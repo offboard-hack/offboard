@@ -1,16 +1,36 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "extends": ["./node_modules/@interfere/landmines/configs/recommended.json"],
-  "ignorePatterns": [
-    ".next/",
-    ".turbo/",
-    "build/",
-    "out/",
-    "next-env.d.ts",
-    "tools/oxlint/anti-slop/"
+  "plugins": ["unicorn", "typescript", "oxc", "react"],
+  "ignorePatterns": ["dist/", ".turbo/", "tools/oxlint/anti-slop/", ".agents/skills/"],
+  "jsPlugins": [
+    {
+      "name": "anti-slop",
+      "specifier": "./tools/oxlint/anti-slop/index.ts"
+    }
   ],
-  "jsPlugins": [{ "name": "anti-slop", "specifier": "./tools/oxlint/anti-slop/index.ts" }],
   "rules": {
+    "eslint/no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "react",
+            "importNames": ["useEffect"],
+            "message": "Replace useEffect with the API that matches the job. Derive values during render, handle user actions in event handlers, and reset state with a key. Use TanStack Query for server data, a TanStack Router loader for route data, useSyncExternalStore for subscriptions, or a callback ref for DOM setup and cleanup. For browser APIs, use a library hook such as useMediaQuery for media queries, useEventListener for browser events, useTimeout for a one-shot timer, or useInterval for a repeating timer (all from usehooks-ts). See https://react.dev/learn/you-might-not-need-an-effect"
+          }
+        ]
+      }
+    ],
+    "eslint/no-restricted-properties": [
+      "error",
+      {
+        "property": "useEffect",
+        "message": "Replace useEffect with the API that matches the job. Derive values during render, handle user actions in event handlers, and reset state with a key. Use TanStack Query for server data, a TanStack Router loader for route data, useSyncExternalStore for subscriptions, or a callback ref for DOM setup and cleanup. For browser APIs, use a library hook such as useMediaQuery for media queries, useEventListener for browser events, useTimeout for a one-shot timer, or useInterval for a repeating timer (all from usehooks-ts). See https://react.dev/learn/you-might-not-need-an-effect"
+      }
+    ],
+    "react/rules-of-hooks": "error",
+    "react/jsx-key": "error",
     "oxc/no-accumulating-spread": "error",
     "anti-slop/no-array-filter-map": "error",
     "anti-slop/no-reduce-accumulator-copy": "error",
@@ -29,6 +49,11 @@
     "anti-slop/no-unsafe-dictionary-type": "error",
     "anti-slop/no-widen-then-assert": "error",
     "anti-slop/require-readable-spacing": "error",
-    "anti-slop/require-safety-comment-for-type-assertion": ["error", { "markers": ["WARNING"] }]
+    "anti-slop/require-safety-comment-for-type-assertion": [
+      "error",
+      {
+        "markers": ["WARNING"]
+      }
+    ]
   }
 }

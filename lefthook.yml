@@ -8,3 +8,6 @@ pre-commit:
       glob: "*.{js,jsx,ts,tsx,mjs,mts,cjs,cts}"
       exclude: "tools/oxlint/anti-slop/**"
       run: npm exec --no -- oxlint --no-error-on-unmatched-pattern -- {staged_files}
+    - name: react-doctor
+      glob: "apps/web/src/**/*.{ts,tsx}"
+      run: npx -y react-doctor@0.9.23 apps/web --staged --scope lines --blocking error --no-score --no-supply-chain --yes
