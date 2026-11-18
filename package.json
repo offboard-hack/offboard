@@ -8,10 +8,20 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "lint": "turbo lint"
+    "lint": "oxlint && turbo lint",
+    "format": "oxfmt --write",
+    "format:check": "oxfmt --check"
   },
-  "packageManager": "npm@10.9.4",
   "devDependencies": {
+    "@interfere/landmines": "0.1.0",
+    "@oxlint/plugins": "1.94.0",
+    "lefthook": "2.2.2",
+    "oxfmt": "0.79.0",
+    "oxlint": "1.94.0",
     "turbo": "^2"
-  }
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "packageManager": "npm@10.9.4"
 }

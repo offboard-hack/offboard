@@ -1,0 +1,10 @@
+pre-commit:
+  parallel: true
+  jobs:
+    - name: oxfmt
+      exclude: "{package-lock.json,tools/oxlint/anti-slop/**}"
+      run: npm exec --no -- oxfmt --check --no-error-on-unmatched-pattern -- {staged_files}
+    - name: oxlint
+      glob: "*.{js,jsx,ts,tsx,mjs,mts,cjs,cts}"
+      exclude: "tools/oxlint/anti-slop/**"
+      run: npm exec --no -- oxlint --no-error-on-unmatched-pattern -- {staged_files}
