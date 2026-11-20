@@ -3,6 +3,7 @@ import { offboardingCases, tasks } from "../schema/index.ts";
 import type { OffboardingRepository } from "./interfaces.ts";
 import { toDtoStatus } from "./status.ts";
 import type { Db } from "./tasks.ts";
+import { isUuid } from "./uuid.ts";
 
 type CaseInput = { name: string; role: string; department: string; deadline: string };
 
@@ -32,6 +33,8 @@ export class DrizzleOffboardingRepository implements OffboardingRepository {
   }
 
   async get(id: string) {
+    if (!isUuid(id)) return null;
+
     const [summary] = await this.summaries().where(eq(offboardingCases.id, id));
 
     if (!summary) return null;
@@ -40,7 +43,7 @@ export class DrizzleOffboardingRepository implements OffboardingRepository {
       .select()
       .from(tasks)
       .where(eq(tasks.caseId, id))
-      .orderBy(asc(tasks.createdAt), asc(tasks.title));
+      .orderBy(asc(tasks.position));
 
     return {
       ...summary,
@@ -50,6 +53,7 @@ export class DrizzleOffboardingRepository implements OffboardingRepository {
         title: r.title,
         team: r.team,
         status: toDtoStatus(r.status),
+        position: r.position,
       })),
     };
   }
@@ -67,6 +71,8 @@ export class DrizzleOffboardingRepository implements OffboardingRepository {
   }
 
   async delete(id: string) {
+    if (!isUuid(id)) return;
+
     await this.db.delete(offboardingCases).where(eq(offboardingCases.id, id));
   }
 }

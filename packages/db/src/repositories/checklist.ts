@@ -2,6 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { checklistRules } from "../schema/index.ts";
 import type { ChecklistRepository } from "./interfaces.ts";
 import type { Db } from "./tasks.ts";
+import { isUuid } from "./uuid.ts";
 
 export class DrizzleChecklistRepository implements ChecklistRepository {
   constructor(private readonly db: Db) {}
@@ -21,6 +22,8 @@ export class DrizzleChecklistRepository implements ChecklistRepository {
   }
 
   async setEnabled(id: string, enabled: boolean) {
+    if (!isUuid(id)) return;
+
     await this.db.update(checklistRules).set({ enabled }).where(eq(checklistRules.id, id));
   }
 }

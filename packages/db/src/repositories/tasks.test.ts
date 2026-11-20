@@ -21,8 +21,21 @@ describe("DrizzleTaskRepository", () => {
   it("creates with default todo status and lists", async () => {
     const { id } = await repo.create(caseId, { title: "a", team: "IT" });
     expect(await repo.listByCase(caseId)).toEqual([
-      { id, caseId, title: "a", team: "IT", status: "todo" },
+      { id, caseId, title: "a", team: "IT", status: "todo", position: 0 },
     ]);
+  });
+
+  it("assigns increasing positions per case", async () => {
+    await repo.create(caseId, { title: "z", team: "IT" });
+    await repo.create(caseId, { title: "a", team: "IT" });
+    expect((await repo.listByCase(caseId)).map((t) => [t.title, t.position])).toEqual([
+      ["z", 0],
+      ["a", 1],
+    ]);
+  });
+
+  it("ignores updateStatus with an invalid uuid", async () => {
+    await expect(repo.updateStatus("abc", "done")).resolves.toBeUndefined();
   });
 
   it("maps inProgress on create and update", async () => {

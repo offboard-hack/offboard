@@ -14,6 +14,7 @@ export type TaskDto = {
   title: string;
   team: string;
   status: "done" | "inProgress" | "todo";
+  position: number;
 };
 
 export type OffboardingCaseDto = CaseSummary & { tasks: TaskDto[] };

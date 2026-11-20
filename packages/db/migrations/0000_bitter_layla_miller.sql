@@ -73,8 +73,10 @@ CREATE TABLE "tasks" (
 	"title" varchar(500) NOT NULL,
 	"team" varchar(255) NOT NULL,
 	"status" "task_status" DEFAULT 'todo' NOT NULL,
+	"position" integer NOT NULL,
 	"created_at" timestamp DEFAULT now(),
 	"updated_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
-ALTER TABLE "tasks" ADD CONSTRAINT "tasks_case_id_offboarding_cases_id_fk" FOREIGN KEY ("case_id") REFERENCES "public"."offboarding_cases"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "tasks" ADD CONSTRAINT "tasks_case_id_offboarding_cases_id_fk" FOREIGN KEY ("case_id") REFERENCES "public"."offboarding_cases"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "tasks_case_id_idx" ON "tasks" USING btree ("case_id");

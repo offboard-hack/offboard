@@ -1,5 +1,5 @@
 {
-  "id": "7e91b6a4-de0d-4e98-9f52-d5bef5c77f30",
+  "id": "fd01e07f-7d22-4d8b-82fb-fda7e2728d8e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -417,6 +417,12 @@
           "notNull": true,
           "default": "'todo'"
         },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -432,7 +438,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "tasks_case_id_idx": {
+          "name": "tasks_case_id_idx",
+          "columns": [
+            {
+              "expression": "case_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "tasks_case_id_offboarding_cases_id_fk": {
           "name": "tasks_case_id_offboarding_cases_id_fk",

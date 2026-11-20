@@ -16,7 +16,7 @@ describe("tasks schema", () => {
   it("has the expected columns", () => {
     const cols = getTableColumns(tasks);
     expect(Object.keys(cols).sort()).toEqual(
-      ["id", "caseId", "title", "team", "status", "createdAt", "updatedAt"].sort(),
+      ["id", "caseId", "title", "team", "status", "position", "createdAt", "updatedAt"].sort(),
     );
   });
 
@@ -27,6 +27,11 @@ describe("tasks schema", () => {
     expect(ref.foreignColumns[0]!.name).toBe("id");
     expect(ref.foreignTable).toBe(offboardingCases);
     expect(fk!.onDelete).toBe("cascade");
+  });
+
+  it("indexes caseId", () => {
+    const [idx] = getTableConfig(tasks).indexes;
+    expect(idx!.config.columns.map((c) => ("name" in c ? c.name : null))).toEqual(["case_id"]);
   });
 
   it("status enum has three values", () => {

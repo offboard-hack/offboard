@@ -24,6 +24,10 @@ describe("DrizzleChecklistRepository", () => {
     ]);
   });
 
+  it("ignores setEnabled with an invalid uuid", async () => {
+    await expect(repo.setEnabled("abc", false)).resolves.toBeUndefined();
+  });
+
   it("updates enabled", async () => {
     const [rule] = await repo.list();
     await repo.setEnabled(rule!.id, false);

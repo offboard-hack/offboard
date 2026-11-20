@@ -359,11 +359,12 @@ export async function seed(db: Db) {
     for (const { tasks: taskSeeds, ...caseSeed } of caseSeeds) {
       const [created] = await tx.insert(offboardingCases).values(caseSeed).returning();
       await tx.insert(tasks).values(
-        taskSeeds.map(([team, title, status]) => ({
+        taskSeeds.map(([team, title, status], position) => ({
           caseId: created!.id,
           team,
           title,
           status,
+          position,
         })),
       );
     }

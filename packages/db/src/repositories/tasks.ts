@@ -1,9 +1,10 @@
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type * as schema from "../schema/index.ts";
 import { tasks } from "../schema/index.ts";
 import type { TaskDto, TaskRepository } from "./interfaces.ts";
 import { toDbStatus, toDtoStatus } from "./status.ts";
+import { isUuid } from "./uuid.ts";
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
@@ -15,7 +16,7 @@ export class DrizzleTaskRepository implements TaskRepository {
       .select()
       .from(tasks)
       .where(eq(tasks.caseId, caseId))
-      .orderBy(asc(tasks.createdAt), asc(tasks.title));
+      .orderBy(asc(tasks.position));
 
     return rows.map((r) => ({
       id: r.id,
@@ -23,6 +24,7 @@ export class DrizzleTaskRepository implements TaskRepository {
       title: r.title,
       team: r.team,
       status: toDtoStatus(r.status),
+      position: r.position,
     }));
   }
 
@@ -34,6 +36,7 @@ export class DrizzleTaskRepository implements TaskRepository {
         title: input.title,
         team: input.team,
         status: toDbStatus(input.status ?? "todo"),
+        position: sql`(select coalesce(max(${tasks.position}) + 1, 0) from ${tasks} where ${tasks.caseId} = ${caseId})`,
       })
       .returning({ id: tasks.id });
 
@@ -41,6 +44,8 @@ export class DrizzleTaskRepository implements TaskRepository {
   }
 
   async updateStatus(id: string, status: TaskDto["status"]) {
+    if (!isUuid(id)) return;
+
     await this.db
       .update(tasks)
       .set({ status: toDbStatus(status), updatedAt: new Date() })
