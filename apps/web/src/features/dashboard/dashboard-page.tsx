@@ -1,193 +1,46 @@
-import { Toggle } from "@base-ui/react/toggle";
-import { ToggleGroup } from "@base-ui/react/toggle-group";
-import * as stylex from "@stylexjs/stylex";
+import { Bar, BarChart, Cell, Pie, PieChart, XAxis, YAxis } from "recharts";
+import { ChartContainer } from "@/shared/ui/shadcn/chart";
+import { Card } from "@/shared/ui/shadcn/card";
+import { ListPage } from "@/shared/ui/list-page";
+import { classProps } from "../../shared/lib/class-props";
+import { Toggle } from "@/shared/ui/shadcn/toggle";
+import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/shadcn/toggle-group";
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { formatDeadline } from "../../entities/offboarding";
+import { formatDeadline, getCaseStatus, todayAtWorkspace } from "../../entities/offboarding";
 import type { OffboardingCase } from "../../entities/offboarding";
-import { ProgressBar } from "../../shared/ui/progress";
 import { PortalFilter } from "../../shared/ui/select";
 import { portalStyles as s } from "../../shared/ui/surface.styles";
-import { colors, motion, typeScale } from "../../shared/ui/theme.stylex";
 import { deadlineGroups, deadlineLabels } from "./deadline";
 import type { DeadlineGroup } from "./deadline";
 
-const stacked = "@media (max-width: 66rem)";
-const compact = "@media (max-width: 37rem)";
-
-const dateAtWorkspace = new Intl.DateTimeFormat("sv-SE", {
-  timeZone: "America/Sao_Paulo",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-const styles = stylex.create({
-  layout: {
-    display: "grid",
-    gridTemplateColumns: { default: "minmax(0, 2.2fr) minmax(0, 1fr)", [stacked]: "1fr" },
-    gap: { default: "2rem", [compact]: "1.5rem" },
-    alignItems: "start",
-  },
-  muted: { fontSize: typeScale.caption, color: colors.muted, lineHeight: 1.5 },
-  list: { listStyleType: "none", padding: 0, margin: 0 },
-  queueHeader: {
-    padding: { default: "1.125rem 1.25rem 0.75rem", [compact]: "1rem 0.875rem 0.75rem" },
-  },
-  queueTitle: { paddingBlockEnd: "0.25rem" },
-  filters: {
-    display: "flex",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "0.5rem",
-    paddingBlockStart: "0.875rem",
-  },
-  group: {
-    display: { default: "flex", [compact]: "grid" },
-    gridTemplateColumns: { default: null, [compact]: "repeat(2, minmax(0, 1fr))" },
-    width: { default: "auto", [compact]: "100%" },
-    flexWrap: "wrap",
-    gap: "0.125rem",
-    minWidth: 0,
-    padding: "0.1875rem",
-    borderRadius: "0.5rem",
-    backgroundColor: colors.wash,
-  },
-  filter: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: { default: "start", [compact]: "space-between" },
-    gap: "0.375rem",
-    paddingInline: "0.5rem",
-    minHeight: { default: "2.25rem", [compact]: "2.75rem" },
-    borderWidth: 0,
-    borderRadius: "0.375rem",
-    color: { default: colors.muted, ":is([data-pressed])": colors.brandHover },
-    backgroundColor: {
-      default: "transparent",
-      ":hover": colors.lavenderSoft,
-      ":is([data-pressed])": colors.surface,
-    },
-    fontSize: typeScale.caption,
-    fontWeight: 650,
-    cursor: "pointer",
-  },
-  filterCount: { fontVariantNumeric: "tabular-nums", minWidth: "1ch" },
-  queueGroup: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.5rem",
-    padding: "0.5rem 0.875rem",
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
-    backgroundColor: colors.wash,
-    color: colors.muted,
-    fontSize: typeScale.caption,
-    fontWeight: 680,
-  },
-  overdue: { color: colors.dangerInk, backgroundColor: colors.dangerSurface },
-  today: { color: colors.warningInk, backgroundColor: colors.warningSurface },
-  deadlineDot: {
-    width: "0.375rem",
-    height: "0.375rem",
-    borderRadius: "50%",
-    backgroundColor: "currentColor",
-  },
-  row: {
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
-  },
-  link: {
-    display: "grid",
-    gridTemplateColumns: {
-      default: "minmax(0, 1fr) 7rem 6.5rem 1rem",
-      [compact]: "minmax(0, 1fr) auto 0.875rem",
-    },
-    alignItems: "center",
-    columnGap: "0.625rem",
-    rowGap: "0.1875rem",
-    minHeight: "3.75rem",
-    padding: "0.625rem 0.875rem",
-    borderRadius: "0.25rem",
-    textDecoration: "none",
-    color: colors.ink,
-    backgroundColor: {
-      default: "transparent",
-      ":hover": colors.wash,
-      ":active": colors.lavenderSoft,
-    },
-    outlineOffset: { default: null, ":focus-visible": "-2px" },
-    transitionProperty: "background-color",
-    transitionDuration: motion.feedback,
-    WebkitTapHighlightColor: colors.lavenderSoft,
-  },
-  person: { display: "grid", gap: "0.125rem", gridColumn: 1, minWidth: 0 },
-  name: { fontWeight: 670, fontSize: "0.9375rem", overflowWrap: "anywhere" },
-  deadline: { gridColumn: { default: 2, [compact]: 1 }, gridRow: { default: 1, [compact]: 2 } },
-  pending: {
-    gridColumn: { default: 3, [compact]: 2 },
-    gridRow: 1,
-    textAlign: "end",
-    fontSize: typeScale.caption,
-    fontWeight: 650,
-    fontVariantNumeric: "tabular-nums",
-  },
-  arrow: { gridColumn: { default: 4, [compact]: 3 }, gridRow: 1, color: colors.brandHover },
-  empty: {
-    display: "grid",
-    gap: "0.625rem",
-    justifyItems: "start",
-    padding: "1rem 1.25rem 1.25rem",
-  },
-  rail: { display: "grid", gap: "1.5rem" },
-  railSection: {
-    display: "grid",
-    gap: "0.625rem",
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
-    paddingBlockStart: "0.875rem",
-  },
-  team: {
-    display: "grid",
-    width: "100%",
-    gridTemplateColumns: "minmax(0, 1fr) minmax(2.5rem, 0.8fr) 2ch",
-    alignItems: "center",
-    gap: "0.625rem",
-    minHeight: "2.75rem",
-    borderWidth: 0,
-    borderRadius: "0.375rem",
-    paddingInline: "0.5rem",
-    color: colors.ink,
-    backgroundColor: {
-      default: "transparent",
-      ":hover": colors.wash,
-      ":is([data-pressed])": colors.lavenderSoft,
-    },
-    textAlign: "start",
-    fontSize: typeScale.body,
-    cursor: "pointer",
-  },
-  track: { height: "0.3125rem", borderRadius: "1rem", backgroundColor: colors.lavenderSoft },
-  fill: (width: string) => ({
-    display: "block",
-    borderRadius: "inherit",
-    width,
-    height: "100%",
-    backgroundColor: colors.brand,
-  }),
-  totals: { fontVariantNumeric: "tabular-nums", textAlign: "end" },
-  progressSummary: {
-    display: "flex",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    alignItems: "baseline",
-    gap: "0.4375rem",
-  },
-});
+const styles = {
+  layout: "grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]",
+  muted: "text-sm text-muted-foreground",
+  queueHeader: "grid gap-1 px-4 pt-4 pb-3 sm:px-5 sm:pt-5",
+  queueTitle: "pb-1",
+  filters: "flex flex-wrap items-center gap-3 pt-3",
+  group: "grid w-full min-w-0 grid-cols-2 gap-1 sm:flex sm:w-auto sm:flex-wrap",
+  filter:
+    "min-h-10 justify-between gap-2 rounded-md px-2 text-xs text-muted-foreground data-pressed:bg-accent data-pressed:text-accent-foreground",
+  filterCount: "tabular-nums",
+  queueGroup:
+    "flex items-center gap-2 border-y bg-muted/45 px-4 py-2.5 text-sm font-semibold text-muted-foreground",
+  overdue: "text-destructive",
+  today: "text-foreground",
+  deadlineDot: "size-1.5 rounded-full bg-current",
+  row: "border-b last:border-b-0",
+  link: "grid min-h-16 grid-cols-[minmax(0,1fr)_auto_1rem] items-center gap-x-2 gap-y-1 px-4 py-3 hover:bg-muted/45 focus-visible:outline-offset-[-2px] md:grid-cols-[minmax(0,1fr)_7rem_6rem_1rem]",
+  person: "col-start-1 grid min-w-0 gap-1",
+  name: "text-sm font-medium wrap-anywhere",
+  deadline: "col-start-1 row-start-2 md:col-start-2 md:row-start-1",
+  pending: "col-start-2 row-start-1 text-right text-xs font-medium tabular-nums md:col-start-3",
+  arrow: "col-start-3 row-start-1 text-primary md:col-start-4",
+  empty: "px-4 py-8",
+  summary: "grid min-w-0 gap-5 sm:grid-cols-2",
+  railSection: "grid gap-3 p-4 sm:p-5",
+  team: "grid h-11 w-full grid-cols-[minmax(0,1fr)_1fr_2ch] items-center gap-2 px-2 text-left text-sm hover:bg-primary/5 data-pressed:bg-primary/10",
+};
 
 type DeadlineFilter = DeadlineGroup | "all";
 
@@ -199,7 +52,6 @@ export function DashboardPage({
   deadlineFilter,
   onAreaChange,
   onDeadlineChange,
-  importLink,
   renderCaseLink,
 }: {
   cases: OffboardingCase[];
@@ -207,10 +59,9 @@ export function DashboardPage({
   deadlineFilter: DeadlineFilter;
   onAreaChange: (area: string) => void;
   onDeadlineChange: (deadline: DeadlineFilter) => void;
-  importLink: ReactNode;
-  renderCaseLink: (id: string, content: ReactNode, xstyle: stylex.StyleXStyles) => ReactNode;
+  renderCaseLink: (id: string, content: ReactNode, xstyle: string) => ReactNode;
 }) {
-  const [today] = useState(() => dateAtWorkspace.format(new Date()));
+  const [today] = useState(todayAtWorkspace);
   const tasks = cases.flatMap((item) => item.tasks);
   const pending = tasks.filter((task) => task.status !== "done");
   const areaCounts = new Map<string, number>();
@@ -220,11 +71,11 @@ export function DashboardPage({
   }
 
   const areas = [...areaCounts].sort((left, right) => right[1] - left[1]);
-  const largest = areas[0]?.[1] ?? 1;
+  const areaSeries = areas.map(([area, count]) => ({ area, count }));
 
-  const teams = [...new Set(tasks.map((task) => task.team))].sort((left, right) =>
-    left.localeCompare(right, "pt-BR"),
-  );
+  const teams = [
+    ...new Set([...(areaFilter ? [areaFilter] : []), ...pending.map((task) => task.team)]),
+  ].sort((left, right) => left.localeCompare(right, "pt-BR"));
 
   const queue = cases
     .map((item) => ({
@@ -253,57 +104,77 @@ export function DashboardPage({
   const completed = tasks.length - pending.length;
   const progress = tasks.length ? Math.round((completed / tasks.length) * 100) : 0;
 
-  return (
-    <>
-      <header {...stylex.props(s.pageHeader)}>
-        <div>
-          <h1 id="titulo-pagina" tabIndex={-1} {...stylex.props(s.heading)}>
-            Painel de desligamentos
-          </h1>
-          <p {...stylex.props(s.description)}>
-            Veja o que vence primeiro e quem ainda tem pendências.
-          </p>
-        </div>
-        {importLink}
-      </header>
-      <div {...stylex.props(styles.layout)}>
-        <section aria-labelledby="attention-title" {...stylex.props(s.workSurface)}>
-          <div {...stylex.props(styles.queueHeader)}>
-            <h2 id="attention-title" {...stylex.props(s.workHeading, styles.queueTitle)}>
-              Precisa de atenção
-            </h2>
-            <p role="status" {...stylex.props(styles.muted)}>
-              {displayedCount} {displayedCount === 1 ? "desligamento" : "desligamentos"}
-              {areaFilter ? ` em ${areaFilter}` : ""} · Por prazo
-            </p>
-            <div {...stylex.props(styles.filters)}>
-              <ToggleGroup<DeadlineFilter>
-                value={[deadlineFilter]}
-                onValueChange={(value) => {
-                  const next = value[0];
+  const overdue = cases.filter((item) => getCaseStatus(item, today) === "overdue").length;
 
-                  if (next) {
+  const caseSeries = [
+    { name: "Em atraso", count: overdue, fill: "var(--chart-2)" },
+    { name: "Demais desligamentos", count: cases.length - overdue, fill: "var(--chart-1)" },
+  ];
+
+  const progressSeries = [
+    { name: "Concluídas", count: completed, fill: "var(--chart-2)" },
+    { name: "Pendentes", count: pending.length, fill: "var(--chart-1)" },
+  ];
+
+  return (
+    <ListPage title="Painel de desligamentos">
+      <div {...classProps(styles.summary)}>
+        <SummaryChart
+          id="cases-summary-title"
+          title="Desligamentos"
+          value={cases.length}
+          series={caseSeries}
+        />
+        <SummaryChart
+          id="progress-title"
+          title="Progresso das tarefas"
+          value={`${progress}%`}
+          series={progressSeries}
+        />
+      </div>
+      <div {...classProps(styles.layout)}>
+        <Card
+          size="sm"
+          className="min-w-0 gap-0 py-0"
+          role="region"
+          aria-labelledby="attention-title"
+        >
+          <div {...classProps(styles.queueHeader)}>
+            <h2 id="attention-title" {...classProps(s.workHeading, styles.queueTitle)}>
+              Fila de desligamentos
+            </h2>
+            <p role="status" {...classProps(styles.muted)}>
+              {displayedCount} {displayedCount === 1 ? "desligamento" : "desligamentos"}
+              {areaFilter ? ` em ${areaFilter}` : ""}
+            </p>
+            <div {...classProps(styles.filters)}>
+              <ToggleGroup
+                value={[deadlineFilter]}
+                onValueChange={([next]) => {
+                  if (
+                    next === "all" ||
+                    next === "overdue" ||
+                    next === "today" ||
+                    next === "upcoming"
+                  ) {
                     onDeadlineChange(next);
                   }
                 }}
                 aria-label="Prazo do desligamento"
-                {...stylex.props(styles.group)}
+                {...classProps(styles.group)}
               >
                 {filters.map((filter) => (
-                  <Toggle<DeadlineFilter>
-                    value={filter}
-                    key={filter}
-                    {...stylex.props(styles.filter)}
-                  >
+                  <ToggleGroupItem value={filter} key={filter} {...classProps(styles.filter)}>
                     {filter === "all" ? "Todos" : deadlineLabels[filter]}
-                    <span {...stylex.props(styles.filterCount)}>
+                    <span {...classProps(styles.filterCount)}>
                       {filter === "all" ? queue.length : visibleGroups[filter].length}
                     </span>
-                  </Toggle>
+                  </ToggleGroupItem>
                 ))}
               </ToggleGroup>
               <PortalFilter
                 label="Área responsável"
+                className="min-h-10"
                 value={areaFilter}
                 onChange={onAreaChange}
                 items={[
@@ -320,32 +191,32 @@ export function DashboardPage({
               records.length > 0 && (
                 <div key={group}>
                   <h3
-                    {...stylex.props(
+                    {...classProps(
                       styles.queueGroup,
                       group === "overdue" && styles.overdue,
                       group === "today" && styles.today,
                     )}
                   >
-                    <span aria-hidden="true" {...stylex.props(styles.deadlineDot)} />
+                    <span aria-hidden="true" {...classProps(styles.deadlineDot)} />
                     {deadlineLabels[group]}
                   </h3>
-                  <ul role="list" {...stylex.props(styles.list)}>
+                  <ul role="list">
                     {records.map(({ item, count }) => (
-                      <li key={item.id} {...stylex.props(styles.row)}>
+                      <li key={item.id} {...classProps(styles.row)}>
                         {renderCaseLink(
                           item.id,
                           <>
-                            <span {...stylex.props(styles.person)}>
-                              <span {...stylex.props(styles.name)}>{item.name}</span>
-                              <span {...stylex.props(styles.muted)}>{item.department}</span>
+                            <span {...classProps(styles.person)}>
+                              <span {...classProps(styles.name)}>{item.name}</span>
+                              <span {...classProps(styles.muted)}>{item.department}</span>
                             </span>
                             <time
                               dateTime={item.deadline}
-                              {...stylex.props(styles.deadline, styles.muted)}
+                              {...classProps(styles.deadline, styles.muted)}
                             >
                               {formatDeadline(item.deadline)}
                             </time>
-                            <span {...stylex.props(styles.pending)}>
+                            <span {...classProps(styles.pending)}>
                               {count} {count === 1 ? "pendência" : "pendências"}
                             </span>
                             <svg
@@ -354,7 +225,7 @@ export function DashboardPage({
                               viewBox="0 0 16 16"
                               fill="none"
                               aria-hidden="true"
-                              {...stylex.props(styles.arrow)}
+                              {...classProps(styles.arrow)}
                             >
                               <path
                                 d="m6 4 4 4-4 4"
@@ -374,59 +245,136 @@ export function DashboardPage({
             );
           })}
           {displayedCount === 0 && (
-            <p {...stylex.props(styles.empty, styles.muted)}>
+            <p {...classProps(styles.empty, styles.muted)}>
               {areaFilter || deadlineFilter !== "all"
                 ? "Nenhum desligamento corresponde a estes filtros."
                 : "Nenhum desligamento com tarefas pendentes."}
             </p>
           )}
-        </section>
-        <div {...stylex.props(styles.rail)}>
-          <section aria-labelledby="progress-title" {...stylex.props(styles.railSection)}>
-            <h2 id="progress-title" {...stylex.props(s.workHeading)}>
-              Progresso dos desligamentos
-            </h2>
-            <div {...stylex.props(styles.progressSummary, styles.muted)}>
-              <span>
-                {completed} de {tasks.length} tarefas concluídas
-              </span>
-              <strong {...stylex.props(styles.totals)}>{progress}%</strong>
-            </div>
-            {tasks.length > 0 && (
-              <ProgressBar label="Progresso das tarefas" value={completed} max={tasks.length} />
-            )}
-            <p {...stylex.props(styles.muted)}>
-              {cases.length} desligamentos · {pending.length} pendências · {areas.length} áreas
-            </p>
-          </section>
-          <section aria-labelledby="areas-title" {...stylex.props(styles.railSection)}>
-            <h2 id="areas-title" {...stylex.props(s.workHeading)}>
-              Pendências por área
-            </h2>
-            {areas.length > 0 ? (
-              <ul role="list" {...stylex.props(styles.list)}>
-                {areas.map(([area, count]) => (
+        </Card>
+        <Card
+          size="sm"
+          role="region"
+          aria-labelledby="areas-title"
+          {...classProps(styles.railSection)}
+        >
+          <h2 id="areas-title" {...classProps(s.workHeading)}>
+            Pendências por área
+          </h2>
+          {areas.length > 0 ? (
+            <div className="relative isolate">
+              <ChartContainer
+                className="pointer-events-none absolute inset-y-0 right-9 left-1/2 aspect-auto"
+                aria-hidden="true"
+              >
+                <BarChart
+                  data={areaSeries}
+                  layout="vertical"
+                  margin={{ top: 0, bottom: 0, left: 0, right: 0 }}
+                  accessibilityLayer={false}
+                >
+                  <XAxis type="number" hide domain={[0, areas[0]?.[1] ?? 1]} />
+                  <YAxis type="category" dataKey="area" hide />
+                  <Bar
+                    dataKey="count"
+                    barSize={8}
+                    radius={4}
+                    background={{ fill: "var(--muted)", radius: 4 }}
+                    isAnimationActive={false}
+                  >
+                    {areaSeries.map(({ area }) => (
+                      <Cell
+                        key={area}
+                        fill="var(--chart-2)"
+                        fillOpacity={areaFilter && areaFilter !== area ? 0.35 : 1}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ChartContainer>
+              <ul role="list" className="relative">
+                {areaSeries.map(({ area, count }) => (
                   <li key={area}>
                     <Toggle
                       pressed={areaFilter === area}
                       onPressedChange={(pressed) => onAreaChange(pressed ? area : "")}
-                      {...stylex.props(styles.team)}
+                      {...classProps(styles.team)}
                     >
                       <span>{area}</span>
-                      <span aria-hidden="true" {...stylex.props(styles.track)}>
-                        <span {...stylex.props(styles.fill(`${(100 * count) / largest}%`))} />
-                      </span>
-                      <strong {...stylex.props(styles.totals)}>{count}</strong>
+                      <strong className="col-start-3 text-right tabular-nums">{count}</strong>
                     </Toggle>
                   </li>
                 ))}
               </ul>
-            ) : (
-              <p {...stylex.props(styles.muted)}>Nenhuma área com pendências.</p>
-            )}
-          </section>
-        </div>
+            </div>
+          ) : (
+            <p {...classProps(styles.muted)}>Nenhuma área com pendências.</p>
+          )}
+        </Card>
       </div>
-    </>
+    </ListPage>
+  );
+}
+
+function SummaryChart({
+  id,
+  title,
+  value,
+  series,
+}: {
+  id: string;
+  title: string;
+  value: number | string;
+  series: { name: string; count: number; fill: string }[];
+}) {
+  const hasData = series.some(({ count }) => count > 0);
+
+  return (
+    <Card size="sm" role="region" aria-labelledby={id} {...classProps(styles.railSection)}>
+      <h2 id={id} {...classProps(s.workHeading)}>
+        {title}
+      </h2>
+      <div className="flex items-center gap-4 sm:gap-5">
+        <div className="relative size-24 shrink-0">
+          {hasData ? (
+            <ChartContainer className="size-full" aria-hidden="true">
+              <PieChart accessibilityLayer={false}>
+                <Pie
+                  data={series}
+                  dataKey="count"
+                  innerRadius="72%"
+                  outerRadius="94%"
+                  startAngle={90}
+                  endAngle={-270}
+                  stroke="none"
+                  isAnimationActive={false}
+                />
+              </PieChart>
+            </ChartContainer>
+          ) : (
+            <div
+              aria-hidden="true"
+              className="absolute inset-1 rounded-full border-8 border-muted"
+            />
+          )}
+          <strong className="absolute inset-0 grid place-items-center text-xl font-semibold tabular-nums">
+            {value}
+          </strong>
+        </div>
+        <ul role="list" className="grid min-w-0 gap-2 text-sm text-muted-foreground">
+          {series.map(({ name, count, fill }) => (
+            <li key={name} className="flex items-center gap-2">
+              <span
+                aria-hidden="true"
+                className="size-2 shrink-0 rounded-full"
+                style={{ backgroundColor: fill }}
+              />
+              <span>{name}</span>
+              <strong className="ml-auto font-medium text-foreground tabular-nums">{count}</strong>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Card>
   );
 }

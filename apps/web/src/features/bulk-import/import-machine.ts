@@ -7,6 +7,7 @@ export type ImportRow = {
 } & ({ kind: "valid" } | { kind: "invalid"; issue: string });
 
 export const maxImportedPeople = 500;
+export const maxImportBytes = 1_000_000;
 
 type ImportContext = {
   file: File | null;
@@ -29,7 +30,7 @@ const readPeople = fromPromise<ImportRow[], File | null>(async ({ input: file })
     throw new Error("Selecione um arquivo CSV.");
   }
 
-  if (file.size > 1_000_000) {
+  if (file.size > maxImportBytes) {
     throw new Error("O arquivo deve ter até 1 MB.");
   }
 

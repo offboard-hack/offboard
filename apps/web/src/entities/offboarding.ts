@@ -120,8 +120,14 @@ const fixtures: CaseFixture[] = [
 export const offboardingDepartments = [...new Set(fixtures.map((item) => item.department))];
 
 export const offboardingTeams = [
-  ...new Set(fixtures.flatMap(({ tasks }) => tasks.map(([team]) => team))),
-];
+  "RH e DP",
+  "TI",
+  "Gestão",
+  "Financeiro",
+  "Jurídico",
+  "Facilities",
+  "Pessoa desligada",
+] as const;
 
 async function listOffboardings() {
   return fixtures.map(({ tasks: fixtureTasks, ...employee }) => {
@@ -145,6 +151,7 @@ export const offboardingsQuery = queryOptions({
   queryKey: ["offboardings"],
   queryFn: listOffboardings,
   staleTime: Infinity,
+  gcTime: Infinity,
 });
 
 const deadlineFormat = new Intl.DateTimeFormat("pt-BR", {
@@ -156,4 +163,37 @@ const deadlineFormat = new Intl.DateTimeFormat("pt-BR", {
 
 export function formatDeadline(isoDate: string) {
   return deadlineFormat.format(new Date(isoDate)).replaceAll(" de ", " ").replace(".", "");
+}
+
+const shortDeadlineFormat = new Intl.DateTimeFormat("pt-BR", {
+  day: "numeric",
+  month: "short",
+  timeZone: "UTC",
+});
+
+export function formatShortDeadline(isoDate: string) {
+  return shortDeadlineFormat.format(new Date(isoDate)).replace(" de ", " ").replace(".", "");
+}
+
+const workspaceDate = new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" });
+
+export function todayAtWorkspace() {
+  return workspaceDate.format(new Date());
+}
+
+export const caseStatusLabels = {
+  overdue: "Em atraso",
+  today: "Vence hoje",
+  upcoming: "No prazo",
+  complete: "Concluído",
+};
+
+export function getCaseStatus({ completed, deadline, total }: CaseSummary, today: string) {
+  if (total > 0 && completed === total) return "complete";
+
+  if (deadline < today) return "overdue";
+
+  if (deadline === today) return "today";
+
+  return "upcoming";
 }

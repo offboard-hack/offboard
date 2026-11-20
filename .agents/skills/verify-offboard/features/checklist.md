@@ -19,7 +19,7 @@ The template board organizes named steps by team and week. HR can edit them, dra
 Preconditions: new context with the built-in model and the `Bloquear acessos` card in TI on the day of offboarding.
 
 - Run `scripts/checklist.mjs` through the launcher in [SKILL.md](../SKILL.md). It uses the sidebar, moves `Bloquear acessos` with Space, ArrowRight, Space, saves, and checks the new placement under TI / Primeira semana in a second tab.
-- For a pointer check, drag the card named `Editar etapa: Bloquear acessos` from its body to `[data-checklist-cell="cell:Gestão:d0"]`. Verify the card is in Gestão and no edit dialog opened. Use `Desfazer` and verify the TI placement returns.
+- For a pointer check, drag the card named `Editar etapa: Bloquear acessos` from its drag handle to `[data-checklist-cell="cell:Gestão:d0"]`. Verify the card is in Gestão and no edit dialog opened. Use `Desfazer` and verify the TI placement returns.
 - Create a step with `Nova etapa: TI, Primeira semana` and the title `Teste de etapa`. Click the resulting card. Change `Nome da etapa`, click `Salvar`, then reopen and confirm deletion through `Excluir` and `Excluir etapa`. Verify the renamed card disappears and returns after undo.
 
 ## Gotchas

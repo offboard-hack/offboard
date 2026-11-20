@@ -1,307 +1,637 @@
-import * as stylex from "@stylexjs/stylex";
-import { Switch } from "@base-ui/react/switch";
-import { useState } from "react";
-import { portalStyles } from "../../shared/ui/surface.styles";
-import { colors, motion } from "../../shared/ui/theme.stylex";
+import { createLocalId } from "@/shared/lib/create-local-id";
+import { pointerIntersection } from "@dnd-kit/collision";
+import { Accessibility, PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
+import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/react";
+import {
+  Add01Icon,
+  DragDropVerticalIcon,
+  Tick02Icon,
+  Undo02Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useHydrated } from "@tanstack/react-router";
+import { useState, type KeyboardEvent } from "react";
+import { cn } from "@/shared/lib/utils";
+import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
+import { Badge } from "@/shared/ui/shadcn/badge";
+import { Button } from "@/shared/ui/shadcn/button";
+import {
+  clearDraftSteps,
+  getPhase,
+  initialSteps,
+  moveStep,
+  phases,
+  readDraftSteps,
+  readSavedModel,
+  saveDraftSteps,
+  saveModel,
+  teams,
+  type ChecklistStep,
+  type Destination,
+  type Placement,
+} from "./checklist-draft";
+import { DeleteStepDialog, StepDialog } from "./step-dialog";
+import { sameStepSettings, type StepSettings } from "./step-settings";
 
-const stacked = "@media (max-width: 52rem)";
-const short = "@media (max-width: 37rem)";
+const cardStyles = "min-w-0 rounded-xl border text-sm";
 
-const styles = stylex.create({
-  metric: {
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
-    paddingBlockStart: "0.625rem",
-  },
-  metricValue: {
-    margin: "0.25rem 0 0",
-    fontSize: "1.5rem",
-    fontWeight: 700,
-    fontVariantNumeric: "tabular-nums",
-  },
-  muted: { fontSize: "0.875rem", color: colors.muted, lineHeight: 1.5, margin: 0 },
-  columns: {
-    display: "grid",
-    gridTemplateColumns: { default: "minmax(0, 1.35fr) minmax(0, 1fr)", [stacked]: "1fr" },
-    alignItems: "start",
-    gap: "1rem",
-  },
-  panelTitle: { padding: "1rem", margin: 0 },
-  list: { listStyle: "none", padding: 0, margin: 0 },
-  row: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "0.75rem",
-    padding: "0.75rem 1rem",
-    borderTopWidth: "1px",
-    borderTopStyle: "solid",
-    borderTopColor: colors.border,
-  },
-  badge: {
-    flexShrink: 0,
-    borderRadius: "99px",
-    padding: "0.25rem 0.625rem",
-    backgroundColor: colors.lavenderSoft,
-    color: colors.brand,
-    fontSize: "0.75rem",
-    fontWeight: 650,
-  },
-  deadline: {
-    display: "grid",
-    alignContent: "start",
-    gap: "0.25rem",
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
-    paddingBlock: "0.5rem",
-    fontSize: "0.875rem",
-  },
-  ruleText: {
-    display: "grid",
-    gap: "0.25rem",
-    fontSize: "0.875rem",
-  },
-  ruleTiming: { color: colors.brand, fontSize: "0.75rem", fontWeight: 550 },
-  switchControl: {
-    display: "grid",
-    placeItems: "center",
-    flexShrink: 0,
-    padding: 0,
-    width: "2.75rem",
-    height: "2.75rem",
-    borderWidth: 0,
-    borderRadius: "0.5rem",
-    backgroundColor: "transparent",
-    cursor: "pointer",
-  },
-  switchTrack: {
-    display: "flex",
-    alignItems: "center",
-    width: "2.25rem",
-    height: "1.375rem",
-    borderRadius: "99px",
-    backgroundColor: colors.muted,
-    padding: "0.125rem",
-    transitionProperty: "background-color",
-    transitionDuration: motion.feedback,
-  },
-  switchTrackOn: { backgroundColor: colors.brand },
-  switchThumb: {
-    width: "1.125rem",
-    height: "1.125rem",
-    borderRadius: "99px",
-    backgroundColor: colors.surface,
-    transitionProperty: {
-      default: null,
-      "@media (prefers-reduced-motion: no-preference)": "transform",
-    },
-    transitionDuration: motion.popup,
-    transitionTimingFunction: motion.easeOut,
-  },
-  switchThumbOn: { transform: "translateX(0.875rem)" },
-  preview: { alignSelf: "start" },
-  previewContent: { display: "grid", gap: "0.875rem", padding: "0 1rem 1rem" },
-  previewMetrics: {
-    display: "grid",
-    gridTemplateColumns: { default: "1fr 1fr", [short]: "1fr" },
-    margin: 0,
-    gap: "0.5rem",
-  },
-  timelineTitle: { fontSize: "0.875rem" },
-  timeline: { display: "grid", gap: "0.375rem" },
+const teamCardColors = {
+  "RH e DP":
+    "border-violet-200 bg-violet-50 hover:bg-violet-100/75 dark:border-violet-800/65 dark:bg-violet-950/50 dark:hover:bg-violet-950/75",
+  TI: "border-blue-200 bg-blue-50 hover:bg-blue-100/75 dark:border-blue-800/65 dark:bg-blue-950/50 dark:hover:bg-blue-950/75",
+  Gestão:
+    "border-orange-200 bg-orange-50 hover:bg-orange-100/75 dark:border-orange-800/65 dark:bg-orange-950/50 dark:hover:bg-orange-950/75",
+  Financeiro:
+    "border-emerald-200 bg-emerald-50 hover:bg-emerald-100/75 dark:border-emerald-800/65 dark:bg-emerald-950/50 dark:hover:bg-emerald-950/75",
+  Jurídico:
+    "border-rose-200 bg-rose-50 hover:bg-rose-100/75 dark:border-rose-800/65 dark:bg-rose-950/50 dark:hover:bg-rose-950/75",
+  Facilities:
+    "border-amber-200 bg-amber-50 hover:bg-amber-100/75 dark:border-amber-800/65 dark:bg-amber-950/50 dark:hover:bg-amber-950/75",
+  "Pessoa desligada":
+    "border-fuchsia-200 bg-fuchsia-50 hover:bg-fuchsia-100/75 dark:border-fuchsia-800/65 dark:bg-fuchsia-950/50 dark:hover:bg-fuchsia-950/75",
+} satisfies Record<Placement["team"], string>;
+
+const checklistPointerSensor = PointerSensor.configure({
+  preventActivation: () => false,
+  activationConstraints: (event) =>
+    event.pointerType === "touch"
+      ? [new PointerActivationConstraints.Delay({ value: 250, tolerance: 5 })]
+      : [new PointerActivationConstraints.Distance({ value: 6 })],
 });
 
-const baseRule = {
-  title: "Aplicar o modelo base da CLT",
-  description: "Aviso prévio, exame demissional, rescisão, eSocial, FGTS e benefícios.",
-  team: "RH e DP",
-  timing: "A partir do dia 0",
-};
+const cellId = (team: Placement["team"], phase: Placement["phase"]) => `cell:${team}:${phase}`;
 
-const optionalRules = [
-  {
-    id: "remote",
-    title: "Agendar coleta em casa",
-    description: "A pessoa escolhe o horário pelo app quando trabalha remotamente.",
-    team: "TI",
-    timing: "Dias 1 a 7",
-  },
-  {
-    id: "assets",
-    title: "Conferir o inventário de TI",
-    description: "Registrar os bens e acompanhar a devolução ao estoque.",
-    team: "TI",
-    timing: "Dias 1 a 7",
-  },
-  {
-    id: "crm",
-    title: "Transferir negócios e contatos",
-    description: "Passar os registros no CRM para quem a gestão indicar.",
-    team: "Gestão",
-    timing: "Dias 1 a 7",
-  },
-  {
-    id: "workspace",
-    title: "Encerrar acesso ao Google Workspace",
-    description: "Bloquear o acesso e transferir os arquivos.",
-    team: "TI",
-    timing: "Dia 0",
-  },
-  {
-    id: "card",
-    title: "Conciliar despesas e cancelar o cartão",
-    description: "Aplicável a quem tem cartão corporativo.",
-    team: "Financeiro",
-    timing: "Dias 1 a 7",
-  },
-  {
-    id: "certificates",
-    title: "Revisar procurações e certificados",
-    description: "Verificar quais autorizações precisam ser revogadas.",
-    team: "Jurídico",
-    timing: "Antes da comunicação",
-  },
-  {
-    id: "stability",
-    title: "Revisar estabilidade",
-    description: "Encaminhar casos sinalizados para análise do Jurídico.",
-    team: "Jurídico",
-    timing: "Antes da comunicação",
-  },
-  {
-    id: "collective",
-    title: "Analisar desligamentos coletivos",
-    description: "Acionar o Jurídico quando o volume exigir avaliação.",
-    team: "Jurídico",
-    timing: "Antes da comunicação",
-  },
-];
+const addStepId = ({ team, phase }: Placement) => `add:${team}:${phase}`;
 
-export function ChecklistRulesPage() {
-  const [enabledRules, setEnabledRules] = useState(
-    () => new Set(optionalRules.map((rule) => rule.id)),
-  );
+const cellDestinations = new Map(
+  teams.flatMap((team) =>
+    phases.map(({ id: phase }) => [cellId(team, phase), { team, phase, beforeId: "" }]),
+  ),
+);
 
-  const activeRules = optionalRules.filter((rule) => enabledRules.has(rule.id));
-  const teamCount = new Set([baseRule.team, ...activeRules.map((rule) => rule.team)]).size;
+type ChecklistDialog =
+  | { kind: "create"; placement: Placement }
+  | { kind: "edit" | "delete"; step: ChecklistStep };
+
+type KeyboardDrag = { stepId: string; destination: Destination };
+
+function StepCard({
+  step,
+  onEdit,
+  onDragKey,
+  onDragBlur,
+  keyboardSource,
+  keyboardTarget,
+}: {
+  step: ChecklistStep;
+  onEdit: () => void;
+  onDragKey: (event: KeyboardEvent<HTMLButtonElement>) => void;
+  onDragBlur: () => void;
+  keyboardSource: boolean;
+  keyboardTarget: boolean;
+}) {
+  const { ref, handleRef, isDragSource } = useDraggable({ id: step.id });
+
+  const { ref: dropRef, isDropTarget } = useDroppable({
+    id: `before:${step.id}`,
+    collisionDetector: pointerIntersection,
+  });
 
   return (
-    <>
-      <header {...stylex.props(portalStyles.pageHeader)}>
-        <div>
-          <h1 id="titulo-pagina" tabIndex={-1} {...stylex.props(portalStyles.heading)}>
-            Checklist automático
-          </h1>
-          <p {...stylex.props(portalStyles.description)}>
-            Simule as regras que complementam o checklist de desligamento.
-          </p>
-        </div>
-      </header>
+    <li ref={dropRef} className="relative">
+      {((isDropTarget && !isDragSource) || keyboardTarget) && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 -top-1 h-0.5 rounded-full bg-primary"
+        />
+      )}
+      <Button
+        ref={ref}
+        id={`edit-${step.id}`}
+        aria-label={`Editar etapa: ${step.title}`}
+        aria-describedby="checklist-keyboard-help"
+        variant="ghost"
+        className={cn(
+          cardStyles,
+          teamCardColors[step.team],
+          "relative flex h-auto min-h-10 w-full justify-start py-2 pr-3 pl-10 text-left leading-snug wrap-anywhere whitespace-normal pointer-coarse:min-h-12 pointer-coarse:pl-14",
+          isDragSource && "opacity-40",
+          keyboardSource && "ring-2 ring-primary ring-offset-1",
+        )}
+        onClick={onEdit}
+        onKeyDown={onDragKey}
+        onBlur={onDragBlur}
+      >
+        <span
+          ref={handleRef}
+          onClick={(event) => event.stopPropagation()}
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 grid w-10 touch-none cursor-grab place-items-center text-muted-foreground active:cursor-grabbing pointer-coarse:w-12"
+        >
+          <HugeiconsIcon icon={DragDropVerticalIcon} />
+        </span>
+        {step.title}
+      </Button>
+    </li>
+  );
+}
 
-      <div {...stylex.props(styles.columns)}>
-        <section aria-labelledby="rules-title" {...stylex.props(portalStyles.panel)}>
-          <h2 id="rules-title" {...stylex.props(portalStyles.subheading, styles.panelTitle)}>
-            Regras do checklist
-          </h2>
-          <ul {...stylex.props(styles.list)}>
-            <li {...stylex.props(styles.row)}>
-              <div {...stylex.props(styles.ruleText)}>
-                <h3>{baseRule.title}</h3>
-                <p {...stylex.props(styles.muted)}>{baseRule.description}</p>
-                <p {...stylex.props(styles.ruleTiming)}>
-                  {baseRule.team} · {baseRule.timing}
-                </p>
-              </div>
-              <span {...stylex.props(styles.badge)}>Obrigatória</span>
-            </li>
-            {optionalRules.map((rule) => {
-              const enabled = enabledRules.has(rule.id);
+function ChecklistCell({
+  team,
+  phase,
+  steps,
+  onEdit,
+  onCreate,
+  phaseLabel,
+  keyboardDrag,
+  onDragKey,
+  onDragBlur,
+}: Placement & {
+  steps: ChecklistStep[];
+  onEdit: (step: ChecklistStep) => void;
+  onCreate: () => void;
+  phaseLabel: string;
+  keyboardDrag: KeyboardDrag | null;
+  onDragKey: (event: KeyboardEvent<HTMLButtonElement>, step: ChecklistStep) => void;
+  onDragBlur: () => void;
+}) {
+  const { ref, isDropTarget } = useDroppable({
+    id: cellId(team, phase),
+    collisionDetector: pointerIntersection,
+    collisionPriority: 0,
+  });
+
+  const keyboardDestination = keyboardDrag?.destination;
+  const keyboardTarget = keyboardDestination?.team === team && keyboardDestination.phase === phase;
+
+  return (
+    <td
+      id={cellId(team, phase)}
+      ref={ref}
+      data-checklist-cell={cellId(team, phase)}
+      className={cn(
+        "relative border-l px-2 pt-2 pb-3 align-top",
+        (isDropTarget || keyboardTarget) && "bg-primary/10 ring-1 ring-primary/50 ring-inset",
+      )}
+    >
+      {steps.length > 0 && (
+        <ul className="grid gap-2">
+          {steps.map((step) => (
+            <StepCard
+              key={step.id}
+              step={step}
+              onEdit={() => onEdit(step)}
+              onDragKey={(event) => onDragKey(event, step)}
+              onDragBlur={onDragBlur}
+              keyboardSource={keyboardDrag?.stepId === step.id}
+              keyboardTarget={keyboardTarget && keyboardDestination?.beforeId === step.id}
+            />
+          ))}
+        </ul>
+      )}
+      <Button
+        id={addStepId({ team, phase })}
+        aria-label={`Nova etapa: ${team}, ${phaseLabel}`}
+        variant="ghost"
+        size="sm"
+        className={cn(
+          "text-muted-foreground hover:bg-primary/8 hover:text-primary pointer-coarse:min-h-11 dark:hover:bg-primary/20 dark:hover:text-primary-foreground",
+          steps.length > 0 && "mt-1",
+        )}
+        onClick={onCreate}
+      >
+        <HugeiconsIcon icon={Add01Icon} aria-hidden="true" />
+        Nova etapa
+      </Button>
+      {(isDropTarget || (keyboardTarget && !keyboardDestination?.beforeId)) && steps.length > 0 && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-2 bottom-1 h-0.5 rounded-full bg-primary"
+        />
+      )}
+    </td>
+  );
+}
+
+type Draft = {
+  steps: ChecklistStep[];
+  history: { steps: ChecklistStep[]; undoMessage: string }[];
+  message: string;
+};
+
+function keyboardDropTarget(
+  key: string,
+  destination: Destination,
+  stepId: string,
+  steps: ChecklistStep[],
+) {
+  const { team, phase, beforeId } = destination;
+  const teamIndex = teams.indexOf(team);
+  const phaseIndex = phases.findIndex(({ id }) => id === phase);
+
+  switch (key) {
+    case "ArrowUp":
+    case "ArrowDown": {
+      const nextTeam = teams[teamIndex + (key === "ArrowUp" ? -1 : 1)];
+
+      return nextTeam ? { team: nextTeam, phase, beforeId: "" } : destination;
+    }
+
+    case "ArrowLeft":
+    case "ArrowRight": {
+      const nextPhase = phases[phaseIndex + (key === "ArrowLeft" ? -1 : 1)];
+
+      return nextPhase ? { team, phase: nextPhase.id, beforeId: "" } : destination;
+    }
+
+    case "PageUp":
+    case "PageDown": {
+      const lane = steps.filter(
+        (step) => step.id !== stepId && step.team === team && step.phase === phase,
+      );
+
+      const index = beforeId ? lane.findIndex(({ id }) => id === beforeId) : lane.length;
+      const next = Math.max(0, index + (key === "PageUp" ? -1 : 1));
+
+      return { team, phase, beforeId: lane[next]?.id ?? "" };
+    }
+
+    default:
+      return undefined;
+  }
+}
+
+function completeStepSettings(step: ChecklistStep) {
+  return { title: step.title, rules: step.rules ?? [], email: step.email ?? null };
+}
+
+export function ChecklistRulesPage() {
+  const hydrated = useHydrated();
+
+  return <ChecklistEditor key={hydrated ? "browser" : "server"} restored={hydrated} />;
+}
+
+function ChecklistEditor({ restored }: { restored: boolean }) {
+  const [saved, setSaved] = useState(() => (restored ? readSavedModel() : undefined));
+
+  const [{ steps, history, message }, setDraft] = useState<Draft>(() => ({
+    steps: restored ? readDraftSteps(saved ?? initialSteps) : initialSteps,
+    history: [],
+    message: "",
+  }));
+
+  const [dialog, setDialog] = useState<ChecklistDialog | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [keyboardDrag, setKeyboardDrag] = useState<KeyboardDrag | null>(null);
+  const [saveError, setSaveError] = useState(false);
+
+  const baseline = saved ?? initialSteps;
+
+  const isSaved =
+    baseline.length === steps.length &&
+    steps.every((step, index) => {
+      const original = baseline[index];
+
+      return (
+        original?.id === step.id &&
+        sameStepSettings(completeStepSettings(original), completeStepSettings(step)) &&
+        original.team === step.team &&
+        original.phase === step.phase
+      );
+    });
+
+  const dialogControls = {
+    open: dialogOpen,
+    onClose: () => setDialogOpen(false),
+    onClosed: () => setDialog(null),
+  };
+
+  function openDialog(next: ChecklistDialog) {
+    setDialog(next);
+    setDialogOpen(true);
+  }
+
+  function commit(next: ChecklistStep[], message: string, undoMessage: string) {
+    saveDraftSteps(next);
+    setDraft({ steps: next, history: [...history, { steps, undoMessage }], message });
+  }
+
+  function commitMove(id: string, destination: Destination) {
+    const next = moveStep(steps, id, destination);
+    const movedStep = next.find((step) => step.id === id);
+
+    if (next === steps || !movedStep) return;
+
+    const phase = getPhase(destination.phase);
+    commit(
+      next,
+      `“${movedStep.title}” movida para ${destination.team} · ${phase.label}.`,
+      `Movimento de “${movedStep.title}” desfeito.`,
+    );
+  }
+
+  function cancelKeyboardDrag() {
+    if (!keyboardDrag) return;
+
+    setKeyboardDrag(null);
+    setDraft({ steps, history, message: "Movimentação cancelada." });
+  }
+
+  function dragWithKeyboard(event: KeyboardEvent<HTMLButtonElement>, step: ChecklistStep) {
+    const { key } = event;
+
+    if (!keyboardDrag) {
+      if (key !== " ") return;
+
+      event.preventDefault();
+
+      if (event.repeat) return;
+
+      const lane = steps.filter((item) => item.team === step.team && item.phase === step.phase);
+      const beforeId = lane[lane.indexOf(step) + 1]?.id ?? "";
+
+      setKeyboardDrag({
+        stepId: step.id,
+        destination: { team: step.team, phase: step.phase, beforeId },
+      });
+
+      return;
+    }
+
+    if (keyboardDrag.stepId !== step.id) return;
+
+    const { destination } = keyboardDrag;
+
+    if (key === "Escape") {
+      event.preventDefault();
+      cancelKeyboardDrag();
+
+      return;
+    }
+
+    if (key === " " || key === "Enter") {
+      event.preventDefault();
+
+      if (event.repeat) return;
+
+      setKeyboardDrag(null);
+      commitMove(step.id, destination);
+      requestAnimationFrame(() => document.getElementById(`edit-${step.id}`)?.focus());
+
+      return;
+    }
+
+    const next = keyboardDropTarget(key, destination, step.id, steps);
+
+    if (!next) return;
+
+    event.preventDefault();
+    setKeyboardDrag({ stepId: step.id, destination: next });
+    document
+      .getElementById(cellId(next.team, next.phase))
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  function createStep(settings: StepSettings, placement: Placement) {
+    const step = {
+      ...placement,
+      id: createLocalId(),
+      ...settings,
+    };
+
+    commit(
+      [...steps, step],
+      `“${settings.title}” adicionada ao rascunho.`,
+      `Criação de “${settings.title}” desfeita.`,
+    );
+    setDialogOpen(false);
+  }
+
+  function editStep(settings: StepSettings, step: ChecklistStep) {
+    if (!sameStepSettings(completeStepSettings(step), settings)) {
+      const next = steps.map((item) => (item.id === step.id ? { ...item, ...settings } : item));
+
+      commit(next, `“${settings.title}” atualizada.`, `Alterações em “${step.title}” desfeitas.`);
+    }
+
+    setDialogOpen(false);
+  }
+
+  function commitModel() {
+    if (!saveModel(steps)) {
+      setSaveError(true);
+
+      return;
+    }
+
+    clearDraftSteps();
+    setSaved(steps);
+    setSaveError(false);
+    setDraft({ steps, history, message: "Modelo salvo neste navegador." });
+  }
+
+  function deleteStep(step: ChecklistStep) {
+    commit(
+      steps.filter(({ id }) => id !== step.id),
+      `“${step.title}” excluída do rascunho.`,
+      `“${step.title}” restaurada.`,
+    );
+    setDialogOpen(false);
+  }
+
+  function undoChange() {
+    const previous = history.at(-1);
+
+    if (!previous) return;
+
+    saveDraftSteps(previous.steps);
+    setDraft({
+      steps: previous.steps,
+      history: history.slice(0, -1),
+      message: previous.undoMessage,
+    });
+  }
+
+  return (
+    <ListPage
+      title="Checklist automático"
+      breadcrumb={<ListBreadcrumb title="Checklist automático" />}
+    >
+      <section
+        aria-labelledby="checklist-template-title"
+        className="min-w-0 rounded-2xl border bg-card"
+      >
+        <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 px-4 py-4 sm:px-5">
+          <div className="grid gap-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 id="checklist-template-title" className="text-base font-semibold">
+                Modelo padrão
+              </h2>
+              <Badge
+                variant="secondary"
+                className={cn(
+                  !isSaved &&
+                    "bg-primary/10 text-primary dark:bg-primary/25 dark:text-primary-foreground",
+                )}
+              >
+                {isSaved ? "Salvo" : "Rascunho"}
+              </Badge>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Clique na etapa para editar ou use a alça para mover entre equipes e fases.
+              <span className="block lg:hidden">Deslize a matriz para ver as outras fases.</span>
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={undoChange} disabled={history.length === 0}>
+              <HugeiconsIcon icon={Undo02Icon} aria-hidden="true" />
+              Desfazer
+            </Button>
+            <Button onClick={commitModel} disabled={isSaved}>
+              <HugeiconsIcon icon={Tick02Icon} aria-hidden="true" />
+              Salvar modelo
+            </Button>
+          </div>
+          {saveError && (
+            <p role="alert" className="basis-full text-sm text-destructive">
+              O navegador não conseguiu salvar o modelo. Tente novamente.
+            </p>
+          )}
+        </header>
+        <DragDropProvider
+          sensors={[checklistPointerSensor]}
+          onDragStart={cancelKeyboardDrag}
+          plugins={(defaults) => defaults.filter((plugin) => plugin !== Accessibility)}
+          onDragEnd={({ canceled, operation }) => {
+            const { source, target } = operation;
+
+            if (canceled || !source || !target) return;
+
+            const targetStep = steps.find((step) => `before:${step.id}` === target.id);
+
+            const destination = targetStep
+              ? { team: targetStep.team, phase: targetStep.phase, beforeId: targetStep.id }
+              : cellDestinations.get(String(target.id));
+
+            if (destination) commitMove(String(source.id), destination);
+          }}
+        >
+          <div
+            role="region"
+            aria-label="Matriz de etapas por equipe e fase"
+            tabIndex={0}
+            className="min-w-0 overflow-x-auto overscroll-x-contain rounded-b-2xl border-t outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          >
+            <table className="w-full min-w-[67rem] table-fixed border-separate border-spacing-0 text-left">
+              <thead className="bg-primary/8 dark:bg-primary/18">
+                <tr>
+                  <th
+                    scope="col"
+                    className="w-24 bg-muted/65 px-3 py-3 text-sm font-semibold sm:w-36 sm:px-4"
+                  >
+                    Equipe
+                  </th>
+                  {phases.map(({ id, label }) => (
+                    <th
+                      key={id}
+                      scope="col"
+                      className="border-l border-primary/12 px-3 py-3 text-sm font-semibold"
+                    >
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="[&_tr+tr>td]:border-t [&_tr+tr>th]:border-t">
+                {teams.map((team) => (
+                  <tr key={team}>
+                    <th
+                      scope="row"
+                      className="bg-muted/30 px-3 py-4 align-top text-sm font-semibold sm:px-4"
+                    >
+                      {team}
+                    </th>
+                    {phases.map(({ id, label }) => (
+                      <ChecklistCell
+                        key={id}
+                        team={team}
+                        phase={id}
+                        steps={steps.filter((step) => step.team === team && step.phase === id)}
+                        onEdit={(step) => openDialog({ kind: "edit", step })}
+                        onCreate={() =>
+                          openDialog({ kind: "create", placement: { team, phase: id } })
+                        }
+                        phaseLabel={label}
+                        keyboardDrag={keyboardDrag}
+                        onDragKey={dragWithKeyboard}
+                        onDragBlur={cancelKeyboardDrag}
+                      />
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <DragOverlay dropAnimation={null} className="pointer-events-none">
+            {(source) => {
+              const step = steps.find((item) => item.id === source.id);
 
               return (
-                <li key={rule.id} {...stylex.props(styles.row)}>
-                  <div {...stylex.props(styles.ruleText)}>
-                    <h3>
-                      <label htmlFor={`rule-${rule.id}`}>{rule.title}</label>
-                    </h3>
-                    <p id={`rule-detail-${rule.id}`} {...stylex.props(styles.muted)}>
-                      {rule.description}
-                    </p>
-                    <p {...stylex.props(styles.ruleTiming)}>
-                      {rule.team} · {rule.timing}
-                    </p>
-                  </div>
-                  <Switch.Root
-                    id={`rule-${rule.id}`}
-                    aria-describedby={`rule-detail-${rule.id}`}
-                    checked={enabled}
-                    nativeButton
-                    render={<button type="button" />}
-                    onCheckedChange={(checked) => {
-                      setEnabledRules((current) => {
-                        const next = new Set(current);
-
-                        if (checked) {
-                          next.add(rule.id);
-                        } else {
-                          next.delete(rule.id);
-                        }
-
-                        return next;
-                      });
-                    }}
-                    {...stylex.props(styles.switchControl)}
+                step && (
+                  <div
+                    aria-hidden="true"
+                    className={cn(
+                      cardStyles,
+                      teamCardColors[step.team],
+                      "px-3 py-2 font-medium shadow-md",
+                    )}
                   >
-                    <span {...stylex.props(styles.switchTrack, enabled && styles.switchTrackOn)}>
-                      <Switch.Thumb
-                        {...stylex.props(styles.switchThumb, enabled && styles.switchThumbOn)}
-                      />
-                    </span>
-                  </Switch.Root>
-                </li>
+                    {step.title}
+                  </div>
+                )
               );
-            })}
-          </ul>
-        </section>
-
-        <section
-          aria-labelledby="preview-title"
-          {...stylex.props(portalStyles.panel, styles.preview)}
-        >
-          <h2 id="preview-title" {...stylex.props(portalStyles.subheading, styles.panelTitle)}>
-            Prévia da simulação
-          </h2>
-          <div {...stylex.props(styles.previewContent)}>
-            <p {...stylex.props(styles.muted)}>
-              As alterações valem para esta prévia e não são salvas.
-            </p>
-            <dl aria-live="polite" {...stylex.props(styles.previewMetrics)}>
-              <div {...stylex.props(styles.metric)}>
-                <dt {...stylex.props(styles.muted)}>Regras aplicadas</dt>
-                <dd {...stylex.props(styles.metricValue)}>{activeRules.length + 1}</dd>
-              </div>
-              <div {...stylex.props(styles.metric)}>
-                <dt {...stylex.props(styles.muted)}>Áreas envolvidas</dt>
-                <dd {...stylex.props(styles.metricValue)}>{teamCount}</dd>
-              </div>
-            </dl>
-            <h3 {...stylex.props(styles.timelineTitle)}>Prazos do checklist</h3>
-            <ul {...stylex.props(styles.list, styles.timeline)}>
-              <li {...stylex.props(styles.deadline)}>
-                <strong>{baseRule.timing}</strong>
-                <span>{baseRule.title}</span>
-              </li>
-              {activeRules.map((rule) => (
-                <li key={rule.id} {...stylex.props(styles.deadline)}>
-                  <strong>{rule.timing}</strong>
-                  <span>{rule.title}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
-      </div>
-    </>
+            }}
+          </DragOverlay>
+        </DragDropProvider>
+        <p id="checklist-keyboard-help" className="sr-only">
+          Pressione Enter para editar ou Espaço para pegar a etapa. Use as setas para mudar de
+          equipe ou fase, Page Up e Page Down para ajustar a posição, Espaço para soltar e Escape
+          para cancelar.
+        </p>
+        <p role="status" className="sr-only">
+          {keyboardDrag
+            ? `${keyboardDrag.destination.team} · ${getPhase(keyboardDrag.destination.phase).label}. ${keyboardDrag.destination.beforeId ? `Antes de ${steps.find(({ id }) => id === keyboardDrag.destination.beforeId)?.title}.` : "Fim da célula."}`
+            : message}
+        </p>
+      </section>
+      {dialog?.kind === "create" && (
+        <StepDialog
+          {...dialogControls}
+          placement={dialog.placement}
+          focusId={addStepId(dialog.placement)}
+          onSave={(settings) => createStep(settings, dialog.placement)}
+        />
+      )}
+      {dialog?.kind === "edit" && (
+        <StepDialog
+          key={dialog.step.id}
+          {...dialogControls}
+          step={dialog.step}
+          placement={dialog.step}
+          focusId={`edit-${dialog.step.id}`}
+          onSave={(settings) => editStep(settings, dialog.step)}
+          onRequestDelete={() => openDialog({ kind: "delete", step: dialog.step })}
+        />
+      )}
+      {dialog?.kind === "delete" && (
+        <DeleteStepDialog
+          key={dialog.step.id}
+          {...dialogControls}
+          step={dialog.step}
+          focusId={addStepId(dialog.step)}
+          onDelete={() => deleteStep(dialog.step)}
+        />
+      )}
+    </ListPage>
   );
 }

@@ -1,176 +1,53 @@
-import * as stylex from "@stylexjs/stylex";
-import { Metrics, PageHeading } from "../../shared/ui/page";
+import { Alert02Icon, Calendar03Icon, Tick02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
+import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
+import type { ListMetric } from "@/shared/ui/list-page";
+import { Bar, BarChart, LabelList, XAxis } from "recharts";
+import { ChartContainer } from "@/shared/ui/shadcn/chart";
+import { classProps } from "../../shared/lib/class-props";
 import { portalStyles as s } from "../../shared/ui/surface.styles";
-import { colors } from "../../shared/ui/theme.stylex";
 
-const compact = "@media (max-width: 67rem)";
-const mobile = "@media (max-width: 36rem)";
+const styles = {
+  report: "grid min-w-0 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]",
+  section: "grid min-w-0 content-start gap-3 rounded-2xl border bg-card p-4 sm:p-5",
+  reportHeading: "text-lg font-semibold",
+  rail: "grid min-w-0 content-start gap-5",
+  stageLabel: "text-sm font-medium",
+  stageValue: "text-lg font-semibold tabular-nums",
+  track: "col-span-2 h-1.5 overflow-hidden bg-muted",
+  bar: "h-full bg-primary",
+  outcomes: "grid gap-3 rounded-2xl border bg-card p-4 sm:p-5",
+  outcome: "flex items-baseline justify-between gap-3",
+  outcomeDetail: "border-t pt-3",
+  outcomeValue: "text-xl font-semibold text-primary",
+  job: "grid gap-1 border-t py-2 text-sm font-medium",
+  caption: "text-sm font-normal text-muted-foreground",
+  privacy: "border-t py-3 text-sm text-muted-foreground",
+  feedback: "grid gap-3 rounded-2xl border bg-card p-4 sm:p-5",
+  topics: "mt-2 grid max-w-3xl gap-3",
+  topic: "grid grid-cols-[minmax(0,1fr)_minmax(1rem,1fr)_auto] items-center gap-2 text-sm",
+  topicTrack: "col-auto",
+  topicValue: "text-right font-medium tabular-nums",
+  placement: "grid gap-3 self-start rounded-2xl border bg-card p-4 sm:p-5",
+  placementCopy: "text-sm text-muted-foreground",
+};
 
-const styles = stylex.create({
-  report: {
-    display: "grid",
-    gridTemplateColumns: {
-      default: "minmax(0, 1.9fr) minmax(0, 1fr)",
-      [compact]: "minmax(0, 1fr)",
-    },
-    gap: { default: "2.5rem", [compact]: "1.75rem" },
-    paddingBlockEnd: "1.75rem",
+const applicationStages: (ListMetric & { axis: string; value: number })[] = [
+  {
+    label: "Candidaturas assistidas",
+    axis: "Candidaturas",
+    value: 386,
+    icon: Calendar03Icon,
+    tone: "primary",
   },
-  section: { display: "grid", alignContent: "start", gap: "0.75rem" },
-  reportHeading: {
-    fontSize: "1.375rem",
-    fontWeight: 680,
-    letterSpacing: "-0.025em",
-    lineHeight: 1.25,
+  {
+    label: "Com retorno da empresa",
+    axis: "Retornos",
+    value: 121,
+    icon: UserGroupIcon,
+    tone: "primary",
   },
-  rail: { display: "grid", alignContent: "start", gap: "1.5rem", minWidth: 0 },
-  list: { listStyle: "none", padding: 0, margin: 0 },
-  stages: {
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: "solid",
-    borderBlockEndColor: colors.border,
-  },
-  stage: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto",
-    alignItems: "baseline",
-    columnGap: "1rem",
-    rowGap: "0.5rem",
-    paddingBlock: { default: "0.875rem", [mobile]: "0.625rem" },
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
-  },
-  stageLabel: { fontSize: "0.875rem", fontWeight: 560 },
-  stageValue: {
-    color: colors.ink,
-    fontSize: "1.375rem",
-    lineHeight: 1,
-    fontWeight: 680,
-    fontVariantNumeric: "tabular-nums",
-  },
-  track: {
-    gridColumn: "1 / -1",
-    backgroundColor: colors.wash,
-    height: "0.4375rem",
-    borderRadius: "1rem",
-    overflow: "hidden",
-  },
-  bar: (width: string) => ({
-    width,
-    height: "100%",
-    borderRadius: "inherit",
-    backgroundColor: colors.brand,
-  }),
-  outcomes: {
-    display: "grid",
-    gap: "0.75rem",
-    padding: "1rem 1.125rem",
-    backgroundColor: colors.wash,
-    borderRadius: "0.75rem",
-  },
-  outcome: {
-    display: "flex",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    gap: "0.75rem",
-  },
-  outcomeDetail: {
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
-    paddingBlockStart: "0.75rem",
-  },
-  outcomeValue: { color: colors.brandHover, fontSize: "1.75rem", letterSpacing: "-0.025em" },
-  job: {
-    paddingBlock: "0.625rem",
-    display: "grid",
-    gap: "0.125rem",
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
-    fontSize: "0.875rem",
-    fontWeight: 590,
-  },
-  caption: { color: colors.muted, fontSize: "0.8125rem", lineHeight: 1.5, fontWeight: 400 },
-  privacy: {
-    color: colors.muted,
-    fontSize: "0.8125rem",
-    lineHeight: 1.6,
-    paddingBlock: "0.875rem",
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
-  },
-  timeline: {
-    display: "grid",
-    gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
-    gap: { default: "0.75rem", [mobile]: "0.4375rem" },
-  },
-  month: {
-    display: "grid",
-    gridTemplateRows: "8rem auto",
-    justifyItems: "center",
-    gap: "0.5rem",
-    fontSize: "0.8125rem",
-    color: colors.muted,
-    minWidth: 0,
-  },
-  plot: {
-    display: "flex",
-    width: "100%",
-    flexDirection: "column",
-    justifyContent: "flex-end",
-    alignItems: "center",
-    gap: "0.375rem",
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: "solid",
-    borderBlockEndColor: colors.border,
-  },
-  column: (height: string) => ({
-    height,
-    width: "min(100%, 3.25rem)",
-    borderStartStartRadius: "0.25rem",
-    borderStartEndRadius: "0.25rem",
-    backgroundColor: colors.lavender,
-  }),
-  latestColumn: { backgroundColor: colors.brand },
-  chartValue: { color: colors.ink, fontVariantNumeric: "tabular-nums", fontWeight: 650 },
-  feedback: {
-    display: "grid",
-    gap: { default: "0.5rem", [mobile]: "0.75rem" },
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
-    paddingBlockStart: "1.25rem",
-  },
-  topics: { display: "grid", gap: "0.625rem", marginBlockStart: "0.5rem", maxWidth: "48rem" },
-  topic: {
-    display: "grid",
-    alignItems: "center",
-    gridTemplateColumns: "minmax(9rem, 1fr) minmax(2rem, 1.5fr) 2ch",
-    gap: "0.625rem",
-    fontSize: "0.875rem",
-  },
-  topicTrack: { gridColumn: "auto" },
-  topicValue: { textAlign: "end", fontVariantNumeric: "tabular-nums", fontWeight: 650 },
-  placement: {
-    display: "grid",
-    alignSelf: "start",
-    gap: "0.75rem",
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
-    paddingBlockStart: "0.875rem",
-  },
-  placementCopy: { color: colors.muted, lineHeight: 1.55, fontSize: "0.875rem" },
-});
-
-const applicationStages = [
-  { label: "Candidaturas assistidas", value: 386 },
-  { label: "Com retorno da empresa", value: 121 },
-  { label: "Entrevistas", value: 64 },
-  { label: "Ofertas", value: 15 },
+  { label: "Entrevistas", axis: "Entrevistas", value: 64, icon: Calendar03Icon, tone: "warning" },
+  { label: "Ofertas", axis: "Ofertas", value: 15, icon: Tick02Icon, tone: "success" },
 ];
 
 const sharedJobs = [
@@ -179,11 +56,11 @@ const sharedJobs = [
   { title: "Analista de dados", company: "Vértice Educação" },
 ];
 
-const feedbackMetrics = [
-  { label: "Ativação", value: "86%" },
-  { label: "Engajamento no mês", value: "77%" },
-  { label: "Etapas da saída concluídas", value: "68%" },
-  { label: "NPS de saída", value: "+42" },
+const feedbackMetrics: ListMetric[] = [
+  { label: "Ativação", value: "86%", icon: UserGroupIcon, tone: "primary" },
+  { label: "Engajamento no mês", value: "77%", icon: Calendar03Icon, tone: "primary" },
+  { label: "Etapas da saída concluídas", value: "68%", icon: Tick02Icon, tone: "success" },
+  { label: "NPS de saída", value: "+42", icon: Alert02Icon, tone: "primary" },
 ];
 
 const activations = [
@@ -204,128 +81,137 @@ const feedbackTopics = [
 ];
 
 export function ApplicationsPage() {
-  const total = applicationStages[0].value;
-
   return (
-    <>
-      <PageHeading
-        title="Candidaturas assistidas"
-        description="Totais da jornada de recolocação desde junho."
-      />
-      <div {...stylex.props(styles.report)}>
-        <section aria-labelledby="application-stages" {...stylex.props(styles.section)}>
-          <h2 id="application-stages" {...stylex.props(styles.reportHeading)}>
+    <ListPage
+      title="Candidaturas assistidas"
+      breadcrumb={<ListBreadcrumb title="Candidaturas assistidas" />}
+      metrics={applicationStages}
+    >
+      <div {...classProps(styles.report)}>
+        <section aria-labelledby="application-stages" {...classProps(styles.section)}>
+          <h2 id="application-stages" {...classProps(styles.reportHeading)}>
             Do convite à oferta
           </h2>
-          <ol role="list" {...stylex.props(styles.list, styles.stages)}>
-            {applicationStages.map(({ label, value }) => (
-              <li key={label} {...stylex.props(styles.stage)}>
-                <span {...stylex.props(styles.stageLabel)}>{label}</span>
-                <strong {...stylex.props(styles.stageValue)}>{value}</strong>
-                <div {...stylex.props(styles.track)} aria-hidden="true">
-                  <div {...stylex.props(styles.bar(`${(value / total) * 100}%`))} />
-                </div>
-              </li>
-            ))}
-          </ol>
+          <p className="text-sm text-muted-foreground">Totais desde junho.</p>
+          <ChartContainer className="aspect-auto h-56 w-full min-w-0" aria-hidden="true">
+            <BarChart
+              data={applicationStages}
+              margin={{ top: 24, bottom: 4 }}
+              accessibilityLayer={false}
+            >
+              <XAxis dataKey="axis" axisLine={false} tickLine={false} interval={0} />
+              <Bar
+                dataKey="value"
+                fill="var(--primary)"
+                radius={[5, 5, 0, 0]}
+                isAnimationActive={false}
+                maxBarSize={56}
+              >
+                <LabelList dataKey="value" position="top" fill="var(--foreground)" />
+              </Bar>
+            </BarChart>
+          </ChartContainer>
         </section>
-        <div {...stylex.props(styles.rail)}>
-          <dl {...stylex.props(styles.outcomes)}>
-            <div {...stylex.props(styles.outcome)}>
-              <dt {...stylex.props(styles.stageLabel)}>Recolocações autorizadas</dt>
-              <dd {...stylex.props(styles.stageValue, styles.outcomeValue)}>12</dd>
+        <div {...classProps(styles.rail)}>
+          <dl {...classProps(styles.outcomes)}>
+            <div {...classProps(styles.outcome)}>
+              <dt {...classProps(styles.stageLabel)}>Recolocações autorizadas</dt>
+              <dd {...classProps(styles.stageValue, styles.outcomeValue)}>12</dd>
             </div>
-            <div {...stylex.props(styles.outcome, styles.outcomeDetail)}>
-              <dt {...stylex.props(styles.stageLabel)}>Pessoas com acesso ao app</dt>
-              <dd {...stylex.props(styles.stageValue)}>48</dd>
+            <div {...classProps(styles.outcome, styles.outcomeDetail)}>
+              <dt {...classProps(styles.stageLabel)}>Pessoas com acesso ao app</dt>
+              <dd {...classProps(styles.stageValue)}>48</dd>
             </div>
           </dl>
-          <section aria-labelledby="shared-jobs" {...stylex.props(styles.section)}>
-            <h2 id="shared-jobs" {...stylex.props(s.subheading)}>
+          <section aria-labelledby="shared-jobs" {...classProps(styles.section)}>
+            <h2 id="shared-jobs" {...classProps(s.subheading)}>
               Vagas compartilhadas
             </h2>
-            <ul role="list" {...stylex.props(styles.list)}>
+            <ul role="list">
               {sharedJobs.map(({ title, company }) => (
-                <li key={title} {...stylex.props(styles.job)}>
+                <li key={title} {...classProps(styles.job)}>
                   {title}
-                  <span {...stylex.props(styles.caption)}>{company}</span>
+                  <span {...classProps(styles.caption)}>{company}</span>
                 </li>
               ))}
             </ul>
           </section>
         </div>
       </div>
-      <p {...stylex.props(styles.privacy)}>
+      <p {...classProps(styles.privacy)}>
         O RH vê somente dados agregados. Currículos, candidaturas e mensagens individuais ficam
         privados.
       </p>
-    </>
+    </ListPage>
   );
 }
 
 export function FeedbackPage() {
-  const max = Math.max(...activations.map(({ value }) => value));
-  const latest = activations.at(-1)?.label;
-
   return (
-    <>
-      <PageHeading
-        title="Cuidado que continua"
-        description="Resultados e feedback agregados da jornada."
-      />
-      <Metrics items={feedbackMetrics} />
-      <div {...stylex.props(styles.report)}>
-        <section aria-labelledby="monthly-activations" {...stylex.props(styles.section)}>
-          <h2 id="monthly-activations" {...stylex.props(styles.reportHeading)}>
+    <ListPage
+      title="Resultados e feedback"
+      breadcrumb={<ListBreadcrumb title="Resultados e feedback" />}
+      metrics={feedbackMetrics}
+    >
+      <div {...classProps(styles.report)}>
+        <section aria-labelledby="monthly-activations" {...classProps(styles.section)}>
+          <h2 id="monthly-activations" {...classProps(styles.reportHeading)}>
             Ativações por mês
           </h2>
-          <ol role="list" {...stylex.props(styles.list, styles.timeline)}>
+          <ChartContainer className="aspect-auto h-48 w-full min-w-0" aria-hidden="true">
+            <BarChart data={activations} margin={{ top: 20, bottom: 4 }} accessibilityLayer={false}>
+              <XAxis dataKey="label" axisLine={false} tickLine={false} />
+              <Bar
+                dataKey="value"
+                fill="var(--primary)"
+                radius={[5, 5, 0, 0]}
+                isAnimationActive={false}
+                maxBarSize={48}
+              >
+                <LabelList dataKey="value" position="top" fill="var(--foreground)" />
+              </Bar>
+            </BarChart>
+          </ChartContainer>
+          <ol className="sr-only">
             {activations.map(({ label, value }) => (
-              <li key={label} {...stylex.props(styles.month)}>
-                <div {...stylex.props(styles.plot)}>
-                  <span {...stylex.props(styles.chartValue)}>{value}</span>
-                  <div
-                    {...stylex.props(
-                      styles.column(`${(value / max) * 78}%`),
-                      label === latest && styles.latestColumn,
-                    )}
-                    aria-hidden="true"
-                  />
-                </div>
-                <span>{label}</span>
+              <li key={label}>
+                {label}: {value}
               </li>
             ))}
           </ol>
         </section>
-        <section aria-labelledby="reported-placements" {...stylex.props(styles.placement)}>
-          <h2 id="reported-placements" {...stylex.props(s.subheading)}>
+        <section aria-labelledby="reported-placements" {...classProps(styles.placement)}>
+          <h2 id="reported-placements" {...classProps(s.subheading)}>
             Recolocação informada
           </h2>
-          <p {...stylex.props(styles.stageValue, styles.outcomeValue)}>12 pessoas</p>
-          <p {...stylex.props(styles.placementCopy)}>
+          <p {...classProps(styles.stageValue, styles.outcomeValue)}>12 pessoas</p>
+          <p {...classProps(styles.placementCopy)}>
             Total baseado em relatos voluntários com autorização.
           </p>
         </section>
       </div>
-      <section aria-labelledby="feedback-topics" {...stylex.props(styles.feedback)}>
-        <h2 id="feedback-topics" {...stylex.props(styles.reportHeading)}>
+      <section aria-labelledby="feedback-topics" {...classProps(styles.feedback)}>
+        <h2 id="feedback-topics" {...classProps(styles.reportHeading)}>
           O que aparece nos feedbacks
         </h2>
-        <p {...stylex.props(styles.placementCopy)}>
+        <p {...classProps(styles.placementCopy)}>
           {feedbackResponses} respostas anônimas. Temas mais citados:
         </p>
-        <ul role="list" {...stylex.props(styles.list, styles.topics)}>
+        <ul role="list" {...classProps(styles.topics)}>
           {feedbackTopics.map(({ label, value }) => (
-            <li key={label} {...stylex.props(styles.topic)}>
+            <li key={label} {...classProps(styles.topic)}>
               <span>{label}</span>
-              <div {...stylex.props(styles.track, styles.topicTrack)} aria-hidden="true">
-                <div {...stylex.props(styles.bar(`${(value / feedbackResponses) * 100}%`))} />
+              <div {...classProps(styles.track, styles.topicTrack)} aria-hidden="true">
+                <div
+                  {...classProps(styles.bar)}
+                  style={{ width: `${(value / feedbackResponses) * 100}%` }}
+                />
               </div>
-              <span {...stylex.props(styles.topicValue)}>{value}</span>
+              <span {...classProps(styles.topicValue)}>{value}</span>
             </li>
           ))}
         </ul>
       </section>
-    </>
+    </ListPage>
   );
 }

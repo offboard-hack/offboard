@@ -1,26 +1,19 @@
-import * as stylex from "@stylexjs/stylex";
-import { Input } from "@base-ui/react/input";
+import { useListPagination } from "@/shared/lib/use-list-pagination";
+import { getRouteApi } from "@tanstack/react-router";
+import { Alert02Icon, Calendar03Icon, Tick02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
+import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
+import { classProps } from "../../shared/lib/class-props";
+import { Input } from "@/shared/ui/shadcn/input";
 import { useState } from "react";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
 import { portalStyles as s } from "../../shared/ui/surface.styles";
-import { colors } from "../../shared/ui/theme.stylex";
-import { Metrics } from "../../shared/ui/page";
 
-const styles = stylex.create({
-  accessTable: { minWidth: "30rem" },
-  notice: {
-    backgroundColor: colors.lavenderSoft,
-    borderRadius: "0.5rem",
-    padding: "0.875rem 1rem",
-    color: colors.muted,
-    fontSize: "0.875rem",
-    lineHeight: 1.5,
-    marginBlock: "1rem",
-  },
-  tablePanel: { marginBlockStart: "1rem" },
-  input: { width: "min(100%, 22rem)" },
-});
+const styles = {
+  accessTable: "min-w-lg",
+  notice: "text-sm text-muted-foreground",
+  input: "w-full max-w-sm",
+};
 
 const beneficiaries = [
   { name: "Marina Lopes", plan: "Gold", status: "Ativo", until: "30 abr" },
@@ -61,7 +54,22 @@ const teamColumns: TableColumn<(typeof team)[number]>[] = [
   { id: "security", accessorFn: ({ security }) => security, header: "Segurança" },
 ];
 
+const route = getRouteApi("/acessos-ao-app");
+
 export function AccessPage() {
+  const navigate = route.useNavigate();
+
+  const updatePagination: Parameters<typeof useListPagination>[0] = (patch) => {
+    void navigate({
+      search: (previous) => ({ ...previous, ...patch }),
+      resetScroll: false,
+    });
+  };
+
+  const urlPagination = useListPagination(updatePagination);
+  const teamPagination = useListPagination(updatePagination, "team");
+  const { page } = route.useSearch();
+
   const [search, setSearch] = useState("");
   const term = search.trim().toLocaleLowerCase("pt-BR");
 
@@ -70,49 +78,67 @@ export function AccessPage() {
   );
 
   return (
-    <>
-      <header {...stylex.props(s.pageHeader)}>
-        <div>
-          <h1 {...stylex.props(s.heading)} id="titulo-pagina" tabIndex={-1}>
-            Beneficiários e equipe
-          </h1>
-          <p {...stylex.props(s.description)}>Cadastros, acessos ao app e permissões do RH.</p>
-        </div>
-      </header>
-      <Metrics
-        items={[
-          { label: "Cadastros nesta amostra", value: beneficiaries.length },
-          {
-            label: "Ativos",
-            value: beneficiaries.filter(({ status }) => status === "Ativo").length,
-          },
-          {
-            label: "Convites pendentes",
-            value: beneficiaries.filter(({ status }) => status === "Convidado").length,
-          },
-          {
-            label: "Expirados",
-            value: beneficiaries.filter(({ status }) => status === "Expirado").length,
-          },
-        ]}
-      />
-      <Input
-        aria-label="Buscar beneficiários por nome"
-        placeholder="Buscar por nome"
-        value={search}
-        onValueChange={setSearch}
-        {...stylex.props(s.filterInput, styles.input)}
-      />
-      <section {...stylex.props(s.panel, styles.tablePanel)} aria-labelledby="beneficiarios">
-        <div {...stylex.props(s.panelHeader)}>
-          <h2 {...stylex.props(s.subheading)} id="beneficiarios">
-            Beneficiários
-          </h2>
-          <span {...stylex.props(s.resultCount)} role="status">
-            {matching.length === 1 ? "1 resultado" : `${matching.length} resultados`}
-          </span>
-        </div>
+    <ListPage
+      title="Acessos ao app"
+      breadcrumb={<ListBreadcrumb title="Acessos ao app" />}
+      metrics={[
+        {
+          label: "Beneficiários na amostra",
+          value: beneficiaries.length,
+          icon: UserGroupIcon,
+          tone: "primary",
+        },
+        {
+          label: "Ativos",
+          value: beneficiaries.filter(({ status }) => status === "Ativo").length,
+          icon: Tick02Icon,
+          tone: "success",
+        },
+        {
+          label: "Convites pendentes",
+          value: beneficiaries.filter(({ status }) => status === "Convidado").length,
+          icon: Calendar03Icon,
+          tone: "warning",
+        },
+        {
+          label: "Expirados",
+          value: beneficiaries.filter(({ status }) => status === "Expirado").length,
+          icon: Alert02Icon,
+          tone: "danger",
+        },
+      ]}
+    >
+      <section className="min-w-0" aria-labelledby="beneficiarios">
+        <p className="sr-only" role="status">
+          {matching.length === 1 ? "1 resultado" : `${matching.length} resultados`}
+        </p>
         <DataTable
+          urlPagination={urlPagination}
+          toolbar={
+            <>
+              <h2 {...classProps(s.subheading, "mr-2 w-full sm:w-auto")} id="beneficiarios">
+                Beneficiários
+              </h2>
+              <Input
+                type="search"
+                aria-label="Buscar beneficiários por nome"
+                placeholder="Buscar por nome"
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.currentTarget.value);
+
+                  if (page) {
+                    void navigate({
+                      search: (previous) => ({ ...previous, page: undefined }),
+                      replace: true,
+                      resetScroll: false,
+                    });
+                  }
+                }}
+                {...classProps(styles.input)}
+              />
+            </>
+          }
           data={matching}
           columns={beneficiaryColumns}
           labelledBy="beneficiarios"
@@ -122,13 +148,14 @@ export function AccessPage() {
           emptyText="Nenhum beneficiário encontrado."
         />
       </section>
-      <section {...stylex.props(s.panel, styles.tablePanel)} aria-labelledby="equipe">
-        <div {...stylex.props(s.panelHeader)}>
-          <h2 {...stylex.props(s.subheading)} id="equipe">
-            Equipe RH e permissões
-          </h2>
-        </div>
+      <section className="min-w-0" aria-labelledby="equipe">
         <DataTable
+          toolbar={
+            <h2 {...classProps(s.subheading)} id="equipe">
+              Equipe RH e permissões
+            </h2>
+          }
+          urlPagination={teamPagination}
           data={team}
           columns={teamColumns}
           labelledBy="equipe"
@@ -137,9 +164,9 @@ export function AccessPage() {
           getRowId={(member) => member.name}
         />
       </section>
-      <p {...stylex.props(styles.notice)}>
+      <p {...classProps(styles.notice)}>
         Esta área mostra apenas cadastros e permissões. A jornada individual no app é privada.
       </p>
-    </>
+    </ListPage>
   );
 }

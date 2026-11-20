@@ -1,7 +1,18 @@
-import { Button as BaseButton } from "@base-ui/react/button";
-import { Input } from "@base-ui/react/input";
-import { Toggle } from "@base-ui/react/toggle";
-import * as stylex from "@stylexjs/stylex";
+import {
+  ArrowLeft01Icon,
+  ArrowRight01Icon,
+  Cancel01Icon,
+  FileUploadIcon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Alert, AlertDescription } from "@/shared/ui/shadcn/alert";
+import { Spinner } from "@/shared/ui/shadcn/spinner";
+import { Empty, EmptyDescription } from "@/shared/ui/shadcn/empty";
+import { classProps } from "../../shared/lib/class-props";
+import { Dropzone } from "@/shared/ui/shadcn/dropzone";
+import { Input } from "@/shared/ui/shadcn/input";
+import { Toggle } from "@/shared/ui/shadcn/toggle";
 import { useActor } from "@xstate/react";
 import { useCallback, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -9,11 +20,17 @@ import { Button } from "../../shared/ui/button";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
 import { portalStyles as s } from "../../shared/ui/surface.styles";
-import { bulkImport, maxImportedPeople } from "./import-machine";
+import { bulkImport, maxImportBytes, maxImportedPeople } from "./import-machine";
 import type { ImportRow } from "./import-machine";
 import { importStyles as ui } from "./import.styles";
 
 const stages = ["Arquivo", "Revisão", "Conclusão"];
+
+const fileSelectionErrors = new Map([
+  ["too-many-files", "Selecione um arquivo CSV por vez."],
+  ["file-too-large", "O arquivo deve ter até 1 MB."],
+  ["file-invalid-type", "Selecione um arquivo CSV."],
+]);
 
 function ImportMark({ kind }: { kind: "file" | "ready" | "upload" }) {
   const paths = {
@@ -37,7 +54,7 @@ function ImportMark({ kind }: { kind: "file" | "ready" | "upload" }) {
 
 function RowIssue({ row }: { row: Extract<ImportRow, { kind: "invalid" }> }) {
   return (
-    <span {...stylex.props(ui.issue)}>
+    <span {...classProps(ui.issue)}>
       Registro {row.record} · {row.issue}
     </span>
   );
@@ -52,7 +69,7 @@ const previewColumns: TableColumn<ImportRow>[] = [
       <>
         {original.name || "—"}
         {original.kind === "invalid" && (
-          <span {...stylex.props(ui.mobileIssue)}>
+          <span {...classProps(ui.mobileIssue)}>
             <RowIssue row={original} />
           </span>
         )}
@@ -82,13 +99,13 @@ const fileSize = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 });
 
 function FileIdentity({ file }: { file: File }) {
   return (
-    <div {...stylex.props(ui.fileRow)}>
-      <span {...stylex.props(ui.icon)}>
+    <div {...classProps(ui.fileRow)}>
+      <span {...classProps(ui.icon)}>
         <ImportMark kind="file" />
       </span>
-      <span {...stylex.props(ui.fileText)}>
-        <span {...stylex.props(ui.fullName)}>{file.name}</span>
-        <span {...stylex.props(ui.detail)}>
+      <span {...classProps(ui.fileText)}>
+        <span {...classProps(ui.fullName)}>{file.name}</span>
+        <span {...classProps(ui.detail)}>
           {file.size >= 1000 ? `${fileSize.format(file.size / 1000)} KB` : `${file.size} bytes`}
         </span>
       </span>
@@ -96,48 +113,61 @@ function FileIdentity({ file }: { file: File }) {
   );
 }
 
-function ImportGuide() {
+function ImportGuide({ modal }: { modal: boolean }) {
+  const download = (
+    <a href="/modelo-desligamentos.csv" download {...classProps(s.secondaryButton, s.button)}>
+      Baixar modelo CSV
+    </a>
+  );
+
+  if (modal) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <p id="csv-format" className="text-sm text-muted-foreground">
+          CSV em UTF-8, até {maxImportedPeople} pessoas e 1 MB.
+        </p>
+        {download}
+      </div>
+    );
+  }
+
   return (
-    <aside aria-labelledby="csv-guide-title" {...stylex.props(ui.guide)}>
-      <h2 id="csv-guide-title" {...stylex.props(s.subheading)}>
-        Estrutura do arquivo
+    <aside aria-labelledby="csv-guide-title" {...classProps(ui.guide)}>
+      <h2 id="csv-guide-title" {...classProps(s.subheading)}>
+        Modelo de planilha
       </h2>
-      <p id="csv-format" {...stylex.props(ui.detail)}>
-        Use um CSV UTF-8 de até 1 MB e {maxImportedPeople} pessoas. As colunas devem vir nesta
-        ordem.
+      <p id="csv-format" {...classProps(ui.detail)}>
+        Salve como CSV em UTF-8, com até {maxImportedPeople} pessoas e 1 MB. Use os cabeçalhos
+        abaixo.
       </p>
-      <pre {...stylex.props(ui.sample)}>
+      <pre {...classProps(ui.sample)}>
         <code>{"nome,departamento\nPessoa Exemplo,Marketing"}</code>
       </pre>
-      <a href="/modelo-desligamentos.csv" download {...stylex.props(s.button, s.secondaryButton)}>
-        Baixar modelo CSV
-      </a>
+      {download}
     </aside>
   );
 }
 
 function FileSelection({
+  modal,
   file,
   error,
   canReview,
   stageHeading,
   onFile,
-  onBrowse,
   onRemove,
   onReview,
 }: {
+  modal: boolean;
   file: File | null;
   error: string;
   canReview: boolean;
   stageHeading: (node: HTMLHeadingElement | null) => void;
   onFile: (file: File) => void;
-  onBrowse: () => void;
   onRemove: () => void;
   onReview: () => void;
 }) {
   const filePicker = useRef<HTMLButtonElement>(null);
-  const dragDepth = useRef(0);
-  const [dragging, setDragging] = useState(false);
   const [dropError, setDropError] = useState("");
   const notice = dropError || error;
 
@@ -147,81 +177,40 @@ function FileSelection({
   }
 
   return (
-    <section aria-labelledby="import-title" {...stylex.props(s.workSurface, ui.body)}>
-      <div {...stylex.props(ui.lead)}>
-        <h2 id="import-title" ref={stageHeading} tabIndex={-1} {...stylex.props(s.workHeading)}>
-          Selecione uma planilha
+    <section aria-labelledby="import-title" {...classProps(s.workSurface, ui.body, "gap-4 py-0")}>
+      <div className={modal ? "sr-only" : ui.lead}>
+        <h2 id="import-title" ref={stageHeading} tabIndex={-1} {...classProps(s.workHeading)}>
+          Arquivo CSV
         </h2>
-        <p {...stylex.props(ui.detail)}>A validação começa assim que você escolher o CSV.</p>
       </div>
-      <div
-        {...stylex.props(ui.dropZone, dragging && ui.dropActive)}
-        onDragEnter={(event) => {
-          if (event.dataTransfer.types.includes("Files")) {
-            event.preventDefault();
-            dragDepth.current += 1;
-            setDragging(true);
-          }
-        }}
-        onDragOver={(event) => {
-          if (event.dataTransfer.types.includes("Files")) {
-            event.preventDefault();
-            event.dataTransfer.dropEffect = "copy";
-            setDragging(true);
-          }
-        }}
-        onDragLeave={() => {
-          dragDepth.current = Math.max(0, dragDepth.current - 1);
+      {file && <FileIdentity file={file} />}
+      <Dropzone
+        accept={{ "text/csv": [".csv"] }}
+        maxSize={maxImportBytes}
+        label={file ? "Trocar arquivo" : "Escolher arquivo"}
+        buttonRef={filePicker}
+        describedBy={notice ? "csv-format import-error" : "csv-format"}
+        onFile={choose}
+        onReject={(rejections) => {
+          const code = rejections[0]?.errors[0]?.code;
 
-          if (dragDepth.current === 0) {
-            setDragging(false);
-          }
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          dragDepth.current = 0;
-          setDragging(false);
-          const dropped = event.dataTransfer.files[0];
-
-          if (dropped && event.dataTransfer.files.length === 1) {
-            choose(dropped);
-          } else if (event.dataTransfer.files.length > 1) {
-            setDropError(
-              file
-                ? "Selecione um arquivo CSV por vez. O arquivo anterior continua selecionado."
-                : "Selecione um arquivo CSV por vez.",
-            );
-          }
+          setDropError(
+            fileSelectionErrors.get(code ?? "") ?? "Não foi possível selecionar o arquivo.",
+          );
         }}
       >
-        {file && <FileIdentity file={file} />}
-        <BaseButton
-          ref={filePicker}
-          type="button"
-          aria-describedby={notice ? "csv-format import-error" : "csv-format"}
-          {...stylex.props(ui.dropTarget, file && ui.replaceTarget)}
-          onClick={onBrowse}
-        >
-          {!file && (
-            <span {...stylex.props(ui.icon, dragging && ui.activeIcon)}>
-              <ImportMark kind="upload" />
-            </span>
-          )}
-          <span {...stylex.props(ui.pickText, !file && ui.pickPrimary)}>
-            {dragging ? "Solte o CSV aqui" : file ? "Trocar arquivo" : "Escolher arquivo"}
-          </span>
-        </BaseButton>
-        {!file && !dragging && (
-          <span {...stylex.props(ui.dragCopy)}>ou arraste um CSV para cá</span>
-        )}
-      </div>
+        <span className="grid size-9 place-items-center text-muted-foreground">
+          <ImportMark kind="upload" />
+        </span>
+        <span className="text-base font-medium">Solte o CSV aqui</span>
+      </Dropzone>
       {notice && (
-        <p id="import-error" role="alert" {...stylex.props(ui.error)}>
-          {notice}
-        </p>
+        <Alert id="import-error" variant="destructive">
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
       )}
       {file && (
-        <div {...stylex.props(ui.actions)}>
+        <div {...classProps(ui.actions)}>
           <Button
             onClick={() => {
               setDropError("");
@@ -229,10 +218,12 @@ function FileSelection({
               filePicker.current?.focus();
             }}
           >
+            <HugeiconsIcon icon={Cancel01Icon} data-icon="inline-start" aria-hidden="true" />
             Remover arquivo
           </Button>
           {canReview && (
             <Button variant="primary" onClick={onReview}>
+              <HugeiconsIcon icon={ArrowRight01Icon} data-icon="inline-start" aria-hidden="true" />
               Revisar arquivo
             </Button>
           )}
@@ -277,83 +268,87 @@ function FileReview({
   );
 
   return (
-    <section aria-labelledby="review-title" {...stylex.props(s.workSurface)}>
-      <div {...stylex.props(ui.body)}>
-        <div {...stylex.props(ui.lead)}>
-          <h2 id="review-title" ref={stageHeading} tabIndex={-1} {...stylex.props(s.workHeading)}>
+    <section aria-labelledby="review-title" {...classProps(s.workSurface)}>
+      <div {...classProps(ui.body, "gap-4 pb-4")}>
+        <div {...classProps(ui.lead)}>
+          <h2 id="review-title" ref={stageHeading} tabIndex={-1} {...classProps(s.workHeading)}>
             Revise a planilha
           </h2>
-          <p {...stylex.props(ui.detail)}>{file.name}</p>
+          <p {...classProps(ui.detail)}>{file.name}</p>
         </div>
-        <div {...stylex.props(ui.validateSummary)}>
+        <div {...classProps(ui.validateSummary)}>
           <span>
             {accepted} {accepted === 1 ? "registro válido" : "registros válidos"}
           </span>
           {invalid > 0 && (
-            <span {...stylex.props(ui.issueCount)}>
+            <span {...classProps(ui.issueCount)}>
               {invalid} {invalid === 1 ? "com erro" : "com erros"}
             </span>
           )}
         </div>
         {invalid > 0 && (
-          <div {...stylex.props(ui.error, ui.blockingError)}>
-            <p id="review-blocker">
-              Corrija os registros sinalizados na planilha e selecione o CSV atualizado para
-              concluir a revisão.
-            </p>
-            <Button onClick={onBrowse}>Trocar planilha</Button>
+          <div {...classProps(ui.error, ui.blockingError)}>
+            <p id="review-blocker">Corrija as linhas marcadas e envie o arquivo de novo.</p>
+            <Button onClick={onBrowse}>
+              <HugeiconsIcon icon={FileUploadIcon} data-icon="inline-start" aria-hidden="true" />
+              Trocar planilha
+            </Button>
           </div>
         )}
-        <div {...stylex.props(ui.reviewToolbar)}>
+        <div {...classProps(ui.reviewToolbar)}>
           <Input
             type="search"
             aria-label="Buscar nome ou departamento"
             placeholder="Nome ou departamento"
             value={query}
-            onValueChange={setQuery}
-            {...stylex.props(s.filterInput, ui.search)}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            {...classProps(s.filterInput, ui.search)}
           />
           {invalid > 0 && (
             <Toggle
               pressed={onlyIssues}
               onPressedChange={setOnlyIssues}
-              {...stylex.props(s.button, ui.issueToggle)}
+              {...classProps(s.button, ui.issueToggle)}
             >
               Só com erros
             </Toggle>
           )}
-          <span role="status" {...stylex.props(ui.detail)}>
+          <span role="status" {...classProps(ui.detail)}>
             {visible.length} de {rows.length} registros
           </span>
         </div>
       </div>
       {visible.length > 0 ? (
-        <div
-          role="region"
-          aria-label="Registros da planilha"
-          tabIndex={0}
-          {...stylex.props(ui.preview)}
-        >
-          <DataTable
-            data={visible}
-            columns={invalid ? columnsWithIssues : previewColumns}
-            labelledBy="review-title"
-            headStyle={ui.stickyHead}
-            tableStyle={ui.reviewTable}
-            getRowId={(row) => String(row.record)}
-          />
-        </div>
+        <DataTable
+          appearance="embedded"
+          data={visible}
+          columns={invalid ? columnsWithIssues : previewColumns}
+          labelledBy="review-title"
+          headStyle={ui.stickyHead}
+          tableStyle={ui.reviewTable}
+          scrollLabel="Registros da planilha"
+          scrollClassName={`${ui.preview} rounded-xl border [&_th]:bg-popover [&_td]:py-3`}
+          getRowId={(row) => String(row.record)}
+        />
       ) : (
-        <p {...stylex.props(ui.empty)}>Nenhum registro corresponde à busca.</p>
+        <Empty>
+          <EmptyDescription>Nenhuma linha encontrada.</EmptyDescription>
+        </Empty>
       )}
-      <div {...stylex.props(ui.reviewFooter, ui.actions)}>
-        {!invalid && <Button onClick={onBack}>Voltar ao arquivo</Button>}
+      <div {...classProps(ui.reviewFooter, ui.actions)}>
+        {!invalid && (
+          <Button onClick={onBack}>
+            <HugeiconsIcon icon={ArrowLeft01Icon} data-icon="inline-start" aria-hidden="true" />
+            Voltar
+          </Button>
+        )}
         <Button
           variant="primary"
           onClick={onConfirm}
           disabled={invalid > 0}
           aria-describedby={invalid ? "review-blocker" : undefined}
         >
+          <HugeiconsIcon icon={Tick02Icon} data-icon="inline-start" aria-hidden="true" />
           Concluir revisão
         </Button>
       </div>
@@ -361,7 +356,13 @@ function FileReview({
   );
 }
 
-export function ImportPage({ returnLink }: { returnLink: ReactNode }) {
+export function ImportPage({
+  returnLink,
+  modal = false,
+}: {
+  returnLink?: ReactNode;
+  modal?: boolean;
+}) {
   const [state, send] = useActor(bulkImport);
   const { file, rows, error } = state.context;
   const step = state.value;
@@ -385,80 +386,87 @@ export function ImportPage({ returnLink }: { returnLink: ReactNode }) {
 
   return (
     <>
-      <div {...stylex.props(s.backLinkRow)}>{returnLink}</div>
-      <header {...stylex.props(s.pageHeader, ui.header)}>
-        <div>
-          <h1 id="titulo-pagina" tabIndex={-1} {...stylex.props(s.heading)}>
-            Cadastro em massa
-          </h1>
-          <p {...stylex.props(s.description)}>Valide um CSV e confira os registros na prévia.</p>
-        </div>
-      </header>
-      <ol aria-label="Etapas do cadastro em massa" role="list" {...stylex.props(ui.steps)}>
-        {stages.map((label, index) => (
-          <li
-            key={label}
-            aria-current={index === stageIndex ? "step" : undefined}
-            {...stylex.props(ui.step, index === stageIndex && ui.currentStep)}
-          >
-            <span
-              aria-hidden="true"
-              {...stylex.props(
-                ui.stepNumber,
-                index === stageIndex && ui.currentNumber,
-                index < stageIndex && ui.completedNumber,
-              )}
+      {!modal && (
+        <>
+          <div {...classProps(s.backLinkRow)}>{returnLink}</div>
+          <header {...classProps(s.pageHeader, ui.header)}>
+            <div>
+              <h1 id="titulo-pagina" tabIndex={-1} {...classProps(s.heading)}>
+                Cadastro em massa
+              </h1>
+              <p {...classProps(s.description)}>Valide um CSV e confira os registros na prévia.</p>
+            </div>
+          </header>
+        </>
+      )}
+      {!modal && (
+        <ol aria-label="Etapas do cadastro em massa" role="list" {...classProps(ui.steps)}>
+          {stages.map((label, index) => (
+            <li
+              key={label}
+              aria-current={index === stageIndex ? "step" : undefined}
+              {...classProps(ui.step, index === stageIndex && ui.currentStep)}
             >
-              {index < stageIndex ? <ImportMark kind="ready" /> : index + 1}
-            </span>
-            {label}
-          </li>
-        ))}
-      </ol>
-      <input
-        hidden
-        ref={fileInput}
-        type="file"
-        accept=".csv,text/csv"
-        onChange={(event) => {
-          const selected = event.currentTarget.files?.[0];
-          event.currentTarget.value = "";
+              <span
+                aria-hidden="true"
+                {...classProps(
+                  ui.stepNumber,
+                  index === stageIndex && ui.currentNumber,
+                  index < stageIndex && ui.completedNumber,
+                )}
+              >
+                {index < stageIndex ? <ImportMark kind="ready" /> : index + 1}
+              </span>
+              {label}
+            </li>
+          ))}
+        </ol>
+      )}
+      {step === "review" && (
+        <input
+          hidden
+          ref={fileInput}
+          type="file"
+          accept=".csv,text/csv"
+          onChange={(event) => {
+            const selected = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
 
-          if (selected) {
-            send({ type: "select", file: selected });
-          }
-        }}
-      />
+            if (selected) {
+              send({ type: "select", file: selected });
+            }
+          }}
+        />
+      )}
       {step === "select" && (
-        <div {...stylex.props(ui.flow)}>
+        <div {...classProps(ui.flow, modal && "gap-3 xl:grid-cols-1")}>
           <FileSelection
+            modal={modal}
             file={file}
             error={error}
             canReview={rows.length > 0}
             stageHeading={stageHeading}
-            onBrowse={openFilePicker}
             onFile={(selected) => send({ type: "select", file: selected })}
             onRemove={() => send({ type: "remove" })}
             onReview={() => send({ type: "review" })}
           />
-          <ImportGuide />
+          <ImportGuide modal={modal} />
         </div>
       )}
       {step === "reading" && (
-        <section aria-labelledby="reading-title" {...stylex.props(s.workSurface, ui.body)}>
-          <div role="status" {...stylex.props(ui.lead)}>
-            <h2
-              id="reading-title"
-              ref={stageHeading}
-              tabIndex={-1}
-              {...stylex.props(s.workHeading)}
-            >
-              Validando a planilha
+        <section aria-labelledby="reading-title" {...classProps(s.workSurface, ui.body)}>
+          <div role="status" {...classProps(ui.lead)}>
+            <Spinner aria-hidden="true" />
+            <h2 id="reading-title" ref={stageHeading} tabIndex={-1} {...classProps(s.workHeading)}>
+              Lendo o CSV…
             </h2>
-            {file && <p {...stylex.props(ui.detail)}>{file.name}</p>}
+            {file && <p {...classProps(ui.detail)}>{file.name}</p>}
           </div>
-          <div {...stylex.props(ui.actions)}>
-            <Button onClick={() => send({ type: "remove" })}>Cancelar leitura</Button>
+          <div {...classProps(ui.actions)}>
+            <Button onClick={() => send({ type: "remove" })}>
+              <HugeiconsIcon icon={Cancel01Icon} data-icon="inline-start" aria-hidden="true" />
+              Cancelar leitura
+            </Button>
           </div>
         </section>
       )}
@@ -473,29 +481,29 @@ export function ImportPage({ returnLink }: { returnLink: ReactNode }) {
         />
       )}
       {step === "complete" && (
-        <section aria-labelledby="complete-title" {...stylex.props(s.workSurface, ui.body)}>
-          <div role="status" {...stylex.props(ui.lead)}>
-            <span {...stylex.props(ui.icon, ui.success)}>
+        <section aria-labelledby="complete-title" {...classProps(s.workSurface, ui.body)}>
+          <div role="status" {...classProps(ui.lead)}>
+            <span {...classProps(ui.icon, ui.success)}>
               <ImportMark kind="ready" />
             </span>
-            <h2
-              id="complete-title"
-              ref={stageHeading}
-              tabIndex={-1}
-              {...stylex.props(s.workHeading)}
-            >
+            <h2 id="complete-title" ref={stageHeading} tabIndex={-1} {...classProps(s.workHeading)}>
               Prévia concluída
             </h2>
-            <p {...stylex.props(ui.detail)}>
+            <p {...classProps(ui.detail)}>
               {rows.length === 1 ? "1 pessoa revisada." : `${rows.length} pessoas revisadas.`}
             </p>
           </div>
-          <div {...stylex.props(ui.actions)}>
-            <Button onClick={() => send({ type: "reset" })}>Importar outro arquivo</Button>
+          <div {...classProps(ui.actions)}>
+            <Button onClick={() => send({ type: "reset" })}>
+              <HugeiconsIcon icon={FileUploadIcon} data-icon="inline-start" aria-hidden="true" />
+              Escolher outro CSV
+            </Button>
           </div>
         </section>
       )}
-      <p {...stylex.props(ui.privacy)}>Prévia local. Nenhum desligamento será cadastrado.</p>
+      {!modal && (
+        <p {...classProps(ui.privacy)}>Os desligamentos não são cadastrados nesta revisão.</p>
+      )}
     </>
   );
 }

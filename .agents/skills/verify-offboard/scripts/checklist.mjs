@@ -12,6 +12,7 @@ if (!OFFBOARD_PLAYWRIGHT_DIR || !OFFBOARD_VERIFY_URL || !OFFBOARD_VERIFY_EVIDENC
 
 const require = createRequire(join(resolve(OFFBOARD_PLAYWRIGHT_DIR), "package.json"));
 const { chromium } = require("playwright");
+
 const browser = await chromium.launch({
   executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
 });

@@ -1,14 +1,20 @@
-import stylex from "@stylexjs/unplugin";
+import { fileURLToPath } from "node:url";
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-export default defineConfig(({ command }) => ({
+export default defineConfig({
   plugins: [
-    stylex.vite({
-      useCSSLayers: true,
-      dev: command === "serve",
-      runtimeInjection: false,
+    tailwindcss(),
+    tanstackStart({
+      router: {
+        entry: "app/router.tsx",
+        routesDirectory: "app/routes",
+        generatedRouteTree: "app/routeTree.gen.ts",
+      },
     }),
     react(),
   ],
-}));
+  resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+});

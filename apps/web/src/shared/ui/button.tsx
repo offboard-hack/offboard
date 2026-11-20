@@ -1,14 +1,17 @@
-import { Button as BaseButton } from "@base-ui/react/button";
-import * as stylex from "@stylexjs/stylex";
-import { portalStyles as s } from "./surface.styles";
-
-const variants = { primary: s.primaryButton, secondary: s.secondaryButton };
+import type { ComponentProps } from "react";
+import { Button as ShadcnButton } from "./shadcn/button";
 
 export function Button({
   variant = "secondary",
   ...props
-}: Omit<BaseButton.Props, "className"> & {
-  variant?: keyof typeof variants;
-}) {
-  return <BaseButton type="button" {...props} {...stylex.props(s.button, variants[variant])} />;
+}: Omit<ComponentProps<typeof ShadcnButton>, "variant"> & { variant?: "primary" | "secondary" }) {
+  return (
+    <ShadcnButton
+      type="button"
+      size="lg"
+      variant={variant === "primary" ? "default" : "outline"}
+      className="min-h-11"
+      {...props}
+    />
+  );
 }

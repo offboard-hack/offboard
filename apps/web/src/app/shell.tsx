@@ -1,42 +1,84 @@
-import * as stylex from "@stylexjs/stylex";
 import type { ReactNode, Ref } from "react";
-import { shellStyles as s } from "./shell.styles";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarHeader,
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/shared/ui/shadcn/sidebar";
+import { SidebarUser } from "./sidebar-user";
+
+const logo = "/offboard-logo.svg";
 
 export function PortalLayout({
   children,
   navigation,
   mainRef,
+  fullWidth,
 }: {
   children: ReactNode;
   navigation: ReactNode;
   mainRef: Ref<HTMLElement>;
+  fullWidth: boolean;
 }) {
   return (
-    <div {...stylex.props(s.portal)}>
-      <a {...stylex.props(s.skipLink)} href="#conteudo">
+    <SidebarProvider>
+      <a
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:border focus:bg-background focus:p-3"
+        href="#conteudo"
+      >
         Ir para o conteúdo
       </a>
-      <aside {...stylex.props(s.sidebar)}>
-        <div {...stylex.props(s.wordmark)}>
-          <span {...stylex.props(s.wordmarkIcon)} data-brand-mark aria-hidden="true">
-            <span {...stylex.props(s.wordmarkGlyph)} />
-          </span>
-          <div>
-            Offboard
-            <span {...stylex.props(s.wordmarkNote)}>Portal do RH</span>
+      <Sidebar collapsible="icon">
+        <SidebarHeader>
+          <div className="px-2 py-1 group-data-[collapsible=icon]:p-0">
+            <div className="group-data-[collapsible=icon]:hidden">
+              <svg
+                role="img"
+                aria-label="Offboard"
+                viewBox="0 0 877 256"
+                className="h-9 w-auto fill-sidebar-foreground text-primary dark:text-sidebar-primary"
+              >
+                <use href={`${logo}#wordmark`} />
+              </svg>
+            </div>
+            <svg
+              role="img"
+              aria-label="Offboard"
+              viewBox="0 0 256 256"
+              className="mx-auto hidden size-6 text-primary group-data-[collapsible=icon]:block dark:text-sidebar-primary"
+            >
+              <use href={`${logo}#mark`} />
+            </svg>
           </div>
-        </div>
-        {navigation}
-      </aside>
-      <div>
-        <header {...stylex.props(s.topbar)}>
-          <span {...stylex.props(s.organization)}>Aurora Tecnologia</span>
-          <span {...stylex.props(s.demoLabel)}>Modo demonstração</span>
+        </SidebarHeader>
+        <SidebarContent>{navigation}</SidebarContent>
+        <SidebarUser />
+      </Sidebar>
+      <SidebarInset id="conteudo" ref={mainRef} tabIndex={-1} className="min-w-0">
+        <header className="flex min-h-12 items-center gap-2 border-b px-2">
+          <SidebarTrigger aria-label="Menu do portal" />
+          <svg
+            role="img"
+            aria-label="Offboard"
+            viewBox="0 0 256 256"
+            className="size-6 shrink-0 text-primary md:hidden dark:text-sidebar-primary"
+          >
+            <use href={`${logo}#mark`} />
+          </svg>
+          <span className="text-sm font-medium">Aurora Tecnologia</span>
         </header>
-        <main ref={mainRef} id="conteudo" {...stylex.props(s.main)} tabIndex={-1}>
+        <div
+          className={
+            fullWidth
+              ? "w-full min-w-0"
+              : "mx-auto w-full min-w-0 max-w-7xl px-4 py-6 sm:px-8 sm:py-8"
+          }
+        >
           {children}
-        </main>
-      </div>
-    </div>
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

@@ -22,7 +22,7 @@ proof_root=$(mktemp -d /tmp/offboard-verification-proof.XXXXXX)
 "$verify_skill/scripts/run.py" "$proof_root/checklist" "$verify_skill/scripts/checklist.mjs"
 ```
 
-The runner starts `npm run dev -w @offboard/api` with `API_HOST=127.0.0.1` and a free `API_PORT`. It starts `npm run dev -w @offboard/web -- --host 127.0.0.1 --port <port> --strictPort` on a different free port. Both listen on loopback. The API retains its default CORS origin because its explicit origin validator rejects loopback IPs and the fixture-backed browser flows make no API calls. API health is a separate check from the portal journeys.
+The runner starts `npm run dev -w @offboard/api` with `API_HOST=127.0.0.1` and a free `API_PORT`. It starts `npm run dev -w @offboard/web -- --host 127.0.0.1 --port <port> --strictPort` on a different free port. Both listen on loopback. The API retains its default CORS origin because the fixture-backed browser flows make no API calls. API health is a separate check from the portal journeys.
 
 Use a new evidence directory for every run. Run against the working checkout so it includes current edits. The launcher and fresh Chromium context isolate ports and user state from any existing Offboard session. Source and Vite caches are shared with processes using the same checkout.
 
