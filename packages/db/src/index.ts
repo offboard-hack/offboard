@@ -2,6 +2,17 @@ export { createClient } from "./client.ts";
 
 export type { Database } from "./client.ts";
 
+export {
+  createRepositories,
+  DrizzleAccessRepository,
+  DrizzleBillingRepository,
+  DrizzleChecklistRepository,
+  DrizzleEquipmentRepository,
+  DrizzleIntegrationRepository,
+  DrizzleOffboardingRepository,
+  DrizzleTaskRepository,
+} from "./repositories/index.ts";
+
 export type {
   AccessRepository,
   BeneficiaryDto,
