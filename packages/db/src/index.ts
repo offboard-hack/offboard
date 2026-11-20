@@ -32,3 +32,7 @@ export type {
   TaskRepository,
   TeamMemberDto,
 } from "./repositories/interfaces.ts";
+
+export * from "./schema/index.ts";
+
+export { seed } from "./seed.ts";
