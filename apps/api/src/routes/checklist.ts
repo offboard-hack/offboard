@@ -1,12 +1,9 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Repositories } from "@offboard/db";
+import { readJson } from "../util.ts";
 
 const patchInput = z.object({ enabled: z.boolean() });
-
-async function readJson(req: Request) {
-  return req.json().catch(() => null);
-}
 
 export function checklistRoutes(repos: Repositories) {
   const router = new Hono();

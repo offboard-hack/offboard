@@ -1,19 +1,16 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Repositories } from "@offboard/db";
+import { readJson } from "../util.ts";
 
 const createInput = z.object({
   name: z.string().min(1),
   role: z.string().min(1),
   department: z.string().min(1),
-  deadline: z.string().min(1),
+  deadline: z.string().date(),
 });
 
 const bulkInput = z.array(createInput);
-
-async function readJson(req: Request) {
-  return req.json().catch(() => null);
-}
 
 export function offboardingsRoutes(repos: Repositories) {
   const router = new Hono();

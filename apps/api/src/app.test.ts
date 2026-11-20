@@ -16,4 +16,9 @@ describe("health", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: "ok" });
   });
+
+  it("GET /health includes CORS headers", async () => {
+    const res = await app.request("/health", { headers: { origin: "http://localhost:3000" } });
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeTruthy();
+  });
 });

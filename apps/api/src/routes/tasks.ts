@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Repositories } from "@offboard/db";
+import { isUuid, readJson } from "../util.ts";
 
 const status = z.enum(["done", "inProgress", "todo"]);
 
@@ -14,10 +15,6 @@ const statusInput = z.object({ status });
 
 const pgError = z.object({ code: z.string() });
 
-async function readJson(req: Request) {
-  return req.json().catch(() => null);
-}
-
 function isForeignKeyViolation(error: Error) {
   return [error, error.cause].some((e) => {
     const parsed = pgError.safeParse(e);
@@ -29,17 +26,25 @@ function isForeignKeyViolation(error: Error) {
 export function taskRoutes(repos: Repositories) {
   const router = new Hono();
 
-  router.get("/offboardings/:caseId/tasks", async (c) =>
-    c.json(await repos.tasks.listByCase(c.req.param("caseId"))),
-  );
+  router.get("/offboardings/:caseId/tasks", async (c) => {
+    const caseId = c.req.param("caseId");
+
+    if (!isUuid(caseId)) return c.json({ error: "not found" }, 404);
+
+    return c.json(await repos.tasks.listByCase(caseId));
+  });
 
   router.post("/offboardings/:caseId/tasks", async (c) => {
+    const caseId = c.req.param("caseId");
+
+    if (!isUuid(caseId)) return c.json({ error: "not found" }, 404);
+
     const result = createInput.safeParse(await readJson(c.req.raw));
 
     if (!result.success) return c.json({ error: "invalid body" }, 400);
 
     try {
-      return c.json(await repos.tasks.create(c.req.param("caseId"), result.data), 201);
+      return c.json(await repos.tasks.create(caseId, result.data), 201);
     } catch (error) {
       if (error instanceof Error && isForeignKeyViolation(error)) {
         return c.json({ error: "not found" }, 404);

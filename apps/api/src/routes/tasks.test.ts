@@ -74,10 +74,14 @@ describe("tasks", () => {
     expect(res.status).toBe(404);
   });
 
-  it("POST propagates errors that are not FK violations", async () => {
+  it("GET returns 404 for a non-UUID caseId", async () => {
+    expect((await app.request("/offboardings/not-a-uuid/tasks")).status).toBe(404);
+  });
+
+  it("POST returns 404 for a non-UUID caseId", async () => {
     const res = await addTask("/offboardings/not-a-uuid/tasks", { title: "x", team: "IT" });
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(404);
   });
 
   it("PATCH updates status and returns 204", async () => {
@@ -93,6 +97,20 @@ describe("tasks", () => {
 
     expect((await patchStatus(id, JSON.stringify({ status: "nope" }))).status).toBe(400);
     expect((await patchStatus(id, "not json")).status).toBe(400);
+  });
+
+  it("POST propagates errors that are not FK violations", async () => {
+    const repos = createRepositories(await createTestDb());
+    const tasks = { ...repos.tasks, create: () => Promise.reject(new Error("boom")) };
+    const failing = createApp({ ...repos, tasks });
+
+    const res = await failing.request(`/offboardings/${missingCase}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "x", team: "IT" }),
+    });
+
+    expect(res.status).toBe(500);
   });
 
   it("PATCH with a non-uuid id returns 204", async () => {

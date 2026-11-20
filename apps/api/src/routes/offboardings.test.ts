@@ -49,6 +49,10 @@ describe("offboardings", () => {
     expect((await post("/offboardings", rest)).status).toBe(400);
   });
 
+  it("POST / rejects invalid deadline", async () => {
+    expect((await post("/offboardings", { ...valid, deadline: "not-a-date" })).status).toBe(400);
+  });
+
   it("POST / rejects empty body, invalid json and null", async () => {
     expect((await post("/offboardings", {})).status).toBe(400);
     expect((await send("/offboardings", "not json")).status).toBe(400);
