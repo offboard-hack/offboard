@@ -1,7 +1,6 @@
-export type SeedStatus = "done" | "inProgress" | "todo";
+export type SeedStatus = "done" | "in_progress" | "todo";
 
 export type SeedCase = {
-  slug: string;
   name: string;
   role: string;
   department: string;
@@ -11,7 +10,6 @@ export type SeedCase = {
 
 export const seedCases = [
   {
-    slug: "marina-lopes",
     name: "Marina Lopes",
     role: "Analista de marketing",
     department: "Marketing",
@@ -23,7 +21,7 @@ export const seedCases = [
       ["RH e DP", "Avisar sobre a continuidade do plano de saúde", "done"],
       ["RH e DP", "Fechar ponto e banco de horas", "done"],
       ["RH e DP", "Agendar exame demissional", "done"],
-      ["RH e DP", "Calcular a rescisão", "inProgress"],
+      ["RH e DP", "Calcular a rescisão", "in_progress"],
       ["RH e DP", "Enviar desligamento ao eSocial", "todo"],
       ["RH e DP", "Recolher FGTS e multa rescisória", "todo"],
       ["RH e DP", "Pagar a rescisão e enviar os documentos", "todo"],
@@ -31,13 +29,13 @@ export const seedCases = [
       ["TI", "Bloquear acessos no último dia", "done"],
       ["TI", "Transferir arquivos e e-mail", "done"],
       ["TI", "Cancelar licenças", "done"],
-      ["TI", "Coletar notebook e acessórios", "inProgress"],
+      ["TI", "Coletar notebook e acessórios", "in_progress"],
       ["TI", "Apagar dados e devolver ao estoque", "todo"],
       ["Gestão", "Montar o mapa de passagem de trabalho", "done"],
-      ["Gestão", "Confirmar a passagem com Marina", "inProgress"],
+      ["Gestão", "Confirmar a passagem com Marina", "in_progress"],
       ["Gestão", "Trocar o responsável no CRM", "done"],
       ["Gestão", "Avisar clientes e fornecedores", "done"],
-      ["Financeiro", "Aprovar reembolsos pendentes", "inProgress"],
+      ["Financeiro", "Aprovar reembolsos pendentes", "in_progress"],
       ["Jurídico", "Verificar procurações e certificados", "done"],
       ["Jurídico", "Transferir contas externas", "todo"],
       ["Facilities", "Desativar crachá e acesso", "done"],
@@ -47,7 +45,6 @@ export const seedCases = [
     ],
   },
   {
-    slug: "rafael-mendes",
     name: "Rafael Mendes",
     role: "Engenheiro de software",
     department: "Tecnologia",
@@ -56,27 +53,25 @@ export const seedCases = [
       ["RH e DP", "Comunicar desligamento e aviso prévio", "done"],
       ["RH e DP", "Agendar exame demissional", "done"],
       ["RH e DP", "Enviar o termo de rescisão", "todo"],
-      ["TI", "Transferir repositórios e acessos", "inProgress"],
+      ["TI", "Transferir repositórios e acessos", "in_progress"],
       ["TI", "Recolher equipamentos", "todo"],
       ["Gestão", "Confirmar a passagem de trabalho", "done"],
     ],
   },
   {
-    slug: "bianca-souza",
     name: "Bianca Souza",
     role: "Coordenadora de operações",
     department: "Operações",
     deadline: "2026-11-18",
     tasks: [
       ["RH e DP", "Comunicar desligamento e aviso prévio", "done"],
-      ["RH e DP", "Fechar ponto e banco de horas", "inProgress"],
+      ["RH e DP", "Fechar ponto e banco de horas", "in_progress"],
       ["RH e DP", "Enviar o termo de rescisão", "todo"],
       ["TI", "Recolher equipamentos", "todo"],
       ["Gestão", "Repasse das rotinas de operação", "done"],
     ],
   },
   {
-    slug: "andre-lima",
     name: "André Lima",
     role: "Analista financeiro",
     department: "Financeiro",
@@ -84,12 +79,11 @@ export const seedCases = [
     tasks: [
       ["RH e DP", "Comunicar desligamento e aviso prévio", "done"],
       ["RH e DP", "Agendar exame demissional", "todo"],
-      ["Financeiro", "Transferir aprovações de pagamentos", "inProgress"],
+      ["Financeiro", "Transferir aprovações de pagamentos", "in_progress"],
       ["TI", "Desativar acessos", "todo"],
     ],
   },
   {
-    slug: "nina-castro",
     name: "Nina Castro",
     role: "Designer de produto",
     department: "Produto",
@@ -98,7 +92,7 @@ export const seedCases = [
       ["RH e DP", "Comunicar desligamento e aviso prévio", "done"],
       ["RH e DP", "Agendar exame demissional", "todo"],
       ["TI", "Transferir acesso aos projetos", "todo"],
-      ["Gestão", "Confirmar a passagem de trabalho", "inProgress"],
+      ["Gestão", "Confirmar a passagem de trabalho", "in_progress"],
     ],
   },
 ] as const satisfies readonly SeedCase[];

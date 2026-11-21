@@ -14,7 +14,7 @@ export type Task = {
   id: string;
   title: string;
   team: string;
-  status: "done" | "inProgress" | "todo";
+  status: "done" | "in_progress" | "todo";
 };
 
 export type OffboardingCase = CaseSummary & { tasks: Task[] };

@@ -12244,6 +12244,33 @@ var PgEnumColumn = class extends PgColumn {
     return this.enum.enumName;
   }
 };
+function pgEnum(enumName, input) {
+  return Array.isArray(input) ? pgEnumWithSchema(enumName, [...input], void 0) : pgEnumObjectWithSchema(enumName, input, void 0);
+}
+function pgEnumWithSchema(enumName, values, schema) {
+  const enumInstance = Object.assign(
+    (name) => new PgEnumColumnBuilder(name ?? "", enumInstance),
+    {
+      enumName,
+      enumValues: values,
+      schema,
+      [isPgEnumSym]: true
+    }
+  );
+  return enumInstance;
+}
+function pgEnumObjectWithSchema(enumName, values, schema) {
+  const enumInstance = Object.assign(
+    (name) => new PgEnumObjectColumnBuilder(name ?? "", enumInstance),
+    {
+      enumName,
+      enumValues: Object.values(values),
+      schema,
+      [isPgEnumSym]: true
+    }
+  );
+  return enumInstance;
+}
 
 // node_modules/drizzle-orm/subquery.js
 var Subquery = class {
@@ -18509,35 +18536,36 @@ var schema_exports = {};
 __export(schema_exports, {
   offboardingCases: () => offboardingCases,
   offboardingCasesRelations: () => offboardingCasesRelations,
-  offboardingTasks: () => offboardingTasks,
-  offboardingTasksRelations: () => offboardingTasksRelations
+  taskStatusEnum: () => taskStatusEnum,
+  tasks: () => tasks,
+  tasksRelations: () => tasksRelations
 });
+var taskStatusEnum = pgEnum("task_status", ["todo", "in_progress", "done"]);
 var offboardingCases = pgTable("offboarding_cases", {
   id: uuid("id").primaryKey().defaultRandom(),
-  slug: varchar("slug", { length: 255 }).notNull().unique(),
   name: varchar("name", { length: 255 }).notNull(),
   role: varchar("role", { length: 255 }).notNull(),
-  department: varchar("department", { length: 100 }).notNull(),
+  department: varchar("department", { length: 255 }).notNull(),
   deadline: date("deadline").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow()
 });
-var offboardingTasks = pgTable("offboarding_tasks", {
+var tasks = pgTable("tasks", {
   id: uuid("id").primaryKey().defaultRandom(),
   caseId: uuid("case_id").notNull().references(() => offboardingCases.id, { onDelete: "cascade" }),
   title: varchar("title", { length: 500 }).notNull(),
-  team: varchar("team", { length: 100 }).notNull(),
-  status: varchar("status", { length: 20 }).$type().notNull().default("todo"),
-  sortOrder: integer("sort_order").notNull().default(0),
+  team: varchar("team", { length: 255 }).notNull(),
+  status: taskStatusEnum("status").notNull().default("todo"),
+  position: integer("position").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow()
 });
 var offboardingCasesRelations = relations(offboardingCases, ({ many }) => ({
-  tasks: many(offboardingTasks)
+  tasks: many(tasks)
 }));
-var offboardingTasksRelations = relations(offboardingTasks, ({ one }) => ({
+var tasksRelations = relations(tasks, ({ one }) => ({
   case: one(offboardingCases, {
-    fields: [offboardingTasks.caseId],
+    fields: [tasks.caseId],
     references: [offboardingCases.id]
   })
 }));
@@ -18551,91 +18579,70 @@ function createClient(url) {
 }
 
 // packages/db/src/repositories/index.ts
-function slugify(name) {
-  return name.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
 function defaultDeadline() {
   const date3 = /* @__PURE__ */ new Date();
   date3.setUTCDate(date3.getUTCDate() + 14);
   return date3.toISOString().slice(0, 10);
 }
 function createRepositories(db) {
-  function uniqueSlug(name, taken) {
-    const base = slugify(name) || "desligamento";
-    let candidate = base;
-    let suffix = 1;
-    while (taken.has(candidate)) {
-      suffix += 1;
-      candidate = `${base}-${suffix}`;
-    }
-    taken.add(candidate);
-    return candidate;
-  }
-  async function takenSlugs() {
-    const rows = await db.select({ slug: offboardingCases.slug }).from(offboardingCases);
-    return new Set(rows.map((row) => row.slug));
-  }
   async function listOffboardings() {
     const rows = await db.select({
-      id: offboardingCases.slug,
+      id: offboardingCases.id,
       name: offboardingCases.name,
       role: offboardingCases.role,
       department: offboardingCases.department,
       deadline: offboardingCases.deadline,
-      completed: sql`count(${offboardingTasks.id}) filter (where ${offboardingTasks.status} = 'done')::int`,
-      total: sql`count(${offboardingTasks.id})::int`
-    }).from(offboardingCases).leftJoin(offboardingTasks, eq(offboardingTasks.caseId, offboardingCases.id)).groupBy(offboardingCases.id).orderBy(asc(offboardingCases.deadline), asc(offboardingCases.name));
+      completed: sql`count(${tasks.id}) filter (where ${tasks.status} = 'done')::int`,
+      total: sql`count(${tasks.id})::int`
+    }).from(offboardingCases).leftJoin(tasks, eq(tasks.caseId, offboardingCases.id)).groupBy(offboardingCases.id).orderBy(asc(offboardingCases.deadline), asc(offboardingCases.name));
     return rows;
   }
-  async function getOffboarding(slug) {
+  async function getOffboarding(id) {
     const found = await db.query.offboardingCases.findFirst({
-      where: eq(offboardingCases.slug, slug),
-      with: { tasks: { orderBy: asc(offboardingTasks.sortOrder) } }
+      where: eq(offboardingCases.id, id),
+      with: { tasks: { orderBy: asc(tasks.position) } }
     });
     if (!found) return null;
-    const tasks = found.tasks.map((task2) => ({
+    const caseTasks = found.tasks.map((task2) => ({
       id: task2.id,
       title: task2.title,
       team: task2.team,
       status: task2.status
     }));
     return {
-      id: found.slug,
+      id: found.id,
       name: found.name,
       role: found.role,
       department: found.department,
       deadline: found.deadline,
-      completed: tasks.filter((task2) => task2.status === "done").length,
-      total: tasks.length,
-      tasks
+      completed: caseTasks.filter((task2) => task2.status === "done").length,
+      total: caseTasks.length,
+      tasks: caseTasks
     };
   }
   async function createOffboarding(data) {
-    const slug = uniqueSlug(data.name, await takenSlugs());
-    await db.insert(offboardingCases).values({ ...data, slug });
-    return { id: slug, ...data, completed: 0, total: 0 };
+    const [inserted] = await db.insert(offboardingCases).values(data).returning({ id: offboardingCases.id });
+    return { id: inserted.id, ...data, completed: 0, total: 0 };
   }
   async function bulkCreateOffboardings(rows) {
     if (rows.length === 0) return [];
-    const taken = await takenSlugs();
     const deadline = defaultDeadline();
     const values = rows.map((row) => ({
       ...row,
       role: "N\xE3o informado",
-      deadline,
-      slug: uniqueSlug(row.name, taken)
+      deadline
     }));
-    await db.insert(offboardingCases).values(values);
-    return values.map(({ slug, ...rest }) => ({ id: slug, ...rest, completed: 0, total: 0 }));
+    const inserted = await db.insert(offboardingCases).values(values).returning({ id: offboardingCases.id });
+    return inserted.map((row, i2) => ({ id: row.id, ...values[i2], completed: 0, total: 0 }));
   }
   async function updateTaskStatus(taskId, status2) {
-    const [updated] = await db.update(offboardingTasks).set({ status: status2, updatedAt: /* @__PURE__ */ new Date() }).where(eq(offboardingTasks.id, taskId)).returning({
-      id: offboardingTasks.id,
-      title: offboardingTasks.title,
-      team: offboardingTasks.team,
-      status: offboardingTasks.status
+    const [updated] = await db.update(tasks).set({ status: status2, updatedAt: /* @__PURE__ */ new Date() }).where(eq(tasks.id, taskId)).returning({
+      id: tasks.id,
+      title: tasks.title,
+      team: tasks.team,
+      status: tasks.status
     });
-    return updated ? { ...updated, status: updated.status } : null;
+    return updated ?? null;
   }
   return {
     listOffboardings,
@@ -39746,7 +39753,7 @@ var caseSummary = t.Object({
   completed: t.Number(),
   total: t.Number()
 });
-var taskStatus = t.Union([t.Literal("done"), t.Literal("inProgress"), t.Literal("todo")]);
+var taskStatus = t.Union([t.Literal("done"), t.Literal("in_progress"), t.Literal("todo")]);
 var task = t.Object({
   id: t.String(),
   title: t.String(),
@@ -39789,9 +39796,9 @@ function createApp(webOrigin, repos2) {
       response: { 201: t.Array(caseSummary) }
     }
   ).get(
-    "/offboardings/:slug",
+    "/offboardings/:id",
     async ({ params, status: status2 }) => {
-      const found = await repos2.getOffboarding(params.slug);
+      const found = await repos2.getOffboarding(params.id);
       return found ?? status2(404, { error: "Offboarding not found" });
     },
     {

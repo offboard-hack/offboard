@@ -36,13 +36,13 @@ const caseStatusVariant = {
 
 const taskStatusStyle = {
   done: local.taskStatusDone,
-  inProgress: local.taskStatusInProgress,
+  in_progress: local.taskStatusInProgress,
   todo: null,
 };
 
 const statusLabel = {
   done: "Concluída",
-  inProgress: "Em andamento",
+  in_progress: "Em andamento",
   todo: "A fazer",
 } satisfies { [Status in Task["status"]]: string };
 
