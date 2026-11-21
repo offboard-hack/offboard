@@ -23,6 +23,7 @@ import {
 } from "../entities/offboarding";
 import {
   beneficiariesQuery,
+  checklistQuery,
   equipmentQuery,
   integrationsQuery,
   plansQuery,
@@ -145,6 +146,9 @@ const checklistRoute = createRoute({
     () => import("../features/checklist/checklist-page"),
     "ChecklistRulesPage",
   ),
+  loader: async ({ context }) => {
+    await context.queryClient.ensureQueryData(checklistQuery);
+  },
 });
 
 const equipmentRoute = createRoute({

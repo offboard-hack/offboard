@@ -1,6 +1,7 @@
 import * as stylex from "@stylexjs/stylex";
 import { Switch } from "@base-ui/react/switch";
-import { useState } from "react";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { checklistQuery, toggleChecklistRule } from "../../shared/api";
 import { portalStyles } from "../../shared/ui/surface.styles";
 import { colors, motion } from "../../shared/ui/theme.stylex";
 
@@ -113,79 +114,32 @@ const styles = stylex.create({
   timeline: { display: "grid", gap: "0.375rem" },
 });
 
-const baseRule = {
-  title: "Aplicar o modelo base da CLT",
-  description: "Aviso prévio, exame demissional, rescisão, eSocial, FGTS e benefícios.",
-  team: "RH e DP",
-  timing: "A partir do dia 0",
-};
-
-const optionalRules = [
-  {
-    id: "remote",
-    title: "Agendar coleta em casa",
-    description: "A pessoa escolhe o horário pelo app quando trabalha remotamente.",
-    team: "TI",
-    timing: "Dias 1 a 7",
-  },
-  {
-    id: "assets",
-    title: "Conferir o inventário de TI",
-    description: "Registrar os bens e acompanhar a devolução ao estoque.",
-    team: "TI",
-    timing: "Dias 1 a 7",
-  },
-  {
-    id: "crm",
-    title: "Transferir negócios e contatos",
-    description: "Passar os registros no CRM para quem a gestão indicar.",
-    team: "Gestão",
-    timing: "Dias 1 a 7",
-  },
-  {
-    id: "workspace",
-    title: "Encerrar acesso ao Google Workspace",
-    description: "Bloquear o acesso e transferir os arquivos.",
-    team: "TI",
-    timing: "Dia 0",
-  },
-  {
-    id: "card",
-    title: "Conciliar despesas e cancelar o cartão",
-    description: "Aplicável a quem tem cartão corporativo.",
-    team: "Financeiro",
-    timing: "Dias 1 a 7",
-  },
-  {
-    id: "certificates",
-    title: "Revisar procurações e certificados",
-    description: "Verificar quais autorizações precisam ser revogadas.",
-    team: "Jurídico",
-    timing: "Antes da comunicação",
-  },
-  {
-    id: "stability",
-    title: "Revisar estabilidade",
-    description: "Encaminhar casos sinalizados para análise do Jurídico.",
-    team: "Jurídico",
-    timing: "Antes da comunicação",
-  },
-  {
-    id: "collective",
-    title: "Analisar desligamentos coletivos",
-    description: "Acionar o Jurídico quando o volume exigir avaliação.",
-    team: "Jurídico",
-    timing: "Antes da comunicação",
-  },
-];
-
 export function ChecklistRulesPage() {
-  const [enabledRules, setEnabledRules] = useState(
-    () => new Set(optionalRules.map((rule) => rule.id)),
-  );
+  const queryClient = useQueryClient();
+  const { data } = useSuspenseQuery(checklistQuery);
+  const { baseRules, optionalRules } = data;
 
-  const activeRules = optionalRules.filter((rule) => enabledRules.has(rule.id));
-  const teamCount = new Set([baseRule.team, ...activeRules.map((rule) => rule.team)]).size;
+  const toggle = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      toggleChecklistRule(id, enabled),
+    onMutate: async ({ id, enabled }) => {
+      await queryClient.cancelQueries({ queryKey: checklistQuery.queryKey });
+      queryClient.setQueryData(
+        checklistQuery.queryKey,
+        (current) =>
+          current && {
+            ...current,
+            optionalRules: current.optionalRules.map((rule) =>
+              rule.id === id ? { ...rule, enabled } : rule,
+            ),
+          },
+      );
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: checklistQuery.queryKey }),
+  });
+
+  const activeRules = [...baseRules, ...optionalRules.filter((rule) => rule.enabled)];
+  const teamCount = new Set(activeRules.map((rule) => rule.team)).size;
 
   return (
     <>
@@ -206,18 +160,20 @@ export function ChecklistRulesPage() {
             Regras do checklist
           </h2>
           <ul {...stylex.props(styles.list)}>
-            <li {...stylex.props(styles.row)}>
-              <div {...stylex.props(styles.ruleText)}>
-                <h3>{baseRule.title}</h3>
-                <p {...stylex.props(styles.muted)}>{baseRule.description}</p>
-                <p {...stylex.props(styles.ruleTiming)}>
-                  {baseRule.team} · {baseRule.timing}
-                </p>
-              </div>
-              <span {...stylex.props(styles.badge)}>Obrigatória</span>
-            </li>
+            {baseRules.map((rule) => (
+              <li key={rule.id} {...stylex.props(styles.row)}>
+                <div {...stylex.props(styles.ruleText)}>
+                  <h3>{rule.title}</h3>
+                  <p {...stylex.props(styles.muted)}>{rule.description}</p>
+                  <p {...stylex.props(styles.ruleTiming)}>
+                    {rule.team} · {rule.timing}
+                  </p>
+                </div>
+                <span {...stylex.props(styles.badge)}>Obrigatória</span>
+              </li>
+            ))}
             {optionalRules.map((rule) => {
-              const enabled = enabledRules.has(rule.id);
+              const { enabled } = rule;
 
               return (
                 <li key={rule.id} {...stylex.props(styles.row)}>
@@ -239,17 +195,7 @@ export function ChecklistRulesPage() {
                     nativeButton
                     render={<button type="button" />}
                     onCheckedChange={(checked) => {
-                      setEnabledRules((current) => {
-                        const next = new Set(current);
-
-                        if (checked) {
-                          next.add(rule.id);
-                        } else {
-                          next.delete(rule.id);
-                        }
-
-                        return next;
-                      });
+                      toggle.mutate({ id: rule.id, enabled: checked });
                     }}
                     {...stylex.props(styles.switchControl)}
                   >
@@ -273,13 +219,10 @@ export function ChecklistRulesPage() {
             Prévia da simulação
           </h2>
           <div {...stylex.props(styles.previewContent)}>
-            <p {...stylex.props(styles.muted)}>
-              As alterações valem para esta prévia e não são salvas.
-            </p>
             <dl aria-live="polite" {...stylex.props(styles.previewMetrics)}>
               <div {...stylex.props(styles.metric)}>
                 <dt {...stylex.props(styles.muted)}>Regras aplicadas</dt>
-                <dd {...stylex.props(styles.metricValue)}>{activeRules.length + 1}</dd>
+                <dd {...stylex.props(styles.metricValue)}>{activeRules.length}</dd>
               </div>
               <div {...stylex.props(styles.metric)}>
                 <dt {...stylex.props(styles.muted)}>Áreas envolvidas</dt>
@@ -288,10 +231,6 @@ export function ChecklistRulesPage() {
             </dl>
             <h3 {...stylex.props(styles.timelineTitle)}>Prazos do checklist</h3>
             <ul {...stylex.props(styles.list, styles.timeline)}>
-              <li {...stylex.props(styles.deadline)}>
-                <strong>{baseRule.timing}</strong>
-                <span>{baseRule.title}</span>
-              </li>
               {activeRules.map((rule) => (
                 <li key={rule.id} {...stylex.props(styles.deadline)}>
                   <strong>{rule.timing}</strong>

@@ -98,6 +98,18 @@ type PlanDto = {
   costCenter: string;
 };
 
+type ChecklistRuleDto = {
+  id: string;
+  title: string;
+  description: string;
+  team: string;
+  timing: string;
+  required: boolean;
+  enabled: boolean;
+};
+
+export type ChecklistRule = Omit<ChecklistRuleDto, "required">;
+
 const shortDate = new Intl.DateTimeFormat("pt-BR", {
   day: "numeric",
   month: "short",
@@ -170,6 +182,31 @@ export async function fetchPlans() {
       }) satisfies Plan,
   );
 }
+
+export async function fetchChecklist() {
+  const dtos = await apiFetch<ChecklistRuleDto[]>("/checklist");
+  const baseRules: ChecklistRule[] = [];
+  const optionalRules: ChecklistRule[] = [];
+
+  for (const { required, ...rule } of dtos) {
+    (required ? baseRules : optionalRules).push(rule);
+  }
+
+  return { baseRules, optionalRules };
+}
+
+export async function toggleChecklistRule(id: string, enabled: boolean) {
+  await apiFetch<unknown>("/checklist/" + id, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export const checklistQuery = queryOptions({
+  queryKey: ["checklist"],
+  queryFn: fetchChecklist,
+});
 
 export const equipmentQuery = queryOptions({
   queryKey: ["equipment"],
