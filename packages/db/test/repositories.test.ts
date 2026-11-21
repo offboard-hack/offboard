@@ -3,11 +3,12 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createClient } from "../src/client.ts";
 import { seedCases } from "../src/offboarding.fixture.ts";
-import { createRepositories, slugify } from "../src/repositories/index.ts";
-import { offboardingTasks } from "../src/schema/index.ts";
+import { createRepositories } from "../src/repositories/index.ts";
+import { tasks } from "../src/schema/index.ts";
 import { seedDatabase } from "../src/seed-database.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+const uuidPattern = /^[0-9a-f-]{36}$/;
 
 describe.skipIf(!url)("repositories", () => {
   const db = createClient(url ?? "");
@@ -28,11 +29,13 @@ describe.skipIf(!url)("repositories", () => {
   });
 
   it("seeds every fixture task in order", async () => {
-    const tasks = await db.select().from(offboardingTasks);
-    expect(tasks).toHaveLength(seedCases.reduce((sum, item) => sum + item.tasks.length, 0));
+    const allTasks = await db.select().from(tasks);
+    expect(allTasks).toHaveLength(seedCases.reduce((sum, item) => sum + item.tasks.length, 0));
 
-    const marina = await repos.getOffboarding("marina-lopes");
-    expect(marina?.tasks.map((task) => [task.team, task.title, task.status])).toEqual(
+    const list = await repos.listOffboardings();
+    const marina = list.find((c) => c.name === "Marina Lopes");
+    const detail = await repos.getOffboarding(marina!.id);
+    expect(detail?.tasks.map((task) => [task.team, task.title, task.status])).toEqual(
       seedCases[0].tasks.map((task) => [...task]),
     );
   });
@@ -40,15 +43,15 @@ describe.skipIf(!url)("repositories", () => {
   it("lists cases with the CaseSummary shape and counts", async () => {
     const list = await repos.listOffboardings();
 
-    expect(list.map((item) => item.id)).toEqual([
-      "marina-lopes",
-      "rafael-mendes",
-      "bianca-souza",
-      "andre-lima",
-      "nina-castro",
+    expect(list.map((item) => item.name)).toEqual([
+      "Marina Lopes",
+      "Rafael Mendes",
+      "Bianca Souza",
+      "André Lima",
+      "Nina Castro",
     ]);
     expect(list[0]).toEqual({
-      id: "marina-lopes",
+      id: expect.stringMatching(uuidPattern),
       name: "Marina Lopes",
       role: "Analista de marketing",
       department: "Marketing",
@@ -56,7 +59,7 @@ describe.skipIf(!url)("repositories", () => {
       completed: 15,
       total: 27,
     });
-    expect(list[3]).toMatchObject({ id: "andre-lima", completed: 1, total: 4 });
+    expect(list[3]).toMatchObject({ name: "André Lima", completed: 1, total: 4 });
   });
 
   it("lists cases without tasks as zero of zero", async () => {
@@ -68,35 +71,36 @@ describe.skipIf(!url)("repositories", () => {
     });
 
     const list = await repos.listOffboardings();
-    expect(list.find((item) => item.id === "sem-tarefas")).toMatchObject({
+    expect(list.find((item) => item.name === "Sem Tarefas")).toMatchObject({
       completed: 0,
       total: 0,
     });
   });
 
   it("returns a case with its tasks", async () => {
-    const found = await repos.getOffboarding("rafael-mendes");
+    const list = await repos.listOffboardings();
+    const rafael = list.find((c) => c.name === "Rafael Mendes")!;
+    const found = await repos.getOffboarding(rafael.id);
 
     expect(found).toMatchObject({
-      id: "rafael-mendes",
       deadline: "2026-11-16",
       completed: 3,
       total: 6,
     });
     expect(found?.tasks).toHaveLength(6);
     expect(found?.tasks[0]).toEqual({
-      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      id: expect.stringMatching(uuidPattern),
       title: "Comunicar desligamento e aviso prévio",
       team: "RH e DP",
       status: "done",
     });
   });
 
-  it("returns null for an unknown slug", async () => {
-    expect(await repos.getOffboarding("nobody")).toBeNull();
+  it("returns null for an unknown id", async () => {
+    expect(await repos.getOffboarding("00000000-0000-4000-8000-000000000001")).toBeNull();
   });
 
-  it("creates a case with an accent-free slug and avoids collisions", async () => {
+  it("creates a case", async () => {
     const input = {
       name: "João  D'Ávila",
       role: "Analista",
@@ -105,57 +109,46 @@ describe.skipIf(!url)("repositories", () => {
     };
 
     const first = await repos.createOffboarding(input);
-    const second = await repos.createOffboarding(input);
 
-    expect(first).toEqual({ id: "joao-d-avila", ...input, completed: 0, total: 0 });
-    expect(second.id).toBe("joao-d-avila-2");
-    expect(await repos.getOffboarding("joao-d-avila")).toMatchObject({ tasks: [], total: 0 });
+    expect(first).toEqual({
+      id: expect.stringMatching(uuidPattern),
+      ...input,
+      completed: 0,
+      total: 0,
+    });
+    expect(await repos.getOffboarding(first.id)).toMatchObject({ tasks: [], total: 0 });
   });
 
-  it("bulk creates cases and deduplicates slugs within the batch", async () => {
+  it("bulk creates cases", async () => {
     expect(await repos.bulkCreateOffboardings([])).toEqual([]);
 
     const created = await repos.bulkCreateOffboardings([
-      { name: "Marina Lopes", department: "Marketing" },
-      { name: "Marina Lopes", department: "Marketing" },
+      { name: "Marina Lopes 2", department: "Marketing" },
       { name: "Ana Paula", department: "RH" },
     ]);
 
-    expect(created.map((item) => item.id)).toEqual([
-      "marina-lopes-2",
-      "marina-lopes-3",
-      "ana-paula",
-    ]);
-    expect(created[2]).toMatchObject({
+    expect(created).toHaveLength(2);
+    expect(created[1]).toMatchObject({
       name: "Ana Paula",
       department: "RH",
       role: "Não informado",
       completed: 0,
       total: 0,
     });
-    expect(created[2].deadline).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(await repos.listOffboardings()).toHaveLength(8);
-  });
-
-  it("falls back to a default slug when the name has no letters", async () => {
-    const created = await repos.createOffboarding({
-      name: "!!!",
-      role: "x",
-      department: "y",
-      deadline: "2026-12-01",
-    });
-
-    expect(created.id).toBe("desligamento");
+    expect(created[1].deadline).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(await repos.listOffboardings()).toHaveLength(7);
   });
 
   it("updates a task status", async () => {
-    const before = await repos.getOffboarding("nina-castro");
+    const list = await repos.listOffboardings();
+    const nina = list.find((c) => c.name === "Nina Castro")!;
+    const before = await repos.getOffboarding(nina.id);
     const target = before!.tasks.find((task) => task.status === "todo")!;
 
     const updated = await repos.updateTaskStatus(target.id, "done");
 
     expect(updated).toEqual({ ...target, status: "done" });
-    const after = await repos.getOffboarding("nina-castro");
+    const after = await repos.getOffboarding(nina.id);
     expect(after?.tasks.find((task) => task.id === target.id)?.status).toBe("done");
     expect(after?.completed).toBe(before!.completed + 1);
   });
@@ -165,15 +158,11 @@ describe.skipIf(!url)("repositories", () => {
   });
 
   it("deletes tasks when their case is removed", async () => {
-    await db.$client.query("delete from offboarding_cases where slug = 'nina-castro'");
-    const tasks = await db.select().from(offboardingTasks);
-    expect(tasks).toHaveLength(seedCases.reduce((sum, item) => sum + item.tasks.length, 0) - 4);
-  });
-});
-
-describe("slugify", () => {
-  it("normalizes accents, case and punctuation", () => {
-    expect(slugify("  André Lima-Souza! ")).toBe("andre-lima-souza");
+    const list = await repos.listOffboardings();
+    const nina = list.find((c) => c.name === "Nina Castro")!;
+    await db.$client.query(`DELETE FROM offboarding_cases WHERE id = '${nina.id}'`);
+    const allTasks = await db.select().from(tasks);
+    expect(allTasks).toHaveLength(seedCases.reduce((sum, item) => sum + item.tasks.length, 0) - 4);
   });
 });
 

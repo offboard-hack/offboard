@@ -15,7 +15,7 @@ const caseSummary = t.Object({
   total: t.Number(),
 });
 
-const taskStatus = t.Union([t.Literal("done"), t.Literal("inProgress"), t.Literal("todo")]);
+const taskStatus = t.Union([t.Literal("done"), t.Literal("in_progress"), t.Literal("todo")]);
 
 const task = t.Object({
   id: t.String(),
@@ -71,9 +71,9 @@ export function createApp(webOrigin: string, repos: Repositories) {
       },
     )
     .get(
-      "/offboardings/:slug",
+      "/offboardings/:id",
       async ({ params, status }) => {
-        const found = await repos.getOffboarding(params.slug);
+        const found = await repos.getOffboarding(params.id);
 
         return found ?? status(404, { error: "Offboarding not found" });
       },

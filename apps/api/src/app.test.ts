@@ -8,6 +8,7 @@ import { createApp } from "./app.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const missingTaskId = "00000000-0000-4000-8000-000000000000";
+const missingCaseId = "00000000-0000-4000-8000-000000000001";
 
 describe.skipIf(!url)("api", () => {
   const db = createClient(url ?? "");
@@ -70,16 +71,18 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("gets an offboarding with its tasks", async () => {
-    const res = await call("/offboardings/marina-lopes");
+    const list = await (await call("/offboardings")).json();
+    const first = list[0];
+    const res = await call(`/offboardings/${first.id}`);
     const found = await res.json();
 
     expect(res.status).toBe(200);
-    expect(found.id).toBe("marina-lopes");
+    expect(found.id).toBe(first.id);
     expect(found.tasks.length).toBe(found.total);
   });
 
-  it("returns 404 for an unknown slug", async () => {
-    const res = await call("/offboardings/missing");
+  it("returns 404 for an unknown id", async () => {
+    const res = await call(`/offboardings/${missingCaseId}`);
 
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "Offboarding not found" });
@@ -88,10 +91,11 @@ describe.skipIf(!url)("api", () => {
   it("creates an offboarding", async () => {
     const body = { name: "Ana Souza", role: "Dev", department: "Eng", deadline: "2026-12-01" };
     const res = await call("/offboardings", "POST", body);
+    const created = await res.json();
 
     expect(res.status).toBe(201);
-    expect(await res.json()).toEqual({ id: "ana-souza", ...body, completed: 0, total: 0 });
-    expect((await call("/offboardings/ana-souza")).status).toBe(200);
+    expect(created).toEqual({ id: expect.any(String), ...body, completed: 0, total: 0 });
+    expect((await call(`/offboardings/${created.id}`)).status).toBe(200);
   });
 
   it.each([
@@ -114,7 +118,9 @@ describe.skipIf(!url)("api", () => {
     const created = await res.json();
 
     expect(res.status).toBe(201);
-    expect(created.map((item: { id: string }) => item.id)).toEqual(["bia-lima", "caio-reis"]);
+    expect(created.length).toBe(2);
+    expect(created[0]).toMatchObject({ name: "Bia Lima", department: "Ops" });
+    expect(created[1]).toMatchObject({ name: "Caio Reis", department: "Ops" });
   });
 
   it("rejects an invalid import", async () => {
@@ -124,12 +130,13 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("updates a task status", async () => {
-    const found = await (await call("/offboardings/marina-lopes")).json();
-    const target = found.tasks.find((item: { status: string }) => item.status !== "inProgress");
-    const res = await call(`/tasks/${target?.id}/status`, "PATCH", { status: "inProgress" });
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const target = detail.tasks.find((item: { status: string }) => item.status !== "in_progress");
+    const res = await call(`/tasks/${target?.id}/status`, "PATCH", { status: "in_progress" });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ...target, status: "inProgress" });
+    expect(await res.json()).toEqual({ ...target, status: "in_progress" });
   });
 
   it("returns 404 for an unknown task", async () => {
