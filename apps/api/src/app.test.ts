@@ -13,7 +13,14 @@ describe.skipIf(!url)("api", () => {
   const db = createClient(url ?? "");
   const app = createApp("http://localhost:5173", createRepositories(db));
 
-  type Payload = Record<string, string | { name: string; department: string }[]>;
+  type Payload = {
+    name?: string;
+    role?: string;
+    department?: string;
+    deadline?: string;
+    status?: string;
+    rows?: { name: string; department?: string }[];
+  };
 
   function call(path: string, method = "GET", body?: Payload) {
     return app.handle(
