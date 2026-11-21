@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npm run build --workspace=apps/web && npx esbuild apps/api/src/vercel.ts --bundle --platform=node --format=esm --target=node22 --outfile=api/offboard.mjs --external:pg-native --banner:js='import{createRequire as _cr}from\"module\";const require=_cr(import.meta.url);'",
+  "buildCommand": "npm run build --workspace=apps/web",
   "installCommand": "npm install",
   "framework": null,
   "outputDirectory": "apps/web/dist/client",
