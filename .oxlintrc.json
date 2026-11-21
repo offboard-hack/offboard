@@ -2,7 +2,13 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "extends": ["./node_modules/@interfere/landmines/configs/recommended.json"],
   "plugins": ["unicorn", "typescript", "oxc", "react"],
-  "ignorePatterns": ["dist/", ".turbo/", "tools/oxlint/anti-slop/", ".agents/skills/"],
+  "ignorePatterns": [
+    "dist/",
+    "api/offboard.mjs",
+    ".turbo/",
+    "tools/oxlint/anti-slop/",
+    ".agents/skills/"
+  ],
   "jsPlugins": [
     {
       "name": "anti-slop",
