@@ -2,6 +2,7 @@ import { Button as BaseButton } from "@base-ui/react/button";
 import { Input } from "@base-ui/react/input";
 import { Toggle } from "@base-ui/react/toggle";
 import * as stylex from "@stylexjs/stylex";
+import { useQueryClient } from "@tanstack/react-query";
 import { useActor } from "@xstate/react";
 import { useCallback, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -13,7 +14,7 @@ import { bulkImport, maxImportedPeople } from "./import-machine";
 import type { ImportRow } from "./import-machine";
 import { importStyles as ui } from "./import.styles";
 
-const stages = ["Arquivo", "Revisão", "Conclusão"];
+const stages = ["Arquivo", "Revisão", "Cadastro"];
 
 function ImportMark({ kind }: { kind: "file" | "ready" | "upload" }) {
   const paths = {
@@ -59,12 +60,14 @@ const previewColumns: TableColumn<ImportRow>[] = [
       </>
     ),
   },
+  { id: "role", accessorFn: ({ role }) => role || "—", header: "Cargo" },
   {
     id: "department",
     accessorFn: ({ department }) => department || "—",
     header: "Departamento",
     meta: { cellStyle: ui.department },
   },
+  { id: "deadline", accessorFn: ({ deadline }) => deadline || "—", header: "Prazo" },
 ];
 
 const columnsWithIssues: TableColumn<ImportRow>[] = [
@@ -107,7 +110,7 @@ function ImportGuide() {
         ordem.
       </p>
       <pre {...stylex.props(ui.sample)}>
-        <code>{"nome,departamento\nPessoa Exemplo,Marketing"}</code>
+        <code>{"nome,cargo,departamento,prazo\nPessoa Exemplo,Analista,Marketing,2026-12-15"}</code>
       </pre>
       <a href="/modelo-desligamentos.csv" download {...stylex.props(s.button, s.secondaryButton)}>
         Baixar modelo CSV
@@ -252,6 +255,7 @@ function normalized(text: string) {
 function FileReview({
   file,
   rows,
+  error,
   stageHeading,
   onBack,
   onBrowse,
@@ -259,6 +263,7 @@ function FileReview({
 }: {
   file: File;
   rows: ImportRow[];
+  error: string;
   stageHeading: (node: HTMLHeadingElement | null) => void;
   onBack: () => void;
   onBrowse: () => void;
@@ -346,6 +351,11 @@ function FileReview({
       ) : (
         <p {...stylex.props(ui.empty)}>Nenhum registro corresponde à busca.</p>
       )}
+      {error && (
+        <p role="alert" {...stylex.props(ui.error)}>
+          {error}
+        </p>
+      )}
       <div {...stylex.props(ui.reviewFooter, ui.actions)}>
         {!invalid && <Button onClick={onBack}>Voltar ao arquivo</Button>}
         <Button
@@ -362,10 +372,22 @@ function FileReview({
 }
 
 export function ImportPage({ returnLink }: { returnLink: ReactNode }) {
-  const [state, send] = useActor(bulkImport);
+  const queryClient = useQueryClient();
+
+  const [machine] = useState(() =>
+    bulkImport.provide({
+      actions: {
+        invalidateOffboardings: () => {
+          void queryClient.invalidateQueries({ queryKey: ["offboardings"] });
+        },
+      },
+    }),
+  );
+
+  const [state, send] = useActor(machine);
   const { file, rows, error } = state.context;
   const step = state.value;
-  const stageIndex = step === "complete" ? 2 : step === "review" ? 1 : 0;
+  const stageIndex = step === "complete" || step === "submitting" ? 2 : step === "review" ? 1 : 0;
   const previousStep = useRef(step);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -466,11 +488,27 @@ export function ImportPage({ returnLink }: { returnLink: ReactNode }) {
         <FileReview
           file={file}
           rows={rows}
+          error={error}
           stageHeading={stageHeading}
           onBack={() => send({ type: "back" })}
           onBrowse={openFilePicker}
           onConfirm={() => send({ type: "confirm" })}
         />
+      )}
+      {step === "submitting" && (
+        <section aria-labelledby="submitting-title" {...stylex.props(s.workSurface, ui.body)}>
+          <div role="status" {...stylex.props(ui.lead)}>
+            <h2
+              id="submitting-title"
+              ref={stageHeading}
+              tabIndex={-1}
+              {...stylex.props(s.workHeading)}
+            >
+              Cadastrando...
+            </h2>
+            <p {...stylex.props(ui.detail)}>{rows.length} pessoas sendo cadastradas.</p>
+          </div>
+        </section>
       )}
       {step === "complete" && (
         <section aria-labelledby="complete-title" {...stylex.props(s.workSurface, ui.body)}>
@@ -484,10 +522,10 @@ export function ImportPage({ returnLink }: { returnLink: ReactNode }) {
               tabIndex={-1}
               {...stylex.props(s.workHeading)}
             >
-              Prévia concluída
+              Cadastro concluído
             </h2>
             <p {...stylex.props(ui.detail)}>
-              {rows.length === 1 ? "1 pessoa revisada." : `${rows.length} pessoas revisadas.`}
+              {rows.length === 1 ? "1 pessoa cadastrada." : `${rows.length} pessoas cadastradas.`}
             </p>
           </div>
           <div {...stylex.props(ui.actions)}>
@@ -495,7 +533,6 @@ export function ImportPage({ returnLink }: { returnLink: ReactNode }) {
           </div>
         </section>
       )}
-      <p {...stylex.props(ui.privacy)}>Prévia local. Nenhum desligamento será cadastrado.</p>
     </>
   );
 }

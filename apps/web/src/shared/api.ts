@@ -208,6 +208,16 @@ export async function toggleChecklistRule(id: string, enabled: boolean) {
   });
 }
 
+export function bulkCreateOffboardings(
+  rows: Array<{ name: string; role: string; department: string; deadline: string }>,
+) {
+  return apiFetch<{ id: string }[]>("/offboardings/bulk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(rows),
+  });
+}
+
 export const checklistQuery = queryOptions({
   queryKey: ["checklist"],
   queryFn: fetchChecklist,
