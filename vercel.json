@@ -1,12 +1,22 @@
 {
-  "buildCommand": "npm run build --workspace=apps/web",
+  "buildCommand": "npm run build --workspace=apps/web && npx esbuild apps/api/src/vercel.ts --bundle --platform=node --format=esm --target=node22 --outfile=api/offboard.mjs --external:pg-native",
   "installCommand": "npm install",
   "framework": null,
   "outputDirectory": "apps/web/dist/client",
   "functions": {
     "api/ssr.mjs": {
       "includeFiles": "apps/web/dist/**"
+    },
+    "api/offboard.mjs": {
+      "memory": 256,
+      "maxDuration": 10
     }
   },
-  "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/api/ssr" }]
+  "rewrites": [
+    { "source": "/api/health", "destination": "/api/offboard" },
+    { "source": "/api/offboardings", "destination": "/api/offboard" },
+    { "source": "/api/offboardings/:path*", "destination": "/api/offboard" },
+    { "source": "/api/tasks/:path*", "destination": "/api/offboard" },
+    { "source": "/((?!assets/).*)", "destination": "/api/ssr" }
+  ]
 }
