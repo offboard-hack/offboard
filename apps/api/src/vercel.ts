@@ -2,7 +2,7 @@ import { createClient } from "@offboard/db/client";
 import { createRepositories } from "@offboard/db/repositories";
 import { createApp } from "./app.js";
 
-const repos = createRepositories(createClient(process.env.DATABASE_URL ?? ""));
+const repos = createRepositories(createClient(process.env.POSTGRES_URL ?? ""));
 const app = createApp(process.env.WEB_ORIGIN ?? "*", repos);
 
 async function handle(request: Request) {
