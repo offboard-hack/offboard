@@ -25,6 +25,11 @@ export async function apiFetch<T>(path: string, init?: RequestInit) {
     throw new Error(`${response.status} ${response.statusText}`);
   }
 
+  if (response.status === 204 || response.headers.get("content-length") === "0") {
+    // WARNING: only callers that expect no body (void/unknown) hit this path.
+    return undefined as T;
+  }
+
   // WARNING: the response body is trusted to match T; no runtime validation.
   return (await response.json()) as T;
 }
