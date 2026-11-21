@@ -8,7 +8,6 @@ import {
   createRoute,
   createRouter,
   lazyRouteComponent,
-  notFound,
   redirect,
   useLocation,
   useRouter,
@@ -16,11 +15,13 @@ import {
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useCallback } from "react";
 import {
+  dashboardQuery,
+  offboardingDetailQuery,
   offboardingDepartments,
   offboardingTeams,
   offboardingsQuery,
 } from "../entities/offboarding";
-import type { CaseSummary, OffboardingCase } from "../entities/offboarding";
+import type { CaseSummary } from "../entities/offboarding";
 import { deadlineGroups } from "../features/dashboard/deadline";
 import type { DeadlineGroup } from "../features/dashboard/deadline";
 import { equipmentStatus } from "../features/asset-returns/status";
@@ -87,7 +88,7 @@ const dashboardRoute = createRoute({
     return filters;
   },
   loader: async ({ context }) => {
-    await context.queryClient.ensureQueryData(offboardingsQuery);
+    await context.queryClient.ensureQueryData(dashboardQuery);
   },
   component: Object.assign(Dashboard, { preload: DashboardPage.preload }),
 });
@@ -119,8 +120,7 @@ const caseRoute = createRoute({
     return filters;
   },
   loader: async ({ context, params }) => {
-    const cases = await context.queryClient.ensureQueryData(offboardingsQuery);
-    getCase(cases, params.caseId);
+    await context.queryClient.ensureQueryData(offboardingDetailQuery(params.caseId));
   },
   component: Object.assign(Case, { preload: CasePage.preload }),
 });
@@ -419,7 +419,7 @@ function CaseLink(item: CaseSummary) {
 }
 
 function Dashboard() {
-  const { data: cases } = useSuspenseQuery(offboardingsQuery);
+  const { data: cases } = useSuspenseQuery(dashboardQuery);
   const { area = "", deadline = "all" } = dashboardRoute.useSearch();
   const navigate = dashboardRoute.useNavigate();
 
@@ -483,8 +483,7 @@ function Case() {
   const { caseId } = caseRoute.useParams();
   const { tasks } = caseRoute.useSearch();
   const navigate = caseRoute.useNavigate();
-  const { data: cases } = useSuspenseQuery(offboardingsQuery);
-  const offboardingCase = getCase(cases, caseId);
+  const { data: offboardingCase } = useSuspenseQuery(offboardingDetailQuery(caseId));
 
   return (
     <CasePage
@@ -500,16 +499,6 @@ function Case() {
       }
     />
   );
-}
-
-function getCase(cases: OffboardingCase[], caseId: string) {
-  const offboardingCase = cases.find((item) => item.id === caseId);
-
-  if (!offboardingCase) {
-    throw notFound();
-  }
-
-  return offboardingCase;
 }
 
 function BulkImport() {

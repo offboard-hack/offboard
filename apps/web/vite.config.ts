@@ -11,4 +11,12 @@ export default defineConfig(({ command }) => ({
     }),
     react(),
   ],
+  server: {
+    proxy: {
+      "/api": {
+        target: "http://localhost:3001",
+        rewrite: (path) => path.replace(/^\/api/, ""),
+      },
+    },
+  },
 }));
