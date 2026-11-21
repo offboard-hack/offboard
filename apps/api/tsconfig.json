@@ -5,10 +5,9 @@
     "strict": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "rootDir": "src",
-    "outDir": "dist",
-    "noEmitOnError": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "types": ["node"]
   },
-  "include": ["src"]
+  "include": ["src", "vitest.config.ts"]
 }
