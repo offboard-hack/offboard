@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npm run build --workspace=apps/web && npx esbuild apps/api/src/vercel.ts --bundle --platform=node --format=esm --target=node22 --outfile=api/offboard.mjs --external:pg-native",
+  "buildCommand": "npm run build --workspace=apps/web && npx esbuild apps/api/src/vercel.ts --bundle --platform=node --format=cjs --target=node22 --outfile=api/offboard.js --external:pg-native",
   "installCommand": "npm install",
   "framework": null,
   "outputDirectory": "apps/web/dist/client",
@@ -7,7 +7,7 @@
     "api/ssr.mjs": {
       "includeFiles": "apps/web/dist/**"
     },
-    "api/offboard.mjs": {
+    "api/offboard.js": {
       "memory": 256,
       "maxDuration": 10
     }
