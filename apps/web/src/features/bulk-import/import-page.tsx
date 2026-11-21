@@ -7,6 +7,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Alert, AlertDescription } from "@/shared/ui/shadcn/alert";
+import { offboardingsQuery } from "@/entities/offboarding";
 import { Spinner } from "@/shared/ui/shadcn/spinner";
 import { Empty, EmptyDescription } from "@/shared/ui/shadcn/empty";
 import { classProps } from "../../shared/lib/class-props";
@@ -14,6 +15,7 @@ import { Dropzone } from "@/shared/ui/shadcn/dropzone";
 import { Input } from "@/shared/ui/shadcn/input";
 import { Toggle } from "@/shared/ui/shadcn/toggle";
 import { useActor } from "@xstate/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Button } from "../../shared/ui/button";
@@ -243,6 +245,7 @@ function normalized(text: string) {
 function FileReview({
   file,
   rows,
+  error,
   stageHeading,
   onBack,
   onBrowse,
@@ -250,6 +253,7 @@ function FileReview({
 }: {
   file: File;
   rows: ImportRow[];
+  error: string;
   stageHeading: (node: HTMLHeadingElement | null) => void;
   onBack: () => void;
   onBrowse: () => void;
@@ -286,6 +290,11 @@ function FileReview({
             </span>
           )}
         </div>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
         {invalid > 0 && (
           <div {...classProps(ui.error, ui.blockingError)}>
             <p id="review-blocker">Corrija as linhas marcadas e envie o arquivo de novo.</p>
@@ -363,6 +372,7 @@ export function ImportPage({
   returnLink?: ReactNode;
   modal?: boolean;
 }) {
+  const queryClient = useQueryClient();
   const [state, send] = useActor(bulkImport);
   const { file, rows, error } = state.context;
   const step = state.value;
@@ -470,14 +480,36 @@ export function ImportPage({
           </div>
         </section>
       )}
+      {step === "submitting" && (
+        <section aria-labelledby="submitting-title" {...classProps(s.workSurface, ui.body)}>
+          <div role="status" {...classProps(ui.lead)}>
+            <Spinner aria-hidden="true" />
+            <h2
+              id="submitting-title"
+              ref={stageHeading}
+              tabIndex={-1}
+              {...classProps(s.workHeading)}
+            >
+              Importando pessoas…
+            </h2>
+          </div>
+        </section>
+      )}
       {step === "review" && file && (
         <FileReview
           file={file}
           rows={rows}
+          error={error}
           stageHeading={stageHeading}
           onBack={() => send({ type: "back" })}
           onBrowse={openFilePicker}
-          onConfirm={() => send({ type: "confirm" })}
+          onConfirm={() =>
+            send({
+              type: "confirm",
+              onImported: () =>
+                void queryClient.invalidateQueries({ queryKey: offboardingsQuery.queryKey }),
+            })
+          }
         />
       )}
       {step === "complete" && (

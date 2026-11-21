@@ -13,6 +13,7 @@ type ImportContext = {
   file: File | null;
   rows: ImportRow[];
   error: string;
+  onImported: () => void;
 };
 
 type ImportEvent =
@@ -20,10 +21,10 @@ type ImportEvent =
   | { type: "review" }
   | { type: "remove" }
   | { type: "back" }
-  | { type: "confirm" }
+  | { type: "confirm"; onImported: () => void }
   | { type: "reset" };
 
-const initialContext: ImportContext = { file: null, rows: [], error: "" };
+const cleared = { file: null, rows: [], error: "" };
 
 const readPeople = fromPromise<ImportRow[], File | null>(async ({ input: file }) => {
   if (!file || !file.name.toLowerCase().endsWith(".csv")) {
@@ -114,11 +115,27 @@ const readPeople = fromPromise<ImportRow[], File | null>(async ({ input: file })
   });
 });
 
-export const bulkImport = setup<ImportContext, ImportEvent, { readPeople: typeof readPeople }>({
-  actors: { readPeople },
+const submitPeople = fromPromise<void, ImportRow[]>(async ({ input: rows }) => {
+  const response = await fetch("/api/offboardings/import", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ rows: rows.map(({ name, department }) => ({ name, department })) }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Não foi possível importar as pessoas. Tente novamente.");
+  }
+});
+
+export const bulkImport = setup<
+  ImportContext,
+  ImportEvent,
+  { readPeople: typeof readPeople; submitPeople: typeof submitPeople }
+>({
+  actors: { readPeople, submitPeople },
 }).createMachine({
   initial: "select",
-  context: initialContext,
+  context: { ...cleared, onImported: () => undefined },
   on: {
     select: {
       target: ".reading",
@@ -133,12 +150,12 @@ export const bulkImport = setup<ImportContext, ImportEvent, { readPeople: typeof
           guard: ({ context }) => context.rows.length > 0,
           target: "review",
         },
-        remove: { actions: assign(initialContext) },
+        remove: { actions: assign(cleared) },
       },
     },
     reading: {
       on: {
-        remove: { target: "select", actions: assign(initialContext) },
+        remove: { target: "select", actions: assign(cleared) },
       },
       invoke: {
         src: "readPeople",
@@ -164,7 +181,22 @@ export const bulkImport = setup<ImportContext, ImportEvent, { readPeople: typeof
         confirm: {
           guard: ({ context }) =>
             context.rows.length > 0 && context.rows.every((row) => row.kind === "valid"),
-          target: "complete",
+          target: "submitting",
+          actions: assign({ onImported: ({ event }) => event.onImported }),
+        },
+      },
+    },
+    submitting: {
+      invoke: {
+        src: "submitPeople",
+        input: ({ context }) => context.rows,
+        onDone: { target: "complete", actions: ({ context }) => context.onImported() },
+        onError: {
+          target: "review",
+          actions: assign({
+            error: ({ event }) =>
+              event.error instanceof Error ? event.error.message : "Não foi possível importar.",
+          }),
         },
       },
     },
@@ -172,7 +204,7 @@ export const bulkImport = setup<ImportContext, ImportEvent, { readPeople: typeof
       on: {
         reset: {
           target: "select",
-          actions: assign(initialContext),
+          actions: assign(cleared),
         },
       },
     },

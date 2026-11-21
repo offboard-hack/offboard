@@ -1,10 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, lazyRouteComponent } from "@tanstack/react-router";
-import { offboardingsQuery } from "@/entities/offboarding";
+import { offboardingsQuery, type OffboardingCase } from "@/entities/offboarding";
 import { ImportModal } from "@/features/bulk-import/import-modal";
-import { createTasksFromChecklist } from "@/features/checklist/checklist-draft";
 import { NewCaseDialog } from "@/features/offboarding/new-case-dialog";
-import { createLocalId } from "@/shared/lib/create-local-id";
 
 const route = getRouteApi("/desligamentos");
 
@@ -23,16 +21,29 @@ export function CaseActions() {
         <ImportPage modal />
       </ImportModal>
       <NewCaseDialog
-        onCreate={(record) => {
-          const id = createLocalId();
-          const tasks = createTasksFromChecklist(record);
+        onCreate={(record) =>
+          void (async () => {
+            const response = await fetch("/api/offboardings", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                name: record.name,
+                role: record.role,
+                department: record.department,
+                deadline: record.deadline,
+              }),
+            });
 
-          queryClient.setQueryData(offboardingsQuery.queryKey, (current = []) => [
-            ...current,
-            { ...record, id, tasks, completed: 0, total: tasks.length },
-          ]);
-          void navigate({ to: "/desligamentos/$caseId", params: { caseId: id } });
-        }}
+            if (!response.ok) {
+              throw new Error("Failed to create offboarding");
+            }
+
+            const created: OffboardingCase = await response.json();
+
+            await queryClient.invalidateQueries({ queryKey: offboardingsQuery.queryKey });
+            await navigate({ to: "/desligamentos/$caseId", params: { caseId: created.id } });
+          })()
+        }
       />
     </div>
   );

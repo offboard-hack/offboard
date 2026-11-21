@@ -16,5 +16,6 @@ export default defineConfig({
     }),
     react(),
   ],
+  server: { proxy: { "/api": process.env.API_URL ?? "http://localhost:3001" } },
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
 });
