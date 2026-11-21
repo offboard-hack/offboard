@@ -136,6 +136,10 @@ export function EquipmentPage() {
     [equipment, status],
   );
 
+  function countByStatus(target: Equipment["status"]) {
+    return equipment.filter((entry) => entry.status === target).length;
+  }
+
   return (
     <>
       <ModuleHeading
@@ -146,16 +150,11 @@ export function EquipmentPage() {
         items={[
           {
             label: "Itens a recuperar",
-            value: 41,
-            detail: "R$ 168 mil em bens",
+            value: equipment.length,
           },
-          {
-            label: "Recebidos",
-            value: 18,
-            detail: "11 já conferidos no estoque",
-          },
-          { label: "Coletas agendadas", value: 12 },
-          { label: "Com problema", value: 2, tone: "danger" },
+          { label: "Recebidos", value: countByStatus("received") },
+          { label: "Coletas agendadas", value: countByStatus("scheduled") },
+          { label: "Com problema", value: countByStatus("failed"), tone: "danger" },
         ]}
       />
       <section {...stylex.props(portalStyles.panel)} aria-labelledby="equipment-title">

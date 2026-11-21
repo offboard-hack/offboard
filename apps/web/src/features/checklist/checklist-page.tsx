@@ -124,6 +124,9 @@ export function ChecklistRulesPage() {
       toggleChecklistRule(id, enabled),
     onMutate: async ({ id, enabled }) => {
       await queryClient.cancelQueries({ queryKey: checklistQuery.queryKey });
+
+      const previous = queryClient.getQueryData(checklistQuery.queryKey);
+
       queryClient.setQueryData(
         checklistQuery.queryKey,
         (current) =>
@@ -134,6 +137,11 @@ export function ChecklistRulesPage() {
             ),
           },
       );
+
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      queryClient.setQueryData(checklistQuery.queryKey, context?.previous);
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: checklistQuery.queryKey }),
   });
@@ -149,7 +157,8 @@ export function ChecklistRulesPage() {
             Checklist automático
           </h1>
           <p {...stylex.props(portalStyles.description)}>
-            Simule as regras que complementam o checklist de desligamento.
+            Ative as regras que complementam o checklist de desligamento. As alterações são salvas
+            automaticamente.
           </p>
         </div>
       </header>
@@ -216,7 +225,7 @@ export function ChecklistRulesPage() {
           {...stylex.props(portalStyles.panel, styles.preview)}
         >
           <h2 id="preview-title" {...stylex.props(portalStyles.subheading, styles.panelTitle)}>
-            Prévia da simulação
+            Regras ativas
           </h2>
           <div {...stylex.props(styles.previewContent)}>
             <dl aria-live="polite" {...stylex.props(styles.previewMetrics)}>

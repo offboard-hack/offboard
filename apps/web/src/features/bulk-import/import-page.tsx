@@ -364,7 +364,7 @@ function FileReview({
           disabled={invalid > 0}
           aria-describedby={invalid ? "review-blocker" : undefined}
         >
-          Concluir revisão
+          Confirmar cadastro
         </Button>
       </div>
     </section>
@@ -506,7 +506,11 @@ export function ImportPage({ returnLink }: { returnLink: ReactNode }) {
             >
               Cadastrando...
             </h2>
-            <p {...stylex.props(ui.detail)}>{rows.length} pessoas sendo cadastradas.</p>
+            <p {...stylex.props(ui.detail)}>
+              {rows.length === 1
+                ? "1 pessoa sendo cadastrada."
+                : `${rows.length} pessoas sendo cadastradas.`}
+            </p>
           </div>
         </section>
       )}

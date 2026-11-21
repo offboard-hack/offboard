@@ -57,7 +57,13 @@ export async function fetchOffboarding(id: string) {
 export async function fetchDashboardCases() {
   const summaries = await fetchOffboardings();
 
-  return Promise.all(summaries.map((summary) => fetchOffboarding(summary.id)));
+  const results = await Promise.allSettled(
+    summaries.map((summary) => fetchOffboarding(summary.id)),
+  );
+
+  return results.map((result, index) =>
+    result.status === "fulfilled" ? result.value : { ...summaries[index], tasks: [] },
+  );
 }
 
 type EquipmentDto = {
@@ -67,7 +73,7 @@ type EquipmentDto = {
   person: string;
   method: Equipment["method"];
   scheduledDate: string | null;
-  status: "scheduled" | "received" | "failed" | "inventory" | "transit" | "with_person";
+  status: "scheduled" | "received" | "failed" | "inventory" | "transit" | "withPerson";
 };
 
 type IntegrationDto = {
@@ -140,7 +146,7 @@ export async function fetchEquipment() {
                 .replace(".", ""),
             }
           : null,
-        status: status === "with_person" ? "withPerson" : status,
+        status,
       }) satisfies Equipment,
   );
 }
