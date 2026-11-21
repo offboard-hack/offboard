@@ -188,7 +188,7 @@ export const bulkImport = setup<
     },
     review: {
       on: {
-        back: "select",
+        back: { target: "select", actions: assign({ error: "" }) },
         confirm: {
           guard: ({ context }) =>
             context.rows.length > 0 && context.rows.every((row) => row.kind === "valid"),
