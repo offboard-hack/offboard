@@ -1,0 +1,12 @@
+{
+  "buildCommand": "npm run build --workspace=apps/web",
+  "installCommand": "npm install",
+  "framework": null,
+  "outputDirectory": "apps/web/dist/client",
+  "functions": {
+    "api/ssr.mjs": {
+      "includeFiles": "apps/web/dist/**"
+    }
+  },
+  "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/api/ssr" }]
+}
