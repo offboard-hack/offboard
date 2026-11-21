@@ -4,7 +4,7 @@
     "package-lock.json",
     "apps/web/src/app/routeTree.gen.ts",
     "dist/",
-    "api/offboard.mjs",
+    "api/offboard.js",
     ".agents/skills/",
     "tools/oxlint/anti-slop/"
   ]
