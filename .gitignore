@@ -38,3 +38,5 @@ yarn-error.log*
 
 # TanStack Start
 .tanstack/
+
+/api/offboard.mjs
