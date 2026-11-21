@@ -1,4 +1,6 @@
 import * as stylex from "@stylexjs/stylex";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { plansQuery } from "../../shared/api";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
 import { Metrics, PageHeading as ModuleHeading } from "../../shared/ui/page";
@@ -101,12 +103,13 @@ const styles = stylex.create({
   },
 });
 
-const plans = [
-  { name: "Silver", price: 149, active: 12, capacity: 20, area: "Tecnologia" },
-  { name: "Gold", price: 249, active: 20, capacity: 30, area: "Marketing" },
-  { name: "Platinum", price: 399, active: 12, capacity: 15, area: "Operações" },
-  { name: "Platinum Premium", price: 699, active: 4, capacity: 5, area: "Liderança" },
-];
+export type Plan = {
+  name: string;
+  price: number;
+  active: number;
+  capacity: number;
+  area: string;
+};
 
 const currency = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -114,7 +117,7 @@ const currency = new Intl.NumberFormat("pt-BR", {
   maximumFractionDigits: 0,
 });
 
-const billingColumns: TableColumn<(typeof plans)[number]>[] = [
+const billingColumns: TableColumn<Plan>[] = [
   {
     id: "area",
     accessorFn: ({ area }) => area,
@@ -137,6 +140,7 @@ const billingColumns: TableColumn<(typeof plans)[number]>[] = [
 ];
 
 export function PlansPage() {
+  const { data: plans } = useSuspenseQuery(plansQuery);
   const licensesInUse = plans.reduce((total, plan) => total + plan.active, 0);
   const licensesAvailable = plans.reduce((total, plan) => total + plan.capacity, 0);
   const monthlyTotal = plans.reduce((total, plan) => total + plan.active * plan.price, 0);
@@ -149,7 +153,11 @@ export function PlansPage() {
       />
       <Metrics
         items={[
-          { label: "Contrato Aurora", value: "Vigente", detail: "1 nov 2026 a 31 out 2027" },
+          {
+            label: "Contrato Aurora",
+            value: "Vigente",
+            detail: "1 nov 2026 a 31 out 2027",
+          },
           {
             label: "Licenças em uso",
             value: `${licensesInUse} de ${licensesAvailable}`,

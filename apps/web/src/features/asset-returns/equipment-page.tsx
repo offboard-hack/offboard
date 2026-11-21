@@ -1,7 +1,9 @@
 import { equipmentStatus } from "./status";
 import * as stylex from "@stylexjs/stylex";
 import { getRouteApi } from "@tanstack/react-router";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { equipmentQuery } from "../../shared/api";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
 import { PortalFilter } from "../../shared/ui/select";
@@ -53,7 +55,7 @@ const styles = stylex.create({
   },
 });
 
-type Equipment = {
+export type Equipment = {
   item: string;
   tag: string;
   person: string;
@@ -61,81 +63,6 @@ type Equipment = {
   date: { iso: string; label: string } | null;
   status: keyof typeof equipmentStatus;
 };
-
-const equipment: Equipment[] = [
-  {
-    item: "Notebook Dell Latitude 5440",
-    tag: "AUR-0412",
-    person: "Marina Lopes",
-    method: "Coleta em casa",
-    date: { iso: "2026-11-10", label: "10 nov" },
-    status: "scheduled",
-  },
-  {
-    item: "Notebook MacBook Air M3",
-    tag: "AUR-0398",
-    person: "Léo Andrade",
-    method: "Coleta em casa",
-    date: null,
-    status: "received",
-  },
-  {
-    item: "Notebook Dell Latitude 5440",
-    tag: "AUR-0377",
-    person: "Rafa Souza",
-    method: "Coleta em casa",
-    date: { iso: "2026-11-09", label: "9 nov" },
-    status: "failed",
-  },
-  {
-    item: "Celular Galaxy A55",
-    tag: "AUR-2210",
-    person: "Otávio Lima",
-    method: "Entrega no escritório",
-    date: null,
-    status: "inventory",
-  },
-  {
-    item: "Notebook ThinkPad T14",
-    tag: "AUR-0455",
-    person: "Igor Santos",
-    method: "Coleta em casa",
-    date: null,
-    status: "transit",
-  },
-  {
-    item: "Monitor Dell 27″",
-    tag: "AUR-3104",
-    person: "Igor Santos",
-    method: "Coleta em casa",
-    date: null,
-    status: "transit",
-  },
-  {
-    item: "Notebook MacBook Pro 14",
-    tag: "AUR-0301",
-    person: "Sofia Ramos",
-    method: "Coleta em casa",
-    date: { iso: "2026-11-12", label: "12 nov" },
-    status: "withPerson",
-  },
-  {
-    item: "Kit EPI e rádio",
-    tag: "AUR-5520",
-    person: "Marcos Vieira",
-    method: "Entrega no escritório",
-    date: null,
-    status: "received",
-  },
-  {
-    item: "Notebook Dell Latitude 5440",
-    tag: "AUR-0419",
-    person: "Ju Martins",
-    method: "Coleta em casa",
-    date: { iso: "2026-11-11", label: "11 nov" },
-    status: "scheduled",
-  },
-];
 
 const assetBadges = {
   scheduled: null,
@@ -189,6 +116,7 @@ const equipmentColumns: TableColumn<Equipment>[] = [
 const route = getRouteApi("/bens-e-coleta");
 
 export function EquipmentPage() {
+  const { data: equipment } = useSuspenseQuery(equipmentQuery);
   const { status: requestedStatus } = route.useSearch();
   const navigate = route.useNavigate();
 
@@ -196,13 +124,16 @@ export function EquipmentPage() {
 
   function setStatus(next: string) {
     if (next !== status) {
-      void navigate({ search: { status: next || undefined }, resetScroll: false });
+      void navigate({
+        search: { status: next || undefined },
+        resetScroll: false,
+      });
     }
   }
 
   const visibleEquipment = useMemo(
     () => (status ? equipment.filter((entry) => entry.status === status) : equipment),
-    [status],
+    [equipment, status],
   );
 
   return (
@@ -213,8 +144,16 @@ export function EquipmentPage() {
       />
       <Metrics
         items={[
-          { label: "Itens a recuperar", value: 41, detail: "R$ 168 mil em bens" },
-          { label: "Recebidos", value: 18, detail: "11 já conferidos no estoque" },
+          {
+            label: "Itens a recuperar",
+            value: 41,
+            detail: "R$ 168 mil em bens",
+          },
+          {
+            label: "Recebidos",
+            value: 18,
+            detail: "11 já conferidos no estoque",
+          },
           { label: "Coletas agendadas", value: 12 },
           { label: "Com problema", value: 2, tone: "danger" },
         ]}
@@ -235,7 +174,10 @@ export function EquipmentPage() {
             onChange={setStatus}
             items={[
               { value: "", label: "Todos os status" },
-              ...Object.entries(equipmentStatus).map(([value, label]) => ({ value, label })),
+              ...Object.entries(equipmentStatus).map(([value, label]) => ({
+                value,
+                label,
+              })),
             ]}
           />
         </div>

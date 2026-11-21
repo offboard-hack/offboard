@@ -1,6 +1,8 @@
 import * as stylex from "@stylexjs/stylex";
 import { Input } from "@base-ui/react/input";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { beneficiariesQuery, teamMembersQuery } from "../../shared/api";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
 import { portalStyles as s } from "../../shared/ui/surface.styles";
@@ -22,26 +24,21 @@ const styles = stylex.create({
   input: { width: "min(100%, 22rem)" },
 });
 
-const beneficiaries = [
-  { name: "Marina Lopes", plan: "Gold", status: "Ativo", until: "30 abr" },
-  { name: "Lucas Almeida", plan: "Silver", status: "Convidado", until: "Após ativação" },
-  { name: "Renata Souza", plan: "Platinum", status: "Ativo", until: "22 abr" },
-  { name: "Pedro Santos", plan: "Gold", status: "Ativo", until: "31 mar" },
-  { name: "Carla Mendes", plan: "Silver", status: "Expirado", until: "31 out" },
-];
+export type Beneficiary = {
+  name: string;
+  plan: string;
+  status: string;
+  until: string;
+};
 
-const team = [
-  { name: "Beatriz Castro", role: "Admin", access: "Áreas administrativas", security: "2FA ativo" },
-  { name: "Camila Rocha", role: "Analista", access: "Cadastro e painel", security: "2FA ativo" },
-  {
-    name: "Diego Alves",
-    role: "Financeiro",
-    access: "Gastos e faturas",
-    security: "Convite pendente",
-  },
-];
+export type TeamMember = {
+  name: string;
+  role: string;
+  access: string;
+  security: string;
+};
 
-const beneficiaryColumns: TableColumn<(typeof beneficiaries)[number]>[] = [
+const beneficiaryColumns: TableColumn<Beneficiary>[] = [
   {
     id: "name",
     accessorFn: ({ name }) => name,
@@ -54,14 +51,20 @@ const beneficiaryColumns: TableColumn<(typeof beneficiaries)[number]>[] = [
   { id: "status", accessorFn: ({ status }) => status, header: "Status" },
 ];
 
-const teamColumns: TableColumn<(typeof team)[number]>[] = [
+const teamColumns: TableColumn<TeamMember>[] = [
   { id: "name", accessorFn: ({ name }) => name, header: "Membro" },
   { id: "role", accessorFn: ({ role }) => role, header: "Papel" },
   { id: "access", accessorFn: ({ access }) => access, header: "Permissão" },
-  { id: "security", accessorFn: ({ security }) => security, header: "Segurança" },
+  {
+    id: "security",
+    accessorFn: ({ security }) => security,
+    header: "Segurança",
+  },
 ];
 
 export function AccessPage() {
+  const { data: beneficiaries } = useSuspenseQuery(beneficiariesQuery);
+  const { data: team } = useSuspenseQuery(teamMembersQuery);
   const [search, setSearch] = useState("");
   const term = search.trim().toLocaleLowerCase("pt-BR");
 

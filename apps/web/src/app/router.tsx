@@ -21,6 +21,13 @@ import {
   offboardingTeams,
   offboardingsQuery,
 } from "../entities/offboarding";
+import {
+  beneficiariesQuery,
+  equipmentQuery,
+  integrationsQuery,
+  plansQuery,
+  teamMembersQuery,
+} from "../shared/api";
 import type { CaseSummary } from "../entities/offboarding";
 import { deadlineGroups } from "../features/dashboard/deadline";
 import type { DeadlineGroup } from "../features/dashboard/deadline";
@@ -154,6 +161,9 @@ const equipmentRoute = createRoute({
     () => import("../features/asset-returns/equipment-page"),
     "EquipmentPage",
   ),
+  loader: async ({ context }) => {
+    await context.queryClient.ensureQueryData(equipmentQuery);
+  },
 });
 
 const integrationsRoute = createRoute({
@@ -173,6 +183,9 @@ const integrationsRoute = createRoute({
     () => import("../features/integrations/integrations-page"),
     "IntegrationsPage",
   ),
+  loader: async ({ context }) => {
+    await context.queryClient.ensureQueryData(integrationsQuery);
+  },
 });
 
 const applicationsRoute = createRoute({
@@ -197,12 +210,21 @@ const accessRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/acessos-ao-app",
   component: lazyRouteComponent(() => import("../features/app-access/access-page"), "AccessPage"),
+  loader: async ({ context }) => {
+    await Promise.all([
+      context.queryClient.ensureQueryData(beneficiariesQuery),
+      context.queryClient.ensureQueryData(teamMembersQuery),
+    ]);
+  },
 });
 
 const plansRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/planos-e-gastos",
   component: lazyRouteComponent(() => import("../features/billing/billing-page"), "PlansPage"),
+  loader: async ({ context }) => {
+    await context.queryClient.ensureQueryData(plansQuery);
+  },
 });
 
 export const router = createRouter({
@@ -273,7 +295,11 @@ function Portal() {
 
       const observer = new MutationObserver(updateHeading);
 
-      observer.observe(main, { childList: true, characterData: true, subtree: true });
+      observer.observe(main, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
       updateHeading();
 
       return () => {
@@ -303,7 +329,11 @@ const navigationGroups = [
         label: "Painel",
         icon: "M3 3h7v10H3zM14 3h7v6h-7zM3 17h7v4H3zM14 13h7v8h-7z",
       },
-      { to: casesRoute.fullPath, label: "Desligamentos", icon: "M11 4H4v16h7m4-12 4 4-4 4m4-4H8" },
+      {
+        to: casesRoute.fullPath,
+        label: "Desligamentos",
+        icon: "M11 4H4v16h7m4-12 4 4-4 4m4-4H8",
+      },
       {
         to: importRoute.fullPath,
         label: "Cadastro em massa",
@@ -436,7 +466,10 @@ function Dashboard() {
       }
       onDeadlineChange={(next) =>
         void navigate({
-          search: (previous) => ({ ...previous, deadline: next === "all" ? undefined : next }),
+          search: (previous) => ({
+            ...previous,
+            deadline: next === "all" ? undefined : next,
+          }),
           resetScroll: false,
         })
       }
@@ -466,7 +499,10 @@ function Cases() {
       department={department}
       onDepartmentChange={(next) => {
         if (department !== next) {
-          void navigate({ search: { area: next || undefined }, resetScroll: false });
+          void navigate({
+            search: { area: next || undefined },
+            resetScroll: false,
+          });
         }
       }}
       renderCaseLink={CaseLink}
@@ -490,7 +526,10 @@ function Case() {
       offboardingCase={offboardingCase}
       taskFilter={tasks ?? ""}
       onTaskFilterChange={(next) =>
-        void navigate({ search: { tasks: next || undefined }, resetScroll: false })
+        void navigate({
+          search: { tasks: next || undefined },
+          resetScroll: false,
+        })
       }
       backLink={
         <Link to="/desligamentos" {...stylex.props(s.backLink)}>

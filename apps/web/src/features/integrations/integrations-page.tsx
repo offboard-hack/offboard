@@ -1,5 +1,7 @@
 import * as stylex from "@stylexjs/stylex";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
+import { integrationsQuery } from "../../shared/api";
 import { PortalFilter } from "../../shared/ui/select";
 import { PageHeading as ModuleHeading } from "../../shared/ui/page";
 import { portalStyles } from "../../shared/ui/surface.styles";
@@ -64,85 +66,22 @@ const styles = stylex.create({
     fontWeight: 650,
     lineHeight: 1.3,
   },
-  badgeReady: { color: colors.successInk, backgroundColor: colors.successSurface },
+  badgeReady: {
+    color: colors.successInk,
+    backgroundColor: colors.successSurface,
+  },
   missingActivity: { display: { default: "block", [compact]: "none" } },
 });
 
-type Integration = { name: string; purpose: string } & (
+export type Integration = { name: string; purpose: string } & (
   | { status: "connected"; update: string }
   | { status: "disconnected" }
 );
 
-const integrations: Integration[] = [
-  {
-    name: "Sistema de folha",
-    purpose: "Envia cadastro, rescisão, eSocial e FGTS.",
-    status: "connected",
-    update: "8 nov, 7h30 · 23 cadastros atualizados",
-  },
-  {
-    name: "Sistema de ponto",
-    purpose: "Fecha ponto e banco de horas.",
-    status: "connected",
-    update: "4 nov · 23 fechamentos",
-  },
-  {
-    name: "Google Workspace",
-    purpose: "Bloqueia acessos e transfere arquivos.",
-    status: "connected",
-    update: "3 nov · 21 contas atualizadas",
-  },
-  {
-    name: "Slack",
-    purpose: "Bloqueia acessos e avisa as áreas responsáveis.",
-    status: "connected",
-    update: "8 nov, 8h02 · 14 avisos",
-  },
-  {
-    name: "HubSpot",
-    purpose: "Transfere negócios e contatos.",
-    status: "connected",
-    update: "4 nov · 61 negócios transferidos",
-  },
-  {
-    name: "Inventário de TI",
-    purpose: "Lista os bens de cada pessoa e registra a entrada no estoque.",
-    status: "connected",
-    update: "8 nov, 9h40 · 2 itens conferidos",
-  },
-  {
-    name: "Transportadora",
-    purpose: "Agenda e rastreia a coleta em casa.",
-    status: "connected",
-    update: "8 nov, 9h12 · Coleta confirmada",
-  },
-  {
-    name: "Clínica ocupacional",
-    purpose: "Agenda o exame demissional.",
-    status: "connected",
-    update: "4 nov · 23 agendamentos",
-  },
-  {
-    name: "Operadora do plano de saúde",
-    purpose: "Informa o direito de manter o plano.",
-    status: "connected",
-    update: "3 nov · 23 avisos",
-  },
-  {
-    name: "Cartão corporativo",
-    purpose: "Cancela cartões e lista despesas em aberto.",
-    status: "disconnected",
-  },
-  {
-    name: "Microsoft 365",
-    purpose: "Bloqueia acessos e transfere arquivos de trabalho.",
-    status: "disconnected",
-  },
-];
-
 const route = getRouteApi("/integracoes");
 
 export function IntegrationsPage() {
+  const { data: integrations } = useSuspenseQuery(integrationsQuery);
   const { status = "" } = route.useSearch();
   const navigate = route.useNavigate();
 
