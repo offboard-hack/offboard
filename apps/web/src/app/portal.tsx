@@ -30,6 +30,7 @@ import {
   updateTaskStatus,
 } from "../entities/offboarding";
 import type { CaseSummary, OffboardingCase, PersonAsset, Task } from "../entities/offboarding";
+import { initialSteps } from "../features/checklist/checklist-draft";
 import { offboardingStyles } from "../features/offboarding/offboarding.styles";
 import { PortalLayout } from "./shell";
 import {
@@ -535,28 +536,20 @@ const demoSubtaskMap = new Map<string, Task["subtasks"]>([
   ],
 ]);
 
-const demoDueDateOffsets = new Map([
-  ["access", 0],
-  ["files", 3],
-  ["collect", 5],
-  ["point", 0],
-  ["invite", 0],
-  ["exam", 7],
-  ["documents", 10],
-  ["review", 14],
-  ["handoff", 5],
-  ["crm", 5],
-  ["card", 7],
-  ["refunds", 10],
-  ["certificates", 7],
-  ["badge", 0],
-  ["confirm", 5],
-  ["survey", 21],
-  ["inventory", 10],
+const phaseOffsetDays = new Map([
+  ["pre", -7],
+  ["d0", 0],
+  ["first-week", 5],
+  ["second-week", 10],
+  ["follow-up", 21],
 ]);
 
-function demoDueDate(taskId: string, caseDeadline: string) {
-  const offset = demoDueDateOffsets.get(taskId);
+const titleToOffset = new Map(
+  initialSteps.map((step) => [step.title, phaseOffsetDays.get(step.phase) ?? 0]),
+);
+
+function demoDueDate(taskTitle: string, caseDeadline: string) {
+  const offset = titleToOffset.get(taskTitle);
 
   if (offset == null) return undefined;
 
@@ -572,7 +565,7 @@ function enrichCase(offboardingCase: OffboardingCase) {
     assets: offboardingCase.assets ?? demoAssets,
     tasks: offboardingCase.tasks.map((task) => ({
       ...task,
-      dueDate: task.dueDate ?? demoDueDate(task.id, offboardingCase.deadline),
+      dueDate: task.dueDate ?? demoDueDate(task.title, offboardingCase.deadline),
       subtasks: task.subtasks ?? demoSubtaskMap.get(task.id),
     })),
   };
