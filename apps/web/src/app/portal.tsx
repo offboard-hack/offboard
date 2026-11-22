@@ -27,6 +27,7 @@ import {
   cycleTaskStatus,
   offboardingTeams,
   offboardingsQuery,
+  toggleSubtask,
   updateTaskStatus,
 } from "../entities/offboarding";
 import type { CaseSummary, OffboardingCase, PersonAsset, Task } from "../entities/offboarding";
@@ -480,6 +481,40 @@ export function Case() {
     },
   });
 
+  const subtaskMutation = useMutation({
+    mutationFn: (subtaskId: string) => toggleSubtask(subtaskId),
+    onMutate: async (subtaskId) => {
+      await queryClient.cancelQueries({ queryKey: offboardingsQuery.queryKey });
+      const previous = queryClient.getQueryData(offboardingsQuery.queryKey);
+
+      queryClient.setQueryData(offboardingsQuery.queryKey, (old: OffboardingCase[] | undefined) =>
+        old?.map((c) =>
+          c.id === caseId
+            ? {
+                ...c,
+                tasks: c.tasks.map((t) => ({
+                  ...t,
+                  subtasks: t.subtasks.map((s) =>
+                    s.id === subtaskId ? { ...s, done: !s.done } : s,
+                  ),
+                })),
+              }
+            : c,
+        ),
+      );
+
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(offboardingsQuery.queryKey, context.previous);
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: offboardingsQuery.queryKey });
+    },
+  });
+
   return (
     <CasePage
       offboardingCase={offboardingCase}
@@ -488,6 +523,7 @@ export function Case() {
         void navigate({ search: { tasks: next || undefined }, resetScroll: false })
       }
       onTaskStatusChange={(taskId, status) => statusMutation.mutate({ taskId, status })}
+      onSubtaskToggle={(subtaskId) => subtaskMutation.mutate(subtaskId)}
       breadcrumb={
         <Breadcrumb aria-label="Localização">
           <BreadcrumbList>
