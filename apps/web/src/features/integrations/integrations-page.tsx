@@ -4,6 +4,7 @@ import {
   File01Icon,
   HeartCheckIcon,
   LaptopIcon,
+  Mail01Icon,
   MedicalFileIcon,
   RefreshIcon,
   Search01Icon,
@@ -121,6 +122,13 @@ const integrations: Integration[] = [
     purpose: "Informa o direito de manter o plano.",
     status: "connected",
     update: "3 nov · 23 avisos",
+  },
+  {
+    name: "Correios",
+    category: "equipment",
+    icon: Mail01Icon,
+    purpose: "Gera etiqueta de devolução e rastreia encomendas.",
+    status: "disconnected",
   },
   {
     name: "Cartão corporativo",

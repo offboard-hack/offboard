@@ -517,17 +517,23 @@ const demoAssets: PersonAsset[] = [
   { item: "Celular Galaxy A55", tag: "AUR-2210", status: "received" },
 ];
 
-const demoSubtasks = {
-  access: [
-    { id: "access-1", title: "Revogar Google Workspace", done: true },
-    { id: "access-2", title: "Revogar Slack", done: true },
-    { id: "access-3", title: "Revogar HubSpot", done: false },
+const demoSubtaskMap = new Map<string, Task["subtasks"]>([
+  [
+    "access",
+    [
+      { id: "access-1", title: "Revogar Google Workspace", done: true },
+      { id: "access-2", title: "Revogar Slack", done: true },
+      { id: "access-3", title: "Revogar HubSpot", done: false },
+    ],
   ],
-  collect: [
-    { id: "collect-1", title: "Confirmar endereço de coleta", done: true },
-    { id: "collect-2", title: "Agendar transportadora", done: false },
+  [
+    "collect",
+    [
+      { id: "collect-1", title: "Confirmar endereço de coleta", done: true },
+      { id: "collect-2", title: "Agendar transportadora", done: false },
+    ],
   ],
-} satisfies Record<string, Task["subtasks"]>;
+]);
 
 function enrichCase(offboardingCase: OffboardingCase) {
   return {
@@ -535,7 +541,7 @@ function enrichCase(offboardingCase: OffboardingCase) {
     assets: offboardingCase.assets ?? demoAssets,
     tasks: offboardingCase.tasks.map((task) => ({
       ...task,
-      subtasks: task.subtasks ?? demoSubtasks[task.id],
+      subtasks: task.subtasks ?? demoSubtaskMap.get(task.id),
     })),
   };
 }
