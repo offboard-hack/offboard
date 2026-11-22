@@ -104,6 +104,17 @@ export const integrations = pgTable(
   (table) => [uniqueIndex("integrations_name_idx").on(table.name)],
 );
 
+export const memberRoleEnum = pgEnum("member_role", ["admin", "rh", "gestor", "visualizador"]);
+
+export const teamMembers = pgTable("team_members", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 255 }).notNull(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
+  role: memberRoleEnum("role").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const actionConfigs = pgTable(
   "action_configs",
   {

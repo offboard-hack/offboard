@@ -1,9 +1,20 @@
 import { and, asc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import type { Database } from "../client.ts";
 import type { ConfigValue } from "../schema/index.ts";
-import { actionConfigs, integrations, offboardingCases, subtasks, tasks } from "../schema/index.ts";
+import {
+  actionConfigs,
+  integrations,
+  offboardingCases,
+  subtasks,
+  tasks,
+  teamMembers,
+} from "../schema/index.ts";
 
 export type TaskStatus = "done" | "in_progress" | "todo";
+
+export type MemberRole = "admin" | "gestor" | "rh" | "visualizador";
+
+export type NewTeamMember = { name: string; email: string; role: MemberRole };
 
 export type CaseSummary = {
   id: string;
@@ -308,6 +319,35 @@ export function createRepositories(db: Database) {
     return row ?? null;
   }
 
+  const memberColumns = {
+    id: teamMembers.id,
+    name: teamMembers.name,
+    email: teamMembers.email,
+    role: teamMembers.role,
+  };
+
+  async function listTeamMembers() {
+    return db.select(memberColumns).from(teamMembers).orderBy(asc(teamMembers.name));
+  }
+
+  async function createTeamMember({ name, email, role }: NewTeamMember) {
+    const [row] = await db
+      .insert(teamMembers)
+      .values({ name, email, role })
+      .returning(memberColumns);
+
+    return row;
+  }
+
+  async function deleteTeamMember(id: string) {
+    const rows = await db
+      .delete(teamMembers)
+      .where(eq(teamMembers.id, id))
+      .returning({ id: teamMembers.id });
+
+    return rows.length > 0;
+  }
+
   return {
     listOffboardings,
     getOffboarding,
@@ -327,5 +367,8 @@ export function createRepositories(db: Database) {
     getTrackedTasks,
     setTrackingCode,
     getTaskTrackingCode,
+    listTeamMembers,
+    createTeamMember,
+    deleteTeamMember,
   };
 }

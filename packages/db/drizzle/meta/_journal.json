@@ -36,6 +36,13 @@
       "when": 1795650000000,
       "tag": "0004_add_tracking_code",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795740000000,
+      "tag": "0005_add_team_members",
+      "breakpoints": true
     }
   ]
 }

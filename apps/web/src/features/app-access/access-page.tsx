@@ -1,9 +1,13 @@
-import { useState } from "react";
+import { Delete02Icon } from "@hugeicons/core-free-icons";
 import { Shield01Icon, UserGroupIcon, UserCheck01Icon, ViewIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useListPagination } from "@/shared/lib/use-list-pagination";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
+import { createTeamMember, deleteTeamMember, teamQuery } from "@/entities/team";
+import type { MemberRole, TeamMember } from "@/entities/team";
+import { useListPagination } from "@/shared/lib/use-list-pagination";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
+import { Button } from "@/shared/ui/shadcn/button";
 import { classProps } from "../../shared/lib/class-props";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
@@ -17,91 +21,118 @@ const styles = {
   accessTable: "min-w-lg",
 };
 
-const roleAccess = {
-  Admin: "Acesso total",
-  RH: "Cadastro e painel",
-  Gestor: "Equipe e aprovações",
-  Visualizador: "Somente leitura",
-};
+const roleDetails = {
+  admin: { label: "Admin", access: "Acesso total" },
+  rh: { label: "RH", access: "Cadastro e painel" },
+  gestor: { label: "Gestor", access: "Equipe e aprovações" },
+  visualizador: { label: "Visualizador", access: "Somente leitura" },
+} satisfies Record<MemberRole, { label: string; access: string }>;
 
-const roleCards = [
+const roleByLabel = {
+  Admin: "admin",
+  RH: "rh",
+  Gestor: "gestor",
+  Visualizador: "visualizador",
+} satisfies Record<NewMember["role"], MemberRole>;
+
+const roleCards: {
+  role: MemberRole;
+  label: string;
+  icon: typeof Shield01Icon;
+  tone: string;
+  capabilities: string;
+}[] = [
   {
-    role: "Admin",
+    role: "admin",
+    label: "Admin",
     icon: Shield01Icon,
     tone: "bg-primary/10 text-primary",
     capabilities: "Gerencia equipe, configura integrações, acessa todos os desligamentos",
   },
   {
-    role: "RH",
+    role: "rh",
+    label: "RH",
     icon: UserGroupIcon,
     tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200",
     capabilities: "Cria e acompanha desligamentos, executa checklist, envia comunicações",
   },
   {
-    role: "Gestor",
+    role: "gestor",
+    label: "Gestor",
     icon: UserCheck01Icon,
     tone: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-200",
     capabilities: "Acompanha equipe, aprova tarefas, recebe notificações",
   },
   {
-    role: "Visualizador",
+    role: "visualizador",
+    label: "Visualizador",
     icon: ViewIcon,
     tone: "bg-muted text-muted-foreground",
     capabilities: "Consulta andamento dos desligamentos (somente leitura)",
   },
 ];
 
-const roleBadges = {
-  Admin: { variant: "default", className: "" },
-  RH: { variant: "secondary", className: "" },
-  Gestor: { variant: "outline", className: "" },
-  Visualizador: { variant: "ghost", className: "bg-muted text-muted-foreground" },
-} as const;
-
-type Member = { name: string; role: NewMember["role"]; access: string; security: string };
-
-const initialTeam: Member[] = [
-  { name: "Beatriz Castro", role: "Admin", access: roleAccess.Admin, security: "2FA ativo" },
-  { name: "Camila Rocha", role: "RH", access: roleAccess.RH, security: "2FA ativo" },
-  {
-    name: "Diego Alves",
-    role: "Gestor",
-    access: roleAccess.Gestor,
-    security: "Convite pendente",
-  },
-];
-
-const teamColumns: TableColumn<Member>[] = [
-  { id: "name", accessorFn: ({ name }) => name, header: "Membro" },
-  {
-    id: "role",
-    accessorFn: ({ role }) => role,
-    header: "Papel",
-    cell: ({ row }) => {
-      const { variant, className } = roleBadges[row.original.role];
-
-      return (
-        <Badge variant={variant} className={className}>
-          {row.original.role}
-        </Badge>
-      );
-    },
-  },
-  { id: "access", accessorFn: ({ access }) => access, header: "Permissão" },
-  { id: "security", accessorFn: ({ security }) => security, header: "Segurança" },
-];
+const roleBadges: Record<
+  MemberRole,
+  { variant: "default" | "secondary" | "outline"; className: string }
+> = {
+  admin: { variant: "default", className: "" },
+  rh: { variant: "secondary", className: "" },
+  gestor: { variant: "outline", className: "" },
+  visualizador: { variant: "outline", className: "bg-muted text-muted-foreground" },
+};
 
 const route = getRouteApi("/acessos-ao-app");
 
 export function AccessPage() {
   const navigate = route.useNavigate();
-  const [team, setTeam] = useState(initialTeam);
+  const client = useQueryClient();
+  const { data: team } = useSuspenseQuery(teamQuery);
+
+  const refresh = () => client.invalidateQueries(teamQuery);
+
+  const add = useMutation({ mutationFn: createTeamMember, onSettled: refresh });
+  const remove = useMutation({ mutationFn: deleteTeamMember, onSettled: refresh });
 
   const addMember = ({ name, email, role }: NewMember) =>
-    setTeam((current) => [
-      ...current,
-      { name, role, access: roleAccess[role], security: `Convite pendente (${email})` },
-    ]);
+    add.mutate({ name, email, role: roleByLabel[role] });
+
+  const teamColumns: TableColumn<TeamMember>[] = [
+    { id: "name", accessorFn: ({ name }) => name, header: "Membro" },
+    { id: "email", accessorFn: ({ email }) => email, header: "E-mail" },
+    {
+      id: "role",
+      accessorFn: ({ role }) => roleDetails[role].label,
+      header: "Papel",
+      cell: ({ row }) => {
+        const { variant, className } = roleBadges[row.original.role];
+
+        return (
+          <Badge variant={variant} className={className}>
+            {roleDetails[row.original.role].label}
+          </Badge>
+        );
+      },
+    },
+    { id: "access", accessorFn: ({ role }) => roleDetails[role].access, header: "Permissão" },
+    {
+      id: "actions",
+      header: "Ações",
+      enableSorting: false,
+      cell: ({ row: { original } }) => (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Remover ${original.name}`}
+          disabled={remove.isPending}
+          onClick={() => remove.mutate(original.id)}
+        >
+          <HugeiconsIcon icon={Delete02Icon} aria-hidden="true" />
+        </Button>
+      ),
+    },
+  ];
 
   const teamPagination = useListPagination(
     (patch) =>
@@ -112,7 +143,7 @@ export function AccessPage() {
   );
 
   const roleSummary = roleCards
-    .map(({ role }) => `${team.filter((member) => member.role === role).length} ${role}`)
+    .map(({ role, label }) => `${team.filter((member) => member.role === role).length} ${label}`)
     .join(" · ");
 
   return (
@@ -121,23 +152,25 @@ export function AccessPage() {
       breadcrumb={<ListBreadcrumb title="Equipe e permissões" />}
     >
       <section className="grid min-w-0 gap-3 sm:grid-cols-2" aria-label="Capacidades por papel">
-        {roleCards.map(({ role, icon, tone, capabilities }) => (
-          <Card key={role}>
+        {roleCards.map(({ label, icon, tone, capabilities }) => (
+          <Card key={label}>
             <CardHeader className="flex-row items-center gap-3">
               <span className={`flex size-8 items-center justify-center rounded-lg ${tone}`}>
                 <HugeiconsIcon icon={icon} size={16} />
               </span>
-              <CardTitle>{role}</CardTitle>
+              <CardTitle>{label}</CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">{capabilities}</CardContent>
           </Card>
         ))}
       </section>
+
       <p className="text-sm text-muted-foreground">
         <strong className="font-semibold text-foreground">Total de membros: {team.length}</strong>
         {" · "}
         {roleSummary}
       </p>
+
       <section className="min-w-0" aria-labelledby="equipe">
         <DataTable
           toolbar={
@@ -152,7 +185,7 @@ export function AccessPage() {
           labelledBy="equipe"
           scrollLabel="Tabela da equipe de RH"
           tableStyle={styles.accessTable}
-          getRowId={(member) => member.name}
+          getRowId={(member) => member.id}
         />
       </section>
     </ListPage>

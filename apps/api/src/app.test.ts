@@ -33,6 +33,7 @@ describe.skipIf(!url)("api", () => {
 
   type Payload = {
     name?: string;
+    email?: string;
     role?: string;
     department?: string;
     deadline?: string;
@@ -347,6 +348,68 @@ describe.skipIf(!url)("api", () => {
     expect(res.status).toBe(404);
   });
 
+  it("lists seeded team members ordered by name", async () => {
+    const res = await call("/team");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([
+      { id: expect.any(String), name: "Beatriz Castro", email: expect.any(String), role: "admin" },
+      { id: expect.any(String), name: "Camila Rocha", email: expect.any(String), role: "rh" },
+      { id: expect.any(String), name: "Diego Alves", email: expect.any(String), role: "gestor" },
+    ]);
+  });
+
+  it("creates a team member", async () => {
+    const res = await call("/team", "POST", {
+      name: "Eva Dias",
+      email: "eva.dias@offboard.com",
+      role: "visualizador",
+    });
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({
+      id: expect.any(String),
+      name: "Eva Dias",
+      email: "eva.dias@offboard.com",
+      role: "visualizador",
+    });
+  });
+
+  it("rejects a duplicate team member email", async () => {
+    const res = await call("/team", "POST", {
+      name: "Outra Pessoa",
+      email: "camila.rocha@offboard.com",
+      role: "rh",
+    });
+
+    expect(res.status).toBe(409);
+  });
+
+  it("rejects invalid team member payloads", async () => {
+    const badEmail = await call("/team", "POST", { name: "A", email: "nope", role: "rh" });
+    const badRole = await call("/team", "POST", { name: "A", email: "a@b.com", role: "root" });
+    const noName = await call("/team", "POST", { email: "a@b.com", role: "rh" });
+
+    expect(badEmail.status).toBe(422);
+    expect(badRole.status).toBe(422);
+    expect(noName.status).toBe(422);
+  });
+
+  it("deletes a team member", async () => {
+    const [first] = await (await call("/team")).json();
+
+    const res = await call(`/team/${first.id}`, "DELETE");
+
+    expect(res.status).toBe(204);
+    expect(await (await call("/team")).json()).toHaveLength(2);
+  });
+
+  it("returns 404 when deleting unknown team member", async () => {
+    const res = await call(`/team/${missingCaseId}`, "DELETE");
+
+    expect(res.status).toBe(404);
+  });
+
   it("rejects invalid action config", async () => {
     const noAction = await call("/action-configs", "POST", { phase: "d0" });
     const noPhase = await call("/action-configs", "POST", { actionId: "test::x" });
@@ -366,6 +429,23 @@ describe.skipIf(!url)("api", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ actionId: "x::y", phase: "d0" }),
+      }),
+    );
+
+    expect(res.status).toBe(500);
+  });
+
+  it("rethrows unexpected team member create errors", async () => {
+    const failing = createApp("http://localhost:5173", {
+      ...createRepositories(db),
+      createTeamMember: () => Promise.reject(new Error("boom")),
+    });
+
+    const res = await failing.handle(
+      new Request("http://localhost/api/team", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "A", email: "a@b.com", role: "rh" }),
       }),
     );
 
