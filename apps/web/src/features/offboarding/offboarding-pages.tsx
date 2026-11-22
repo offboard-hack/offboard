@@ -541,7 +541,7 @@ export function CasePage({
               </div>
               <ul role="list" className="divide-y">
                 {teamTasks.map((task) => {
-                  const hasDetails = (task.subtasks && task.subtasks.length > 0) || task.note;
+                  const hasDetails = task.subtasks.length > 0 || task.description;
 
                   const expanded = expandedTasks.has(task.id);
 
@@ -602,7 +602,7 @@ export function CasePage({
                       </div>
                       {hasDetails && expanded && (
                         <div className="border-t bg-muted/20 px-4 py-3 pl-10">
-                          {task.subtasks && task.subtasks.length > 0 && (
+                          {task.subtasks.length > 0 && (
                             <ul className="grid gap-1.5">
                               {task.subtasks.map((sub) => (
                                 <li key={sub.id} className="flex items-center gap-2 text-sm">
@@ -626,8 +626,8 @@ export function CasePage({
                               ))}
                             </ul>
                           )}
-                          {task.note && (
-                            <p className="mt-2 text-sm text-muted-foreground">{task.note}</p>
+                          {task.description && (
+                            <p className="mt-2 text-sm text-muted-foreground">{task.description}</p>
                           )}
                         </div>
                       )}

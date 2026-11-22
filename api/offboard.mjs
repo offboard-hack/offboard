@@ -1,4 +1,4 @@
-import{createRequire as _cr}from"module";const require=_cr(import.meta.url);
+import{createRequire}from"module";const require=createRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -1269,46 +1269,46 @@ var require_cert_signatures = __commonJS({
     function x509Error(msg, cert) {
       return new Error("SASL channel binding: " + msg + " when parsing public certificate " + cert.toString("base64"));
     }
-    function readASN1Length(data, index) {
-      let length = data[index++];
-      if (length < 128) return { length, index };
+    function readASN1Length(data, index2) {
+      let length = data[index2++];
+      if (length < 128) return { length, index: index2 };
       const lengthBytes = length & 127;
       if (lengthBytes > 4) throw x509Error("bad length", data);
       length = 0;
       for (let i2 = 0; i2 < lengthBytes; i2++) {
-        length = length << 8 | data[index++];
+        length = length << 8 | data[index2++];
       }
-      return { length, index };
+      return { length, index: index2 };
     }
-    function readASN1OID(data, index) {
-      if (data[index++] !== 6) throw x509Error("non-OID data", data);
-      const { length: OIDLength, index: indexAfterOIDLength } = readASN1Length(data, index);
-      index = indexAfterOIDLength;
-      const lastIndex = index + OIDLength;
-      const byte1 = data[index++];
+    function readASN1OID(data, index2) {
+      if (data[index2++] !== 6) throw x509Error("non-OID data", data);
+      const { length: OIDLength, index: indexAfterOIDLength } = readASN1Length(data, index2);
+      index2 = indexAfterOIDLength;
+      const lastIndex = index2 + OIDLength;
+      const byte1 = data[index2++];
       let oid = (byte1 / 40 >> 0) + "." + byte1 % 40;
-      while (index < lastIndex) {
+      while (index2 < lastIndex) {
         let value = 0;
-        while (index < lastIndex) {
-          const nextByte = data[index++];
+        while (index2 < lastIndex) {
+          const nextByte = data[index2++];
           value = value << 7 | nextByte & 127;
           if (nextByte < 128) break;
         }
         oid += "." + value;
       }
-      return { oid, index };
+      return { oid, index: index2 };
     }
-    function expectASN1Seq(data, index) {
-      if (data[index++] !== 48) throw x509Error("non-sequence data", data);
-      return readASN1Length(data, index);
+    function expectASN1Seq(data, index2) {
+      if (data[index2++] !== 48) throw x509Error("non-sequence data", data);
+      return readASN1Length(data, index2);
     }
-    function signatureAlgorithmHashFromCertificate(data, index) {
-      if (index === void 0) index = 0;
-      index = expectASN1Seq(data, index).index;
-      const { length: certInfoLength, index: indexAfterCertInfoLength } = expectASN1Seq(data, index);
-      index = indexAfterCertInfoLength + certInfoLength;
-      index = expectASN1Seq(data, index).index;
-      const { oid, index: indexAfterOID } = readASN1OID(data, index);
+    function signatureAlgorithmHashFromCertificate(data, index2) {
+      if (index2 === void 0) index2 = 0;
+      index2 = expectASN1Seq(data, index2).index;
+      const { length: certInfoLength, index: indexAfterCertInfoLength } = expectASN1Seq(data, index2);
+      index2 = indexAfterCertInfoLength + certInfoLength;
+      index2 = expectASN1Seq(data, index2).index;
+      const { oid, index: indexAfterOID } = readASN1OID(data, index2);
       switch (oid) {
         // RSA
         case "1.2.840.113549.1.1.4":
@@ -1340,12 +1340,12 @@ var require_cert_signatures = __commonJS({
           return "SHA-512";
         // RSASSA-PSS: hash is indicated separately
         case "1.2.840.113549.1.1.10": {
-          index = indexAfterOID;
-          index = expectASN1Seq(data, index).index;
-          if (data[index++] !== 160) throw x509Error("non-tag data", data);
-          index = readASN1Length(data, index).index;
-          index = expectASN1Seq(data, index).index;
-          const { oid: hashOID } = readASN1OID(data, index);
+          index2 = indexAfterOID;
+          index2 = expectASN1Seq(data, index2).index;
+          if (data[index2++] !== 160) throw x509Error("non-tag data", data);
+          index2 = readASN1Length(data, index2).index;
+          index2 = expectASN1Seq(data, index2).index;
+          const { oid: hashOID } = readASN1OID(data, index2);
           switch (hashOID) {
             // standalone hash OIDs
             case "1.2.840.113549.2.5":
@@ -4283,9 +4283,9 @@ var require_client = __commonJS({
             queryCallback(error62);
             query.callback = () => {
             };
-            const index = this._queryQueue.indexOf(query);
-            if (index > -1) {
-              this._queryQueue.splice(index, 1);
+            const index2 = this._queryQueue.indexOf(query);
+            if (index2 > -1) {
+              this._queryQueue.splice(index2, 1);
             } else if (this.pipeline) {
               this.connection.stream.destroy();
               return;
@@ -5099,9 +5099,9 @@ var require_client2 = __commonJS({
           queryCallback(error62);
           query.callback = () => {
           };
-          const index = this._queryQueue.indexOf(query);
-          if (index > -1) {
-            this._queryQueue.splice(index, 1);
+          const index2 = this._queryQueue.indexOf(query);
+          if (index2 > -1) {
+            this._queryQueue.splice(index2, 1);
           }
           this._pulseQueryQueue();
         }, readTimeout);
@@ -7555,18 +7555,18 @@ var require_common = __commonJS({
           if (typeof args[0] !== "string") {
             args.unshift("%O");
           }
-          let index = 0;
+          let index2 = 0;
           args[0] = args[0].replace(/%([a-zA-Z%])/g, (match, format) => {
             if (match === "%%") {
               return "%";
             }
-            index++;
+            index2++;
             const formatter = createDebug.formatters[format];
             if (typeof formatter === "function") {
-              const val = args[index];
+              const val = args[index2];
               match = formatter.call(self, val);
-              args.splice(index, 1);
-              index--;
+              args.splice(index2, 1);
+              index2--;
             }
             return match;
           });
@@ -7801,15 +7801,15 @@ var require_browser = __commonJS({
       }
       const c2 = "color: " + this.color;
       args.splice(1, 0, c2, "color: inherit");
-      let index = 0;
+      let index2 = 0;
       let lastC = 0;
       args[0].replace(/%[a-zA-Z%]/g, (match) => {
         if (match === "%%") {
           return;
         }
-        index++;
+        index2++;
         if (match === "%c") {
-          lastC = index;
+          lastC = index2;
         }
       });
       args.splice(lastC, 0, c2);
@@ -8683,7 +8683,7 @@ var init_uint8array_extras = __esm({
       utf8: new globalThis.TextDecoder("utf8")
     };
     cachedEncoder = new globalThis.TextEncoder();
-    byteToHexLookupTable = Array.from({ length: 256 }, (_2, index) => index.toString(16).padStart(2, "0"));
+    byteToHexLookupTable = Array.from({ length: 256 }, (_2, index2) => index2.toString(16).padStart(2, "0"));
   }
 });
 
@@ -8691,16 +8691,16 @@ var init_uint8array_extras = __esm({
 function stringToBytes(string4, encoding) {
   if (encoding === "utf-16le") {
     const bytes = [];
-    for (let index = 0; index < string4.length; index++) {
-      const code = string4.charCodeAt(index);
+    for (let index2 = 0; index2 < string4.length; index2++) {
+      const code = string4.charCodeAt(index2);
       bytes.push(code & 255, code >> 8 & 255);
     }
     return bytes;
   }
   if (encoding === "utf-16be") {
     const bytes = [];
-    for (let index = 0; index < string4.length; index++) {
-      const code = string4.charCodeAt(index);
+    for (let index2 = 0; index2 < string4.length; index2++) {
+      const code = string4.charCodeAt(index2);
       bytes.push(code >> 8 & 255, code & 255);
     }
     return bytes;
@@ -8713,11 +8713,11 @@ function tarHeaderChecksumMatches(arrayBuffer, offset = 0) {
     return false;
   }
   let sum = 8 * 32;
-  for (let index = offset; index < offset + 148; index++) {
-    sum += arrayBuffer[index];
+  for (let index2 = offset; index2 < offset + 148; index2++) {
+    sum += arrayBuffer[index2];
   }
-  for (let index = offset + 156; index < offset + 512; index++) {
-    sum += arrayBuffer[index];
+  for (let index2 = offset + 156; index2 < offset + 512; index2++) {
+    sum += arrayBuffer[index2];
   }
   return readSum === sum;
 }
@@ -9140,12 +9140,12 @@ function checkBytes(buffer, headers, options) {
     offset: 0,
     ...options
   };
-  for (const [index, header] of headers.entries()) {
+  for (const [index2, header] of headers.entries()) {
     if (options.mask) {
-      if (header !== (options.mask[index] & buffer[index + options.offset])) {
+      if (header !== (options.mask[index2] & buffer[index2 + options.offset])) {
         return false;
       }
-    } else if (header !== buffer[index + options.offset]) {
+    } else if (header !== buffer[index2 + options.offset]) {
       return false;
     }
   }
@@ -9453,7 +9453,7 @@ async function detectZip(tokenizer) {
           };
         }
         default:
-          if (new RegExp("classes\\d*\\.dex", "v").test(zipHeader.filename)) {
+          if (/classes\d*\.dex/v.test(zipHeader.filename)) {
             fileType2 = {
               ext: "apk",
               mime: "application/vnd.android.package-archive"
@@ -10706,7 +10706,7 @@ var init_source = __esm({
         }
         if (this.checkString("AC")) {
           const version3 = new StringType2(4, "latin1").get(this.buffer, 2);
-          if (new RegExp("^\\d+$", "v").test(version3) && version3 >= 1e3 && version3 <= 1050) {
+          if (/^\d+$/v.test(version3) && version3 >= 1e3 && version3 <= 1050) {
             return {
               ext: "dwg",
               mime: "image/vnd.dwg"
@@ -11344,22 +11344,22 @@ var require_dist2 = __commonJS({
       if (len < 2)
         return obj;
       const dec = options?.decode || decode6;
-      let index = 0;
+      let index2 = 0;
       do {
-        const eqIdx = eqIndex(str, index, len);
+        const eqIdx = eqIndex(str, index2, len);
         if (eqIdx === -1)
           break;
-        const endIdx = endIndex(str, index, len);
+        const endIdx = endIndex(str, index2, len);
         if (eqIdx > endIdx) {
-          index = str.lastIndexOf(";", eqIdx - 1) + 1;
+          index2 = str.lastIndexOf(";", eqIdx - 1) + 1;
           continue;
         }
-        const key = valueSlice(str, index, eqIdx);
+        const key = valueSlice(str, index2, eqIdx);
         if (obj[key] === void 0) {
           obj[key] = dec(valueSlice(str, eqIdx + 1, endIdx));
         }
-        index = endIdx + 1;
-      } while (index < len);
+        index2 = endIdx + 1;
+      } while (index2 < len);
       return obj;
     }
     function stringifyCookie(cookie, options) {
@@ -11469,11 +11469,11 @@ var require_dist2 = __commonJS({
         name: valueSlice(str, 0, eqIdx),
         value: dec(valueSlice(str, eqIdx + 1, endIdx))
       };
-      let index = endIdx + 1;
-      while (index < len) {
-        const endIdx2 = endIndex(str, index, len);
-        const eqIdx2 = eqIndex(str, index, endIdx2);
-        const attr = eqIdx2 === -1 ? valueSlice(str, index, endIdx2) : valueSlice(str, index, eqIdx2);
+      let index2 = endIdx + 1;
+      while (index2 < len) {
+        const endIdx2 = endIndex(str, index2, len);
+        const eqIdx2 = eqIndex(str, index2, endIdx2);
+        const attr = eqIdx2 === -1 ? valueSlice(str, index2, endIdx2) : valueSlice(str, index2, eqIdx2);
         const val = eqIdx2 === -1 ? void 0 : valueSlice(str, eqIdx2 + 1, endIdx2);
         switch (attr.toLowerCase()) {
           case "httponly":
@@ -11519,17 +11519,17 @@ var require_dist2 = __commonJS({
             }
             break;
         }
-        index = endIdx2 + 1;
+        index2 = endIdx2 + 1;
       }
       return setCookie;
     }
     function endIndex(str, min, len) {
-      const index = str.indexOf(";", min);
-      return index === -1 ? len : index;
+      const index2 = str.indexOf(";", min);
+      return index2 === -1 ? len : index2;
     }
     function eqIndex(str, min, max) {
-      const index = str.indexOf("=", min);
-      return index < max ? index : -1;
+      const index2 = str.indexOf("=", min);
+      return index2 < max ? index2 : -1;
     }
     function valueSlice(str, min, max) {
       let start = min;
@@ -13022,8 +13022,8 @@ function haveSameKeys(left, right) {
   if (leftKeys.length !== rightKeys.length) {
     return false;
   }
-  for (const [index, key] of leftKeys.entries()) {
-    if (key !== rightKeys[index]) {
+  for (const [index2, key] of leftKeys.entries()) {
+    if (key !== rightKeys[index2]) {
       return false;
     }
   }
@@ -14604,6 +14604,9 @@ var Index = class {
     this.config = { ...config2, table };
   }
 };
+function index(name) {
+  return new IndexBuilderOn(false, name);
+}
 function uniqueIndex(name) {
   return new IndexBuilderOn(true, name);
 }
@@ -15266,8 +15269,8 @@ var PgDialect = class {
       return void 0;
     }
     const joinsArray = [];
-    for (const [index, joinMeta] of joins.entries()) {
-      if (index === 0) {
+    for (const [index2, joinMeta] of joins.entries()) {
+      if (index2 === 0) {
         joinsArray.push(sql` `);
       }
       const table = joinMeta.table;
@@ -15294,7 +15297,7 @@ var PgDialect = class {
           sql`${sql.raw(joinMeta.joinType)} join${lateralSql} ${table}${onSql}`
         );
       }
-      if (index < joins.length - 1) {
+      if (index2 < joins.length - 1) {
         joinsArray.push(sql` `);
       }
     }
@@ -18648,6 +18651,8 @@ __export(schema_exports, {
   integrations: () => integrations,
   offboardingCases: () => offboardingCases,
   offboardingCasesRelations: () => offboardingCasesRelations,
+  subtasks: () => subtasks,
+  subtasksRelations: () => subtasksRelations,
   taskStatusEnum: () => taskStatusEnum,
   tasks: () => tasks,
   tasksRelations: () => tasksRelations
@@ -18668,18 +18673,40 @@ var tasks = pgTable("tasks", {
   title: varchar("title", { length: 500 }).notNull(),
   team: varchar("team", { length: 255 }).notNull(),
   status: taskStatusEnum("status").notNull().default("todo"),
+  description: text("description"),
+  dueDate: date("due_date"),
   position: integer("position").notNull(),
   phase: varchar("phase", { length: 50 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow()
 });
+var subtasks = pgTable(
+  "subtasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    taskId: uuid("task_id").notNull().references(() => tasks.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 500 }).notNull(),
+    done: boolean("done").notNull().default(false),
+    position: integer("position").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow()
+  },
+  (table) => [index("subtasks_task_id_idx").on(table.taskId)]
+);
 var offboardingCasesRelations = relations(offboardingCases, ({ many }) => ({
   tasks: many(tasks)
 }));
-var tasksRelations = relations(tasks, ({ one }) => ({
+var tasksRelations = relations(tasks, ({ one, many }) => ({
   case: one(offboardingCases, {
     fields: [tasks.caseId],
     references: [offboardingCases.id]
+  }),
+  subtasks: many(subtasks)
+}));
+var subtasksRelations = relations(subtasks, ({ one }) => ({
+  task: one(tasks, {
+    fields: [subtasks.taskId],
+    references: [tasks.id]
   })
 }));
 var connectionStatusEnum = pgEnum("connection_status", [
@@ -18749,14 +18776,26 @@ function createRepositories(db) {
   async function getOffboarding(id) {
     const found = await db.query.offboardingCases.findFirst({
       where: eq(offboardingCases.id, id),
-      with: { tasks: { orderBy: asc(tasks.position) } }
+      with: {
+        tasks: {
+          orderBy: asc(tasks.position),
+          with: { subtasks: { orderBy: asc(subtasks.position) } }
+        }
+      }
     });
     if (!found) return null;
     const caseTasks = found.tasks.map((task2) => ({
       id: task2.id,
       title: task2.title,
       team: task2.team,
-      status: task2.status
+      status: task2.status,
+      description: task2.description,
+      dueDate: task2.dueDate,
+      subtasks: task2.subtasks.map((sub) => ({
+        id: sub.id,
+        title: sub.title,
+        done: sub.done
+      }))
     }));
     return {
       id: found.id,
@@ -18789,9 +18828,21 @@ function createRepositories(db) {
       id: tasks.id,
       title: tasks.title,
       team: tasks.team,
-      status: tasks.status
+      status: tasks.status,
+      description: tasks.description,
+      dueDate: tasks.dueDate
     });
-    return updated ?? null;
+    if (!updated) return null;
+    const subs = await db.select({ id: subtasks.id, title: subtasks.title, done: subtasks.done }).from(subtasks).where(eq(subtasks.taskId, taskId)).orderBy(asc(subtasks.position));
+    return { ...updated, subtasks: subs };
+  }
+  async function toggleSubtask(subtaskId) {
+    const [row] = await db.update(subtasks).set({ done: sql`NOT ${subtasks.done}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq(subtasks.id, subtaskId)).returning({
+      id: subtasks.id,
+      title: subtasks.title,
+      done: subtasks.done
+    });
+    return row ?? null;
   }
   async function listIntegrations() {
     const rows = await db.select({ name: integrations.name, status: integrations.status }).from(integrations).orderBy(asc(integrations.name));
@@ -18829,6 +18880,7 @@ function createRepositories(db) {
     createOffboarding,
     bulkCreateOffboardings,
     updateTaskStatus,
+    toggleSubtask,
     listIntegrations,
     upsertIntegration,
     listActionConfigs,
@@ -19929,8 +19981,8 @@ function Array2(items, options) {
 }
 
 // node_modules/@sinclair/typebox/build/esm/type/argument/argument.mjs
-function Argument(index) {
-  return CreateType({ [Kind]: "Argument", index });
+function Argument(index2) {
+  return CreateType({ [Kind]: "Argument", index: index2 });
 }
 
 // node_modules/@sinclair/typebox/build/esm/type/async-iterator/async-iterator.mjs
@@ -20009,28 +20061,28 @@ var TemplateLiteralParserError = class extends TypeBoxError {
 function Unescape(pattern) {
   return pattern.replace(/\\\$/g, "$").replace(/\\\*/g, "*").replace(/\\\^/g, "^").replace(/\\\|/g, "|").replace(/\\\(/g, "(").replace(/\\\)/g, ")");
 }
-function IsNonEscaped(pattern, index, char2) {
-  return pattern[index] === char2 && pattern.charCodeAt(index - 1) !== 92;
+function IsNonEscaped(pattern, index2, char2) {
+  return pattern[index2] === char2 && pattern.charCodeAt(index2 - 1) !== 92;
 }
-function IsOpenParen(pattern, index) {
-  return IsNonEscaped(pattern, index, "(");
+function IsOpenParen(pattern, index2) {
+  return IsNonEscaped(pattern, index2, "(");
 }
-function IsCloseParen(pattern, index) {
-  return IsNonEscaped(pattern, index, ")");
+function IsCloseParen(pattern, index2) {
+  return IsNonEscaped(pattern, index2, ")");
 }
-function IsSeparator(pattern, index) {
-  return IsNonEscaped(pattern, index, "|");
+function IsSeparator(pattern, index2) {
+  return IsNonEscaped(pattern, index2, "|");
 }
 function IsGroup(pattern) {
   if (!(IsOpenParen(pattern, 0) && IsCloseParen(pattern, pattern.length - 1)))
     return false;
   let count = 0;
-  for (let index = 0; index < pattern.length; index++) {
-    if (IsOpenParen(pattern, index))
+  for (let index2 = 0; index2 < pattern.length; index2++) {
+    if (IsOpenParen(pattern, index2))
       count += 1;
-    if (IsCloseParen(pattern, index))
+    if (IsCloseParen(pattern, index2))
       count -= 1;
-    if (count === 0 && index !== pattern.length - 1)
+    if (count === 0 && index2 !== pattern.length - 1)
       return false;
   }
   return true;
@@ -20040,19 +20092,19 @@ function InGroup(pattern) {
 }
 function IsPrecedenceOr(pattern) {
   let count = 0;
-  for (let index = 0; index < pattern.length; index++) {
-    if (IsOpenParen(pattern, index))
+  for (let index2 = 0; index2 < pattern.length; index2++) {
+    if (IsOpenParen(pattern, index2))
       count += 1;
-    if (IsCloseParen(pattern, index))
+    if (IsCloseParen(pattern, index2))
       count -= 1;
-    if (IsSeparator(pattern, index) && count === 0)
+    if (IsSeparator(pattern, index2) && count === 0)
       return true;
   }
   return false;
 }
 function IsPrecedenceAnd(pattern) {
-  for (let index = 0; index < pattern.length; index++) {
-    if (IsOpenParen(pattern, index))
+  for (let index2 = 0; index2 < pattern.length; index2++) {
+    if (IsOpenParen(pattern, index2))
       return true;
   }
   return false;
@@ -20060,16 +20112,16 @@ function IsPrecedenceAnd(pattern) {
 function Or(pattern) {
   let [count, start] = [0, 0];
   const expressions = [];
-  for (let index = 0; index < pattern.length; index++) {
-    if (IsOpenParen(pattern, index))
+  for (let index2 = 0; index2 < pattern.length; index2++) {
+    if (IsOpenParen(pattern, index2))
       count += 1;
-    if (IsCloseParen(pattern, index))
+    if (IsCloseParen(pattern, index2))
       count -= 1;
-    if (IsSeparator(pattern, index) && count === 0) {
-      const range2 = pattern.slice(start, index);
+    if (IsSeparator(pattern, index2) && count === 0) {
+      const range2 = pattern.slice(start, index2);
       if (range2.length > 0)
         expressions.push(TemplateLiteralParse(range2));
-      start = index + 1;
+      start = index2 + 1;
     }
   }
   const range = pattern.slice(start);
@@ -20082,40 +20134,40 @@ function Or(pattern) {
   return { type: "or", expr: expressions };
 }
 function And(pattern) {
-  function Group(value, index) {
-    if (!IsOpenParen(value, index))
+  function Group(value, index2) {
+    if (!IsOpenParen(value, index2))
       throw new TemplateLiteralParserError(`TemplateLiteralParser: Index must point to open parens`);
     let count = 0;
-    for (let scan = index; scan < value.length; scan++) {
+    for (let scan = index2; scan < value.length; scan++) {
       if (IsOpenParen(value, scan))
         count += 1;
       if (IsCloseParen(value, scan))
         count -= 1;
       if (count === 0)
-        return [index, scan];
+        return [index2, scan];
     }
     throw new TemplateLiteralParserError(`TemplateLiteralParser: Unclosed group parens in expression`);
   }
-  function Range(pattern2, index) {
-    for (let scan = index; scan < pattern2.length; scan++) {
+  function Range(pattern2, index2) {
+    for (let scan = index2; scan < pattern2.length; scan++) {
       if (IsOpenParen(pattern2, scan))
-        return [index, scan];
+        return [index2, scan];
     }
-    return [index, pattern2.length];
+    return [index2, pattern2.length];
   }
   const expressions = [];
-  for (let index = 0; index < pattern.length; index++) {
-    if (IsOpenParen(pattern, index)) {
-      const [start, end] = Group(pattern, index);
+  for (let index2 = 0; index2 < pattern.length; index2++) {
+    if (IsOpenParen(pattern, index2)) {
+      const [start, end] = Group(pattern, index2);
       const range = pattern.slice(start, end + 1);
       expressions.push(TemplateLiteralParse(range));
-      index = end;
+      index2 = end;
     } else {
-      const [start, end] = Range(pattern, index);
+      const [start, end] = Range(pattern, index2);
       const range = pattern.slice(start, end);
       if (range.length > 0)
         expressions.push(TemplateLiteralParse(range));
-      index = end - 1;
+      index2 = end - 1;
     }
   }
   return expressions.length === 0 ? { type: "const", const: "" } : expressions.length === 1 ? expressions[0] : { type: "and", expr: expressions };
@@ -20672,7 +20724,7 @@ function KeyOfFromMappedResult(mappedResult, options) {
 function KeyOfPropertyEntries(schema) {
   const keys = KeyOfPropertyKeys(schema);
   const schemas = IndexFromPropertyKeys(schema, keys);
-  return keys.map((_2, index) => [keys[index], schemas[index]]);
+  return keys.map((_2, index2) => [keys[index2], schemas[index2]]);
 }
 
 // node_modules/@sinclair/typebox/build/esm/type/composite/composite.mjs
@@ -20816,13 +20868,13 @@ function FromBoolean(left, right) {
   return IsStructuralRight(right) ? StructuralRight(left, right) : type_exports.IsObject(right) ? FromObjectRight(left, right) : type_exports.IsRecord(right) ? FromRecordRight(left, right) : type_exports.IsBoolean(right) ? ExtendsResult.True : ExtendsResult.False;
 }
 function FromConstructor(left, right) {
-  return IsStructuralRight(right) ? StructuralRight(left, right) : type_exports.IsObject(right) ? FromObjectRight(left, right) : !type_exports.IsConstructor(right) ? ExtendsResult.False : left.parameters.length > right.parameters.length ? ExtendsResult.False : !left.parameters.every((schema, index) => IntoBooleanResult(Visit3(right.parameters[index], schema)) === ExtendsResult.True) ? ExtendsResult.False : IntoBooleanResult(Visit3(left.returns, right.returns));
+  return IsStructuralRight(right) ? StructuralRight(left, right) : type_exports.IsObject(right) ? FromObjectRight(left, right) : !type_exports.IsConstructor(right) ? ExtendsResult.False : left.parameters.length > right.parameters.length ? ExtendsResult.False : !left.parameters.every((schema, index2) => IntoBooleanResult(Visit3(right.parameters[index2], schema)) === ExtendsResult.True) ? ExtendsResult.False : IntoBooleanResult(Visit3(left.returns, right.returns));
 }
 function FromDate(left, right) {
   return IsStructuralRight(right) ? StructuralRight(left, right) : type_exports.IsObject(right) ? FromObjectRight(left, right) : type_exports.IsRecord(right) ? FromRecordRight(left, right) : type_exports.IsDate(right) ? ExtendsResult.True : ExtendsResult.False;
 }
 function FromFunction(left, right) {
-  return IsStructuralRight(right) ? StructuralRight(left, right) : type_exports.IsObject(right) ? FromObjectRight(left, right) : !type_exports.IsFunction(right) ? ExtendsResult.False : left.parameters.length > right.parameters.length ? ExtendsResult.False : !left.parameters.every((schema, index) => IntoBooleanResult(Visit3(right.parameters[index], schema)) === ExtendsResult.True) ? ExtendsResult.False : IntoBooleanResult(Visit3(left.returns, right.returns));
+  return IsStructuralRight(right) ? StructuralRight(left, right) : type_exports.IsObject(right) ? FromObjectRight(left, right) : !type_exports.IsFunction(right) ? ExtendsResult.False : left.parameters.length > right.parameters.length ? ExtendsResult.False : !left.parameters.every((schema, index2) => IntoBooleanResult(Visit3(right.parameters[index2], schema)) === ExtendsResult.True) ? ExtendsResult.False : IntoBooleanResult(Visit3(left.returns, right.returns));
 }
 function FromIntegerRight(left, right) {
   return type_exports.IsLiteral(left) && value_exports.IsNumber(left.const) ? ExtendsResult.True : type_exports.IsNumber(left) || type_exports.IsInteger(left) ? ExtendsResult.True : ExtendsResult.False;
@@ -20982,7 +21034,7 @@ function FromTupleRight(left, right) {
   return type_exports.IsNever(left) ? ExtendsResult.True : type_exports.IsUnknown(left) ? ExtendsResult.False : type_exports.IsAny(left) ? ExtendsResult.Union : ExtendsResult.False;
 }
 function FromTuple3(left, right) {
-  return IsStructuralRight(right) ? StructuralRight(left, right) : type_exports.IsObject(right) && IsObjectArrayLike(right) ? ExtendsResult.True : type_exports.IsArray(right) && IsArrayOfTuple(left, right) ? ExtendsResult.True : !type_exports.IsTuple(right) ? ExtendsResult.False : value_exports.IsUndefined(left.items) && !value_exports.IsUndefined(right.items) || !value_exports.IsUndefined(left.items) && value_exports.IsUndefined(right.items) ? ExtendsResult.False : value_exports.IsUndefined(left.items) && !value_exports.IsUndefined(right.items) ? ExtendsResult.True : left.items.every((schema, index) => Visit3(schema, right.items[index]) === ExtendsResult.True) ? ExtendsResult.True : ExtendsResult.False;
+  return IsStructuralRight(right) ? StructuralRight(left, right) : type_exports.IsObject(right) && IsObjectArrayLike(right) ? ExtendsResult.True : type_exports.IsArray(right) && IsArrayOfTuple(left, right) ? ExtendsResult.True : !type_exports.IsTuple(right) ? ExtendsResult.False : value_exports.IsUndefined(left.items) && !value_exports.IsUndefined(right.items) || !value_exports.IsUndefined(left.items) && value_exports.IsUndefined(right.items) ? ExtendsResult.False : value_exports.IsUndefined(left.items) && !value_exports.IsUndefined(right.items) ? ExtendsResult.True : left.items.every((schema, index2) => Visit3(schema, right.items[index2]) === ExtendsResult.True) ? ExtendsResult.True : ExtendsResult.False;
 }
 function FromUint8Array(left, right) {
   return IsStructuralRight(right) ? StructuralRight(left, right) : type_exports.IsObject(right) ? FromObjectRight(left, right) : type_exports.IsRecord(right) ? FromRecordRight(left, right) : type_exports.IsUint8Array(right) ? ExtendsResult.True : ExtendsResult.False;
@@ -22761,7 +22813,7 @@ function* FromArray8(schema, references, path, value) {
     return;
   }
   const containsSchema = IsDefined2(schema.contains) ? schema.contains : Never();
-  const containsCount = value.reduce((acc, value2, index) => Visit6(containsSchema, references, `${path}${index}`, value2).next().done === true ? acc + 1 : acc, 0);
+  const containsCount = value.reduce((acc, value2, index2) => Visit6(containsSchema, references, `${path}${index2}`, value2).next().done === true ? acc + 1 : acc, 0);
   if (containsCount === 0) {
     yield Create(ValueErrorType.ArrayContains, schema, path, value);
   }
@@ -23535,7 +23587,7 @@ function FromTuple8(schema, references) {
   if (schema.items === void 0) {
     return [];
   } else {
-    return Array.from({ length: schema.minItems }).map((_2, index) => Visit7(schema.items[index], references));
+    return Array.from({ length: schema.minItems }).map((_2, index2) => Visit7(schema.items[index2], references));
   }
 }
 function FromUndefined4(schema, references) {
@@ -23819,7 +23871,7 @@ function FromTuple9(schema, references, value) {
     return Create2(schema, references);
   if (schema.items === void 0)
     return [];
-  return schema.items.map((schema2, index) => Visit8(schema2, references, value[index]));
+  return schema.items.map((schema2, index2) => Visit8(schema2, references, value[index2]));
 }
 function FromUnion14(schema, references, value) {
   return Check(schema, references, value) ? Clone2(value) : CastUnion(schema, references, value);
@@ -24134,8 +24186,8 @@ function FromTuple11(schema, references, value) {
   const isConvertable = IsArray2(value) && !IsUndefined2(schema.items);
   if (!isConvertable)
     return value;
-  return value.map((value2, index) => {
-    return index < schema.items.length ? Visit10(schema.items[index], references, value2) : value2;
+  return value.map((value2, index2) => {
+    return index2 < schema.items.length ? Visit10(schema.items[index2], references, value2) : value2;
   });
 }
 function FromUndefined5(schema, references, value) {
@@ -24231,7 +24283,7 @@ function Default3(schema, path, value) {
   }
 }
 function FromArray14(schema, references, path, value) {
-  return IsArray2(value) ? Default3(schema, path, value.map((value2, index) => Visit11(schema.items, references, `${path}/${index}`, value2))) : Default3(schema, path, value);
+  return IsArray2(value) ? Default3(schema, path, value.map((value2, index2) => Visit11(schema.items, references, `${path}/${index2}`, value2))) : Default3(schema, path, value);
 }
 function FromIntersect15(schema, references, path, value) {
   if (!IsObject2(value) || IsValueType(value))
@@ -24319,7 +24371,7 @@ function FromThis7(schema, references, path, value) {
   return Default3(schema, path, Visit11(target, references, path, value));
 }
 function FromTuple12(schema, references, path, value) {
-  return IsArray2(value) && IsArray2(schema.items) ? Default3(schema, path, schema.items.map((schema2, index) => Visit11(schema2, references, `${path}/${index}`, value[index]))) : Default3(schema, path, value);
+  return IsArray2(value) && IsArray2(schema.items) ? Default3(schema, path, schema.items.map((schema2, index2) => Visit11(schema2, references, `${path}/${index2}`, value[index2]))) : Default3(schema, path, value);
 }
 function FromUnion17(schema, references, path, value) {
   for (const subschema of schema.anyOf) {
@@ -24391,7 +24443,7 @@ function Default4(schema, path, value) {
 }
 function FromArray15(schema, references, path, value) {
   const defaulted = Default4(schema, path, value);
-  return IsArray2(defaulted) ? defaulted.map((value2, index) => Visit12(schema.items, references, `${path}/${index}`, value2)) : defaulted;
+  return IsArray2(defaulted) ? defaulted.map((value2, index2) => Visit12(schema.items, references, `${path}/${index2}`, value2)) : defaulted;
 }
 function FromImport8(schema, references, path, value) {
   const additional = globalThis.Object.values(schema.$defs);
@@ -24485,7 +24537,7 @@ function FromThis8(schema, references, path, value) {
 }
 function FromTuple13(schema, references, path, value) {
   const value1 = Default4(schema, path, value);
-  return IsArray2(schema.items) ? schema.items.map((schema2, index) => Visit12(schema2, references, `${path}/${index}`, value1[index])) : [];
+  return IsArray2(schema.items) ? schema.items.map((schema2, index2) => Visit12(schema2, references, `${path}/${index2}`, value1[index2])) : [];
 }
 function FromUnion18(schema, references, path, value) {
   for (const subschema of schema.anyOf) {
@@ -24857,8 +24909,8 @@ function Delete3(value, pointer) {
     key = component;
   }
   if (Array.isArray(owner)) {
-    const index = parseInt(key);
-    owner.splice(index, 1);
+    const index2 = parseInt(key);
+    owner.splice(index2, 1);
   } else {
     delete owner[key];
   }
@@ -24904,12 +24956,12 @@ function DateType3(left, right) {
 function ArrayType3(left, right) {
   if (!IsArray2(right) || left.length !== right.length)
     return false;
-  return left.every((value, index) => Equal(value, right[index]));
+  return left.every((value, index2) => Equal(value, right[index2]));
 }
 function TypedArrayType(left, right) {
   if (!IsTypedArray(right) || left.length !== right.length || Object.getPrototypeOf(left).constructor.name !== Object.getPrototypeOf(right).constructor.name)
     return false;
-  return left.every((value, index) => Equal(value, right[index]));
+  return left.every((value, index2) => Equal(value, right[index2]));
 }
 function ValueType(left, right) {
   return left === right;
@@ -25107,8 +25159,8 @@ function ArrayType5(root, path, current, next) {
   if (!IsArray2(current)) {
     pointer_exports.Set(root, path, Clone2(next));
   } else {
-    for (let index = 0; index < next.length; index++) {
-      Visit16(root, `${path}/${index}`, current[index], next[index]);
+    for (let index2 = 0; index2 < next.length; index2++) {
+      Visit16(root, `${path}/${index2}`, current[index2], next[index2]);
     }
     current.splice(next.length);
   }
@@ -25889,8 +25941,8 @@ var mime = {
   "7z": "application/x-7z-compressed"
 };
 var getFileExtension = (path) => {
-  const index = path.lastIndexOf(".");
-  return index === -1 ? "" : path.slice(index + 1);
+  const index2 = path.lastIndexOf(".");
+  return index2 === -1 ? "" : path.slice(index2 + 1);
 };
 var createReadStream;
 var stat;
@@ -26676,10 +26728,10 @@ var formatValidationSummaryValue = (value) => {
         return "[object Object]";
       const output2 = [];
       let size = 0;
-      for (let index = 0; index < length; index++) {
+      for (let index2 = 0; index2 < length; index2++) {
         const descriptor = Object.getOwnPropertyDescriptor(
           value,
-          `${index}`
+          `${index2}`
         );
         if (!descriptor || !("value" in descriptor)) {
           output2.push("");
@@ -26702,9 +26754,9 @@ var formatValidationSummaryValue = (value) => {
 };
 var validationOutputFits = (value) => {
   let bytes = 0;
-  for (let index = 0; index < value.length; index++) {
-    const code = value.charCodeAt(index);
-    if (code < 128 ? bytes++ : code < 2048 ? bytes += 2 : code >= 55296 && code <= 56319 && value.charCodeAt(index + 1) >= 56320 && value.charCodeAt(index + 1) <= 57343 ? (bytes += 4, index++) : bytes += 3, bytes > MAX_VALIDATION_ERROR_OUTPUT_LENGTH) return false;
+  for (let index2 = 0; index2 < value.length; index2++) {
+    const code = value.charCodeAt(index2);
+    if (code < 128 ? bytes++ : code < 2048 ? bytes += 2 : code >= 55296 && code <= 56319 && value.charCodeAt(index2 + 1) >= 56320 && value.charCodeAt(index2 + 1) <= 57343 ? (bytes += 4, index2++) : bytes += 3, bytes > MAX_VALIDATION_ERROR_OUTPUT_LENGTH) return false;
   }
   return true;
 };
@@ -26744,12 +26796,12 @@ var projectValidationValue = (value, state, depth = 0) => {
         value,
         "length"
       ), length = typeof lengthDescriptor?.value == "number" ? lengthDescriptor.value : 0;
-      let index = 0;
-      for (; index < length && index < MAX_VALIDATION_ERROR_CONTAINER_ENTRIES && state.entries < MAX_VALIDATION_ERROR_ENTRIES && state.nodes < MAX_VALIDATION_ERROR_NODES; index++) {
+      let index2 = 0;
+      for (; index2 < length && index2 < MAX_VALIDATION_ERROR_CONTAINER_ENTRIES && state.entries < MAX_VALIDATION_ERROR_ENTRIES && state.nodes < MAX_VALIDATION_ERROR_NODES; index2++) {
         state.entries++;
         const descriptor = Object.getOwnPropertyDescriptor(
           value,
-          `${index}`
+          `${index2}`
         ), projected = descriptor ? "value" in descriptor ? projectValidationValue(
           descriptor.value,
           state,
@@ -26759,7 +26811,7 @@ var projectValidationValue = (value, state, depth = 0) => {
           projected === OMIT_VALIDATION_VALUE ? null : projected
         );
       }
-      return index < length && output22.push(VALIDATION_TRUNCATED), state.preservePrototype || Object.setPrototypeOf(output22, null), output22;
+      return index2 < length && output22.push(VALIDATION_TRUNCATED), state.preservePrototype || Object.setPrototypeOf(output22, null), output22;
     }
     const output2 = state.preservePrototype ? {} : /* @__PURE__ */ Object.create(null);
     let truncated = false, entries = 0, inspected = 0;
@@ -26854,10 +26906,10 @@ var formatStandardValidationPath = (value) => {
     const output2 = [];
     let size = 0;
     const limit = Math.min(length, MAX_VALIDATION_ERROR_CONTAINER_ENTRIES);
-    for (let index = 0; index < limit; index++) {
+    for (let index2 = 0; index2 < limit; index2++) {
       const descriptor = Object.getOwnPropertyDescriptor(
         value,
-        `${index}`
+        `${index2}`
       );
       if (!descriptor || !("value" in descriptor)) continue;
       const part = descriptor.value;
@@ -27757,12 +27809,12 @@ t.BooleanString = ElysiaType.BooleanString, t.ObjectString = ElysiaType.ObjectSt
 // node_modules/elysia/dist/sucrose.mjs
 var separateFunction = (code) => {
   code.startsWith("async") && (code = code.slice(5)), code = code.trimStart();
-  let index = -1;
-  if (code.charCodeAt(0) === 40 && (index = code.indexOf("=>", code.indexOf(")")), index !== -1)) {
-    let bracketEndIndex = index;
+  let index2 = -1;
+  if (code.charCodeAt(0) === 40 && (index2 = code.indexOf("=>", code.indexOf(")")), index2 !== -1)) {
+    let bracketEndIndex = index2;
     for (; bracketEndIndex > 0 && code.charCodeAt(--bracketEndIndex) !== 41; )
       ;
-    let body = code.slice(index + 2);
+    let body = code.slice(index2 + 2);
     return body.charCodeAt(0) === 32 && (body = body.trimStart()), [
       code.slice(1, bracketEndIndex),
       body,
@@ -27771,10 +27823,10 @@ var separateFunction = (code) => {
       }
     ];
   }
-  if (/^(\w+)=>/g.test(code) && (index = code.indexOf("=>"), index !== -1)) {
-    let body = code.slice(index + 2);
+  if (/^(\w+)=>/g.test(code) && (index2 = code.indexOf("=>"), index2 !== -1)) {
+    let body = code.slice(index2 + 2);
     return body.charCodeAt(0) === 32 && (body = body.trimStart()), [
-      code.slice(0, index),
+      code.slice(0, index2),
       body,
       {
         isArrowReturn: body.charCodeAt(0) !== 123
@@ -27782,10 +27834,10 @@ var separateFunction = (code) => {
     ];
   }
   if (code.startsWith("function")) {
-    index = code.indexOf("(");
+    index2 = code.indexOf("(");
     const end = code.indexOf(")");
     return [
-      code.slice(index + 1, end),
+      code.slice(index2 + 1, end),
       code.slice(end + 2),
       {
         isArrowReturn: false
@@ -27864,11 +27916,11 @@ var findParameterReference = (parameter, inference) => {
   const { parameters, hasParenthesis } = retrieveRootparameters(parameter);
   return parameters.query && (inference.query = true), parameters.headers && (inference.headers = true), parameters.body && (inference.body = true), parameters.cookie && (inference.cookie = true), parameters.set && (inference.set = true), parameters.server && (inference.server = true), parameters.route && (inference.route = true), parameters.url && (inference.url = true), parameters.path && (inference.path = true), hasParenthesis ? `{ ${Object.keys(parameters).join(", ")} }` : Object.keys(parameters).join(", ");
 };
-var findEndIndex = (type, content, index) => {
+var findEndIndex = (type, content, index2) => {
   const regex2 = new RegExp(
     `${type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\n\\t,; ]`
   );
-  index !== void 0 && (regex2.lastIndex = index);
+  index2 !== void 0 && (regex2.lastIndex = index2);
   const match = regex2.exec(content);
   return match ? match.index : -1;
 };
@@ -27877,22 +27929,22 @@ var findAlias = (type, body, depth = 0) => {
   const aliases = [];
   let content = body;
   for (; ; ) {
-    let index = findEndIndex(" = " + type, content);
-    if (index === -1 && (index = findEndIndex("=" + type, content)), index === -1) {
+    let index2 = findEndIndex(" = " + type, content);
+    if (index2 === -1 && (index2 = findEndIndex("=" + type, content)), index2 === -1) {
       let lastIndex = content.indexOf(" = " + type);
       if (lastIndex === -1 && (lastIndex = content.indexOf("=" + type)), lastIndex + 3 + type.length !== content.length) break;
-      index = lastIndex;
+      index2 = lastIndex;
     }
-    const part = content.slice(0, index), lastPart = part.lastIndexOf(" ");
+    const part = content.slice(0, index2), lastPart = part.lastIndexOf(" ");
     let variable = part.slice(lastPart !== -1 ? lastPart + 1 : -1);
     if (variable === "}") {
       const [start, end] = bracketPairRangeReverse(part);
-      aliases.push(removeColonAlias(content.slice(start, end))), content = content.slice(index + 3 + type.length);
+      aliases.push(removeColonAlias(content.slice(start, end))), content = content.slice(index2 + 3 + type.length);
       continue;
     }
     for (; variable.charCodeAt(0) === 44; ) variable = variable.slice(1);
     for (; variable.charCodeAt(0) === 9; ) variable = variable.slice(1);
-    variable.includes("(") || aliases.push(variable), content = content.slice(index + 3 + type.length);
+    variable.includes("(") || aliases.push(variable), content = content.slice(index2 + 3 + type.length);
   }
   for (const alias of aliases) {
     if (alias.charCodeAt(0) === 123) continue;
@@ -28298,10 +28350,10 @@ var parseSetCookies = (headers, setCookie) => {
   if (!headers) return headers;
   headers.delete("set-cookie");
   for (let i2 = 0; i2 < setCookie.length; i2++) {
-    const index = setCookie[i2].indexOf("=");
+    const index2 = setCookie[i2].indexOf("=");
     headers.append(
       "set-cookie",
-      `${setCookie[i2].slice(0, index)}=${setCookie[i2].slice(index + 1) || ""}`
+      `${setCookie[i2].slice(0, index2)}=${setCookie[i2].slice(index2 + 1) || ""}`
     );
   }
   return headers;
@@ -28524,31 +28576,31 @@ async function tee(source, branches = 2) {
       } catch {
       }
     }
-  }, close = (index) => {
-    const branch = state[index];
+  }, close = (index2) => {
+    const branch = state[index2];
     return branch.active ? (branch.active = false, active--, hasValue && !branch.consumed && --remaining === 0 && (hasValue = false, wake()), true) : false;
-  }, next = async (index) => {
-    const branch = state[index];
+  }, next = async (index2) => {
+    const branch = state[index2];
     for (; branch.active; ) {
       if (failed)
-        throw close(index), sourceError;
+        throw close(index2), sourceError;
       if (hasValue && !branch.consumed) {
         branch.consumed = true;
         const result = { done: false, value: current };
         return --remaining === 0 && (hasValue = false, wake()), result;
       }
       if (done) {
-        close(index);
+        close(index2);
         break;
       }
       hasValue || pull(), await wait();
     }
     return { done: true, value: void 0 };
   };
-  return state.map((_2, index) => ({
-    next: () => next(index),
+  return state.map((_2, index2) => ({
+    next: () => next(index2),
     async return(finalValue) {
-      return close(index) && (index === 0 || !active) && stop(), { done: true, value: finalValue };
+      return close(index2) && (index2 === 0 || !active) && stop(), { done: true, value: finalValue };
     },
     [Symbol.asyncIterator]() {
       return this;
@@ -29524,7 +29576,7 @@ var MAX_PATH_DEPTH = 32;
 var MAX_ARRAY_INDEX = 1e4;
 var MAX_ASSIGNMENTS = 2e4;
 var spend = (budget, cost = 1) => budget.remaining < cost ? false : (budget.remaining -= cost, true);
-var growArray = (array2, index, budget) => index < array2.length || spend(budget, index - array2.length + 1);
+var growArray = (array2, index2, budget) => index2 < array2.length || spend(budget, index2 - array2.length + 1);
 var isDangerousKey = (key) => {
   if (DANGEROUS_KEYS.has(key)) return true;
   const match = key.match(ARRAY_INDEX_REGEX);
@@ -29533,10 +29585,10 @@ var isDangerousKey = (key) => {
 var parseArrayKey = (key) => {
   const match = key.match(ARRAY_INDEX_REGEX);
   if (!match) return;
-  const index = Number(match[2]);
-  return !Number.isSafeInteger(index) || index > MAX_ARRAY_INDEX ? null : {
+  const index2 = Number(match[2]);
+  return !Number.isSafeInteger(index2) || index2 > MAX_ARRAY_INDEX ? null : {
     name: match[1],
-    index
+    index: index2
   };
 };
 var parseObjectString = (entry) => {
@@ -29953,7 +30005,7 @@ var mirror = (schema, property, instruction) => {
           instruction.parentIsOptional || instruction.fromUnion
         );
         if (isOptional2) {
-          const index = instruction.array;
+          const index2 = instruction.array;
           if (property.startsWith("ar")) {
             const dotIndex = name.indexOf(".");
             let refName;
@@ -29970,10 +30022,10 @@ var mirror = (schema, property, instruction) => {
               }
             }
             const array2 = instruction.optionalsInArray;
-            if (array2[index]) {
-              array2[index].push(refName);
+            if (array2[index2]) {
+              array2[index2].push(refName);
             } else {
-              array2[index] = [refName];
+              array2[index2] = [refName];
             }
           } else {
             instruction.optionals.push(name);
@@ -32467,8 +32519,8 @@ return route.store.compile()(c)
 return new Response(null,{status:_ht.status,statusText:_ht.statusText,headers:_ht.headers})
 }))
 `);
-    for (const [method, index] of Object.entries(methods))
-      method === "ALL" || method === "GET" || method === "WS" || (switchMap += `case ${JSON.stringify(method)}:return ht[${index}].composed(c)
+    for (const [method, index2] of Object.entries(methods))
+      method === "ALL" || method === "GET" || method === "WS" || (switchMap += `case ${JSON.stringify(method)}:return ht[${index2}].composed(c)
 `);
     "ALL" in methods ? switchMap += `default:return ht[${methods.ALL}].composed(c)
 ` : switchMap += `default:break map
@@ -33412,8 +33464,8 @@ var createDynamicHandler = (app2) => {
         else {
           let contentType;
           if (request.body && (contentType = request.headers.get("content-type")), contentType) {
-            const index = contentType.indexOf(";");
-            if (index !== -1 && (contentType = contentType.slice(0, index)), context.contentType = contentType, hooks.parse)
+            const index2 = contentType.indexOf(";");
+            if (index2 !== -1 && (contentType = contentType.slice(0, index2)), context.contentType = contentType, hooks.parse)
               for (let i2 = 0; i2 < hooks.parse.length; i2++) {
                 const hook = hooks.parse[i2].fn;
                 if (typeof hook == "string")
@@ -34320,7 +34372,7 @@ var _Elysia = class _Elysia2 {
         allowMeta,
         inference: this.inference
       });
-      return this.router.history[index] && (_compiled = this.router.history[index].composed = compiled), compiled;
+      return this.router.history[index2] && (_compiled = this.router.history[index2].composed = compiled), compiled;
     };
     let oldIndex;
     if (`${method}_${path}` in this.routeTree)
@@ -34332,7 +34384,7 @@ var _Elysia = class _Elysia2 {
         }
       }
     else this.routeTree[`${method}_${path}`] = this.router.history.length;
-    const index = oldIndex ?? this.router.history.length, route = this.router.history, mainHandler = shouldPrecompile ? compile3() : (ctx) => _compiled ? _compiled(ctx) : (route[index].composed = compile3())(ctx);
+    const index2 = oldIndex ?? this.router.history.length, route = this.router.history, mainHandler = shouldPrecompile ? compile3() : (ctx) => _compiled ? _compiled(ctx) : (route[index2].composed = compile3())(ctx);
     oldIndex !== void 0 ? this.router.history[oldIndex] = Object.assign(
       {
         method,
@@ -34360,15 +34412,15 @@ var _Elysia = class _Elysia2 {
       )
     );
     const handler = {
-      handler: shouldPrecompile ? route[index].composed : void 0,
+      handler: shouldPrecompile ? route[index2].composed : void 0,
       compile() {
         return this.handler = compile3();
       }
     }, staticRouter = this.router.static, isStaticPath = path.indexOf(":") === -1 && path.indexOf("*") === -1;
     if (method === "WS") {
       if (isStaticPath) {
-        path in staticRouter ? staticRouter[path][method] = index : staticRouter[path] = {
-          [method]: index
+        path in staticRouter ? staticRouter[path][method] = index2 : staticRouter[path] = {
+          [method]: index2
         };
         return;
       }
@@ -34378,8 +34430,8 @@ var _Elysia = class _Elysia2 {
       return;
     }
     if (isStaticPath)
-      path in staticRouter ? staticRouter[path][method] = index : staticRouter[path] = {
-        [method]: index
+      path in staticRouter ? staticRouter[path][method] = index2 : staticRouter[path] = {
+        [method]: index2
       }, this.config.strictPath || addResponsePath(getLoosePath(path));
     else {
       if (this.router.http.add(method, path, handler), !this.config.strictPath) {
@@ -43313,11 +43365,11 @@ function capSize(inst, size) {
 var arraySize = (input2) => Array.isArray(input2) ? input2.length : -1;
 var mapSize = (input2) => input2 instanceof Map ? input2.size : -1;
 var setSize = (input2) => input2 instanceof Set ? input2.size : -1;
-function handleArrayResult(result, final, index) {
+function handleArrayResult(result, final, index2) {
   if (result.issues.length) {
-    final.issues.push(...prefixIssues(index, result.issues));
+    final.issues.push(...prefixIssues(index2, result.issues));
   }
-  final.value[index] = result.value;
+  final.value[index2] = result.value;
 }
 var $ZodArray = /* @__PURE__ */ $constructor("$ZodArray", (inst, def) => {
   $ZodType.init(inst, def);
@@ -43929,14 +43981,14 @@ function mergeValues(a2, b2) {
       return { valid: false, mergeErrorPath: [] };
     }
     const newArray = [];
-    for (let index = 0; index < a2.length; index++) {
-      const itemA = a2[index];
-      const itemB = b2[index];
+    for (let index2 = 0; index2 < a2.length; index2++) {
+      const itemA = a2[index2];
+      const itemB = b2[index2];
       const sharedValue = mergeValues(itemA, itemB);
       if (!sharedValue.valid) {
         return {
           valid: false,
-          mergeErrorPath: [index, ...sharedValue.mergeErrorPath]
+          mergeErrorPath: [index2, ...sharedValue.mergeErrorPath]
         };
       }
       newArray.push(sharedValue.data);
@@ -44087,11 +44139,11 @@ function getTupleOptStart(items, key) {
   }
   return 0;
 }
-function handleTupleResult(result, final, index) {
+function handleTupleResult(result, final, index2) {
   if (result.issues.length) {
-    final.issues.push(...prefixIssues(index, result.issues));
+    final.issues.push(...prefixIssues(index2, result.issues));
   }
-  final.value[index] = result.value;
+  final.value[index2] = result.value;
 }
 function handleTupleResults(itemResults, final, items, input2, optoutStart) {
   for (let i2 = 0; i2 < items.length; i2++) {
@@ -58782,7 +58834,7 @@ function detectVersion(schema, defaultTarget) {
   return defaultTarget ?? "draft-2020-12";
 }
 function applyMinItems(items, minItems) {
-  return items.map((item, index) => index < minItems ? item : item.optional());
+  return items.map((item, index2) => index2 < minItems ? item : item.optional());
 }
 function decodeJSONPointerSegment(segment) {
   return segment.replace(/~1/g, "/").replace(/~0/g, "~");
@@ -59657,11 +59709,19 @@ var caseSummary = t.Object({
   total: t.Number()
 });
 var taskStatus = t.Union([t.Literal("done"), t.Literal("in_progress"), t.Literal("todo")]);
+var subtaskRow = t.Object({
+  id: t.String(),
+  title: t.String(),
+  done: t.Boolean()
+});
 var task = t.Object({
   id: t.String(),
   title: t.String(),
   team: t.String(),
-  status: taskStatus
+  status: taskStatus,
+  description: t.Union([t.String(), t.Null()]),
+  dueDate: t.Union([t.String(), t.Null()]),
+  subtasks: t.Array(subtaskRow)
 });
 var offboardingCase = t.Composite([caseSummary, t.Object({ tasks: t.Array(task) })]);
 var connectionStatus = t.Union([
@@ -59739,6 +59799,16 @@ function createApp(webOrigin, repos2) {
       params: t.Object({ id: t.String({ format: "uuid" }) }),
       body: t.Object({ status: taskStatus }),
       response: { 200: task, 404: notFound }
+    }
+  ).patch(
+    "/subtasks/:id/toggle",
+    async ({ params, status: status2 }) => {
+      const toggled = await repos2.toggleSubtask(params.id);
+      return toggled ?? status2(404, { error: "Subtask not found" });
+    },
+    {
+      params: t.Object({ id: t.String({ format: "uuid" }) }),
+      response: { 200: subtaskRow, 404: notFound }
     }
   ).get("/integrations", () => repos2.listIntegrations(), {
     response: t.Array(integrationRow)
