@@ -233,11 +233,13 @@ export function createApp(webOrigin: string, repos: Repositories) {
     .post(
       "/integrations/slack/events",
       ({ body }) => {
-        if (body.type === "url_verification") {
+        if (body.type === "url_verification" && body.challenge) {
           return { challenge: body.challenge };
         }
 
-        return { ok: true };
+        console.log("slack event:", body.type);
+
+        return { ok: true } satisfies { ok: true };
       },
       {
         body: t.Object({

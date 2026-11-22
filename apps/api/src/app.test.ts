@@ -355,6 +355,16 @@ describe.skipIf(!url)("api", () => {
     expect(await res.json()).toEqual({ challenge: "test-challenge-abc123" });
   });
 
+  it("returns ok when url_verification lacks challenge", async () => {
+    const res = await call("/integrations/slack/events", "POST", {
+      type: "url_verification",
+      token: "test-token",
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
   it("accepts slack event_callback with 200", async () => {
     const res = await call("/integrations/slack/events", "POST", {
       type: "event_callback",

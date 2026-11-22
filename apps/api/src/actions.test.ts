@@ -62,7 +62,7 @@ describe.skipIf(!url)("fireActions", () => {
         return;
       }
 
-      if (req.url === "/chat.postMessage.fail") {
+      if (req.url === "/slack-error/chat.postMessage") {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: "channel_not_found" }));
 
@@ -85,7 +85,7 @@ describe.skipIf(!url)("fireActions", () => {
     await new Promise<void>((resolve) => {
       server.listen(0, () => {
         const addr = server.address();
-        const port = addr && "port" in addr ? addr.port : 0;
+        const port = addr != null && addr instanceof Object ? addr.port : 0;
 
         serverUrl = `http://127.0.0.1:${port}`;
         resolve();
@@ -297,7 +297,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("catches slack bot API errors", async () => {
-    process.env.SLACK_API_URL = `${serverUrl}/chat.postMessage.`;
+    process.env.SLACK_API_URL = `${serverUrl}/slack-error/`;
 
     await repos.createActionConfig({
       actionId: "slack:bot-api-fail",
@@ -312,7 +312,7 @@ describe.skipIf(!url)("fireActions", () => {
     const result = results.find((r) => r.actionId === "slack:bot-api-fail");
 
     expect(result?.success).toBe(false);
-    expect(result?.error).toBeDefined();
+    expect(result?.error).toContain("channel_not_found");
   });
 
   it("prefers webhookUrl over botToken when both present", async () => {

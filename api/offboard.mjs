@@ -71260,9 +71260,10 @@ function createApp(webOrigin, repos2) {
   ).post(
     "/integrations/slack/events",
     ({ body }) => {
-      if (body.type === "url_verification") {
+      if (body.type === "url_verification" && body.challenge) {
         return { challenge: body.challenge };
       }
+      console.log("slack event:", body.type);
       return { ok: true };
     },
     {
