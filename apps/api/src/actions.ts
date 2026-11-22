@@ -1,4 +1,5 @@
 import type { ConfigValue } from "@offboard/db/schema";
+import { Resend } from "resend";
 import type { Repositories } from "./app.js";
 
 export type ActionContext = {
@@ -45,6 +46,38 @@ async function executeSlack(webhookUrl: string, message: string, context: Action
   return { ok: response.ok, status: response.status };
 }
 
+async function executeEmail(to: string, subject: string, body: string, context: ActionContext) {
+  const apiKey = process.env.RESEND_API_KEY;
+
+  if (!apiKey) {
+    return { ok: false, error: "RESEND_API_KEY not configured" };
+  }
+
+  const replaceVars = (text: string) =>
+    text
+      .replaceAll("{{task}}", context.taskTitle)
+      .replaceAll("{{status}}", context.status)
+      .replaceAll("{{phase}}", context.phase);
+
+  const finalSubject = replaceVars(subject);
+  const finalBody = replaceVars(body);
+
+  const resend = new Resend(apiKey);
+
+  const { error } = await resend.emails.send({
+    from: "Offboard <onboarding@resend.dev>",
+    to,
+    subject: finalSubject,
+    html: finalBody,
+  });
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true };
+}
+
 export async function fireActions(repos: Repositories, context: ActionContext) {
   if (!context.phase) return [] satisfies ActionResult[];
 
@@ -86,7 +119,26 @@ export async function fireActions(repos: Repositories, context: ActionContext) {
           error: ok ? undefined : `HTTP ${status}`,
         });
       } else if (config.actionId.startsWith("email:")) {
-        results.push({ actionId: config.actionId, success: true });
+        const to = str(config.config.to);
+
+        if (!to) {
+          results.push({ actionId: config.actionId, success: false, error: "missing to" });
+          continue;
+        }
+
+        const subject = str(config.config.subject) ?? "Offboard: {{task}} — {{status}}";
+
+        const body =
+          str(config.config.body) ??
+          "<p>Task <b>{{task}}</b> changed to <b>{{status}}</b> in phase <b>{{phase}}</b>.</p>";
+
+        const result = await executeEmail(to, subject, body, context);
+
+        results.push({
+          actionId: config.actionId,
+          success: result.ok,
+          error: result.ok ? undefined : result.error,
+        });
       } else {
         results.push({ actionId: config.actionId, success: false, error: "unknown action type" });
       }
