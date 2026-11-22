@@ -23,7 +23,7 @@ export async function seedDatabase(db: Database) {
           team,
           title,
           status,
-          phase: phase ?? null,
+          phase,
           position: index,
         })),
       );
