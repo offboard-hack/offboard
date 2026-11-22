@@ -39,24 +39,19 @@ type Connection = keyof typeof connections;
 type Provider = {
   name: string;
   purpose: string;
-} & (
-  | { status: "connected" | "reconnect"; update: string }
-  | { status: "disconnected"; update?: never }
-);
+  status: Connection;
+};
 
 type Integration = {
   name: string;
   purpose: string;
   category: keyof typeof categories;
+  status: Connection;
   providers?: Provider[];
 } & (
   | { logo: `/brands/${string}.svg`; icon?: never }
   | { icon: ComponentProps<typeof HugeiconsIcon>["icon"]; logo?: never }
-) &
-  (
-    | { status: "connected" | "reconnect"; update: string }
-    | { status: "disconnected"; update?: never }
-  );
+);
 
 const integrations: Integration[] = [
   {
@@ -65,7 +60,6 @@ const integrations: Integration[] = [
     icon: File01Icon,
     purpose: "Envia cadastro, rescisão, eSocial e FGTS.",
     status: "connected",
-    update: "8 nov, 7h30 · 23 cadastros atualizados",
   },
   {
     name: "Sistema de ponto",
@@ -73,7 +67,6 @@ const integrations: Integration[] = [
     icon: Clock01Icon,
     purpose: "Fecha ponto e banco de horas.",
     status: "reconnect",
-    update: "4 nov · 23 fechamentos",
   },
   {
     name: "Google Workspace",
@@ -81,7 +74,6 @@ const integrations: Integration[] = [
     logo: "/brands/google.svg",
     purpose: "Bloqueia acessos e transfere arquivos.",
     status: "connected",
-    update: "3 nov · 21 contas atualizadas",
   },
   {
     name: "Slack",
@@ -89,7 +81,6 @@ const integrations: Integration[] = [
     logo: "/brands/slack.svg",
     purpose: "Bloqueia acessos e avisa as áreas responsáveis.",
     status: "connected",
-    update: "8 nov, 8h02 · 14 avisos",
   },
   {
     name: "HubSpot",
@@ -97,7 +88,6 @@ const integrations: Integration[] = [
     logo: "/brands/hubspot.svg",
     purpose: "Transfere negócios e contatos.",
     status: "connected",
-    update: "4 nov · 61 negócios transferidos",
   },
   {
     name: "Inventário de TI",
@@ -105,7 +95,6 @@ const integrations: Integration[] = [
     icon: LaptopIcon,
     purpose: "Lista os bens de cada pessoa e registra a entrada no estoque.",
     status: "connected",
-    update: "8 nov, 9h40 · 2 itens conferidos",
   },
   {
     name: "Transportadora",
@@ -113,13 +102,11 @@ const integrations: Integration[] = [
     icon: TruckIcon,
     purpose: "Agenda e rastreia a coleta de equipamentos.",
     status: "connected",
-    update: "8 nov, 10h05 · 3 etiquetas geradas",
     providers: [
       {
         name: "Correios",
         purpose: "Logística reversa, etiqueta e rastreio via API dos Correios.",
         status: "connected",
-        update: "8 nov, 10h05 · 3 etiquetas geradas",
       },
     ],
   },
@@ -129,7 +116,6 @@ const integrations: Integration[] = [
     icon: MedicalFileIcon,
     purpose: "Agenda o exame demissional.",
     status: "connected",
-    update: "4 nov · 23 agendamentos",
   },
   {
     name: "Operadora do plano de saúde",
@@ -137,7 +123,6 @@ const integrations: Integration[] = [
     icon: HeartCheckIcon,
     purpose: "Informa o direito de manter o plano.",
     status: "connected",
-    update: "3 nov · 23 avisos",
   },
   {
     name: "Cartão corporativo",
@@ -325,7 +310,6 @@ function IntegrationCard({
     name: p.name,
     purpose: p.purpose,
     connection: overrides[`${item.name}::${p.name}`] ?? p.status,
-    update: p.status !== "disconnected" ? p.update : undefined,
   }));
 
   const hasProviders = providers.length > 0;
@@ -376,11 +360,7 @@ function IntegrationCard({
               <div className="grid min-w-0 gap-0.5">
                 <span className="truncate text-sm font-medium">{provider.name}</span>
 
-                <span className="truncate text-xs text-muted-foreground">
-                  {provider.connection === "connected"
-                    ? (provider.update ?? "Sem atividade ainda")
-                    : provider.purpose}
-                </span>
+                <span className="truncate text-xs text-muted-foreground">{provider.purpose}</span>
               </div>
 
               <Switch
@@ -419,9 +399,7 @@ function IntegrationCard({
           </Button>
         ) : (
           <span className="text-xs text-muted-foreground">
-            {connection === "connected"
-              ? (item.update ?? "Sem atividade ainda")
-              : "Ative para conectar"}
+            {connection !== "connected" && "Ative para conectar"}
           </span>
         )}
       </div>
