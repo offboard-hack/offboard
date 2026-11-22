@@ -3,7 +3,9 @@ import { Alert02Icon, Calendar03Icon, Tick02Icon, UserGroupIcon } from "@hugeico
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { classProps } from "../../shared/lib/class-props";
-import { equipmentStatus } from "./status";
+import { getTrackingStatus, equipmentStatus, trackingStatus } from "./status";
+import { formatShortDeadline, offboardingsQuery, taskTrackingQuery } from "@/entities/offboarding";
+import { useQueries, useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { DataTable } from "../../shared/ui/data-table";
@@ -18,6 +20,11 @@ const styles = {
   badgeReady: "text-foreground",
   badgeTransit: "text-foreground",
   badgeWarning: "text-destructive",
+  trackingNone: "bg-muted text-muted-foreground",
+  trackingWaiting: "bg-muted text-muted-foreground",
+  trackingTransit: "bg-yellow-100 text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-200",
+  trackingDelivered: "bg-green-100 text-green-900 dark:bg-green-900/30 dark:text-green-200",
+  code: "font-mono text-xs",
   steps: "mt-3 list-decimal space-y-1 pl-5 text-sm",
 };
 
@@ -114,6 +121,72 @@ const assetBadges = {
   withPerson: styles.badgeNeutral,
 };
 
+type Shipment = {
+  id: string;
+  title: string;
+  person: string;
+  trackingCode: string | null;
+  status: keyof typeof trackingStatus;
+  date: { iso: string; label: string } | null;
+};
+
+const trackingBadges = {
+  none: styles.trackingNone,
+  loading: styles.trackingNone,
+  waiting: styles.trackingWaiting,
+  transit: styles.trackingTransit,
+  delivered: styles.trackingDelivered,
+};
+
+const shipmentColumns: TableColumn<Shipment>[] = [
+  {
+    id: "title",
+    accessorFn: ({ title }) => title,
+    header: "Tarefa",
+    enableSorting: true,
+    sortFn: "portugueseText",
+    meta: { cellStyle: portalStyles.tableHeading },
+  },
+  {
+    id: "person",
+    accessorFn: ({ person }) => person,
+    header: "Pessoa",
+    enableSorting: true,
+    sortFn: "portugueseText",
+  },
+  {
+    id: "trackingCode",
+    header: "Código de rastreio",
+    cell: ({ row }) => {
+      const { trackingCode } = row.original;
+
+      return trackingCode ? <span {...classProps(styles.code)}>{trackingCode}</span> : "—";
+    },
+  },
+  {
+    id: "date",
+    header: "Data",
+    cell: ({ row }) => {
+      const { date } = row.original;
+
+      return date ? <time dateTime={date.iso}>{date.label}</time> : "Sem data";
+    },
+  },
+  {
+    id: "status",
+    header: "Rastreio",
+    cell: ({ row }) => {
+      const { status } = row.original;
+
+      return (
+        <Badge variant="secondary" {...classProps(styles.badge, trackingBadges[status])}>
+          {trackingStatus[status]}
+        </Badge>
+      );
+    },
+  },
+];
+
 const equipmentColumns: TableColumn<Equipment>[] = [
   {
     id: "item",
@@ -182,6 +255,39 @@ export function EquipmentPage() {
     }
   }
 
+  const { data: cases } = useSuspenseQuery(offboardingsQuery);
+
+  const tasks = useMemo(
+    () =>
+      cases.flatMap((entry) =>
+        entry.tasks
+          .filter((task) => task.trackingCode)
+          .map((task) => ({ task, person: entry.name })),
+      ),
+    [cases],
+  );
+
+  const trackings = useQueries({
+    queries: tasks.map(({ task }) => taskTrackingQuery(task.id)),
+  });
+
+  const shipments: Shipment[] = tasks.map(({ task, person }, index) => {
+    const tracking = trackings[index]?.data?.tracking;
+    const iso = tracking?.lastUpdate || task.dueDate;
+
+    return {
+      id: task.id,
+      title: task.title,
+      person,
+      trackingCode: task.trackingCode,
+      status: getTrackingStatus(
+        task.trackingCode,
+        trackings[index]?.isError ? { delivered: false, lastUpdate: "" } : tracking,
+      ),
+      date: iso ? { iso, label: formatShortDeadline(iso) } : null,
+    };
+  });
+
   const visibleEquipment = useMemo(
     () => (status ? equipment.filter((entry) => entry.status === status) : equipment),
     [status],
@@ -243,6 +349,20 @@ export function EquipmentPage() {
           columns={equipmentColumns}
           labelledBy="equipment-title"
           getRowId={(entry) => entry.tag}
+          tableStyle={styles.inventory}
+        />
+      </section>
+      <section className="min-w-0" aria-labelledby="shipments-title">
+        <h2 {...classProps(portalStyles.subheading)} id="shipments-title">
+          Rastreio dos envios
+        </h2>
+        <DataTable
+          data={shipments}
+          emptyText="Nenhum envio com código de rastreio."
+          scrollLabel="Tabela de envios"
+          columns={shipmentColumns}
+          labelledBy="shipments-title"
+          getRowId={(entry) => entry.id}
           tableStyle={styles.inventory}
         />
       </section>

@@ -17,6 +17,7 @@ export type Task = {
   status: "done" | "in_progress" | "todo";
   description: string | null;
   dueDate: string | null;
+  trackingCode: string | null;
   subtasks: { id: string; title: string; done: boolean }[];
 };
 
@@ -167,4 +168,27 @@ export async function updateTaskStatus(taskId: string, status: Task["status"]) {
   const updated: Task = await response.json();
 
   return updated;
+}
+
+export type TaskTracking = {
+  trackingCode: string | null;
+  tracking: { delivered: boolean; lastEvent: string; lastUpdate: string } | null;
+};
+
+export function taskTrackingQuery(taskId: string) {
+  return queryOptions({
+    queryKey: ["task-tracking", taskId],
+    queryFn: async () => {
+      const response = await fetch(`${apiBase()}/api/tasks/${encodeURIComponent(taskId)}/tracking`);
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch tracking");
+      }
+
+      const result: TaskTracking = await response.json();
+
+      return result;
+    },
+    staleTime: 60_000,
+  });
 }

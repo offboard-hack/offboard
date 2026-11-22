@@ -164,6 +164,7 @@ export function createTasksFromChecklist(person: Pick<CaseSummary, "role" | "dep
               status: "todo",
               description: null,
               dueDate: null,
+              trackingCode: null,
               subtasks: [],
             } satisfies Task,
           ]
