@@ -24,6 +24,7 @@ import {
   caseStatusLabels,
   getCaseStatus,
   formatDeadline,
+  formatExactDate,
   formatShortDeadline,
   todayAtWorkspace,
 } from "../../entities/offboarding";
@@ -575,7 +576,7 @@ export function CasePage({
                                 className={`text-xs ${overdue ? "font-medium text-destructive" : "text-muted-foreground"}`}
                               >
                                 {overdue ? "Atrasada · " : ""}
-                                {formatShortDeadline(task.dueDate)}
+                                {formatExactDate(task.dueDate)}
                               </time>
                             )}
                           </span>

@@ -12,7 +12,14 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useHydrated } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type KeyboardEvent } from "react";
+import {
+  actionConfigsQuery,
+  applyActionConfigs,
+  syncActionConfigs,
+  type ActionConfigRow,
+} from "@/entities/action-config";
 import { cn } from "@/shared/lib/utils";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import { Badge } from "@/shared/ui/shadcn/badge";
@@ -316,14 +323,36 @@ function completeStepSettings(step: ChecklistStep) {
 export function ChecklistRulesPage() {
   const hydrated = useHydrated();
 
-  return <ChecklistEditor key={hydrated ? "browser" : "server"} restored={hydrated} />;
+  const actionConfigs = useQuery({ ...actionConfigsQuery, enabled: hydrated });
+
+  return (
+    <ChecklistEditor
+      key={`${hydrated ? "browser" : "server"}:${actionConfigs.data ? "actions" : "local"}`}
+      restored={hydrated}
+      actionRows={actionConfigs.data ?? []}
+    />
+  );
 }
 
-function ChecklistEditor({ restored }: { restored: boolean }) {
-  const [saved, setSaved] = useState(() => (restored ? readSavedModel() : undefined));
+function ChecklistEditor({
+  restored,
+  actionRows,
+}: {
+  restored: boolean;
+  actionRows: ActionConfigRow[];
+}) {
+  const client = useQueryClient();
+
+  const [saved, setSaved] = useState(() => {
+    const model = restored ? readSavedModel() : undefined;
+
+    return restored ? applyActionConfigs(model ?? initialSteps, actionRows) : model;
+  });
 
   const [{ steps, history, message }, setDraft] = useState<Draft>(() => ({
-    steps: restored ? readDraftSteps(saved ?? initialSteps) : initialSteps,
+    steps: restored
+      ? applyActionConfigs(readDraftSteps(saved ?? initialSteps), actionRows)
+      : initialSteps,
     history: [],
     message: "",
   }));
@@ -332,6 +361,7 @@ function ChecklistEditor({ restored }: { restored: boolean }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [keyboardDrag, setKeyboardDrag] = useState<KeyboardDrag | null>(null);
   const [saveError, setSaveError] = useState(false);
+  const [syncError, setSyncError] = useState(false);
 
   const baseline = saved ?? initialSteps;
 
@@ -465,11 +495,21 @@ function ChecklistEditor({ restored }: { restored: boolean }) {
     setDialogOpen(false);
   }
 
-  function commitModel() {
+  async function commitModel() {
     if (!saveModel(steps)) {
       setSaveError(true);
 
       return;
+    }
+
+    try {
+      const existing = await client.fetchQuery({ ...actionConfigsQuery, staleTime: 0 });
+
+      await syncActionConfigs(steps, existing);
+      await client.invalidateQueries(actionConfigsQuery);
+      setSyncError(false);
+    } catch {
+      setSyncError(true);
     }
 
     clearDraftSteps();
@@ -540,6 +580,11 @@ function ChecklistEditor({ restored }: { restored: boolean }) {
               Salvar modelo
             </Button>
           </div>
+          {syncError && (
+            <p role="alert" className="basis-full text-sm text-destructive">
+              Não foi possível salvar as ações no servidor. Tente novamente.
+            </p>
+          )}
           {saveError && (
             <p role="alert" className="basis-full text-sm text-destructive">
               O navegador não conseguiu salvar o modelo. Tente novamente.
