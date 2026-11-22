@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useListPagination } from "@/shared/lib/use-list-pagination";
 import { getRouteApi } from "@tanstack/react-router";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
@@ -5,13 +6,21 @@ import { classProps } from "../../shared/lib/class-props";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
 import { portalStyles as s } from "../../shared/ui/surface.styles";
+import { AddMemberDialog } from "./add-member-dialog";
+import type { NewMember } from "./add-member-dialog";
 
 const styles = {
   accessTable: "min-w-lg",
-  notice: "text-sm text-muted-foreground",
 };
 
-const team = [
+const roleAccess = {
+  Admin: "Acesso total",
+  RH: "Cadastro e painel",
+  Gestor: "Equipe e aprovações",
+  Visualizador: "Somente leitura",
+};
+
+const initialTeam = [
   { name: "Beatriz Castro", role: "Admin", access: "Áreas administrativas", security: "2FA ativo" },
   { name: "Camila Rocha", role: "Analista", access: "Cadastro e painel", security: "2FA ativo" },
   {
@@ -22,7 +31,7 @@ const team = [
   },
 ];
 
-const teamColumns: TableColumn<(typeof team)[number]>[] = [
+const teamColumns: TableColumn<(typeof initialTeam)[number]>[] = [
   { id: "name", accessorFn: ({ name }) => name, header: "Membro" },
   { id: "role", accessorFn: ({ role }) => role, header: "Papel" },
   { id: "access", accessorFn: ({ access }) => access, header: "Permissão" },
@@ -33,6 +42,13 @@ const route = getRouteApi("/acessos-ao-app");
 
 export function AccessPage() {
   const navigate = route.useNavigate();
+  const [team, setTeam] = useState(initialTeam);
+
+  const addMember = ({ name, email, role }: NewMember) =>
+    setTeam((current) => [
+      ...current,
+      { name, role, access: roleAccess[role], security: `Convite pendente (${email})` },
+    ]);
 
   const teamPagination = useListPagination(
     (patch) =>
@@ -54,6 +70,7 @@ export function AccessPage() {
               Equipe RH e permissões
             </h2>
           }
+          toolbarEnd={<AddMemberDialog onAdd={addMember} />}
           urlPagination={teamPagination}
           data={team}
           columns={teamColumns}
@@ -63,9 +80,6 @@ export function AccessPage() {
           getRowId={(member) => member.name}
         />
       </section>
-      <p {...classProps(styles.notice)}>
-        Esta área mostra apenas permissões. A jornada individual no app é privada.
-      </p>
     </ListPage>
   );
 }
