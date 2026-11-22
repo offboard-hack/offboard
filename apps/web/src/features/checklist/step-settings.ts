@@ -21,6 +21,7 @@ const emailSchema = z.object({
 
 export const stepFormSchema = z.object({
   title: z.string().trim().min(1, "Informe o nome da etapa.").max(120, "Use até 120 caracteres."),
+  deadlineOffset: z.number().int().min(-90).max(90).nullable(),
   rules: z.array(stepRuleSchema),
   email: emailSchema.nullable(),
 });
@@ -41,6 +42,7 @@ export function matchesStepRules(rules: Rule[], person: Pick<CaseSummary, "depar
 export function sameStepSettings(previous: StepSettings, next: StepSettings) {
   return (
     previous.title === next.title &&
+    previous.deadlineOffset === next.deadlineOffset &&
     previous.rules.length === next.rules.length &&
     previous.rules.every((rule, index) => {
       const other = next.rules[index];

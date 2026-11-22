@@ -4,7 +4,9 @@ import { Accessibility, PointerActivationConstraints, PointerSensor } from "@dnd
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/react";
 import {
   Add01Icon,
+  Calendar03Icon,
   DragDropVerticalIcon,
+  FilterHorizontalIcon,
   Tick02Icon,
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
@@ -34,6 +36,12 @@ import { DeleteStepDialog, StepDialog } from "./step-dialog";
 import { sameStepSettings, type StepSettings } from "./step-settings";
 
 const cardStyles = "min-w-0 rounded-xl border text-sm";
+
+function formatOffset(offset: number) {
+  if (offset === 0) return "D";
+
+  return offset > 0 ? `D+${offset}` : `D${offset}`;
+}
 
 const teamCardColors = {
   "RH e DP":
@@ -130,7 +138,23 @@ function StepCard({
         >
           <HugeiconsIcon icon={DragDropVerticalIcon} />
         </span>
-        {step.title}
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="min-w-0 flex-1">{step.title}</span>
+          {step.deadlineOffset != null && (
+            <span className="inline-flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground">
+              <HugeiconsIcon icon={Calendar03Icon} className="size-3" aria-hidden="true" />
+              {formatOffset(step.deadlineOffset)}
+            </span>
+          )}
+          {(step.rules?.length ?? 0) > 0 && (
+            <span
+              className="shrink-0 text-muted-foreground"
+              aria-label={`${step.rules!.length} ${step.rules!.length === 1 ? "condição" : "condições"}`}
+            >
+              <HugeiconsIcon icon={FilterHorizontalIcon} className="size-3" />
+            </span>
+          )}
+        </span>
       </Button>
     </li>
   );
@@ -262,7 +286,12 @@ function keyboardDropTarget(
 }
 
 function completeStepSettings(step: ChecklistStep) {
-  return { title: step.title, rules: step.rules ?? [], email: step.email ?? null };
+  return {
+    title: step.title,
+    deadlineOffset: step.deadlineOffset ?? null,
+    rules: step.rules ?? [],
+    email: step.email ?? null,
+  };
 }
 
 export function ChecklistRulesPage() {

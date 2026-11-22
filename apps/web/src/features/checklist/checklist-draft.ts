@@ -5,9 +5,10 @@ import type { CaseSummary, Task } from "@/entities/offboarding";
 
 export const teams = offboardingTeams;
 
-const phaseIds = ["d0", "first-week", "second-week", "follow-up"] as const;
+const phaseIds = ["pre", "d0", "first-week", "second-week", "follow-up"] as const;
 
 export const phases = [
+  { id: "pre", label: "Pré-desligamento" },
   { id: "d0", label: "Dia do desligamento" },
   { id: "first-week", label: "Primeira semana" },
   { id: "second-week", label: "Segunda semana" },
@@ -25,6 +26,7 @@ const placementSchema = z.object({
 
 const storedStepSchema = placementSchema.extend({
   ...stepFormSchema.shape,
+  deadlineOffset: stepFormSchema.shape.deadlineOffset.optional(),
   rules: stepFormSchema.shape.rules.optional(),
   email: stepFormSchema.shape.email.optional(),
   id: z.string().min(1),
