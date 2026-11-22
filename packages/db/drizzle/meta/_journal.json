@@ -20,7 +20,14 @@
       "idx": 2,
       "version": "7",
       "when": 1795470000000,
-      "tag": "0002_add_task_details",
+      "tag": "0002_add_phase_and_action_configs",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795560000000,
+      "tag": "0003_add_task_details",
       "breakpoints": true
     }
   ]

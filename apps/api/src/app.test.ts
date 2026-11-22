@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "@offboard/db/repositories";
+import type { ConfigValue } from "@offboard/db/schema";
 import { seedDatabase } from "@offboard/db/seed-database";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -21,6 +22,10 @@ describe.skipIf(!url)("api", () => {
     deadline?: string;
     status?: string;
     rows?: { name: string; department?: string }[];
+    actionId?: string;
+    enabled?: boolean;
+    config?: Record<string, ConfigValue>;
+    phase?: string;
   };
 
   function call(path: string, method = "GET", body?: Payload) {
@@ -228,5 +233,105 @@ describe.skipIf(!url)("api", () => {
     const res = await call("/integrations/Whatever", "PUT", { status: "invalid" });
 
     expect(res.status).toBe(422);
+  });
+
+  it("lists action configs from seed", async () => {
+    const res = await call("/action-configs");
+    const list = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(list.length).toBeGreaterThan(0);
+    expect(list[0]).toEqual({
+      id: expect.any(String),
+      actionId: expect.any(String),
+      enabled: expect.any(Boolean),
+      config: expect.any(Object),
+      phase: expect.any(String),
+    });
+  });
+
+  it("creates an action config", async () => {
+    const res = await call("/action-configs", "POST", {
+      actionId: "google::transfer_files",
+      phase: "first-week",
+      config: { target: "manager" },
+    });
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({
+      id: expect.any(String),
+      actionId: "google::transfer_files",
+      enabled: true,
+      config: { target: "manager" },
+      phase: "first-week",
+    });
+  });
+
+  it("rejects a duplicate action_id", async () => {
+    await call("/action-configs", "POST", { actionId: "dup::test", phase: "d0" });
+    const res = await call("/action-configs", "POST", { actionId: "dup::test", phase: "d0" });
+
+    expect(res.status).toBe(409);
+  });
+
+  it("updates an action config", async () => {
+    const created = await (
+      await call("/action-configs", "POST", { actionId: "upd::test", phase: "d0" })
+    ).json();
+
+    const res = await call(`/action-configs/${created.id}`, "PUT", {
+      enabled: false,
+      phase: "pre",
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: created.id, enabled: false, phase: "pre" });
+  });
+
+  it("returns 404 when updating unknown config", async () => {
+    const res = await call(`/action-configs/${missingCaseId}`, "PUT", { enabled: false });
+
+    expect(res.status).toBe(404);
+  });
+
+  it("deletes an action config", async () => {
+    const created = await (
+      await call("/action-configs", "POST", { actionId: "del::test", phase: "d0" })
+    ).json();
+
+    const res = await call(`/action-configs/${created.id}`, "DELETE");
+
+    expect(res.status).toBe(204);
+  });
+
+  it("returns 404 when deleting unknown config", async () => {
+    const res = await call(`/action-configs/${missingCaseId}`, "DELETE");
+
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects invalid action config", async () => {
+    const noAction = await call("/action-configs", "POST", { phase: "d0" });
+    const noPhase = await call("/action-configs", "POST", { actionId: "test::x" });
+
+    expect(noAction.status).toBe(422);
+    expect(noPhase.status).toBe(422);
+  });
+
+  it("rethrows unexpected create errors", async () => {
+    const failing = createApp("http://localhost:5173", {
+      ...createRepositories(db),
+      createActionConfig: () => Promise.reject(new Error("boom")),
+    });
+
+    const res = await failing.handle(
+      new Request("http://localhost/api/action-configs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ actionId: "x::y", phase: "d0" }),
+      }),
+    );
+
+    expect(res.status).toBe(500);
   });
 });

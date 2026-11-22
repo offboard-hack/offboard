@@ -4,6 +4,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -12,6 +13,14 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+
+export type ConfigValue =
+  | boolean
+  | number
+  | string
+  | null
+  | ConfigValue[]
+  | { [key: string]: ConfigValue };
 
 export const taskStatusEnum = pgEnum("task_status", ["todo", "in_progress", "done"]);
 
@@ -36,6 +45,7 @@ export const tasks = pgTable("tasks", {
   description: text("description"),
   dueDate: date("due_date"),
   position: integer("position").notNull(),
+  phase: varchar("phase", { length: 50 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -91,4 +101,18 @@ export const integrations = pgTable(
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [uniqueIndex("integrations_name_idx").on(table.name)],
+);
+
+export const actionConfigs = pgTable(
+  "action_configs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    actionId: varchar("action_id", { length: 100 }).notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    config: jsonb("config").$type<Record<string, ConfigValue>>().notNull().default({}),
+    phase: varchar("phase", { length: 50 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [uniqueIndex("action_configs_action_id_idx").on(table.actionId)],
 );

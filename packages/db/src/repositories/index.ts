@@ -1,6 +1,7 @@
 import { asc, eq, sql } from "drizzle-orm";
 import type { Database } from "../client.ts";
-import { integrations, offboardingCases, subtasks, tasks } from "../schema/index.ts";
+import type { ConfigValue } from "../schema/index.ts";
+import { actionConfigs, integrations, offboardingCases, subtasks, tasks } from "../schema/index.ts";
 
 export type TaskStatus = "done" | "in_progress" | "todo";
 
@@ -44,6 +45,29 @@ export type BulkOffboardingRow = { name: string; department: string };
 export type ConnectionStatus = "connected" | "disconnected" | "reconnect";
 
 export type IntegrationRow = { name: string; status: ConnectionStatus };
+
+export type ActionConfigRow = {
+  id: string;
+  actionId: string;
+  enabled: boolean;
+  config: Record<string, ConfigValue>;
+  phase: string;
+};
+
+export type NewActionConfig = {
+  actionId: string;
+  enabled?: boolean;
+  config?: Record<string, ConfigValue>;
+  phase: string;
+};
+
+const actionConfigColumns = {
+  id: actionConfigs.id,
+  actionId: actionConfigs.actionId,
+  enabled: actionConfigs.enabled,
+  config: actionConfigs.config,
+  phase: actionConfigs.phase,
+};
 
 function defaultDeadline() {
   const date = new Date();
@@ -199,6 +223,44 @@ export function createRepositories(db: Database) {
     return row;
   }
 
+  async function listActionConfigs() {
+    return db.select(actionConfigColumns).from(actionConfigs).orderBy(asc(actionConfigs.actionId));
+  }
+
+  async function getActionConfig(id: string) {
+    const [row] = await db
+      .select(actionConfigColumns)
+      .from(actionConfigs)
+      .where(eq(actionConfigs.id, id));
+
+    return row ?? null;
+  }
+
+  async function createActionConfig(data: NewActionConfig) {
+    const [row] = await db.insert(actionConfigs).values(data).returning(actionConfigColumns);
+
+    return row;
+  }
+
+  async function updateActionConfig(id: string, data: Partial<NewActionConfig>) {
+    const [row] = await db
+      .update(actionConfigs)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(actionConfigs.id, id))
+      .returning(actionConfigColumns);
+
+    return row ?? null;
+  }
+
+  async function deleteActionConfig(id: string) {
+    const rows = await db
+      .delete(actionConfigs)
+      .where(eq(actionConfigs.id, id))
+      .returning({ id: actionConfigs.id });
+
+    return rows.length > 0;
+  }
+
   return {
     listOffboardings,
     getOffboarding,
@@ -208,5 +270,10 @@ export function createRepositories(db: Database) {
     toggleSubtask,
     listIntegrations,
     upsertIntegration,
+    listActionConfigs,
+    getActionConfig,
+    createActionConfig,
+    updateActionConfig,
+    deleteActionConfig,
   };
 }

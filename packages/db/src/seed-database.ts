@@ -1,10 +1,12 @@
+import { seedActionConfigs } from "./action-config.fixture.ts";
 import type { Database } from "./client.ts";
 import { seedIntegrations } from "./integration.fixture.ts";
 import { seedCases } from "./offboarding.fixture.ts";
-import { integrations, offboardingCases, subtasks, tasks } from "./schema/index.ts";
+import { actionConfigs, integrations, offboardingCases, subtasks, tasks } from "./schema/index.ts";
 
 export async function seedDatabase(db: Database) {
   await db.transaction(async (tx) => {
+    await tx.delete(actionConfigs);
     await tx.delete(subtasks);
     await tx.delete(tasks);
     await tx.delete(offboardingCases);
@@ -26,6 +28,7 @@ export async function seedDatabase(db: Database) {
             team: seedTask.team,
             title: seedTask.title,
             status: seedTask.status,
+            phase: seedTask.phase ?? null,
             description: seedTask.description ?? null,
             dueDate: seedTask.dueDate ?? null,
             position: i,
@@ -48,5 +51,7 @@ export async function seedDatabase(db: Database) {
     if (seedIntegrations.length > 0) {
       await tx.insert(integrations).values(seedIntegrations);
     }
+
+    await tx.insert(actionConfigs).values(seedActionConfigs);
   });
 }

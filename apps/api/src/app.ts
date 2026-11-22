@@ -2,6 +2,7 @@ import { cors } from "@elysia/cors";
 import { node } from "@elysia/node";
 import type { createRepositories } from "@offboard/db/repositories";
 import { Elysia, t } from "elysia";
+import { z } from "zod";
 
 export type Repositories = ReturnType<typeof createRepositories>;
 
@@ -43,9 +44,29 @@ const connectionStatus = t.Union([
 
 const integrationRow = t.Object({ name: t.String(), status: connectionStatus });
 
+const actionPhase = t.Union([
+  t.Literal("pre"),
+  t.Literal("d0"),
+  t.Literal("first-week"),
+  t.Literal("second-week"),
+  t.Literal("follow-up"),
+]);
+
+const actionConfigValues = t.Record(t.String(), t.Any());
+
+const actionConfigRow = t.Object({
+  id: t.String(),
+  actionId: t.String(),
+  enabled: t.Boolean(),
+  config: actionConfigValues,
+  phase: t.String(),
+});
+
 const notFound = t.Object({ error: t.String() });
 
 const text = t.String({ minLength: 1 });
+
+const uniqueViolation = z.object({ cause: z.object({ code: z.literal("23505") }) });
 
 export function createApp(webOrigin: string, repos: Repositories) {
   return new Elysia({ adapter: node(), prefix: "/api" })
@@ -133,6 +154,66 @@ export function createApp(webOrigin: string, repos: Repositories) {
         params: t.Object({ name: t.String() }),
         body: t.Object({ status: connectionStatus }),
         response: integrationRow,
+      },
+    )
+    .get("/action-configs", () => repos.listActionConfigs(), {
+      response: t.Array(actionConfigRow),
+    })
+    .post(
+      "/action-configs",
+      async ({ body, set, status }) => {
+        try {
+          const created = await repos.createActionConfig(body);
+          set.status = 201;
+
+          return created;
+        } catch (error) {
+          if (uniqueViolation.safeParse(error).success) {
+            return status(409, { error: "Action config already exists" });
+          }
+
+          throw error;
+        }
+      },
+      {
+        body: t.Object({
+          actionId: t.String({ minLength: 1, maxLength: 100 }),
+          phase: actionPhase,
+          enabled: t.Optional(t.Boolean()),
+          config: t.Optional(actionConfigValues),
+        }),
+        response: { 201: actionConfigRow, 409: notFound },
+      },
+    )
+    .put(
+      "/action-configs/:id",
+      async ({ params, body, status }) => {
+        const updated = await repos.updateActionConfig(params.id, body);
+
+        return updated ?? status(404, { error: "Action config not found" });
+      },
+      {
+        params: t.Object({ id: t.String({ format: "uuid" }) }),
+        body: t.Object({
+          phase: t.Optional(actionPhase),
+          enabled: t.Optional(t.Boolean()),
+          config: t.Optional(actionConfigValues),
+        }),
+        response: { 200: actionConfigRow, 404: notFound },
+      },
+    )
+    .delete(
+      "/action-configs/:id",
+      async ({ params, status }) => {
+        const removed = await repos.deleteActionConfig(params.id);
+
+        return removed
+          ? new Response(null, { status: 204 })
+          : status(404, { error: "Action config not found" });
+      },
+      {
+        params: t.Object({ id: t.String({ format: "uuid" }) }),
+        response: { 204: t.Void(), 404: notFound },
       },
     );
 }

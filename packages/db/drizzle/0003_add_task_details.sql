@@ -1,6 +1,6 @@
-ALTER TABLE "tasks" ADD COLUMN "description" text;
+ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "description" text;
 --> statement-breakpoint
-ALTER TABLE "tasks" ADD COLUMN "due_date" date;
+ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "due_date" date;
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "subtasks" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
