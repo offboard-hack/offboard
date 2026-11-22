@@ -14499,6 +14499,115 @@ var pgTable = (name, columns, extraConfig) => {
   return pgTableWithSchema(name, columns, extraConfig, void 0);
 };
 
+// node_modules/drizzle-orm/pg-core/indexes.js
+var IndexBuilderOn = class {
+  constructor(unique, name) {
+    this.unique = unique;
+    this.name = name;
+  }
+  static [entityKind] = "PgIndexBuilderOn";
+  on(...columns) {
+    return new IndexBuilder(
+      columns.map((it) => {
+        if (is(it, SQL)) {
+          return it;
+        }
+        it = it;
+        const clonedIndexedColumn = new IndexedColumn(it.name, !!it.keyAsName, it.columnType, it.indexConfig);
+        it.indexConfig = JSON.parse(JSON.stringify(it.defaultConfig));
+        return clonedIndexedColumn;
+      }),
+      this.unique,
+      false,
+      this.name
+    );
+  }
+  onOnly(...columns) {
+    return new IndexBuilder(
+      columns.map((it) => {
+        if (is(it, SQL)) {
+          return it;
+        }
+        it = it;
+        const clonedIndexedColumn = new IndexedColumn(it.name, !!it.keyAsName, it.columnType, it.indexConfig);
+        it.indexConfig = it.defaultConfig;
+        return clonedIndexedColumn;
+      }),
+      this.unique,
+      true,
+      this.name
+    );
+  }
+  /**
+   * Specify what index method to use. Choices are `btree`, `hash`, `gist`, `spgist`, `gin`, `brin`, or user-installed access methods like `bloom`. The default method is `btree.
+   *
+   * If you have the `pg_vector` extension installed in your database, you can use the `hnsw` and `ivfflat` options, which are predefined types.
+   *
+   * **You can always specify any string you want in the method, in case Drizzle doesn't have it natively in its types**
+   *
+   * @param method The name of the index method to be used
+   * @param columns
+   * @returns
+   */
+  using(method, ...columns) {
+    return new IndexBuilder(
+      columns.map((it) => {
+        if (is(it, SQL)) {
+          return it;
+        }
+        it = it;
+        const clonedIndexedColumn = new IndexedColumn(it.name, !!it.keyAsName, it.columnType, it.indexConfig);
+        it.indexConfig = JSON.parse(JSON.stringify(it.defaultConfig));
+        return clonedIndexedColumn;
+      }),
+      this.unique,
+      true,
+      this.name,
+      method
+    );
+  }
+};
+var IndexBuilder = class {
+  static [entityKind] = "PgIndexBuilder";
+  /** @internal */
+  config;
+  constructor(columns, unique, only, name, method = "btree") {
+    this.config = {
+      name,
+      columns,
+      unique,
+      only,
+      method
+    };
+  }
+  concurrently() {
+    this.config.concurrently = true;
+    return this;
+  }
+  with(obj) {
+    this.config.with = obj;
+    return this;
+  }
+  where(condition) {
+    this.config.where = condition;
+    return this;
+  }
+  /** @internal */
+  build(table) {
+    return new Index(this.config, table);
+  }
+};
+var Index = class {
+  static [entityKind] = "PgIndex";
+  config;
+  constructor(config, table) {
+    this.config = { ...config, table };
+  }
+};
+function uniqueIndex(name) {
+  return new IndexBuilderOn(true, name);
+}
+
 // node_modules/drizzle-orm/pg-core/primary-keys.js
 var PrimaryKeyBuilder = class {
   static [entityKind] = "PgPrimaryKeyBuilder";
@@ -18534,6 +18643,8 @@ function drizzle(...params) {
 // packages/db/src/schema/index.ts
 var schema_exports = {};
 __export(schema_exports, {
+  connectionStatusEnum: () => connectionStatusEnum,
+  integrations: () => integrations,
   offboardingCases: () => offboardingCases,
   offboardingCasesRelations: () => offboardingCasesRelations,
   taskStatusEnum: () => taskStatusEnum,
@@ -18569,6 +18680,22 @@ var tasksRelations = relations(tasks, ({ one }) => ({
     references: [offboardingCases.id]
   })
 }));
+var connectionStatusEnum = pgEnum("connection_status", [
+  "connected",
+  "disconnected",
+  "reconnect"
+]);
+var integrations = pgTable(
+  "integrations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 255 }).notNull(),
+    status: connectionStatusEnum("status").notNull().default("disconnected"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow()
+  },
+  (table) => [uniqueIndex("integrations_name_idx").on(table.name)]
+);
 
 // packages/db/src/client.ts
 function createClient(url) {
@@ -18644,12 +18771,25 @@ function createRepositories(db) {
     });
     return updated ?? null;
   }
+  async function listIntegrations() {
+    const rows = await db.select({ name: integrations.name, status: integrations.status }).from(integrations).orderBy(asc(integrations.name));
+    return rows;
+  }
+  async function upsertIntegration(name, status2) {
+    const [row] = await db.insert(integrations).values({ name, status: status2 }).onConflictDoUpdate({
+      target: integrations.name,
+      set: { status: status2, updatedAt: /* @__PURE__ */ new Date() }
+    }).returning({ name: integrations.name, status: integrations.status });
+    return row;
+  }
   return {
     listOffboardings,
     getOffboarding,
     createOffboarding,
     bulkCreateOffboardings,
-    updateTaskStatus
+    updateTaskStatus,
+    listIntegrations,
+    upsertIntegration
   };
 }
 
@@ -20111,7 +20251,7 @@ function IndexPropertyKeys(type) {
 function FromProperties(type, properties, options) {
   const result = {};
   for (const K2 of Object.getOwnPropertyNames(properties)) {
-    result[K2] = Index(type, IndexPropertyKeys(properties[K2]), options);
+    result[K2] = Index2(type, IndexPropertyKeys(properties[K2]), options);
   }
   return result;
 }
@@ -20157,7 +20297,7 @@ function IndexFromPropertyKeys(type, propertyKeys) {
 function FromSchema(type, propertyKeys) {
   return UnionEvaluated(IndexFromPropertyKeys(type, propertyKeys));
 }
-function Index(type, key, options) {
+function Index2(type, key, options) {
   if (IsRef(type) || IsRef(key)) {
     const error = `Index types using Ref parameters require both Type and Key to be of TSchema`;
     if (!IsSchema(type) || !IsSchema(key))
@@ -20173,7 +20313,7 @@ function Index(type, key, options) {
 
 // node_modules/@sinclair/typebox/build/esm/type/indexed/indexed-from-mapped-key.mjs
 function MappedIndexPropertyKey(type, key, options) {
-  return { [key]: Index(type, [key], Clone(options)) };
+  return { [key]: Index2(type, [key], Clone(options)) };
 }
 function MappedIndexPropertyKeys(type, propertyKeys, options) {
   return propertyKeys.reduce((result, left) => {
@@ -21447,7 +21587,7 @@ function FromAwaited(parameters) {
   return Awaited(parameters[0]);
 }
 function FromIndex(parameters) {
-  return Index(parameters[0], parameters[1]);
+  return Index2(parameters[0], parameters[1]);
 }
 function FromKeyOf(parameters) {
   return KeyOf(parameters[0]);
@@ -21655,7 +21795,7 @@ __export(type_exports3, {
   Extends: () => Extends,
   Extract: () => Extract,
   Function: () => Function2,
-  Index: () => Index,
+  Index: () => Index2,
   InstanceType: () => InstanceType,
   Instantiate: () => Instantiate,
   Integer: () => Integer,
@@ -39761,6 +39901,12 @@ var task = t.Object({
   status: taskStatus
 });
 var offboardingCase = t.Composite([caseSummary, t.Object({ tasks: t.Array(task) })]);
+var connectionStatus = t.Union([
+  t.Literal("connected"),
+  t.Literal("disconnected"),
+  t.Literal("reconnect")
+]);
+var integrationRow = t.Object({ name: t.String(), status: connectionStatus });
 var notFound = t.Object({ error: t.String() });
 var text2 = t.String({ minLength: 1 });
 function createApp(webOrigin, repos2) {
@@ -39815,6 +39961,16 @@ function createApp(webOrigin, repos2) {
       body: t.Object({ status: taskStatus }),
       response: { 200: task, 404: notFound }
     }
+  ).get("/integrations", () => repos2.listIntegrations(), {
+    response: t.Array(integrationRow)
+  }).put(
+    "/integrations/:name",
+    async ({ params, body }) => repos2.upsertIntegration(params.name, body.status),
+    {
+      params: t.Object({ name: t.String() }),
+      body: t.Object({ status: connectionStatus }),
+      response: integrationRow
+    }
   );
 }
 
@@ -39826,11 +39982,13 @@ async function handle(request) {
 }
 var GET = handle;
 var POST = handle;
+var PUT = handle;
 var PATCH = handle;
 export {
   GET,
   PATCH,
-  POST
+  POST,
+  PUT
 };
 /*! Bundled license information:
 
