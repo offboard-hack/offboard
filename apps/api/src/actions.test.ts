@@ -55,10 +55,27 @@ describe.skipIf(!url)("fireActions", () => {
         return;
       }
 
+      if (req.url === "/chat.postMessage") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, channel: "C123", ts: "1234567890.123456" }));
+
+        return;
+      }
+
+      if (req.url === "/chat.postMessage.fail") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "channel_not_found" }));
+
+        return;
+      }
+
       res.writeHead(200);
       res.end("ok");
     });
   });
+
+  let savedBotToken: string | undefined;
+  let savedApiUrl: string | undefined;
 
   beforeAll(async () => {
     await migrate(db, {
@@ -74,16 +91,30 @@ describe.skipIf(!url)("fireActions", () => {
         resolve();
       });
     });
+
+    savedBotToken = process.env.SLACK_BOT_TOKEN;
+    savedApiUrl = process.env.SLACK_API_URL;
+    delete process.env.SLACK_BOT_TOKEN;
   });
 
   beforeEach(async () => {
     await seedDatabase(db);
     receivedRequests.length = 0;
+    delete process.env.SLACK_BOT_TOKEN;
+    process.env.SLACK_API_URL = `${serverUrl}/`;
   });
 
   afterAll(async () => {
     server.close();
     await db.$client.end();
+
+    if (savedBotToken != null) {
+      process.env.SLACK_BOT_TOKEN = savedBotToken;
+    }
+
+    if (savedApiUrl != null) {
+      process.env.SLACK_API_URL = savedApiUrl;
+    }
   });
 
   it("returns empty when phase is empty", async () => {
@@ -175,7 +206,7 @@ describe.skipIf(!url)("fireActions", () => {
     });
   });
 
-  it("reports missing slack webhookUrl", async () => {
+  it("reports missing slack webhookUrl or botToken", async () => {
     await repos.createActionConfig({
       actionId: "slack:no-url",
       phase: "d0",
@@ -188,7 +219,7 @@ describe.skipIf(!url)("fireActions", () => {
     expect(result).toEqual({
       actionId: "slack:no-url",
       success: false,
-      error: "missing webhookUrl",
+      error: "missing webhookUrl or botToken",
     });
   });
 
@@ -203,6 +234,105 @@ describe.skipIf(!url)("fireActions", () => {
     const result = results.find((r) => r.actionId === "slack:fail-http");
 
     expect(result).toEqual({ actionId: "slack:fail-http", success: false, error: "HTTP 500" });
+  });
+
+  it("sends via bot token when config has botToken and channel", async () => {
+    await repos.createActionConfig({
+      actionId: "slack:bot-exec",
+      phase: "d0",
+      config: {
+        botToken: "xoxb-test-token",
+        channel: "#general",
+        message: "{{task}} is now {{status}}",
+      },
+    });
+
+    const results = await fireActions(repos, context);
+    const result = results.find((r) => r.actionId === "slack:bot-exec");
+
+    expect(result).toEqual({ actionId: "slack:bot-exec", success: true });
+
+    const apiReq = receivedRequests.find((r) => r.url === "/chat.postMessage");
+    expect(apiReq).toBeDefined();
+    const params = new URLSearchParams(apiReq!.body);
+    expect(params.get("channel")).toBe("#general");
+    expect(params.get("text")).toBe("Bloquear acessos is now done");
+  });
+
+  it("sends via bot token from env when config lacks botToken", async () => {
+    process.env.SLACK_BOT_TOKEN = "xoxb-env-token";
+
+    await repos.createActionConfig({
+      actionId: "slack:bot-env",
+      phase: "d0",
+      config: {
+        channel: "#ops",
+      },
+    });
+
+    const results = await fireActions(repos, context);
+    const result = results.find((r) => r.actionId === "slack:bot-env");
+
+    expect(result).toEqual({ actionId: "slack:bot-env", success: true });
+
+    const apiReq = receivedRequests.find((r) => r.url === "/chat.postMessage");
+    expect(apiReq).toBeDefined();
+  });
+
+  it("reports missing channel when using bot token", async () => {
+    await repos.createActionConfig({
+      actionId: "slack:bot-no-channel",
+      phase: "d0",
+      config: { botToken: "xoxb-test-token" },
+    });
+
+    const results = await fireActions(repos, context);
+    const result = results.find((r) => r.actionId === "slack:bot-no-channel");
+
+    expect(result).toEqual({
+      actionId: "slack:bot-no-channel",
+      success: false,
+      error: "missing channel",
+    });
+  });
+
+  it("catches slack bot API errors", async () => {
+    process.env.SLACK_API_URL = `${serverUrl}/chat.postMessage.`;
+
+    await repos.createActionConfig({
+      actionId: "slack:bot-api-fail",
+      phase: "d0",
+      config: {
+        botToken: "xoxb-test-token",
+        channel: "#invalid",
+      },
+    });
+
+    const results = await fireActions(repos, context);
+    const result = results.find((r) => r.actionId === "slack:bot-api-fail");
+
+    expect(result?.success).toBe(false);
+    expect(result?.error).toBeDefined();
+  });
+
+  it("prefers webhookUrl over botToken when both present", async () => {
+    await repos.createActionConfig({
+      actionId: "slack:both-configs",
+      phase: "d0",
+      config: {
+        webhookUrl: `${serverUrl}/slack-preferred`,
+        botToken: "xoxb-test-token",
+        channel: "#general",
+      },
+    });
+
+    const results = await fireActions(repos, context);
+    const result = results.find((r) => r.actionId === "slack:both-configs");
+
+    expect(result).toEqual({ actionId: "slack:both-configs", success: true });
+
+    const slackReq = receivedRequests.find((r) => r.url === "/slack-preferred");
+    expect(slackReq).toBeDefined();
   });
 
   it("reports missing email recipient", async () => {
