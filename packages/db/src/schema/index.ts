@@ -2,10 +2,12 @@ import { relations } from "drizzle-orm";
 import {
   boolean,
   date,
+  index,
   integer,
   jsonb,
   pgEnum,
   pgTable,
+  text,
   timestamp,
   uniqueIndex,
   uuid,
@@ -40,20 +42,46 @@ export const tasks = pgTable("tasks", {
   title: varchar("title", { length: 500 }).notNull(),
   team: varchar("team", { length: 255 }).notNull(),
   status: taskStatusEnum("status").notNull().default("todo"),
+  description: text("description"),
+  dueDate: date("due_date"),
   position: integer("position").notNull(),
   phase: varchar("phase", { length: 50 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const subtasks = pgTable(
+  "subtasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 500 }).notNull(),
+    done: boolean("done").notNull().default(false),
+    position: integer("position").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [index("subtasks_task_id_idx").on(table.taskId)],
+);
+
 export const offboardingCasesRelations = relations(offboardingCases, ({ many }) => ({
   tasks: many(tasks),
 }));
 
-export const tasksRelations = relations(tasks, ({ one }) => ({
+export const tasksRelations = relations(tasks, ({ one, many }) => ({
   case: one(offboardingCases, {
     fields: [tasks.caseId],
     references: [offboardingCases.id],
+  }),
+  subtasks: many(subtasks),
+}));
+
+export const subtasksRelations = relations(subtasks, ({ one }) => ({
+  task: one(tasks, {
+    fields: [subtasks.taskId],
+    references: [tasks.id],
   }),
 }));
 

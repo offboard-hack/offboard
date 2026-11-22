@@ -1,7 +1,7 @@
 import { asc, eq, sql } from "drizzle-orm";
 import type { Database } from "../client.ts";
 import type { ConfigValue } from "../schema/index.ts";
-import { actionConfigs, integrations, offboardingCases, tasks } from "../schema/index.ts";
+import { actionConfigs, integrations, offboardingCases, subtasks, tasks } from "../schema/index.ts";
 
 export type TaskStatus = "done" | "in_progress" | "todo";
 
@@ -15,11 +15,20 @@ export type CaseSummary = {
   total: number;
 };
 
+export type SubtaskRow = {
+  id: string;
+  title: string;
+  done: boolean;
+};
+
 export type OffboardingTask = {
   id: string;
   title: string;
   team: string;
   status: TaskStatus;
+  description: string | null;
+  dueDate: string | null;
+  subtasks: SubtaskRow[];
 };
 
 export type OffboardingCase = CaseSummary & { tasks: OffboardingTask[] };
@@ -90,16 +99,28 @@ export function createRepositories(db: Database) {
   async function getOffboarding(id: string) {
     const found = await db.query.offboardingCases.findFirst({
       where: eq(offboardingCases.id, id),
-      with: { tasks: { orderBy: asc(tasks.position) } },
+      with: {
+        tasks: {
+          orderBy: asc(tasks.position),
+          with: { subtasks: { orderBy: asc(subtasks.position) } },
+        },
+      },
     });
 
     if (!found) return null;
 
-    const caseTasks = found.tasks.map((task) => ({
+    const caseTasks: OffboardingTask[] = found.tasks.map((task) => ({
       id: task.id,
       title: task.title,
       team: task.team,
       status: task.status,
+      description: task.description,
+      dueDate: task.dueDate,
+      subtasks: task.subtasks.map((sub) => ({
+        id: sub.id,
+        title: sub.title,
+        done: sub.done,
+      })),
     }));
 
     return {
@@ -151,9 +172,33 @@ export function createRepositories(db: Database) {
         title: tasks.title,
         team: tasks.team,
         status: tasks.status,
+        description: tasks.description,
+        dueDate: tasks.dueDate,
       });
 
-    return updated ?? null;
+    if (!updated) return null;
+
+    const subs = await db
+      .select({ id: subtasks.id, title: subtasks.title, done: subtasks.done })
+      .from(subtasks)
+      .where(eq(subtasks.taskId, taskId))
+      .orderBy(asc(subtasks.position));
+
+    return { ...updated, subtasks: subs };
+  }
+
+  async function toggleSubtask(subtaskId: string) {
+    const [row] = await db
+      .update(subtasks)
+      .set({ done: sql`NOT ${subtasks.done}`, updatedAt: new Date() })
+      .where(eq(subtasks.id, subtaskId))
+      .returning({
+        id: subtasks.id,
+        title: subtasks.title,
+        done: subtasks.done,
+      });
+
+    return row ?? null;
   }
 
   async function listIntegrations() {
@@ -222,6 +267,7 @@ export function createRepositories(db: Database) {
     createOffboarding,
     bulkCreateOffboardings,
     updateTaskStatus,
+    toggleSubtask,
     listIntegrations,
     upsertIntegration,
     listActionConfigs,

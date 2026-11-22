@@ -17,6 +17,7 @@
     { "source": "/api/offboardings", "destination": "/api/offboard" },
     { "source": "/api/offboardings/:path*", "destination": "/api/offboard" },
     { "source": "/api/tasks/:path*", "destination": "/api/offboard" },
+    { "source": "/api/subtasks/:path*", "destination": "/api/offboard" },
     { "source": "/api/integrations", "destination": "/api/offboard" },
     { "source": "/api/integrations/:path*", "destination": "/api/offboard" },
     { "source": "/api/action-configs", "destination": "/api/offboard" },
