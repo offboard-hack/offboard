@@ -160,7 +160,7 @@ export function DashboardPage({
                     onDeadlineChange(next);
                   }
                 }}
-                aria-label="Prazo do desligamento"
+                aria-label="Data de encerramento"
                 {...classProps(styles.group)}
               >
                 {filters.map((filter) => (

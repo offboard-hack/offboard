@@ -162,11 +162,13 @@ export function IntegrationsPage() {
     connection: overrides[item.name] ?? item.status,
   }));
 
+  const effectiveStatus = status || "connected";
+
   const visible = systems.filter(
     ({ name, purpose, connection }) =>
-      (!status ||
-        status === connection ||
-        (status === "disconnected" && connection === "reconnect")) &&
+      (effectiveStatus === "all" ||
+        effectiveStatus === connection ||
+        (effectiveStatus === "disconnected" && connection === "reconnect")) &&
       searchKey(`${name} ${purpose}`).includes(query),
   );
 
@@ -208,15 +210,18 @@ export function IntegrationsPage() {
           onChange={(next) =>
             void navigate({
               search: {
-                status: next === "connected" || next === "disconnected" ? next : undefined,
+                status:
+                  next === "connected" || next === "disconnected" || next === "all"
+                    ? next
+                    : undefined,
               },
               resetScroll: false,
             })
           }
           items={[
-            { value: "", label: "Todas as conexões" },
             { value: "connected", label: "Conectadas" },
             { value: "disconnected", label: "Não conectadas" },
+            { value: "all", label: "Todas as conexões" },
           ]}
         />
       </div>

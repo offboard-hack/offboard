@@ -151,7 +151,7 @@ export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => voi
                 return (
                   <div className="grid content-start gap-2">
                     <Label id={id + "-deadline-label"} htmlFor={id + "-deadline"}>
-                      Prazo
+                      Data de encerramento
                     </Label>
                     <DatePicker
                       id={id + "-deadline"}
