@@ -121,11 +121,6 @@ const integrations: Integration[] = [
         status: "connected",
         update: "8 nov, 10h05 · 3 etiquetas geradas",
       },
-      {
-        name: "Loggi",
-        purpose: "Coleta e entrega expressa.",
-        status: "disconnected",
-      },
     ],
   },
   {
