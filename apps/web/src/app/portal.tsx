@@ -8,7 +8,7 @@ import {
 } from "@/shared/ui/shadcn/breadcrumb";
 import { classProps } from "../shared/lib/class-props";
 import { Button } from "../shared/ui/button";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
   HeadContent,
   Link,
@@ -23,8 +23,13 @@ import {
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useCallback } from "react";
 import type { ReactNode } from "react";
-import { offboardingTeams, offboardingsQuery } from "../entities/offboarding";
-import type { CaseSummary, OffboardingCase } from "../entities/offboarding";
+import {
+  cycleTaskStatus,
+  offboardingTeams,
+  offboardingsQuery,
+  updateTaskStatus,
+} from "../entities/offboarding";
+import type { CaseSummary, OffboardingCase, Task } from "../entities/offboarding";
 import { offboardingStyles } from "../features/offboarding/offboarding.styles";
 import { PortalLayout } from "./shell";
 import {
@@ -427,8 +432,53 @@ export function Case() {
   const { caseId } = caseRoute.useParams();
   const { tasks } = caseRoute.useSearch();
   const navigate = caseRoute.useNavigate();
+  const queryClient = useQueryClient();
   const { data: cases } = useSuspenseQuery(offboardingsQuery);
   const offboardingCase = getCase(cases, caseId);
+
+  const statusMutation = useMutation({
+    mutationFn: ({ taskId, status }: { taskId: string; status: Task["status"] }) =>
+      updateTaskStatus(taskId, cycleTaskStatus(status)),
+    onMutate: async ({ taskId, status }) => {
+      await queryClient.cancelQueries({ queryKey: offboardingsQuery.queryKey });
+      const previous = queryClient.getQueryData(offboardingsQuery.queryKey);
+
+      queryClient.setQueryData(offboardingsQuery.queryKey, (old: OffboardingCase[] | undefined) =>
+        old?.map((c) =>
+          c.id === caseId
+            ? {
+                ...c,
+                tasks: c.tasks.map((t) =>
+                  t.id === taskId ? { ...t, status: cycleTaskStatus(status) } : t,
+                ),
+                completed: c.tasks.reduce(
+                  (sum, t) =>
+                    sum +
+                    (t.id === taskId
+                      ? cycleTaskStatus(status) === "done"
+                        ? 1
+                        : 0
+                      : t.status === "done"
+                        ? 1
+                        : 0),
+                  0,
+                ),
+              }
+            : c,
+        ),
+      );
+
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(offboardingsQuery.queryKey, context.previous);
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: offboardingsQuery.queryKey });
+    },
+  });
 
   return (
     <CasePage
@@ -437,6 +487,7 @@ export function Case() {
       onTaskFilterChange={(next) =>
         void navigate({ search: { tasks: next || undefined }, resetScroll: false })
       }
+      onTaskStatusChange={(taskId, status) => statusMutation.mutate({ taskId, status })}
       breadcrumb={
         <Breadcrumb aria-label="Localização">
           <BreadcrumbList>
