@@ -103,7 +103,7 @@ const integrations: Integration[] = [
     name: "Transportadora",
     category: "equipment",
     icon: TruckIcon,
-    purpose: "Agenda e rastreia a coleta em casa.",
+    purpose: "Agenda e rastreia a coleta por transportadora particular.",
     status: "connected",
     update: "8 nov, 9h12 · Coleta confirmada",
   },
@@ -127,8 +127,10 @@ const integrations: Integration[] = [
     name: "Correios",
     category: "equipment",
     icon: Mail01Icon,
-    purpose: "Gera etiqueta de devolução e rastreia encomendas.",
-    status: "disconnected",
+    purpose:
+      "Gera etiqueta de logística reversa, agenda coleta e rastreia encomendas via API dos Correios.",
+    status: "connected",
+    update: "8 nov, 10h05 · 3 etiquetas geradas",
   },
   {
     name: "Cartão corporativo",
