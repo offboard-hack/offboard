@@ -39,6 +39,22 @@ describe.skipIf(!url)("fireActions", () => {
         return;
       }
 
+      if (req.url === "/emails") {
+        const parsed = JSON.parse(body);
+
+        if (parsed.to === "fail@example.com") {
+          res.writeHead(422);
+          res.end(JSON.stringify({ name: "validation_error", message: "Invalid recipient" }));
+
+          return;
+        }
+
+        res.writeHead(200);
+        res.end(JSON.stringify({ id: "email_123" }));
+
+        return;
+      }
+
       res.writeHead(200);
       res.end("ok");
     });
@@ -189,17 +205,130 @@ describe.skipIf(!url)("fireActions", () => {
     expect(result).toEqual({ actionId: "slack:fail-http", success: false, error: "HTTP 500" });
   });
 
-  it("handles email action as a no-op success", async () => {
+  it("reports missing email recipient", async () => {
     await repos.createActionConfig({
-      actionId: "email:test-noop",
+      actionId: "email:no-to",
       phase: "d0",
       config: {},
     });
 
     const results = await fireActions(repos, context);
-    const result = results.find((r) => r.actionId === "email:test-noop");
+    const result = results.find((r) => r.actionId === "email:no-to");
 
-    expect(result).toEqual({ actionId: "email:test-noop", success: true });
+    expect(result).toEqual({ actionId: "email:no-to", success: false, error: "missing to" });
+  });
+
+  it("reports missing RESEND_API_KEY", async () => {
+    const saved = process.env.RESEND_API_KEY;
+    delete process.env.RESEND_API_KEY;
+
+    try {
+      await repos.createActionConfig({
+        actionId: "email:no-key",
+        phase: "d0",
+        config: { to: "user@example.com", subject: "Test", body: "Hello" },
+      });
+
+      const results = await fireActions(repos, context);
+      const result = results.find((r) => r.actionId === "email:no-key");
+
+      expect(result).toEqual({
+        actionId: "email:no-key",
+        success: false,
+        error: "RESEND_API_KEY not configured",
+      });
+    } finally {
+      if (saved !== undefined) {
+        process.env.RESEND_API_KEY = saved;
+      }
+    }
+  });
+
+  it("sends email with template variables replaced", async () => {
+    process.env.RESEND_API_KEY = "re_test_fake";
+    process.env.RESEND_BASE_URL = serverUrl;
+
+    try {
+      await repos.createActionConfig({
+        actionId: "email:template",
+        phase: "d0",
+        config: {
+          to: "dev@example.com",
+          subject: "{{task}} is {{status}}",
+          body: "<p>{{task}} moved to {{status}} in {{phase}}</p>",
+        },
+      });
+
+      const results = await fireActions(repos, context);
+      const result = results.find((r) => r.actionId === "email:template");
+
+      expect(result).toEqual({ actionId: "email:template", success: true });
+
+      const emailReq = receivedRequests.find((r) => r.url === "/emails");
+      const parsed = JSON.parse(emailReq!.body);
+
+      expect(parsed.from).toBe("Offboard <onboarding@resend.dev>");
+      expect(parsed.to).toBe("dev@example.com");
+      expect(parsed.subject).toBe("Bloquear acessos is done");
+      expect(parsed.html).toBe("<p>Bloquear acessos moved to done in d0</p>");
+    } finally {
+      delete process.env.RESEND_API_KEY;
+      delete process.env.RESEND_BASE_URL;
+    }
+  });
+
+  it("uses default subject and body when not configured", async () => {
+    process.env.RESEND_API_KEY = "re_test_fake";
+    process.env.RESEND_BASE_URL = serverUrl;
+
+    try {
+      await repos.createActionConfig({
+        actionId: "email:defaults",
+        phase: "d0",
+        config: { to: "dev@example.com" },
+      });
+
+      const results = await fireActions(repos, context);
+      const result = results.find((r) => r.actionId === "email:defaults");
+
+      expect(result).toEqual({ actionId: "email:defaults", success: true });
+
+      const emailReq = receivedRequests.find((r) => r.url === "/emails");
+      const parsed = JSON.parse(emailReq!.body);
+
+      expect(parsed.subject).toBe("Offboard: Bloquear acessos — done");
+      expect(parsed.html).toBe(
+        "<p>Task <b>Bloquear acessos</b> changed to <b>done</b> in phase <b>d0</b>.</p>",
+      );
+    } finally {
+      delete process.env.RESEND_API_KEY;
+      delete process.env.RESEND_BASE_URL;
+    }
+  });
+
+  it("reports email API error", async () => {
+    process.env.RESEND_API_KEY = "re_test_fake";
+    process.env.RESEND_BASE_URL = serverUrl;
+
+    try {
+      await repos.createActionConfig({
+        actionId: "email:api-fail",
+        phase: "d0",
+        config: { to: "fail@example.com", subject: "Test", body: "Hello" },
+      });
+
+      const results = await fireActions(repos, context);
+      const result = results.find((r) => r.actionId === "email:api-fail");
+
+      expect(result).toEqual({
+        actionId: "email:api-fail",
+        success: false,
+        error: "Invalid recipient",
+      });
+    } finally {
+      delete process.env.RESEND_API_KEY;
+      delete process.env.RESEND_BASE_URL;
+    }
   });
 
   it("reports unknown action types", async () => {
