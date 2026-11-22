@@ -69,7 +69,7 @@ export function SidebarUser() {
                   onClick={() => setOpenMobile(false)}
                 >
                   <HugeiconsIcon icon={UserAccountIcon} aria-hidden="true" />
-                  Acessos ao app
+                  Equipe
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   render={<Link to="/planos-e-gastos" />}

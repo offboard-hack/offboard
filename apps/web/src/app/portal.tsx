@@ -228,7 +228,7 @@ const navigationGroups = [
       },
       {
         to: "/acessos-ao-app",
-        label: "Acessos ao app",
+        label: "Equipe",
         icon: "M14 8a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM3 20a7 5 0 0 1 14 0m2-13v6m-3-3h6",
       },
     ],
