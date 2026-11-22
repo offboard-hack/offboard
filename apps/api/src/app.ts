@@ -17,11 +17,20 @@ const caseSummary = t.Object({
 
 const taskStatus = t.Union([t.Literal("done"), t.Literal("in_progress"), t.Literal("todo")]);
 
+const subtaskRow = t.Object({
+  id: t.String(),
+  title: t.String(),
+  done: t.Boolean(),
+});
+
 const task = t.Object({
   id: t.String(),
   title: t.String(),
   team: t.String(),
   status: taskStatus,
+  description: t.Union([t.String(), t.Null()]),
+  dueDate: t.Union([t.String(), t.Null()]),
+  subtasks: t.Array(subtaskRow),
 });
 
 const offboardingCase = t.Composite([caseSummary, t.Object({ tasks: t.Array(task) })]);
@@ -100,6 +109,18 @@ export function createApp(webOrigin: string, repos: Repositories) {
         params: t.Object({ id: t.String({ format: "uuid" }) }),
         body: t.Object({ status: taskStatus }),
         response: { 200: task, 404: notFound },
+      },
+    )
+    .patch(
+      "/subtasks/:id/toggle",
+      async ({ params, status }) => {
+        const toggled = await repos.toggleSubtask(params.id);
+
+        return toggled ?? status(404, { error: "Subtask not found" });
+      },
+      {
+        params: t.Object({ id: t.String({ format: "uuid" }) }),
+        response: { 200: subtaskRow, 404: notFound },
       },
     )
     .get("/integrations", () => repos.listIntegrations(), {

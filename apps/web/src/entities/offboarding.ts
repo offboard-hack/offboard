@@ -15,9 +15,9 @@ export type Task = {
   title: string;
   team: string;
   status: "done" | "in_progress" | "todo";
-  dueDate?: string;
-  note?: string;
-  subtasks?: { id: string; title: string; done: boolean }[];
+  description: string | null;
+  dueDate: string | null;
+  subtasks: { id: string; title: string; done: boolean }[];
 };
 
 export type PersonAsset = {
@@ -137,6 +137,20 @@ const nextStatus: Record<Task["status"], Task["status"]> = {
 
 export function cycleTaskStatus(current: Task["status"]) {
   return nextStatus[current];
+}
+
+export async function toggleSubtask(subtaskId: string) {
+  const response = await fetch(`/api/subtasks/${encodeURIComponent(subtaskId)}/toggle`, {
+    method: "PATCH",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to toggle subtask");
+  }
+
+  const updated: Task["subtasks"][number] = await response.json();
+
+  return updated;
 }
 
 export async function updateTaskStatus(taskId: string, status: Task["status"]) {

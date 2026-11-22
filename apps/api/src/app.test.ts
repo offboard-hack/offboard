@@ -81,6 +81,22 @@ describe.skipIf(!url)("api", () => {
     expect(found.tasks.length).toBe(found.total);
   });
 
+  it("returns task details with description, dueDate and subtasks", async () => {
+    const list = await (await call("/offboardings")).json();
+    const marina = list.find((c: { name: string }) => c.name === "Marina Lopes");
+    const res = await call(`/offboardings/${marina.id}`);
+    const found = await res.json();
+
+    const calcular = found.tasks.find((t: { title: string }) => t.title === "Calcular a rescisão");
+    expect(calcular.dueDate).toBe("2026-11-13");
+    expect(calcular.subtasks).toHaveLength(4);
+    expect(calcular.subtasks[0]).toEqual({
+      id: expect.any(String),
+      title: "Levantar saldo de férias",
+      done: true,
+    });
+  });
+
   it("returns 404 for an unknown id", async () => {
     const res = await call(`/offboardings/${missingCaseId}`);
 
@@ -136,7 +152,10 @@ describe.skipIf(!url)("api", () => {
     const res = await call(`/tasks/${target?.id}/status`, "PATCH", { status: "in_progress" });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ...target, status: "in_progress" });
+    const body = await res.json();
+    expect(body.id).toBe(target.id);
+    expect(body.status).toBe("in_progress");
+    expect(body).toHaveProperty("subtasks");
   });
 
   it("returns 404 for an unknown task", async () => {
@@ -152,6 +171,33 @@ describe.skipIf(!url)("api", () => {
 
     expect(badStatus.status).toBe(422);
     expect(badId.status).toBe(422);
+  });
+
+  it("toggles a subtask", async () => {
+    const list = await (await call("/offboardings")).json();
+    const marina = list.find((c: { name: string }) => c.name === "Marina Lopes");
+    const detail = await (await call(`/offboardings/${marina.id}`)).json();
+    const calcular = detail.tasks.find((t: { title: string }) => t.title === "Calcular a rescisão");
+    const sub = calcular.subtasks.find((s: { title: string }) => s.title === "Calcular multa FGTS");
+
+    expect(sub.done).toBe(false);
+
+    const res = await call(`/subtasks/${sub.id}/toggle`, "PATCH");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: sub.id, title: "Calcular multa FGTS", done: true });
+  });
+
+  it("returns 404 for an unknown subtask toggle", async () => {
+    const res = await call(`/subtasks/${missingTaskId}/toggle`, "PATCH");
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Subtask not found" });
+  });
+
+  it("rejects an invalid subtask id", async () => {
+    const res = await call("/subtasks/not-a-uuid/toggle", "PATCH");
+
+    expect(res.status).toBe(422);
   });
 
   it("lists integrations from seed", async () => {

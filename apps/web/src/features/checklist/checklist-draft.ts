@@ -154,7 +154,17 @@ export function createTasksFromChecklist(person: Pick<CaseSummary, "role" | "dep
   return phases.flatMap(({ id: phase }) =>
     model.flatMap((step) =>
       step.phase === phase && matchesStepRules(step.rules ?? [], person)
-        ? [{ id: step.id, title: step.title, team: step.team, status: "todo" } satisfies Task]
+        ? [
+            {
+              id: step.id,
+              title: step.title,
+              team: step.team,
+              status: "todo",
+              description: null,
+              dueDate: null,
+              subtasks: [],
+            } satisfies Task,
+          ]
         : [],
     ),
   );

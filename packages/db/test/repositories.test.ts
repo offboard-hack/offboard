@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createClient } from "../src/client.ts";
 import { seedCases } from "../src/offboarding.fixture.ts";
 import { createRepositories } from "../src/repositories/index.ts";
-import { tasks } from "../src/schema/index.ts";
+import { subtasks, tasks } from "../src/schema/index.ts";
 import { seedDatabase } from "../src/seed-database.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -36,7 +36,7 @@ describe.skipIf(!url)("repositories", () => {
     const marina = list.find((c) => c.name === "Marina Lopes");
     const detail = await repos.getOffboarding(marina!.id);
     expect(detail?.tasks.map((task) => [task.team, task.title, task.status])).toEqual(
-      seedCases[0].tasks.map((task) => [...task]),
+      seedCases[0].tasks.map((task) => [task.team, task.title, task.status]),
     );
   });
 
@@ -77,7 +77,7 @@ describe.skipIf(!url)("repositories", () => {
     });
   });
 
-  it("returns a case with its tasks", async () => {
+  it("returns a case with its tasks including new fields", async () => {
     const list = await repos.listOffboardings();
     const rafael = list.find((c) => c.name === "Rafael Mendes")!;
     const found = await repos.getOffboarding(rafael.id);
@@ -93,7 +93,33 @@ describe.skipIf(!url)("repositories", () => {
       title: "Comunicar desligamento e aviso prévio",
       team: "RH e DP",
       status: "done",
+      description: null,
+      dueDate: null,
+      subtasks: [],
     });
+  });
+
+  it("returns description and dueDate when set", async () => {
+    const list = await repos.listOffboardings();
+    const marina = list.find((c) => c.name === "Marina Lopes")!;
+    const detail = await repos.getOffboarding(marina.id);
+
+    const calcular = detail?.tasks.find((t) => t.title === "Calcular a rescisão");
+    expect(calcular?.dueDate).toBe("2026-11-13");
+    expect(calcular?.subtasks).toHaveLength(4);
+    expect(calcular?.subtasks[0]).toEqual({
+      id: expect.stringMatching(uuidPattern),
+      title: "Levantar saldo de férias",
+      done: true,
+    });
+
+    const comunicar = detail?.tasks.find(
+      (t) => t.title === "Comunicar desligamento e aviso prévio",
+    );
+
+    expect(comunicar?.description).toBe(
+      "Agendar reunião com o gestor e comunicar formalmente o desligamento.",
+    );
   });
 
   it("returns null for an unknown id", async () => {
@@ -139,7 +165,7 @@ describe.skipIf(!url)("repositories", () => {
     expect(await repos.listOffboardings()).toHaveLength(7);
   });
 
-  it("updates a task status", async () => {
+  it("updates a task status and returns new fields", async () => {
     const list = await repos.listOffboardings();
     const nina = list.find((c) => c.name === "Nina Castro")!;
     const before = await repos.getOffboarding(nina.id);
@@ -147,7 +173,10 @@ describe.skipIf(!url)("repositories", () => {
 
     const updated = await repos.updateTaskStatus(target.id, "done");
 
-    expect(updated).toEqual({ ...target, status: "done" });
+    expect(updated).toEqual({
+      ...target,
+      status: "done",
+    });
     const after = await repos.getOffboarding(nina.id);
     expect(after?.tasks.find((task) => task.id === target.id)?.status).toBe("done");
     expect(after?.completed).toBe(before!.completed + 1);
@@ -155,6 +184,58 @@ describe.skipIf(!url)("repositories", () => {
 
   it("returns null when updating an unknown task", async () => {
     expect(await repos.updateTaskStatus("00000000-0000-0000-0000-000000000000", "done")).toBeNull();
+  });
+
+  it("toggles a subtask", async () => {
+    const list = await repos.listOffboardings();
+    const marina = list.find((c) => c.name === "Marina Lopes")!;
+    const detail = await repos.getOffboarding(marina.id);
+    const calcular = detail?.tasks.find((t) => t.title === "Calcular a rescisão");
+    const sub = calcular?.subtasks.find((s) => s.title === "Calcular multa FGTS");
+
+    expect(sub?.done).toBe(false);
+
+    const toggled = await repos.toggleSubtask(sub!.id);
+    expect(toggled).toEqual({ id: sub!.id, title: "Calcular multa FGTS", done: true });
+
+    const toggledBack = await repos.toggleSubtask(sub!.id);
+    expect(toggledBack?.done).toBe(false);
+  });
+
+  it("returns null when toggling an unknown subtask", async () => {
+    expect(await repos.toggleSubtask("00000000-0000-0000-0000-000000000000")).toBeNull();
+  });
+
+  it("deletes subtasks when their task is removed via cascade", async () => {
+    const allSubtasks = await db.select().from(subtasks);
+    expect(allSubtasks.length).toBeGreaterThan(0);
+
+    const list = await repos.listOffboardings();
+    const marina = list.find((c) => c.name === "Marina Lopes")!;
+    await db.$client.query(`DELETE FROM offboarding_cases WHERE id = '${marina.id}'`);
+
+    const remaining = await db.select().from(subtasks);
+
+    const rafaelSubCount = seedCases[1].tasks.reduce(
+      (sum, t) => sum + (t.subtasks?.length ?? 0),
+      0,
+    );
+
+    expect(remaining).toHaveLength(rafaelSubCount);
+  });
+
+  it("lists integrations", async () => {
+    const list = await repos.listIntegrations();
+    expect(list.length).toBeGreaterThan(0);
+    expect(list[0]).toEqual({ name: expect.any(String), status: expect.any(String) });
+  });
+
+  it("upserts an integration", async () => {
+    const created = await repos.upsertIntegration("Test Repo", "connected");
+    expect(created).toEqual({ name: "Test Repo", status: "connected" });
+
+    const updated = await repos.upsertIntegration("Test Repo", "disconnected");
+    expect(updated).toEqual({ name: "Test Repo", status: "disconnected" });
   });
 
   it("deletes tasks when their case is removed", async () => {
