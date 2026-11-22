@@ -24309,6 +24309,7 @@ var tasks = pgTable("tasks", {
   dueDate: date("due_date"),
   position: integer("position").notNull(),
   phase: varchar("phase", { length: 50 }),
+  trackingCode: varchar("tracking_code", { length: 30 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow()
 });
@@ -24423,6 +24424,7 @@ function createRepositories(db) {
       status: task2.status,
       description: task2.description,
       dueDate: task2.dueDate,
+      trackingCode: task2.trackingCode,
       subtasks: task2.subtasks.map((sub) => ({
         id: sub.id,
         title: sub.title,
@@ -24466,7 +24468,8 @@ function createRepositories(db) {
       team: tasks.team,
       status: tasks.status,
       description: tasks.description,
-      dueDate: tasks.dueDate
+      dueDate: tasks.dueDate,
+      trackingCode: tasks.trackingCode
     });
     if (!updated) return null;
     const subs = await db.select({ id: subtasks.id, title: subtasks.title, done: subtasks.done }).from(subtasks).where(eq(subtasks.taskId, taskId)).orderBy(asc(subtasks.position));
@@ -24513,6 +24516,22 @@ function createRepositories(db) {
     const rows = await db.delete(actionConfigs).where(eq(actionConfigs.id, id)).returning({ id: actionConfigs.id });
     return rows.length > 0;
   }
+  async function getTrackedTasks() {
+    return db.select({
+      id: tasks.id,
+      title: tasks.title,
+      phase: tasks.phase,
+      trackingCode: tasks.trackingCode
+    }).from(tasks).where(and(isNotNull(tasks.trackingCode), ne(tasks.status, "done")));
+  }
+  async function setTrackingCode(taskId, code) {
+    const [row] = await db.update(tasks).set({ trackingCode: code, updatedAt: /* @__PURE__ */ new Date() }).where(eq(tasks.id, taskId)).returning({ id: tasks.id, trackingCode: tasks.trackingCode });
+    return row ?? null;
+  }
+  async function getTaskTrackingCode(taskId) {
+    const [row] = await db.select({ id: tasks.id, trackingCode: tasks.trackingCode, status: tasks.status }).from(tasks).where(eq(tasks.id, taskId));
+    return row ?? null;
+  }
   return {
     listOffboardings,
     getOffboarding,
@@ -24528,7 +24547,10 @@ function createRepositories(db) {
     getActionConfig,
     createActionConfig,
     updateActionConfig,
-    deleteActionConfig
+    deleteActionConfig,
+    getTrackedTasks,
+    setTrackingCode,
+    getTaskTrackingCode
   };
 }
 
@@ -71074,6 +71096,67 @@ async function fireActions(repos2, context) {
   return results;
 }
 
+// apps/api/src/correios.ts
+var correiosEvent = external_exports.object({
+  codigo: external_exports.string(),
+  tipo: external_exports.string(),
+  descricao: external_exports.string(),
+  dtHrCriado: external_exports.string()
+});
+var correiosObject = external_exports.object({
+  eventos: external_exports.array(correiosEvent).optional(),
+  mensagem: external_exports.string().optional()
+});
+var correiosResponse = external_exports.object({
+  objetos: external_exports.array(correiosObject).optional()
+});
+var DELIVERED_CODES = /* @__PURE__ */ new Set(["BDE", "BDI", "BDR"]);
+function isDelivered(codigo, tipo) {
+  return DELIVERED_CODES.has(codigo) && tipo === "01";
+}
+async function trackPackage(trackingCode, baseUrl) {
+  const url2 = `${baseUrl}/v1/sro-rastro/${encodeURIComponent(trackingCode)}`;
+  let response;
+  try {
+    response = await fetch(url2, {
+      headers: {
+        "app-check-token": "bypass",
+        "user-agent": "Dart/3.6"
+      },
+      signal: AbortSignal.timeout(8e3)
+    });
+  } catch {
+    return { delivered: false, lastEvent: "network error", lastUpdate: "" };
+  }
+  if (!response.ok) {
+    return { delivered: false, lastEvent: `HTTP ${response.status}`, lastUpdate: "" };
+  }
+  let body;
+  try {
+    body = await response.json();
+  } catch {
+    return { delivered: false, lastEvent: "invalid response", lastUpdate: "" };
+  }
+  const parsed = correiosResponse.safeParse(body);
+  if (!parsed.success) {
+    return { delivered: false, lastEvent: "invalid response", lastUpdate: "" };
+  }
+  const objetos = parsed.data.objetos;
+  if (!objetos || objetos.length === 0) {
+    return { delivered: false, lastEvent: "no data", lastUpdate: "" };
+  }
+  const obj = objetos[0];
+  if (!obj.eventos || obj.eventos.length === 0) {
+    return { delivered: false, lastEvent: obj.mensagem ?? "no events", lastUpdate: "" };
+  }
+  const latest = obj.eventos[0];
+  return {
+    delivered: isDelivered(latest.codigo, latest.tipo),
+    lastEvent: latest.descricao,
+    lastUpdate: latest.dtHrCriado
+  };
+}
+
 // apps/api/src/app.ts
 var caseSummary = t.Object({
   id: t.String(),
@@ -71097,6 +71180,7 @@ var task = t.Object({
   status: taskStatus,
   description: t.Union([t.String(), t.Null()]),
   dueDate: t.Union([t.String(), t.Null()]),
+  trackingCode: t.Union([t.String(), t.Null()]),
   subtasks: t.Array(subtaskRow)
 });
 var offboardingCase = t.Composite([caseSummary, t.Object({ tasks: t.Array(task) })]);
@@ -71124,7 +71208,30 @@ var actionConfigRow = t.Object({
 var notFound = t.Object({ error: t.String() });
 var text2 = t.String({ minLength: 1 });
 var uniqueViolation = external_exports.object({ cause: external_exports.object({ code: external_exports.literal("23505") }) });
-function createApp(webOrigin, repos2) {
+var CORREIOS_DEFAULT_URL = "https://proxyapp.correios.com.br";
+function createApp(webOrigin, repos2, correiosBaseUrl = CORREIOS_DEFAULT_URL) {
+  async function checkTrackedShipments() {
+    const tracked = await repos2.getTrackedTasks();
+    const delivered = [];
+    const results = await Promise.allSettled(
+      tracked.map(async (task2) => {
+        const result = await trackPackage(task2.trackingCode, correiosBaseUrl);
+        if (!result.delivered) return;
+        const updated = await repos2.updateTaskStatus(task2.id, "done");
+        if (!updated) return;
+        delivered.push(task2.id);
+        if (task2.phase) {
+          await fireActions(repos2, {
+            taskId: task2.id,
+            taskTitle: task2.title,
+            status: "done",
+            phase: task2.phase
+          });
+        }
+      })
+    );
+    return { checked: results.length, delivered };
+  }
   return new Elysia({ adapter: node(), prefix: "/api" }).use(cors({ origin: webOrigin, credentials: false })).get("/health", () => ({ status: "ok" }), {
     response: t.Object({ status: t.Literal("ok") })
   }).get("/offboardings", () => repos2.listOffboardings(), {
@@ -71309,6 +71416,44 @@ function createApp(webOrigin, repos2) {
       }),
       response: {
         200: t.Object({ accepted: t.Boolean(), reason: t.Optional(t.String()) }),
+        404: notFound
+      }
+    }
+  ).get("/correios/check", () => checkTrackedShipments(), {
+    response: t.Object({
+      checked: t.Number(),
+      delivered: t.Array(t.String())
+    })
+  }).post("/correios/check", () => checkTrackedShipments(), {
+    response: t.Object({
+      checked: t.Number(),
+      delivered: t.Array(t.String())
+    })
+  }).get(
+    "/tasks/:id/tracking",
+    async ({ params, status: status2 }) => {
+      const row = await repos2.getTaskTrackingCode(params.id);
+      if (!row) return status2(404, { error: "Task not found" });
+      if (!row.trackingCode) {
+        return { trackingCode: null, tracking: null };
+      }
+      const tracking = await trackPackage(row.trackingCode, correiosBaseUrl);
+      return { trackingCode: row.trackingCode, tracking };
+    },
+    {
+      params: t.Object({ id: t.String({ format: "uuid" }) }),
+      response: {
+        200: t.Object({
+          trackingCode: t.Union([t.String(), t.Null()]),
+          tracking: t.Union([
+            t.Object({
+              delivered: t.Boolean(),
+              lastEvent: t.String(),
+              lastUpdate: t.String()
+            }),
+            t.Null()
+          ])
+        }),
         404: notFound
       }
     }

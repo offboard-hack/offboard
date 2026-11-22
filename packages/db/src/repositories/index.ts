@@ -1,4 +1,4 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import type { Database } from "../client.ts";
 import type { ConfigValue } from "../schema/index.ts";
 import { actionConfigs, integrations, offboardingCases, subtasks, tasks } from "../schema/index.ts";
@@ -28,6 +28,7 @@ export type OffboardingTask = {
   status: TaskStatus;
   description: string | null;
   dueDate: string | null;
+  trackingCode: string | null;
   subtasks: SubtaskRow[];
 };
 
@@ -116,6 +117,7 @@ export function createRepositories(db: Database) {
       status: task.status,
       description: task.description,
       dueDate: task.dueDate,
+      trackingCode: task.trackingCode,
       subtasks: task.subtasks.map((sub) => ({
         id: sub.id,
         title: sub.title,
@@ -180,6 +182,7 @@ export function createRepositories(db: Database) {
         status: tasks.status,
         description: tasks.description,
         dueDate: tasks.dueDate,
+        trackingCode: tasks.trackingCode,
       });
 
     if (!updated) return null;
@@ -274,6 +277,37 @@ export function createRepositories(db: Database) {
     return rows.length > 0;
   }
 
+  async function getTrackedTasks() {
+    return db
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        phase: tasks.phase,
+        trackingCode: tasks.trackingCode,
+      })
+      .from(tasks)
+      .where(and(isNotNull(tasks.trackingCode), ne(tasks.status, "done")));
+  }
+
+  async function setTrackingCode(taskId: string, code: string) {
+    const [row] = await db
+      .update(tasks)
+      .set({ trackingCode: code, updatedAt: new Date() })
+      .where(eq(tasks.id, taskId))
+      .returning({ id: tasks.id, trackingCode: tasks.trackingCode });
+
+    return row ?? null;
+  }
+
+  async function getTaskTrackingCode(taskId: string) {
+    const [row] = await db
+      .select({ id: tasks.id, trackingCode: tasks.trackingCode, status: tasks.status })
+      .from(tasks)
+      .where(eq(tasks.id, taskId));
+
+    return row ?? null;
+  }
+
   return {
     listOffboardings,
     getOffboarding,
@@ -290,5 +324,8 @@ export function createRepositories(db: Database) {
     createActionConfig,
     updateActionConfig,
     deleteActionConfig,
+    getTrackedTasks,
+    setTrackingCode,
+    getTaskTrackingCode,
   };
 }

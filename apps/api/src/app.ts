@@ -4,6 +4,7 @@ import type { createRepositories } from "@offboard/db/repositories";
 import { Elysia, t } from "elysia";
 import { z } from "zod";
 import { fireActions } from "./actions.js";
+import { trackPackage } from "./correios.js";
 
 export type Repositories = ReturnType<typeof createRepositories>;
 
@@ -32,6 +33,7 @@ const task = t.Object({
   status: taskStatus,
   description: t.Union([t.String(), t.Null()]),
   dueDate: t.Union([t.String(), t.Null()]),
+  trackingCode: t.Union([t.String(), t.Null()]),
   subtasks: t.Array(subtaskRow),
 });
 
@@ -69,7 +71,44 @@ const text = t.String({ minLength: 1 });
 
 const uniqueViolation = z.object({ cause: z.object({ code: z.literal("23505") }) });
 
-export function createApp(webOrigin: string, repos: Repositories) {
+const CORREIOS_DEFAULT_URL = "https://proxyapp.correios.com.br";
+
+export function createApp(
+  webOrigin: string,
+  repos: Repositories,
+  correiosBaseUrl = CORREIOS_DEFAULT_URL,
+) {
+  async function checkTrackedShipments() {
+    const tracked = await repos.getTrackedTasks();
+    const delivered: string[] = [];
+
+    const results = await Promise.allSettled(
+      tracked.map(async (task) => {
+        // WARNING: getTrackedTasks guarantees non-null trackingCode
+        const result = await trackPackage(task.trackingCode as string, correiosBaseUrl);
+
+        if (!result.delivered) return;
+
+        const updated = await repos.updateTaskStatus(task.id, "done");
+
+        if (!updated) return;
+
+        delivered.push(task.id);
+
+        if (task.phase) {
+          await fireActions(repos, {
+            taskId: task.id,
+            taskTitle: task.title,
+            status: "done",
+            phase: task.phase,
+          });
+        }
+      }),
+    );
+
+    return { checked: results.length, delivered };
+  }
+
   return new Elysia({ adapter: node(), prefix: "/api" })
     .use(cors({ origin: webOrigin, credentials: false }))
     .get("/health", () => ({ status: "ok" }) satisfies { status: "ok" }, {
@@ -289,6 +328,51 @@ export function createApp(webOrigin: string, repos: Repositories) {
         }),
         response: {
           200: t.Object({ accepted: t.Boolean(), reason: t.Optional(t.String()) }),
+          404: notFound,
+        },
+      },
+    )
+    .get("/correios/check", () => checkTrackedShipments(), {
+      response: t.Object({
+        checked: t.Number(),
+        delivered: t.Array(t.String()),
+      }),
+    })
+    .post("/correios/check", () => checkTrackedShipments(), {
+      response: t.Object({
+        checked: t.Number(),
+        delivered: t.Array(t.String()),
+      }),
+    })
+    .get(
+      "/tasks/:id/tracking",
+      async ({ params, status }) => {
+        const row = await repos.getTaskTrackingCode(params.id);
+
+        if (!row) return status(404, { error: "Task not found" });
+
+        if (!row.trackingCode) {
+          return { trackingCode: null, tracking: null };
+        }
+
+        const tracking = await trackPackage(row.trackingCode, correiosBaseUrl);
+
+        return { trackingCode: row.trackingCode, tracking };
+      },
+      {
+        params: t.Object({ id: t.String({ format: "uuid" }) }),
+        response: {
+          200: t.Object({
+            trackingCode: t.Union([t.String(), t.Null()]),
+            tracking: t.Union([
+              t.Object({
+                delivered: t.Boolean(),
+                lastEvent: t.String(),
+                lastUpdate: t.String(),
+              }),
+              t.Null(),
+            ]),
+          }),
           404: notFound,
         },
       },
