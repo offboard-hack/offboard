@@ -24282,13 +24282,15 @@ __export(schema_exports, {
   actionConfigs: () => actionConfigs,
   connectionStatusEnum: () => connectionStatusEnum,
   integrations: () => integrations,
+  memberRoleEnum: () => memberRoleEnum,
   offboardingCases: () => offboardingCases,
   offboardingCasesRelations: () => offboardingCasesRelations,
   subtasks: () => subtasks,
   subtasksRelations: () => subtasksRelations,
   taskStatusEnum: () => taskStatusEnum,
   tasks: () => tasks,
-  tasksRelations: () => tasksRelations
+  tasksRelations: () => tasksRelations,
+  teamMembers: () => teamMembers
 });
 var taskStatusEnum = pgEnum("task_status", ["todo", "in_progress", "done"]);
 var offboardingCases = pgTable("offboarding_cases", {
@@ -24359,6 +24361,15 @@ var integrations = pgTable(
   },
   (table) => [uniqueIndex("integrations_name_idx").on(table.name)]
 );
+var memberRoleEnum = pgEnum("member_role", ["admin", "rh", "gestor", "visualizador"]);
+var teamMembers = pgTable("team_members", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 255 }).notNull(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
+  role: memberRoleEnum("role").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow()
+});
 var actionConfigs = pgTable(
   "action_configs",
   {
@@ -24533,6 +24544,23 @@ function createRepositories(db) {
     const [row] = await db.select({ id: tasks.id, trackingCode: tasks.trackingCode, status: tasks.status }).from(tasks).where(eq(tasks.id, taskId));
     return row ?? null;
   }
+  const memberColumns = {
+    id: teamMembers.id,
+    name: teamMembers.name,
+    email: teamMembers.email,
+    role: teamMembers.role
+  };
+  async function listTeamMembers() {
+    return db.select(memberColumns).from(teamMembers).orderBy(asc(teamMembers.name));
+  }
+  async function createTeamMember({ name, email: email3, role }) {
+    const [row] = await db.insert(teamMembers).values({ name, email: email3, role }).returning(memberColumns);
+    return row;
+  }
+  async function deleteTeamMember(id) {
+    const rows = await db.delete(teamMembers).where(eq(teamMembers.id, id)).returning({ id: teamMembers.id });
+    return rows.length > 0;
+  }
   return {
     listOffboardings,
     getOffboarding,
@@ -24551,7 +24579,10 @@ function createRepositories(db) {
     deleteActionConfig,
     getTrackedTasks,
     setTrackingCode,
-    getTaskTrackingCode
+    getTaskTrackingCode,
+    listTeamMembers,
+    createTeamMember,
+    deleteTeamMember
   };
 }
 
@@ -71198,6 +71229,18 @@ var actionPhase = t.Union([
   t.Literal("second-week"),
   t.Literal("follow-up")
 ]);
+var memberRole = t.Union([
+  t.Literal("admin"),
+  t.Literal("gestor"),
+  t.Literal("rh"),
+  t.Literal("visualizador")
+]);
+var teamMemberRow = t.Object({
+  id: t.String(),
+  name: t.String(),
+  email: t.String(),
+  role: memberRole
+});
 var actionConfigValues = t.Record(t.String(), t.Any());
 var actionConfigRow = t.Object({
   id: t.String(),
@@ -71360,6 +71403,40 @@ function createApp(webOrigin, repos2, correiosBaseUrl = CORREIOS_DEFAULT_URL) {
     async ({ params, status: status2 }) => {
       const removed = await repos2.deleteActionConfig(params.id);
       return removed ? new Response(null, { status: 204 }) : status2(404, { error: "Action config not found" });
+    },
+    {
+      params: t.Object({ id: t.String({ format: "uuid" }) }),
+      response: { 204: t.Void(), 404: notFound }
+    }
+  ).get("/team", () => repos2.listTeamMembers(), {
+    response: t.Array(teamMemberRow)
+  }).post(
+    "/team",
+    async ({ body, set: set3, status: status2 }) => {
+      try {
+        const created = await repos2.createTeamMember(body);
+        set3.status = 201;
+        return created;
+      } catch (error62) {
+        if (uniqueViolation.safeParse(error62).success) {
+          return status2(409, { error: "Team member already exists" });
+        }
+        throw error62;
+      }
+    },
+    {
+      body: t.Object({
+        name: t.String({ minLength: 1, maxLength: 255 }),
+        email: t.String({ format: "email", maxLength: 255 }),
+        role: memberRole
+      }),
+      response: { 201: teamMemberRow, 409: notFound }
+    }
+  ).delete(
+    "/team/:id",
+    async ({ params, status: status2 }) => {
+      const removed = await repos2.deleteTeamMember(params.id);
+      return removed ? new Response(null, { status: 204 }) : status2(404, { error: "Team member not found" });
     },
     {
       params: t.Object({ id: t.String({ format: "uuid" }) }),

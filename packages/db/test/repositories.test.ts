@@ -392,6 +392,66 @@ describe.skipIf(!url)("repositories", () => {
   });
 });
 
+describe.skipIf(!url)("team members", () => {
+  const db = createClient(url ?? "");
+  const repos = createRepositories(db);
+
+  beforeAll(async () => {
+    await migrate(db, {
+      migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
+    });
+  });
+
+  beforeEach(async () => {
+    await seedDatabase(db);
+  });
+
+  afterAll(async () => {
+    await db.$client.end();
+  });
+
+  it("lists seeded members ordered by name", async () => {
+    const members = await repos.listTeamMembers();
+
+    expect(members.map(({ name, role }) => [name, role])).toEqual([
+      ["Beatriz Castro", "admin"],
+      ["Camila Rocha", "rh"],
+      ["Diego Alves", "gestor"],
+    ]);
+    expect(members[0].id).toMatch(uuidPattern);
+  });
+
+  it("creates a member and lists it in order", async () => {
+    const created = await repos.createTeamMember({
+      name: "Ana Souza",
+      email: "ana.souza@offboard.com",
+      role: "visualizador",
+    });
+
+    expect(created).toEqual({
+      id: expect.stringMatching(uuidPattern),
+      name: "Ana Souza",
+      email: "ana.souza@offboard.com",
+      role: "visualizador",
+    });
+    expect((await repos.listTeamMembers())[0].name).toBe("Ana Souza");
+  });
+
+  it("rejects a duplicate email", async () => {
+    await expect(
+      repos.createTeamMember({ name: "Dup", email: "camila.rocha@offboard.com", role: "rh" }),
+    ).rejects.toThrow();
+  });
+
+  it("deletes by id and reports whether a row was removed", async () => {
+    const [first] = await repos.listTeamMembers();
+
+    expect(await repos.deleteTeamMember(first.id)).toBe(true);
+    expect(await repos.deleteTeamMember(first.id)).toBe(false);
+    expect(await repos.listTeamMembers()).toHaveLength(2);
+  });
+});
+
 describe("createClient", () => {
   it("strips sslmode and disables certificate verification for cloud hosts", async () => {
     const cloud = createClient(

@@ -55,6 +55,20 @@ const actionPhase = t.Union([
   t.Literal("follow-up"),
 ]);
 
+const memberRole = t.Union([
+  t.Literal("admin"),
+  t.Literal("gestor"),
+  t.Literal("rh"),
+  t.Literal("visualizador"),
+]);
+
+const teamMemberRow = t.Object({
+  id: t.String(),
+  name: t.String(),
+  email: t.String(),
+  role: memberRole,
+});
+
 const actionConfigValues = t.Record(t.String(), t.Any());
 
 const actionConfigRow = t.Object({
@@ -263,6 +277,48 @@ export function createApp(
         return removed
           ? new Response(null, { status: 204 })
           : status(404, { error: "Action config not found" });
+      },
+      {
+        params: t.Object({ id: t.String({ format: "uuid" }) }),
+        response: { 204: t.Void(), 404: notFound },
+      },
+    )
+    .get("/team", () => repos.listTeamMembers(), {
+      response: t.Array(teamMemberRow),
+    })
+    .post(
+      "/team",
+      async ({ body, set, status }) => {
+        try {
+          const created = await repos.createTeamMember(body);
+          set.status = 201;
+
+          return created;
+        } catch (error) {
+          if (uniqueViolation.safeParse(error).success) {
+            return status(409, { error: "Team member already exists" });
+          }
+
+          throw error;
+        }
+      },
+      {
+        body: t.Object({
+          name: t.String({ minLength: 1, maxLength: 255 }),
+          email: t.String({ format: "email", maxLength: 255 }),
+          role: memberRole,
+        }),
+        response: { 201: teamMemberRow, 409: notFound },
+      },
+    )
+    .delete(
+      "/team/:id",
+      async ({ params, status }) => {
+        const removed = await repos.deleteTeamMember(params.id);
+
+        return removed
+          ? new Response(null, { status: 204 })
+          : status(404, { error: "Team member not found" });
       },
       {
         params: t.Object({ id: t.String({ format: "uuid" }) }),
