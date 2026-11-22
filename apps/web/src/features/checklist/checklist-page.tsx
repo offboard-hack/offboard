@@ -37,6 +37,17 @@ import { sameStepSettings, type StepSettings } from "./step-settings";
 
 const cardStyles = "min-w-0 rounded-xl border text-sm";
 
+const ruleFieldLabel = { department: "Área", role: "Cargo" };
+const ruleOperatorLabel = { equals: "=", notEquals: "≠" };
+
+function formatRuleSummary(rule: {
+  field: "department" | "role";
+  operator: "equals" | "notEquals";
+  value: string;
+}) {
+  return `${ruleFieldLabel[rule.field]} ${ruleOperatorLabel[rule.operator]} ${rule.value}`;
+}
+
 function formatOffset(offset: number) {
   if (offset === 0) return "D";
 
@@ -138,20 +149,26 @@ function StepCard({
         >
           <HugeiconsIcon icon={DragDropVerticalIcon} />
         </span>
-        <span className="flex min-w-0 flex-1 items-center gap-1.5">
-          <span className="min-w-0 flex-1">{step.title}</span>
-          {step.deadlineOffset != null && (
-            <span className="inline-flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground">
-              <HugeiconsIcon icon={Calendar03Icon} className="size-3" aria-hidden="true" />
-              {formatOffset(step.deadlineOffset)}
-            </span>
-          )}
-          {(step.rules?.length ?? 0) > 0 && (
-            <span
-              className="shrink-0 text-muted-foreground"
-              aria-label={`${step.rules!.length} ${step.rules!.length === 1 ? "condição" : "condições"}`}
-            >
-              <HugeiconsIcon icon={FilterHorizontalIcon} className="size-3" />
+        <span className="grid min-w-0 flex-1 gap-0.5">
+          <span className="flex items-center gap-1.5">
+            <span className="min-w-0 flex-1">{step.title}</span>
+            {step.deadlineOffset != null && (
+              <span className="inline-flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground">
+                <HugeiconsIcon icon={Calendar03Icon} className="size-3" aria-hidden="true" />
+                {formatOffset(step.deadlineOffset)}
+              </span>
+            )}
+          </span>
+          {step.rules && step.rules.length > 0 && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <HugeiconsIcon
+                icon={FilterHorizontalIcon}
+                className="size-3 shrink-0"
+                aria-hidden="true"
+              />
+              <span className="truncate">
+                {step.rules.map((rule) => formatRuleSummary(rule)).join(" · ")}
+              </span>
             </span>
           )}
         </span>
