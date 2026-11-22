@@ -36,7 +36,7 @@ describe.skipIf(!url)("repositories", () => {
     const marina = list.find((c) => c.name === "Marina Lopes");
     const detail = await repos.getOffboarding(marina!.id);
     expect(detail?.tasks.map((task) => [task.team, task.title, task.status])).toEqual(
-      seedCases[0].tasks.map((task) => [...task]),
+      seedCases[0].tasks.map(([team, title, status]) => [team, title, status]),
     );
   });
 
