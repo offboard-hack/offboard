@@ -96,6 +96,17 @@ export function formatDeadline(isoDate: string) {
   return deadlineFormat.format(new Date(isoDate)).replaceAll(" de ", " ").replace(".", "");
 }
 
+const exactDateFormat = new Intl.DateTimeFormat("pt-BR", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+export function formatExactDate(isoDate: string) {
+  return exactDateFormat.format(new Date(isoDate));
+}
+
 const shortDeadlineFormat = new Intl.DateTimeFormat("pt-BR", {
   day: "numeric",
   month: "short",
