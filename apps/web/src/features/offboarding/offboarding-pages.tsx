@@ -545,6 +545,8 @@ export function CasePage({
 
                   const expanded = expandedTasks.has(task.id);
 
+                  const overdue = task.status !== "done" && !!task.dueDate && task.dueDate < today;
+
                   return (
                     <li key={task.id}>
                       <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
@@ -561,7 +563,18 @@ export function CasePage({
                               aria-hidden="true"
                             />
                           )}
-                          <span className="min-w-0 wrap-anywhere">{task.title}</span>
+                          <span className="grid min-w-0 gap-0.5">
+                            <span className="wrap-anywhere">{task.title}</span>
+                            {task.dueDate && (
+                              <time
+                                dateTime={task.dueDate}
+                                className={`text-xs ${overdue ? "font-medium text-destructive" : "text-muted-foreground"}`}
+                              >
+                                {overdue ? "Atrasada · " : ""}
+                                {formatShortDeadline(task.dueDate)}
+                              </time>
+                            )}
+                          </span>
                         </button>
                         {onTaskStatusChange ? (
                           <button
