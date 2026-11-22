@@ -365,17 +365,19 @@ export function CasePage({
   taskFilter,
   onTaskFilterChange,
   onTaskStatusChange,
+  onSubtaskToggle,
   breadcrumb,
 }: {
   offboardingCase: OffboardingCase;
   taskFilter: "pending" | "done" | "";
   onTaskFilterChange: (filter: "pending" | "done" | "") => void;
   onTaskStatusChange?: (taskId: string, status: Task["status"]) => void;
+  onSubtaskToggle?: (subtaskId: string) => void;
   breadcrumb: ReactNode;
 }) {
   const { name, role, department, deadline, completed, total, tasks, assets } = offboardingCase;
   const [today] = useState(todayAtWorkspace);
-  const status = getCaseStatus(offboardingCase, today);
+  const caseStatus = getCaseStatus(offboardingCase, today);
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
 
   function toggleExpand(taskId: string) {
@@ -453,7 +455,9 @@ export function CasePage({
                   </dd>
                   <dt className="text-muted-foreground">Situação</dt>
                   <dd className="text-right">
-                    <Badge variant={caseStatusVariant[status]}>{caseStatusLabels[status]}</Badge>
+                    <Badge variant={caseStatusVariant[caseStatus]}>
+                      {caseStatusLabels[caseStatus]}
+                    </Badge>
                   </dd>
                 </dl>
               </div>
@@ -606,22 +610,31 @@ export function CasePage({
                             <ul className="grid gap-1.5">
                               {task.subtasks.map((sub) => (
                                 <li key={sub.id} className="flex items-center gap-2 text-sm">
-                                  <span
-                                    className={`inline-block size-3.5 shrink-0 rounded-sm border ${sub.done ? "border-primary bg-primary" : "border-muted-foreground/40"}`}
-                                    aria-hidden="true"
+                                  <button
+                                    type="button"
+                                    aria-label={`${sub.done ? "Desmarcar" : "Marcar"}: ${sub.title}`}
+                                    className="flex items-center gap-2 text-left"
+                                    onClick={() => onSubtaskToggle?.(sub.id)}
                                   >
-                                    {sub.done && (
-                                      <HugeiconsIcon
-                                        icon={Tick02Icon}
-                                        className="size-3.5 text-primary-foreground"
-                                      />
-                                    )}
-                                  </span>
-                                  <span
-                                    className={sub.done ? "text-muted-foreground line-through" : ""}
-                                  >
-                                    {sub.title}
-                                  </span>
+                                    <span
+                                      className={`inline-block size-3.5 shrink-0 rounded-sm border ${sub.done ? "border-primary bg-primary" : "border-muted-foreground/40"}`}
+                                      aria-hidden="true"
+                                    >
+                                      {sub.done && (
+                                        <HugeiconsIcon
+                                          icon={Tick02Icon}
+                                          className="size-3.5 text-primary-foreground"
+                                        />
+                                      )}
+                                    </span>
+                                    <span
+                                      className={
+                                        sub.done ? "text-muted-foreground line-through" : ""
+                                      }
+                                    >
+                                      {sub.title}
+                                    </span>
+                                  </button>
                                 </li>
                               ))}
                             </ul>
