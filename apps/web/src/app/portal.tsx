@@ -29,7 +29,7 @@ import {
   offboardingsQuery,
   updateTaskStatus,
 } from "../entities/offboarding";
-import type { CaseSummary, OffboardingCase, Task } from "../entities/offboarding";
+import type { CaseSummary, OffboardingCase, PersonAsset, Task } from "../entities/offboarding";
 import { offboardingStyles } from "../features/offboarding/offboarding.styles";
 import { PortalLayout } from "./shell";
 import {
@@ -511,6 +511,35 @@ export function Case() {
   );
 }
 
+const demoAssets: PersonAsset[] = [
+  { item: "Notebook Dell Latitude 5440", tag: "AUR-0412", status: "scheduled" },
+  { item: "Monitor Dell 27″", tag: "AUR-3104", status: "withPerson" },
+  { item: "Celular Galaxy A55", tag: "AUR-2210", status: "received" },
+];
+
+const demoSubtasks = {
+  access: [
+    { id: "access-1", title: "Revogar Google Workspace", done: true },
+    { id: "access-2", title: "Revogar Slack", done: true },
+    { id: "access-3", title: "Revogar HubSpot", done: false },
+  ],
+  collect: [
+    { id: "collect-1", title: "Confirmar endereço de coleta", done: true },
+    { id: "collect-2", title: "Agendar transportadora", done: false },
+  ],
+} satisfies Record<string, Task["subtasks"]>;
+
+function enrichCase(offboardingCase: OffboardingCase) {
+  return {
+    ...offboardingCase,
+    assets: offboardingCase.assets ?? demoAssets,
+    tasks: offboardingCase.tasks.map((task) => ({
+      ...task,
+      subtasks: task.subtasks ?? demoSubtasks[task.id],
+    })),
+  };
+}
+
 export function getCase(cases: OffboardingCase[], caseId: string) {
   const offboardingCase = cases.find((item) => item.id === caseId);
 
@@ -518,7 +547,7 @@ export function getCase(cases: OffboardingCase[], caseId: string) {
     throw notFound();
   }
 
-  return offboardingCase;
+  return enrichCase(offboardingCase);
 }
 
 export function BulkImport() {

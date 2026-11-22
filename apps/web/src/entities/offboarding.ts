@@ -15,9 +15,17 @@ export type Task = {
   title: string;
   team: string;
   status: "done" | "in_progress" | "todo";
+  note?: string;
+  subtasks?: { id: string; title: string; done: boolean }[];
 };
 
-export type OffboardingCase = CaseSummary & { tasks: Task[] };
+export type PersonAsset = {
+  item: string;
+  tag: string;
+  status: "withPerson" | "scheduled" | "transit" | "received" | "failed";
+};
+
+export type OffboardingCase = CaseSummary & { tasks: Task[]; assets?: PersonAsset[] };
 
 export const offboardingDepartments = [
   "Marketing",

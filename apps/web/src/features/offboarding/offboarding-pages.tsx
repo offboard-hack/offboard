@@ -1,6 +1,15 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useListPagination } from "@/shared/lib/use-list-pagination";
-import { Alert02Icon, Calendar03Icon, Tick02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
+import {
+  Alert02Icon,
+  ArrowDown01Icon,
+  ArrowRight01Icon,
+  Calendar03Icon,
+  LaptopIcon,
+  Tick02Icon,
+  UserGroupIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { ListPage } from "@/shared/ui/list-page";
 import type { ListMetric } from "@/shared/ui/list-page";
 import { Card, CardContent, CardHeader } from "@/shared/ui/shadcn/card";
@@ -19,7 +28,7 @@ import {
   formatShortDeadline,
   todayAtWorkspace,
 } from "../../entities/offboarding";
-import type { CaseSummary, OffboardingCase, Task } from "../../entities/offboarding";
+import type { CaseSummary, OffboardingCase, PersonAsset, Task } from "../../entities/offboarding";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
 import { ProgressBar } from "../../shared/ui/progress";
@@ -38,6 +47,22 @@ const taskStatusStyle = {
   done: local.taskStatusDone,
   in_progress: local.taskStatusInProgress,
   todo: null,
+};
+
+const assetStatusLabel: Record<PersonAsset["status"], string> = {
+  withPerson: "Com a pessoa",
+  scheduled: "Coleta agendada",
+  transit: "Em trânsito",
+  received: "Recebido",
+  failed: "Sem sucesso",
+};
+
+const assetStatusVariant: Record<PersonAsset["status"], ComponentProps<typeof Badge>["variant"]> = {
+  withPerson: "secondary",
+  scheduled: "status-warning",
+  transit: "secondary",
+  received: "status-success",
+  failed: "status-danger",
 };
 
 const statusLabel = {
@@ -351,9 +376,24 @@ export function CasePage({
   onTaskStatusChange?: (taskId: string, status: Task["status"]) => void;
   breadcrumb: ReactNode;
 }) {
-  const { name, role, department, deadline, completed, total, tasks } = offboardingCase;
+  const { name, role, department, deadline, completed, total, tasks, assets } = offboardingCase;
   const [today] = useState(todayAtWorkspace);
   const status = getCaseStatus(offboardingCase, today);
+  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
+
+  function toggleExpand(taskId: string) {
+    setExpandedTasks((previous) => {
+      const next = new Set(previous);
+
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+
+      return next;
+    });
+  }
 
   const visibleTasks = tasks.filter(
     (task) =>
@@ -422,6 +462,36 @@ export function CasePage({
               </div>
             </CardContent>
           </Card>
+          {assets && assets.length > 0 && (
+            <Card size="sm">
+              <CardContent className="grid gap-3">
+                <h2 className="border-b pb-2 text-sm font-semibold">
+                  <HugeiconsIcon
+                    icon={LaptopIcon}
+                    className="mr-1.5 inline-block size-4 align-text-bottom"
+                    aria-hidden="true"
+                  />
+                  Bens vinculados
+                </h2>
+                <ul className="grid gap-2">
+                  {assets.map((asset) => (
+                    <li key={asset.tag} className="flex items-center justify-between gap-2 text-sm">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{asset.item}</p>
+                        <p className="text-xs text-muted-foreground">{asset.tag}</p>
+                      </div>
+                      <Badge
+                        variant={assetStatusVariant[asset.status]}
+                        className="shrink-0 text-xs"
+                      >
+                        {assetStatusLabel[asset.status]}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
         </section>
 
         <section className="grid min-w-0 gap-3" aria-labelledby="checklist-title">
@@ -473,37 +543,87 @@ export function CasePage({
                 </span>
               </div>
               <ul role="list" className="divide-y">
-                {teamTasks.map((task) => (
-                  <li
-                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
-                    key={task.id}
-                  >
-                    <span className="min-w-0 wrap-anywhere">{task.title}</span>
-                    {onTaskStatusChange ? (
-                      <button
-                        type="button"
-                        onClick={() => onTaskStatusChange(task.id, task.status)}
-                        {...classProps(local.taskStatusButton)}
-                      >
-                        <Badge
-                          variant="secondary"
-                          {...classProps(local.taskStatus, taskStatusStyle[task.status])}
-                          data-status={task.status}
+                {teamTasks.map((task) => {
+                  const hasDetails = (task.subtasks && task.subtasks.length > 0) || task.note;
+
+                  const expanded = expandedTasks.has(task.id);
+
+                  return (
+                    <li key={task.id}>
+                      <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+                        <button
+                          type="button"
+                          className="flex min-w-0 items-center gap-2 text-left"
+                          onClick={() => hasDetails && toggleExpand(task.id)}
+                          aria-expanded={hasDetails ? expanded : undefined}
                         >
-                          {statusLabel[task.status]}
-                        </Badge>
-                      </button>
-                    ) : (
-                      <Badge
-                        variant="secondary"
-                        {...classProps(local.taskStatus, taskStatusStyle[task.status])}
-                        data-status={task.status}
-                      >
-                        {statusLabel[task.status]}
-                      </Badge>
-                    )}
-                  </li>
-                ))}
+                          {hasDetails && (
+                            <HugeiconsIcon
+                              icon={expanded ? ArrowDown01Icon : ArrowRight01Icon}
+                              className="size-4 shrink-0 text-muted-foreground"
+                              aria-hidden="true"
+                            />
+                          )}
+                          <span className="min-w-0 wrap-anywhere">{task.title}</span>
+                        </button>
+                        {onTaskStatusChange ? (
+                          <button
+                            type="button"
+                            onClick={() => onTaskStatusChange(task.id, task.status)}
+                            {...classProps(local.taskStatusButton)}
+                          >
+                            <Badge
+                              variant="secondary"
+                              {...classProps(local.taskStatus, taskStatusStyle[task.status])}
+                              data-status={task.status}
+                            >
+                              {statusLabel[task.status]}
+                            </Badge>
+                          </button>
+                        ) : (
+                          <Badge
+                            variant="secondary"
+                            {...classProps(local.taskStatus, taskStatusStyle[task.status])}
+                            data-status={task.status}
+                          >
+                            {statusLabel[task.status]}
+                          </Badge>
+                        )}
+                      </div>
+                      {hasDetails && expanded && (
+                        <div className="border-t bg-muted/20 px-4 py-3 pl-10">
+                          {task.subtasks && task.subtasks.length > 0 && (
+                            <ul className="grid gap-1.5">
+                              {task.subtasks.map((sub) => (
+                                <li key={sub.id} className="flex items-center gap-2 text-sm">
+                                  <span
+                                    className={`inline-block size-3.5 shrink-0 rounded-sm border ${sub.done ? "border-primary bg-primary" : "border-muted-foreground/40"}`}
+                                    aria-hidden="true"
+                                  >
+                                    {sub.done && (
+                                      <HugeiconsIcon
+                                        icon={Tick02Icon}
+                                        className="size-3.5 text-primary-foreground"
+                                      />
+                                    )}
+                                  </span>
+                                  <span
+                                    className={sub.done ? "text-muted-foreground line-through" : ""}
+                                  >
+                                    {sub.title}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {task.note && (
+                            <p className="mt-2 text-sm text-muted-foreground">{task.note}</p>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           ))}
