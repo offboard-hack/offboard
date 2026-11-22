@@ -1,8 +1,12 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "@offboard/db/repositories";
 import type { ConfigValue } from "@offboard/db/schema";
+import { tasks } from "@offboard/db/schema";
 import { seedDatabase } from "@offboard/db/seed-database";
+import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.ts";
@@ -13,7 +17,19 @@ const missingCaseId = "00000000-0000-4000-8000-000000000001";
 
 describe.skipIf(!url)("api", () => {
   const db = createClient(url ?? "");
-  const app = createApp("http://localhost:5173", createRepositories(db));
+  const repos = createRepositories(db);
+
+  let correiosBody = "";
+  let correiosStatus = 200;
+
+  const correiosServer = createServer((_req, res) => {
+    res.writeHead(correiosStatus, { "content-type": "application/json" });
+    res.end(correiosBody);
+  });
+
+  let correiosBaseUrl: string;
+
+  const app = createApp("http://localhost:5173", repos);
 
   type Payload = {
     name?: string;
@@ -51,6 +67,14 @@ describe.skipIf(!url)("api", () => {
     await migrate(db, {
       migrationsFolder: fileURLToPath(new URL("../../../packages/db/drizzle", import.meta.url)),
     });
+
+    await new Promise<void>((resolve) => {
+      correiosServer.listen(0, "127.0.0.1", resolve);
+    });
+
+    // WARNING: listen(0) guarantees AddressInfo with a port
+    const addr = correiosServer.address() as AddressInfo;
+    correiosBaseUrl = `http://127.0.0.1:${addr.port}`;
   });
 
   beforeEach(async () => {
@@ -58,6 +82,10 @@ describe.skipIf(!url)("api", () => {
   });
 
   afterAll(async () => {
+    await new Promise<void>((resolve) => {
+      correiosServer.close(() => resolve());
+    });
+
     await db.$client.end();
   });
 
@@ -430,5 +458,249 @@ describe.skipIf(!url)("api", () => {
 
     expect(res.status).toBe(200);
     expect((await res.json()).status).toBe("done");
+  });
+
+  it("returns tracking info for a task with tracking code", async () => {
+    const correiosApp = createApp("http://localhost:5173", repos, correiosBaseUrl);
+
+    correiosStatus = 200;
+    correiosBody = JSON.stringify({
+      objetos: [
+        {
+          eventos: [
+            {
+              codigo: "RO",
+              tipo: "01",
+              descricao: "Objeto em trânsito",
+              dtHrCriado: "2026-11-18T16:00:00",
+            },
+          ],
+        },
+      ],
+    });
+
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const task = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    await db.update(tasks).set({ trackingCode: "AB123456789BR" }).where(eq(tasks.id, task.id));
+
+    const res = await correiosApp.handle(
+      new Request(`http://localhost/api/tasks/${task.id}/tracking`),
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.trackingCode).toBe("AB123456789BR");
+    expect(body.tracking).toEqual({
+      delivered: false,
+      lastEvent: "Objeto em trânsito",
+      lastUpdate: "2026-11-18T16:00:00",
+    });
+  });
+
+  it("returns null tracking for a task without tracking code", async () => {
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const task = detail.tasks[0];
+
+    const res = await app.handle(new Request(`http://localhost/api/tasks/${task.id}/tracking`));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ trackingCode: null, tracking: null });
+  });
+
+  it("returns 404 for tracking on unknown task", async () => {
+    const res = await app.handle(
+      new Request(`http://localhost/api/tasks/${missingTaskId}/tracking`),
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Task not found" });
+  });
+
+  it("checks tracked shipments via GET and marks delivered tasks done", async () => {
+    const correiosApp = createApp("http://localhost:5173", repos, correiosBaseUrl);
+
+    correiosStatus = 200;
+    correiosBody = JSON.stringify({
+      objetos: [
+        {
+          eventos: [
+            {
+              codigo: "BDE",
+              tipo: "01",
+              descricao: "Objeto entregue ao destinatário",
+              dtHrCriado: "2026-11-20T10:30:00",
+            },
+          ],
+        },
+      ],
+    });
+
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const todo = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    await db.update(tasks).set({ trackingCode: "CD987654321BR" }).where(eq(tasks.id, todo.id));
+
+    const res = await correiosApp.handle(new Request("http://localhost/api/correios/check"));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.checked).toBeGreaterThanOrEqual(1);
+    expect(body.delivered).toContain(todo.id);
+
+    const after = await (await call(`/offboardings/${list[0].id}`)).json();
+    expect(after.tasks.find((t: { id: string }) => t.id === todo.id).status).toBe("done");
+  });
+
+  it("checks tracked shipments via POST", async () => {
+    const correiosApp = createApp("http://localhost:5173", repos, correiosBaseUrl);
+
+    correiosStatus = 200;
+    correiosBody = JSON.stringify({ objetos: [] });
+
+    const res = await correiosApp.handle(
+      new Request("http://localhost/api/correios/check", { method: "POST" }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ checked: 0, delivered: [] });
+  });
+
+  it("does not mark non-delivered tracked tasks as done", async () => {
+    const correiosApp = createApp("http://localhost:5173", repos, correiosBaseUrl);
+
+    correiosStatus = 200;
+    correiosBody = JSON.stringify({
+      objetos: [
+        {
+          eventos: [
+            {
+              codigo: "RO",
+              tipo: "01",
+              descricao: "Objeto em trânsito",
+              dtHrCriado: "2026-11-18T16:00:00",
+            },
+          ],
+        },
+      ],
+    });
+
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const todo = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    await db.update(tasks).set({ trackingCode: "EF111222333BR" }).where(eq(tasks.id, todo.id));
+
+    const res = await correiosApp.handle(new Request("http://localhost/api/correios/check"));
+
+    const body = await res.json();
+    expect(body.delivered).toEqual([]);
+
+    const after = await (await call(`/offboardings/${list[0].id}`)).json();
+    expect(after.tasks.find((t: { id: string }) => t.id === todo.id).status).toBe("todo");
+  });
+
+  it("fires actions for delivered tasks with a phase", async () => {
+    const correiosApp = createApp("http://localhost:5173", repos, correiosBaseUrl);
+
+    correiosStatus = 200;
+    correiosBody = JSON.stringify({
+      objetos: [
+        {
+          eventos: [
+            {
+              codigo: "BDE",
+              tipo: "01",
+              descricao: "Objeto entregue",
+              dtHrCriado: "2026-11-21T09:00:00",
+            },
+          ],
+        },
+      ],
+    });
+
+    const list = await (await call("/offboardings")).json();
+
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+
+    const taskWithPhase = detail.tasks.find(
+      (t: { status: string; title: string }) =>
+        t.status === "todo" && t.title === "Enviar desligamento ao eSocial",
+    );
+
+    await db
+      .update(tasks)
+      .set({ trackingCode: "GH444555666BR" })
+      .where(eq(tasks.id, taskWithPhase.id));
+
+    const res = await correiosApp.handle(new Request("http://localhost/api/correios/check"));
+
+    const body = await res.json();
+    expect(body.delivered).toContain(taskWithPhase.id);
+  });
+
+  it("includes trackingCode in task details", async () => {
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const task = detail.tasks[0];
+
+    expect(task).toHaveProperty("trackingCode");
+  });
+
+  it("handles task deletion during correios check gracefully", async () => {
+    const stubbedApp = createApp(
+      "http://localhost:5173",
+      {
+        ...repos,
+        getTrackedTasks: () =>
+          Promise.resolve([
+            { id: missingTaskId, title: "Gone", phase: "d0", trackingCode: "ZZ999999999BR" },
+          ]),
+      },
+      correiosBaseUrl,
+    );
+
+    correiosStatus = 200;
+    correiosBody = JSON.stringify({
+      objetos: [
+        {
+          eventos: [
+            {
+              codigo: "BDE",
+              tipo: "01",
+              descricao: "Entregue",
+              dtHrCriado: "2026-11-21T10:00:00",
+            },
+          ],
+        },
+      ],
+    });
+
+    const res = await stubbedApp.handle(new Request("http://localhost/api/correios/check"));
+
+    const body = await res.json();
+    expect(body.checked).toBe(1);
+    expect(body.delivered).toEqual([]);
+  });
+
+  it("rethrows unexpected create errors", async () => {
+    const failing = createApp("http://localhost:5173", {
+      ...repos,
+      createActionConfig: () => Promise.reject(new Error("boom")),
+    });
+
+    const res = await failing.handle(
+      new Request("http://localhost/api/action-configs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ actionId: "x::y", phase: "d0" }),
+      }),
+    );
+
+    expect(res.status).toBe(500);
   });
 });

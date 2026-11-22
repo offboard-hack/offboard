@@ -46,6 +46,7 @@ export const tasks = pgTable("tasks", {
   dueDate: date("due_date"),
   position: integer("position").notNull(),
   phase: varchar("phase", { length: 50 }),
+  trackingCode: varchar("tracking_code", { length: 30 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

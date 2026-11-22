@@ -95,6 +95,7 @@ describe.skipIf(!url)("repositories", () => {
       status: "done",
       description: null,
       dueDate: null,
+      trackingCode: null,
       subtasks: [],
     });
   });
@@ -323,7 +324,71 @@ describe.skipIf(!url)("repositories", () => {
     const nina = list.find((c) => c.name === "Nina Castro")!;
     await db.$client.query(`DELETE FROM offboarding_cases WHERE id = '${nina.id}'`);
     const allTasks = await db.select().from(tasks);
-    expect(allTasks).toHaveLength(seedCases.reduce((sum, item) => sum + item.tasks.length, 0) - 4);
+    const ninaTasks = seedCases.find((c) => c.name === "Nina Castro")!.tasks.length;
+    expect(allTasks).toHaveLength(
+      seedCases.reduce((sum, item) => sum + item.tasks.length, 0) - ninaTasks,
+    );
+  });
+
+  it("sets and reads a tracking code", async () => {
+    const list = await repos.listOffboardings();
+    const marina = list.find((c) => c.name === "Marina Lopes")!;
+    const detail = await repos.getOffboarding(marina.id);
+    const task = detail!.tasks[0];
+
+    const result = await repos.setTrackingCode(task.id, "AB123456789BR");
+    expect(result).toEqual({ id: task.id, trackingCode: "AB123456789BR" });
+
+    const info = await repos.getTaskTrackingCode(task.id);
+    expect(info).toMatchObject({ id: task.id, trackingCode: "AB123456789BR" });
+  });
+
+  it("returns null when setting tracking code on unknown task", async () => {
+    expect(await repos.setTrackingCode("00000000-0000-0000-0000-000000000000", "XX")).toBeNull();
+  });
+
+  it("returns null when reading tracking code on unknown task", async () => {
+    expect(await repos.getTaskTrackingCode("00000000-0000-0000-0000-000000000000")).toBeNull();
+  });
+
+  it("returns tracked tasks (not done, with tracking code)", async () => {
+    const list = await repos.listOffboardings();
+    const marina = list.find((c) => c.name === "Marina Lopes")!;
+    const detail = await repos.getOffboarding(marina.id);
+    const todoTask = detail!.tasks.find((t) => t.status === "todo")!;
+    const doneTask = detail!.tasks.find((t) => t.status === "done")!;
+
+    await repos.setTrackingCode(todoTask.id, "TRACK001BR");
+    await repos.setTrackingCode(doneTask.id, "TRACK002BR");
+
+    const tracked = await repos.getTrackedTasks();
+    const ids = tracked.map((t) => t.id);
+
+    expect(ids).toContain(todoTask.id);
+    expect(ids).not.toContain(doneTask.id);
+  });
+
+  it("includes trackingCode in updateTaskStatus result", async () => {
+    const list = await repos.listOffboardings();
+    const nina = list.find((c) => c.name === "Nina Castro")!;
+    const detail = await repos.getOffboarding(nina.id);
+    const task = detail!.tasks.find((t) => t.status === "todo")!;
+
+    await repos.setTrackingCode(task.id, "TRACK003BR");
+    const updated = await repos.updateTaskStatus(task.id, "done");
+    expect(updated?.trackingCode).toBe("TRACK003BR");
+  });
+
+  it("includes trackingCode in getOffboarding tasks", async () => {
+    const list = await repos.listOffboardings();
+    const marina = list.find((c) => c.name === "Marina Lopes")!;
+    const detail = await repos.getOffboarding(marina.id);
+    const task = detail!.tasks[0];
+
+    await repos.setTrackingCode(task.id, "TRACK004BR");
+
+    const refreshed = await repos.getOffboarding(marina.id);
+    expect(refreshed!.tasks.find((t) => t.id === task.id)!.trackingCode).toBe("TRACK004BR");
   });
 });
 

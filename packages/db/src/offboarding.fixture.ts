@@ -300,6 +300,7 @@ export const seedCases: readonly SeedCase[] = [
         status: "in_progress",
         phase: "pre",
       },
+      { team: "Facilities", title: "Devolver chaves do armário", status: "todo" },
     ],
   },
 ];
