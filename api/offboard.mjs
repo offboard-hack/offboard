@@ -11562,675 +11562,6 @@ var require_dist2 = __commonJS({
   }
 });
 
-<<<<<<< HEAD
-// node_modules/@stablelib/base64/lib/base64.js
-var require_base64 = __commonJS({
-  "node_modules/@stablelib/base64/lib/base64.js"(exports) {
-    "use strict";
-    var __extends = exports && exports.__extends || /* @__PURE__ */ (function() {
-      var extendStatics = function(d2, b2) {
-        extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d3, b3) {
-          d3.__proto__ = b3;
-        } || function(d3, b3) {
-          for (var p2 in b3) if (b3.hasOwnProperty(p2)) d3[p2] = b3[p2];
-        };
-        return extendStatics(d2, b2);
-      };
-      return function(d2, b2) {
-        extendStatics(d2, b2);
-        function __() {
-          this.constructor = d2;
-        }
-        d2.prototype = b2 === null ? Object.create(b2) : (__.prototype = b2.prototype, new __());
-      };
-    })();
-    Object.defineProperty(exports, "__esModule", { value: true });
-    var INVALID_BYTE = 256;
-    var Coder = (
-      /** @class */
-      (function() {
-        function Coder2(_paddingCharacter) {
-          if (_paddingCharacter === void 0) {
-            _paddingCharacter = "=";
-          }
-          this._paddingCharacter = _paddingCharacter;
-        }
-        Coder2.prototype.encodedLength = function(length) {
-          if (!this._paddingCharacter) {
-            return (length * 8 + 5) / 6 | 0;
-          }
-          return (length + 2) / 3 * 4 | 0;
-        };
-        Coder2.prototype.encode = function(data) {
-          var out = "";
-          var i2 = 0;
-          for (; i2 < data.length - 2; i2 += 3) {
-            var c2 = data[i2] << 16 | data[i2 + 1] << 8 | data[i2 + 2];
-            out += this._encodeByte(c2 >>> 3 * 6 & 63);
-            out += this._encodeByte(c2 >>> 2 * 6 & 63);
-            out += this._encodeByte(c2 >>> 1 * 6 & 63);
-            out += this._encodeByte(c2 >>> 0 * 6 & 63);
-          }
-          var left = data.length - i2;
-          if (left > 0) {
-            var c2 = data[i2] << 16 | (left === 2 ? data[i2 + 1] << 8 : 0);
-            out += this._encodeByte(c2 >>> 3 * 6 & 63);
-            out += this._encodeByte(c2 >>> 2 * 6 & 63);
-            if (left === 2) {
-              out += this._encodeByte(c2 >>> 1 * 6 & 63);
-            } else {
-              out += this._paddingCharacter || "";
-            }
-            out += this._paddingCharacter || "";
-          }
-          return out;
-        };
-        Coder2.prototype.maxDecodedLength = function(length) {
-          if (!this._paddingCharacter) {
-            return (length * 6 + 7) / 8 | 0;
-          }
-          return length / 4 * 3 | 0;
-        };
-        Coder2.prototype.decodedLength = function(s2) {
-          return this.maxDecodedLength(s2.length - this._getPaddingLength(s2));
-        };
-        Coder2.prototype.decode = function(s2) {
-          if (s2.length === 0) {
-            return new Uint8Array(0);
-          }
-          var paddingLength = this._getPaddingLength(s2);
-          var length = s2.length - paddingLength;
-          var out = new Uint8Array(this.maxDecodedLength(length));
-          var op = 0;
-          var i2 = 0;
-          var haveBad = 0;
-          var v0 = 0, v1 = 0, v2 = 0, v3 = 0;
-          for (; i2 < length - 4; i2 += 4) {
-            v0 = this._decodeChar(s2.charCodeAt(i2 + 0));
-            v1 = this._decodeChar(s2.charCodeAt(i2 + 1));
-            v2 = this._decodeChar(s2.charCodeAt(i2 + 2));
-            v3 = this._decodeChar(s2.charCodeAt(i2 + 3));
-            out[op++] = v0 << 2 | v1 >>> 4;
-            out[op++] = v1 << 4 | v2 >>> 2;
-            out[op++] = v2 << 6 | v3;
-            haveBad |= v0 & INVALID_BYTE;
-            haveBad |= v1 & INVALID_BYTE;
-            haveBad |= v2 & INVALID_BYTE;
-            haveBad |= v3 & INVALID_BYTE;
-          }
-          if (i2 < length - 1) {
-            v0 = this._decodeChar(s2.charCodeAt(i2));
-            v1 = this._decodeChar(s2.charCodeAt(i2 + 1));
-            out[op++] = v0 << 2 | v1 >>> 4;
-            haveBad |= v0 & INVALID_BYTE;
-            haveBad |= v1 & INVALID_BYTE;
-          }
-          if (i2 < length - 2) {
-            v2 = this._decodeChar(s2.charCodeAt(i2 + 2));
-            out[op++] = v1 << 4 | v2 >>> 2;
-            haveBad |= v2 & INVALID_BYTE;
-          }
-          if (i2 < length - 3) {
-            v3 = this._decodeChar(s2.charCodeAt(i2 + 3));
-            out[op++] = v2 << 6 | v3;
-            haveBad |= v3 & INVALID_BYTE;
-          }
-          if (haveBad !== 0) {
-            throw new Error("Base64Coder: incorrect characters for decoding");
-          }
-          return out;
-        };
-        Coder2.prototype._encodeByte = function(b2) {
-          var result = b2;
-          result += 65;
-          result += 25 - b2 >>> 8 & 0 - 65 - 26 + 97;
-          result += 51 - b2 >>> 8 & 26 - 97 - 52 + 48;
-          result += 61 - b2 >>> 8 & 52 - 48 - 62 + 43;
-          result += 62 - b2 >>> 8 & 62 - 43 - 63 + 47;
-          return String.fromCharCode(result);
-        };
-        Coder2.prototype._decodeChar = function(c2) {
-          var result = INVALID_BYTE;
-          result += (42 - c2 & c2 - 44) >>> 8 & -INVALID_BYTE + c2 - 43 + 62;
-          result += (46 - c2 & c2 - 48) >>> 8 & -INVALID_BYTE + c2 - 47 + 63;
-          result += (47 - c2 & c2 - 58) >>> 8 & -INVALID_BYTE + c2 - 48 + 52;
-          result += (64 - c2 & c2 - 91) >>> 8 & -INVALID_BYTE + c2 - 65 + 0;
-          result += (96 - c2 & c2 - 123) >>> 8 & -INVALID_BYTE + c2 - 97 + 26;
-          return result;
-        };
-        Coder2.prototype._getPaddingLength = function(s2) {
-          var paddingLength = 0;
-          if (this._paddingCharacter) {
-            for (var i2 = s2.length - 1; i2 >= 0; i2--) {
-              if (s2[i2] !== this._paddingCharacter) {
-                break;
-              }
-              paddingLength++;
-            }
-            if (s2.length < 4 || paddingLength > 2) {
-              throw new Error("Base64Coder: incorrect padding");
-            }
-          }
-          return paddingLength;
-        };
-        return Coder2;
-      })()
-    );
-    exports.Coder = Coder;
-    var stdCoder = new Coder();
-    function encode3(data) {
-      return stdCoder.encode(data);
-    }
-    exports.encode = encode3;
-    function decode6(s2) {
-      return stdCoder.decode(s2);
-    }
-    exports.decode = decode6;
-    var URLSafeCoder = (
-      /** @class */
-      (function(_super) {
-        __extends(URLSafeCoder2, _super);
-        function URLSafeCoder2() {
-          return _super !== null && _super.apply(this, arguments) || this;
-        }
-        URLSafeCoder2.prototype._encodeByte = function(b2) {
-          var result = b2;
-          result += 65;
-          result += 25 - b2 >>> 8 & 0 - 65 - 26 + 97;
-          result += 51 - b2 >>> 8 & 26 - 97 - 52 + 48;
-          result += 61 - b2 >>> 8 & 52 - 48 - 62 + 45;
-          result += 62 - b2 >>> 8 & 62 - 45 - 63 + 95;
-          return String.fromCharCode(result);
-        };
-        URLSafeCoder2.prototype._decodeChar = function(c2) {
-          var result = INVALID_BYTE;
-          result += (44 - c2 & c2 - 46) >>> 8 & -INVALID_BYTE + c2 - 45 + 62;
-          result += (94 - c2 & c2 - 96) >>> 8 & -INVALID_BYTE + c2 - 95 + 63;
-          result += (47 - c2 & c2 - 58) >>> 8 & -INVALID_BYTE + c2 - 48 + 52;
-          result += (64 - c2 & c2 - 91) >>> 8 & -INVALID_BYTE + c2 - 65 + 0;
-          result += (96 - c2 & c2 - 123) >>> 8 & -INVALID_BYTE + c2 - 97 + 26;
-          return result;
-        };
-        return URLSafeCoder2;
-      })(Coder)
-    );
-    exports.URLSafeCoder = URLSafeCoder;
-    var urlSafeCoder = new URLSafeCoder();
-    function encodeURLSafe(data) {
-      return urlSafeCoder.encode(data);
-    }
-    exports.encodeURLSafe = encodeURLSafe;
-    function decodeURLSafe(s2) {
-      return urlSafeCoder.decode(s2);
-    }
-    exports.decodeURLSafe = decodeURLSafe;
-    exports.encodedLength = function(length) {
-      return stdCoder.encodedLength(length);
-    };
-    exports.maxDecodedLength = function(length) {
-      return stdCoder.maxDecodedLength(length);
-    };
-    exports.decodedLength = function(s2) {
-      return stdCoder.decodedLength(s2);
-    };
-  }
-});
-
-// node_modules/fast-sha256/sha256.js
-var require_sha256 = __commonJS({
-  "node_modules/fast-sha256/sha256.js"(exports, module) {
-    (function(root, factory) {
-      var exports2 = {};
-      factory(exports2);
-      var sha256 = exports2["default"];
-      for (var k in exports2) {
-        sha256[k] = exports2[k];
-      }
-      if (typeof module === "object" && typeof module.exports === "object") {
-        module.exports = sha256;
-      } else if (typeof define === "function" && define.amd) {
-        define(function() {
-          return sha256;
-        });
-      } else {
-        root.sha256 = sha256;
-      }
-    })(exports, function(exports2) {
-      "use strict";
-      exports2.__esModule = true;
-      exports2.digestLength = 32;
-      exports2.blockSize = 64;
-      var K = new Uint32Array([
-        1116352408,
-        1899447441,
-        3049323471,
-        3921009573,
-        961987163,
-        1508970993,
-        2453635748,
-        2870763221,
-        3624381080,
-        310598401,
-        607225278,
-        1426881987,
-        1925078388,
-        2162078206,
-        2614888103,
-        3248222580,
-        3835390401,
-        4022224774,
-        264347078,
-        604807628,
-        770255983,
-        1249150122,
-        1555081692,
-        1996064986,
-        2554220882,
-        2821834349,
-        2952996808,
-        3210313671,
-        3336571891,
-        3584528711,
-        113926993,
-        338241895,
-        666307205,
-        773529912,
-        1294757372,
-        1396182291,
-        1695183700,
-        1986661051,
-        2177026350,
-        2456956037,
-        2730485921,
-        2820302411,
-        3259730800,
-        3345764771,
-        3516065817,
-        3600352804,
-        4094571909,
-        275423344,
-        430227734,
-        506948616,
-        659060556,
-        883997877,
-        958139571,
-        1322822218,
-        1537002063,
-        1747873779,
-        1955562222,
-        2024104815,
-        2227730452,
-        2361852424,
-        2428436474,
-        2756734187,
-        3204031479,
-        3329325298
-      ]);
-      function hashBlocks(w2, v2, p2, pos, len) {
-        var a2, b2, c2, d2, e2, f2, g2, h2, u2, i2, j, t1, t22;
-        while (len >= 64) {
-          a2 = v2[0];
-          b2 = v2[1];
-          c2 = v2[2];
-          d2 = v2[3];
-          e2 = v2[4];
-          f2 = v2[5];
-          g2 = v2[6];
-          h2 = v2[7];
-          for (i2 = 0; i2 < 16; i2++) {
-            j = pos + i2 * 4;
-            w2[i2] = (p2[j] & 255) << 24 | (p2[j + 1] & 255) << 16 | (p2[j + 2] & 255) << 8 | p2[j + 3] & 255;
-          }
-          for (i2 = 16; i2 < 64; i2++) {
-            u2 = w2[i2 - 2];
-            t1 = (u2 >>> 17 | u2 << 32 - 17) ^ (u2 >>> 19 | u2 << 32 - 19) ^ u2 >>> 10;
-            u2 = w2[i2 - 15];
-            t22 = (u2 >>> 7 | u2 << 32 - 7) ^ (u2 >>> 18 | u2 << 32 - 18) ^ u2 >>> 3;
-            w2[i2] = (t1 + w2[i2 - 7] | 0) + (t22 + w2[i2 - 16] | 0);
-          }
-          for (i2 = 0; i2 < 64; i2++) {
-            t1 = (((e2 >>> 6 | e2 << 32 - 6) ^ (e2 >>> 11 | e2 << 32 - 11) ^ (e2 >>> 25 | e2 << 32 - 25)) + (e2 & f2 ^ ~e2 & g2) | 0) + (h2 + (K[i2] + w2[i2] | 0) | 0) | 0;
-            t22 = ((a2 >>> 2 | a2 << 32 - 2) ^ (a2 >>> 13 | a2 << 32 - 13) ^ (a2 >>> 22 | a2 << 32 - 22)) + (a2 & b2 ^ a2 & c2 ^ b2 & c2) | 0;
-            h2 = g2;
-            g2 = f2;
-            f2 = e2;
-            e2 = d2 + t1 | 0;
-            d2 = c2;
-            c2 = b2;
-            b2 = a2;
-            a2 = t1 + t22 | 0;
-          }
-          v2[0] += a2;
-          v2[1] += b2;
-          v2[2] += c2;
-          v2[3] += d2;
-          v2[4] += e2;
-          v2[5] += f2;
-          v2[6] += g2;
-          v2[7] += h2;
-          pos += 64;
-          len -= 64;
-        }
-        return pos;
-      }
-      var Hash2 = (
-        /** @class */
-        (function() {
-          function Hash3() {
-            this.digestLength = exports2.digestLength;
-            this.blockSize = exports2.blockSize;
-            this.state = new Int32Array(8);
-            this.temp = new Int32Array(64);
-            this.buffer = new Uint8Array(128);
-            this.bufferLength = 0;
-            this.bytesHashed = 0;
-            this.finished = false;
-            this.reset();
-          }
-          Hash3.prototype.reset = function() {
-            this.state[0] = 1779033703;
-            this.state[1] = 3144134277;
-            this.state[2] = 1013904242;
-            this.state[3] = 2773480762;
-            this.state[4] = 1359893119;
-            this.state[5] = 2600822924;
-            this.state[6] = 528734635;
-            this.state[7] = 1541459225;
-            this.bufferLength = 0;
-            this.bytesHashed = 0;
-            this.finished = false;
-            return this;
-          };
-          Hash3.prototype.clean = function() {
-            for (var i2 = 0; i2 < this.buffer.length; i2++) {
-              this.buffer[i2] = 0;
-            }
-            for (var i2 = 0; i2 < this.temp.length; i2++) {
-              this.temp[i2] = 0;
-            }
-            this.reset();
-          };
-          Hash3.prototype.update = function(data, dataLength) {
-            if (dataLength === void 0) {
-              dataLength = data.length;
-            }
-            if (this.finished) {
-              throw new Error("SHA256: can't update because hash was finished.");
-            }
-            var dataPos = 0;
-            this.bytesHashed += dataLength;
-            if (this.bufferLength > 0) {
-              while (this.bufferLength < 64 && dataLength > 0) {
-                this.buffer[this.bufferLength++] = data[dataPos++];
-                dataLength--;
-              }
-              if (this.bufferLength === 64) {
-                hashBlocks(this.temp, this.state, this.buffer, 0, 64);
-                this.bufferLength = 0;
-              }
-            }
-            if (dataLength >= 64) {
-              dataPos = hashBlocks(this.temp, this.state, data, dataPos, dataLength);
-              dataLength %= 64;
-            }
-            while (dataLength > 0) {
-              this.buffer[this.bufferLength++] = data[dataPos++];
-              dataLength--;
-            }
-            return this;
-          };
-          Hash3.prototype.finish = function(out) {
-            if (!this.finished) {
-              var bytesHashed = this.bytesHashed;
-              var left = this.bufferLength;
-              var bitLenHi = bytesHashed / 536870912 | 0;
-              var bitLenLo = bytesHashed << 3;
-              var padLength = bytesHashed % 64 < 56 ? 64 : 128;
-              this.buffer[left] = 128;
-              for (var i2 = left + 1; i2 < padLength - 8; i2++) {
-                this.buffer[i2] = 0;
-              }
-              this.buffer[padLength - 8] = bitLenHi >>> 24 & 255;
-              this.buffer[padLength - 7] = bitLenHi >>> 16 & 255;
-              this.buffer[padLength - 6] = bitLenHi >>> 8 & 255;
-              this.buffer[padLength - 5] = bitLenHi >>> 0 & 255;
-              this.buffer[padLength - 4] = bitLenLo >>> 24 & 255;
-              this.buffer[padLength - 3] = bitLenLo >>> 16 & 255;
-              this.buffer[padLength - 2] = bitLenLo >>> 8 & 255;
-              this.buffer[padLength - 1] = bitLenLo >>> 0 & 255;
-              hashBlocks(this.temp, this.state, this.buffer, 0, padLength);
-              this.finished = true;
-            }
-            for (var i2 = 0; i2 < 8; i2++) {
-              out[i2 * 4 + 0] = this.state[i2] >>> 24 & 255;
-              out[i2 * 4 + 1] = this.state[i2] >>> 16 & 255;
-              out[i2 * 4 + 2] = this.state[i2] >>> 8 & 255;
-              out[i2 * 4 + 3] = this.state[i2] >>> 0 & 255;
-            }
-            return this;
-          };
-          Hash3.prototype.digest = function() {
-            var out = new Uint8Array(this.digestLength);
-            this.finish(out);
-            return out;
-          };
-          Hash3.prototype._saveState = function(out) {
-            for (var i2 = 0; i2 < this.state.length; i2++) {
-              out[i2] = this.state[i2];
-            }
-          };
-          Hash3.prototype._restoreState = function(from, bytesHashed) {
-            for (var i2 = 0; i2 < this.state.length; i2++) {
-              this.state[i2] = from[i2];
-            }
-            this.bytesHashed = bytesHashed;
-            this.finished = false;
-            this.bufferLength = 0;
-          };
-          return Hash3;
-        })()
-      );
-      exports2.Hash = Hash2;
-      var HMAC = (
-        /** @class */
-        (function() {
-          function HMAC2(key) {
-            this.inner = new Hash2();
-            this.outer = new Hash2();
-            this.blockSize = this.inner.blockSize;
-            this.digestLength = this.inner.digestLength;
-            var pad = new Uint8Array(this.blockSize);
-            if (key.length > this.blockSize) {
-              new Hash2().update(key).finish(pad).clean();
-            } else {
-              for (var i2 = 0; i2 < key.length; i2++) {
-                pad[i2] = key[i2];
-              }
-            }
-            for (var i2 = 0; i2 < pad.length; i2++) {
-              pad[i2] ^= 54;
-            }
-            this.inner.update(pad);
-            for (var i2 = 0; i2 < pad.length; i2++) {
-              pad[i2] ^= 54 ^ 92;
-            }
-            this.outer.update(pad);
-            this.istate = new Uint32Array(8);
-            this.ostate = new Uint32Array(8);
-            this.inner._saveState(this.istate);
-            this.outer._saveState(this.ostate);
-            for (var i2 = 0; i2 < pad.length; i2++) {
-              pad[i2] = 0;
-            }
-          }
-          HMAC2.prototype.reset = function() {
-            this.inner._restoreState(this.istate, this.inner.blockSize);
-            this.outer._restoreState(this.ostate, this.outer.blockSize);
-            return this;
-          };
-          HMAC2.prototype.clean = function() {
-            for (var i2 = 0; i2 < this.istate.length; i2++) {
-              this.ostate[i2] = this.istate[i2] = 0;
-            }
-            this.inner.clean();
-            this.outer.clean();
-          };
-          HMAC2.prototype.update = function(data) {
-            this.inner.update(data);
-            return this;
-          };
-          HMAC2.prototype.finish = function(out) {
-            if (this.outer.finished) {
-              this.outer.finish(out);
-            } else {
-              this.inner.finish(out);
-              this.outer.update(out, this.digestLength).finish(out);
-            }
-            return this;
-          };
-          HMAC2.prototype.digest = function() {
-            var out = new Uint8Array(this.digestLength);
-            this.finish(out);
-            return out;
-          };
-          return HMAC2;
-        })()
-      );
-      exports2.HMAC = HMAC;
-      function hash2(data) {
-        var h2 = new Hash2().update(data);
-        var digest = h2.digest();
-        h2.clean();
-        return digest;
-      }
-      exports2.hash = hash2;
-      exports2["default"] = hash2;
-      function hmac(key, data) {
-        var h2 = new HMAC(key).update(data);
-        var digest = h2.digest();
-        h2.clean();
-        return digest;
-      }
-      exports2.hmac = hmac;
-      function fillBuffer(buffer, hmac2, info, counter) {
-        var num = counter[0];
-        if (num === 0) {
-          throw new Error("hkdf: cannot expand more");
-        }
-        hmac2.reset();
-        if (num > 1) {
-          hmac2.update(buffer);
-        }
-        if (info) {
-          hmac2.update(info);
-        }
-        hmac2.update(counter);
-        hmac2.finish(buffer);
-        counter[0]++;
-      }
-      var hkdfSalt = new Uint8Array(exports2.digestLength);
-      function hkdf(key, salt, info, length) {
-        if (salt === void 0) {
-          salt = hkdfSalt;
-        }
-        if (length === void 0) {
-          length = 32;
-        }
-        var counter = new Uint8Array([1]);
-        var okm = hmac(salt, key);
-        var hmac_ = new HMAC(okm);
-        var buffer = new Uint8Array(hmac_.digestLength);
-        var bufpos = buffer.length;
-        var out = new Uint8Array(length);
-        for (var i2 = 0; i2 < length; i2++) {
-          if (bufpos === buffer.length) {
-            fillBuffer(buffer, hmac_, info, counter);
-            bufpos = 0;
-          }
-          out[i2] = buffer[bufpos++];
-        }
-        hmac_.clean();
-        buffer.fill(0);
-        counter.fill(0);
-        return out;
-      }
-      exports2.hkdf = hkdf;
-      function pbkdf2(password, salt, iterations, dkLen) {
-        var prf = new HMAC(password);
-        var len = prf.digestLength;
-        var ctr = new Uint8Array(4);
-        var t3 = new Uint8Array(len);
-        var u2 = new Uint8Array(len);
-        var dk = new Uint8Array(dkLen);
-        for (var i2 = 0; i2 * len < dkLen; i2++) {
-          var c2 = i2 + 1;
-          ctr[0] = c2 >>> 24 & 255;
-          ctr[1] = c2 >>> 16 & 255;
-          ctr[2] = c2 >>> 8 & 255;
-          ctr[3] = c2 >>> 0 & 255;
-          prf.reset();
-          prf.update(salt);
-          prf.update(ctr);
-          prf.finish(u2);
-          for (var j = 0; j < len; j++) {
-            t3[j] = u2[j];
-          }
-          for (var j = 2; j <= iterations; j++) {
-            prf.reset();
-            prf.update(u2).finish(u2);
-            for (var k = 0; k < len; k++) {
-              t3[k] ^= u2[k];
-            }
-          }
-          for (var j = 0; j < len && i2 * len + j < dkLen; j++) {
-            dk[i2 * len + j] = t3[j];
-          }
-        }
-        for (var i2 = 0; i2 < len; i2++) {
-          t3[i2] = u2[i2] = 0;
-        }
-        for (var i2 = 0; i2 < 4; i2++) {
-          ctr[i2] = 0;
-        }
-        prf.clean();
-        return dk;
-      }
-      exports2.pbkdf2 = pbkdf2;
-    });
-  }
-});
-
-// node_modules/standardwebhooks/dist/timing_safe_equal.js
-var require_timing_safe_equal = __commonJS({
-  "node_modules/standardwebhooks/dist/timing_safe_equal.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.timingSafeEqual = timingSafeEqual;
-    function assert2(expr, msg = "") {
-      if (!expr) {
-        throw new Error(msg);
-      }
-    }
-    function timingSafeEqual(a2, b2) {
-      if (a2.byteLength !== b2.byteLength) {
-        return false;
-      }
-      if (!(a2 instanceof DataView)) {
-        a2 = new DataView(ArrayBuffer.isView(a2) ? a2.buffer : a2);
-      }
-      if (!(b2 instanceof DataView)) {
-        b2 = new DataView(ArrayBuffer.isView(b2) ? b2.buffer : b2);
-      }
-      assert2(a2 instanceof DataView);
-      assert2(b2 instanceof DataView);
-      const length = a2.byteLength;
-      let out = 0;
-      let i2 = -1;
-      while (++i2 < length) {
-        out |= a2.getUint8(i2) ^ b2.getUint8(i2);
-      }
-      return out === 0;
-=======
 // node_modules/@slack/web-api/dist/errors.js
 var require_errors = __commonJS({
   "node_modules/@slack/web-api/dist/errors.js"(exports) {
@@ -12453,11 +11784,11 @@ var require_instrument = __commonJS({
     }
     var baseUserAgent = `${replaceSlashes(packageJson.name)}/${packageJson.version} ${toLatin1Safe((0, node_path_1.basename)(process.title))}/${process.version.replace("v", "")} ${os.platform()}/${os.release()}`;
     var appMetadata = {};
-    function addAppMetadata({ name, version: version3 }) {
-      appMetadata[replaceSlashes(name)] = version3;
+    function addAppMetadata({ name, version: version4 }) {
+      appMetadata[replaceSlashes(name)] = version4;
     }
     function getUserAgent() {
-      const appIdentifier = Object.entries(appMetadata).map(([name, version3]) => `${name}/${version3}`).join(" ");
+      const appIdentifier = Object.entries(appMetadata).map(([name, version4]) => `${name}/${version4}`).join(" ");
       return (appIdentifier.length > 0 ? `${appIdentifier} ` : "") + baseUserAgent;
     }
   }
@@ -12839,11 +12170,11 @@ var require_eventemitter3 = __commonJS({
     "use strict";
     var has = Object.prototype.hasOwnProperty;
     var prefix = "~";
-    function Events() {
+    function Events2() {
     }
     if (Object.create) {
-      Events.prototype = /* @__PURE__ */ Object.create(null);
-      if (!new Events().__proto__) prefix = false;
+      Events2.prototype = /* @__PURE__ */ Object.create(null);
+      if (!new Events2().__proto__) prefix = false;
     }
     function EE(fn, context, once) {
       this.fn = fn;
@@ -12861,11 +12192,11 @@ var require_eventemitter3 = __commonJS({
       return emitter;
     }
     function clearEvent(emitter, evt) {
-      if (--emitter._eventsCount === 0) emitter._events = new Events();
+      if (--emitter._eventsCount === 0) emitter._events = new Events2();
       else delete emitter._events[evt];
     }
     function EventEmitter() {
-      this._events = new Events();
+      this._events = new Events2();
       this._eventsCount = 0;
     }
     EventEmitter.prototype.eventNames = function eventNames() {
@@ -12980,7 +12311,7 @@ var require_eventemitter3 = __commonJS({
         evt = prefix ? prefix + event : event;
         if (this._events[evt]) clearEvent(this, evt);
       } else {
-        this._events = new Events();
+        this._events = new Events2();
         this._eventsCount = 0;
       }
       return this;
@@ -13969,127 +13300,10 @@ var require_file_upload = __commonJS({
     }
     function buildInvalidFilesUploadParamError() {
       return "You may supply file_uploads only for a single channel, message, or thread respectively. Therefore, please supply any channel_id, initial_comment or blocks, or thread_ts in the top-layer.";
->>>>>>> e75ef43 (feat: add Slack Bot Token API support alongside webhooks)
     }
   }
 });
 
-<<<<<<< HEAD
-// node_modules/standardwebhooks/dist/index.js
-var require_dist3 = __commonJS({
-  "node_modules/standardwebhooks/dist/index.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.Webhook = exports.WebhookVerificationError = void 0;
-    var base643 = require_base64();
-    var sha256 = require_sha256();
-    var timing_safe_equal_1 = require_timing_safe_equal();
-    var WEBHOOK_TOLERANCE_IN_SECONDS = 5 * 60;
-    var ExtendableError = class _ExtendableError extends Error {
-      constructor(message) {
-        super(message);
-        Object.setPrototypeOf(this, _ExtendableError.prototype);
-        this.name = "ExtendableError";
-        this.stack = new Error(message).stack;
-      }
-    };
-    var WebhookVerificationError = class _WebhookVerificationError extends ExtendableError {
-      constructor(message) {
-        super(message);
-        Object.setPrototypeOf(this, _WebhookVerificationError.prototype);
-        this.name = "WebhookVerificationError";
-      }
-    };
-    exports.WebhookVerificationError = WebhookVerificationError;
-    var Webhook2 = class _Webhook {
-      constructor(secret, options) {
-        if ((options === null || options === void 0 ? void 0 : options.format) === "raw") {
-          if (secret instanceof Uint8Array) {
-            this.key = secret;
-          } else {
-            this.key = Uint8Array.from(secret, (c2) => c2.charCodeAt(0));
-          }
-        } else {
-          if (typeof secret !== "string") {
-            throw new Error("Expected secret to be of type string");
-          }
-          if (secret.startsWith(_Webhook.prefix)) {
-            secret = secret.substring(_Webhook.prefix.length);
-          }
-          this.key = base643.decode(secret);
-        }
-        if (this.key.length === 0) {
-          throw new Error("Secret can't be empty.");
-        }
-      }
-      verify(payload, headers, options) {
-        var _a4;
-        const jsonParse = (_a4 = options === null || options === void 0 ? void 0 : options.jsonParse) !== null && _a4 !== void 0 ? _a4 : true;
-        const normalizedHeaders = {};
-        for (const key of Object.keys(headers)) {
-          normalizedHeaders[key.toLowerCase()] = headers[key];
-        }
-        const msgId = normalizedHeaders["webhook-id"];
-        const msgSignature = normalizedHeaders["webhook-signature"];
-        const msgTimestamp = normalizedHeaders["webhook-timestamp"];
-        if (!msgSignature || !msgId || !msgTimestamp) {
-          throw new WebhookVerificationError("Missing required headers");
-        }
-        const timestamp2 = this.verifyTimestamp(msgTimestamp);
-        const computedSignature = this.sign(msgId, timestamp2, payload);
-        const expectedSignature = computedSignature.split(",")[1];
-        const passedSignatures = msgSignature.split(" ");
-        const encoder2 = new globalThis.TextEncoder();
-        for (const versionedSignature of passedSignatures) {
-          const [version4, signature] = versionedSignature.split(",");
-          if (version4 !== "v1") {
-            continue;
-          }
-          if ((0, timing_safe_equal_1.timingSafeEqual)(encoder2.encode(signature), encoder2.encode(expectedSignature))) {
-            const payloadString = payload.toString();
-            if (payloadString === "") {
-              return void 0;
-            }
-            if (jsonParse) {
-              return JSON.parse(payloadString);
-            } else {
-              return void 0;
-            }
-          }
-        }
-        throw new WebhookVerificationError("No matching signature found");
-      }
-      sign(msgId, timestamp2, payload) {
-        if (typeof payload === "string") {
-        } else if (payload.constructor.name === "Buffer") {
-          payload = payload.toString();
-        } else {
-          throw new Error("Expected payload to be of type string or Buffer.");
-        }
-        const encoder2 = new TextEncoder();
-        const timestampNumber = Math.floor(timestamp2.getTime() / 1e3);
-        const toSign = encoder2.encode(`${msgId}.${timestampNumber}.${payload}`);
-        const expectedSignature = base643.encode(sha256.hmac(this.key, toSign));
-        return `v1,${expectedSignature}`;
-      }
-      verifyTimestamp(timestampHeader) {
-        const now = Math.floor(Date.now() / 1e3);
-        const timestamp2 = parseInt(timestampHeader, 10);
-        if (Number.isNaN(timestamp2)) {
-          throw new WebhookVerificationError("Invalid Signature Headers");
-        }
-        if (now - timestamp2 > WEBHOOK_TOLERANCE_IN_SECONDS) {
-          throw new WebhookVerificationError("Message timestamp too old");
-        }
-        if (timestamp2 > now + WEBHOOK_TOLERANCE_IN_SECONDS) {
-          throw new WebhookVerificationError("Message timestamp too new");
-        }
-        return new Date(timestamp2 * 1e3);
-      }
-    };
-    exports.Webhook = Webhook2;
-    Webhook2.prefix = "whsec_";
-=======
 // node_modules/@slack/web-api/dist/helpers.js
 var require_helpers = __commonJS({
   "node_modules/@slack/web-api/dist/helpers.js"(exports) {
@@ -14110,11 +13324,11 @@ var require_eventemitter32 = __commonJS({
     "use strict";
     var has = Object.prototype.hasOwnProperty;
     var prefix = "~";
-    function Events() {
+    function Events2() {
     }
     if (Object.create) {
-      Events.prototype = /* @__PURE__ */ Object.create(null);
-      if (!new Events().__proto__) prefix = false;
+      Events2.prototype = /* @__PURE__ */ Object.create(null);
+      if (!new Events2().__proto__) prefix = false;
     }
     function EE(fn, context, once) {
       this.fn = fn;
@@ -14132,11 +13346,11 @@ var require_eventemitter32 = __commonJS({
       return emitter;
     }
     function clearEvent(emitter, evt) {
-      if (--emitter._eventsCount === 0) emitter._events = new Events();
+      if (--emitter._eventsCount === 0) emitter._events = new Events2();
       else delete emitter._events[evt];
     }
     function EventEmitter() {
-      this._events = new Events();
+      this._events = new Events2();
       this._eventsCount = 0;
     }
     EventEmitter.prototype.eventNames = function eventNames() {
@@ -14251,7 +13465,7 @@ var require_eventemitter32 = __commonJS({
         evt = prefix ? prefix + event : event;
         if (this._events[evt]) clearEvent(this, evt);
       } else {
-        this._events = new Events();
+        this._events = new Events2();
         this._eventsCount = 0;
       }
       return this;
@@ -17190,7 +16404,794 @@ var require_dist6 = __commonJS({
       return WebClient_1.WebClientEvent;
     } });
     __exportStar(require_methods(), exports);
->>>>>>> e75ef43 (feat: add Slack Bot Token API support alongside webhooks)
+  }
+});
+
+// node_modules/@stablelib/base64/lib/base64.js
+var require_base64 = __commonJS({
+  "node_modules/@stablelib/base64/lib/base64.js"(exports) {
+    "use strict";
+    var __extends = exports && exports.__extends || /* @__PURE__ */ (function() {
+      var extendStatics = function(d2, b2) {
+        extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d3, b3) {
+          d3.__proto__ = b3;
+        } || function(d3, b3) {
+          for (var p2 in b3) if (b3.hasOwnProperty(p2)) d3[p2] = b3[p2];
+        };
+        return extendStatics(d2, b2);
+      };
+      return function(d2, b2) {
+        extendStatics(d2, b2);
+        function __() {
+          this.constructor = d2;
+        }
+        d2.prototype = b2 === null ? Object.create(b2) : (__.prototype = b2.prototype, new __());
+      };
+    })();
+    Object.defineProperty(exports, "__esModule", { value: true });
+    var INVALID_BYTE = 256;
+    var Coder = (
+      /** @class */
+      (function() {
+        function Coder2(_paddingCharacter) {
+          if (_paddingCharacter === void 0) {
+            _paddingCharacter = "=";
+          }
+          this._paddingCharacter = _paddingCharacter;
+        }
+        Coder2.prototype.encodedLength = function(length) {
+          if (!this._paddingCharacter) {
+            return (length * 8 + 5) / 6 | 0;
+          }
+          return (length + 2) / 3 * 4 | 0;
+        };
+        Coder2.prototype.encode = function(data) {
+          var out = "";
+          var i2 = 0;
+          for (; i2 < data.length - 2; i2 += 3) {
+            var c2 = data[i2] << 16 | data[i2 + 1] << 8 | data[i2 + 2];
+            out += this._encodeByte(c2 >>> 3 * 6 & 63);
+            out += this._encodeByte(c2 >>> 2 * 6 & 63);
+            out += this._encodeByte(c2 >>> 1 * 6 & 63);
+            out += this._encodeByte(c2 >>> 0 * 6 & 63);
+          }
+          var left = data.length - i2;
+          if (left > 0) {
+            var c2 = data[i2] << 16 | (left === 2 ? data[i2 + 1] << 8 : 0);
+            out += this._encodeByte(c2 >>> 3 * 6 & 63);
+            out += this._encodeByte(c2 >>> 2 * 6 & 63);
+            if (left === 2) {
+              out += this._encodeByte(c2 >>> 1 * 6 & 63);
+            } else {
+              out += this._paddingCharacter || "";
+            }
+            out += this._paddingCharacter || "";
+          }
+          return out;
+        };
+        Coder2.prototype.maxDecodedLength = function(length) {
+          if (!this._paddingCharacter) {
+            return (length * 6 + 7) / 8 | 0;
+          }
+          return length / 4 * 3 | 0;
+        };
+        Coder2.prototype.decodedLength = function(s2) {
+          return this.maxDecodedLength(s2.length - this._getPaddingLength(s2));
+        };
+        Coder2.prototype.decode = function(s2) {
+          if (s2.length === 0) {
+            return new Uint8Array(0);
+          }
+          var paddingLength = this._getPaddingLength(s2);
+          var length = s2.length - paddingLength;
+          var out = new Uint8Array(this.maxDecodedLength(length));
+          var op = 0;
+          var i2 = 0;
+          var haveBad = 0;
+          var v0 = 0, v1 = 0, v2 = 0, v3 = 0;
+          for (; i2 < length - 4; i2 += 4) {
+            v0 = this._decodeChar(s2.charCodeAt(i2 + 0));
+            v1 = this._decodeChar(s2.charCodeAt(i2 + 1));
+            v2 = this._decodeChar(s2.charCodeAt(i2 + 2));
+            v3 = this._decodeChar(s2.charCodeAt(i2 + 3));
+            out[op++] = v0 << 2 | v1 >>> 4;
+            out[op++] = v1 << 4 | v2 >>> 2;
+            out[op++] = v2 << 6 | v3;
+            haveBad |= v0 & INVALID_BYTE;
+            haveBad |= v1 & INVALID_BYTE;
+            haveBad |= v2 & INVALID_BYTE;
+            haveBad |= v3 & INVALID_BYTE;
+          }
+          if (i2 < length - 1) {
+            v0 = this._decodeChar(s2.charCodeAt(i2));
+            v1 = this._decodeChar(s2.charCodeAt(i2 + 1));
+            out[op++] = v0 << 2 | v1 >>> 4;
+            haveBad |= v0 & INVALID_BYTE;
+            haveBad |= v1 & INVALID_BYTE;
+          }
+          if (i2 < length - 2) {
+            v2 = this._decodeChar(s2.charCodeAt(i2 + 2));
+            out[op++] = v1 << 4 | v2 >>> 2;
+            haveBad |= v2 & INVALID_BYTE;
+          }
+          if (i2 < length - 3) {
+            v3 = this._decodeChar(s2.charCodeAt(i2 + 3));
+            out[op++] = v2 << 6 | v3;
+            haveBad |= v3 & INVALID_BYTE;
+          }
+          if (haveBad !== 0) {
+            throw new Error("Base64Coder: incorrect characters for decoding");
+          }
+          return out;
+        };
+        Coder2.prototype._encodeByte = function(b2) {
+          var result = b2;
+          result += 65;
+          result += 25 - b2 >>> 8 & 0 - 65 - 26 + 97;
+          result += 51 - b2 >>> 8 & 26 - 97 - 52 + 48;
+          result += 61 - b2 >>> 8 & 52 - 48 - 62 + 43;
+          result += 62 - b2 >>> 8 & 62 - 43 - 63 + 47;
+          return String.fromCharCode(result);
+        };
+        Coder2.prototype._decodeChar = function(c2) {
+          var result = INVALID_BYTE;
+          result += (42 - c2 & c2 - 44) >>> 8 & -INVALID_BYTE + c2 - 43 + 62;
+          result += (46 - c2 & c2 - 48) >>> 8 & -INVALID_BYTE + c2 - 47 + 63;
+          result += (47 - c2 & c2 - 58) >>> 8 & -INVALID_BYTE + c2 - 48 + 52;
+          result += (64 - c2 & c2 - 91) >>> 8 & -INVALID_BYTE + c2 - 65 + 0;
+          result += (96 - c2 & c2 - 123) >>> 8 & -INVALID_BYTE + c2 - 97 + 26;
+          return result;
+        };
+        Coder2.prototype._getPaddingLength = function(s2) {
+          var paddingLength = 0;
+          if (this._paddingCharacter) {
+            for (var i2 = s2.length - 1; i2 >= 0; i2--) {
+              if (s2[i2] !== this._paddingCharacter) {
+                break;
+              }
+              paddingLength++;
+            }
+            if (s2.length < 4 || paddingLength > 2) {
+              throw new Error("Base64Coder: incorrect padding");
+            }
+          }
+          return paddingLength;
+        };
+        return Coder2;
+      })()
+    );
+    exports.Coder = Coder;
+    var stdCoder = new Coder();
+    function encode3(data) {
+      return stdCoder.encode(data);
+    }
+    exports.encode = encode3;
+    function decode6(s2) {
+      return stdCoder.decode(s2);
+    }
+    exports.decode = decode6;
+    var URLSafeCoder = (
+      /** @class */
+      (function(_super) {
+        __extends(URLSafeCoder2, _super);
+        function URLSafeCoder2() {
+          return _super !== null && _super.apply(this, arguments) || this;
+        }
+        URLSafeCoder2.prototype._encodeByte = function(b2) {
+          var result = b2;
+          result += 65;
+          result += 25 - b2 >>> 8 & 0 - 65 - 26 + 97;
+          result += 51 - b2 >>> 8 & 26 - 97 - 52 + 48;
+          result += 61 - b2 >>> 8 & 52 - 48 - 62 + 45;
+          result += 62 - b2 >>> 8 & 62 - 45 - 63 + 95;
+          return String.fromCharCode(result);
+        };
+        URLSafeCoder2.prototype._decodeChar = function(c2) {
+          var result = INVALID_BYTE;
+          result += (44 - c2 & c2 - 46) >>> 8 & -INVALID_BYTE + c2 - 45 + 62;
+          result += (94 - c2 & c2 - 96) >>> 8 & -INVALID_BYTE + c2 - 95 + 63;
+          result += (47 - c2 & c2 - 58) >>> 8 & -INVALID_BYTE + c2 - 48 + 52;
+          result += (64 - c2 & c2 - 91) >>> 8 & -INVALID_BYTE + c2 - 65 + 0;
+          result += (96 - c2 & c2 - 123) >>> 8 & -INVALID_BYTE + c2 - 97 + 26;
+          return result;
+        };
+        return URLSafeCoder2;
+      })(Coder)
+    );
+    exports.URLSafeCoder = URLSafeCoder;
+    var urlSafeCoder = new URLSafeCoder();
+    function encodeURLSafe(data) {
+      return urlSafeCoder.encode(data);
+    }
+    exports.encodeURLSafe = encodeURLSafe;
+    function decodeURLSafe(s2) {
+      return urlSafeCoder.decode(s2);
+    }
+    exports.decodeURLSafe = decodeURLSafe;
+    exports.encodedLength = function(length) {
+      return stdCoder.encodedLength(length);
+    };
+    exports.maxDecodedLength = function(length) {
+      return stdCoder.maxDecodedLength(length);
+    };
+    exports.decodedLength = function(s2) {
+      return stdCoder.decodedLength(s2);
+    };
+  }
+});
+
+// node_modules/fast-sha256/sha256.js
+var require_sha256 = __commonJS({
+  "node_modules/fast-sha256/sha256.js"(exports, module) {
+    (function(root, factory) {
+      var exports2 = {};
+      factory(exports2);
+      var sha256 = exports2["default"];
+      for (var k in exports2) {
+        sha256[k] = exports2[k];
+      }
+      if (typeof module === "object" && typeof module.exports === "object") {
+        module.exports = sha256;
+      } else if (typeof define === "function" && define.amd) {
+        define(function() {
+          return sha256;
+        });
+      } else {
+        root.sha256 = sha256;
+      }
+    })(exports, function(exports2) {
+      "use strict";
+      exports2.__esModule = true;
+      exports2.digestLength = 32;
+      exports2.blockSize = 64;
+      var K = new Uint32Array([
+        1116352408,
+        1899447441,
+        3049323471,
+        3921009573,
+        961987163,
+        1508970993,
+        2453635748,
+        2870763221,
+        3624381080,
+        310598401,
+        607225278,
+        1426881987,
+        1925078388,
+        2162078206,
+        2614888103,
+        3248222580,
+        3835390401,
+        4022224774,
+        264347078,
+        604807628,
+        770255983,
+        1249150122,
+        1555081692,
+        1996064986,
+        2554220882,
+        2821834349,
+        2952996808,
+        3210313671,
+        3336571891,
+        3584528711,
+        113926993,
+        338241895,
+        666307205,
+        773529912,
+        1294757372,
+        1396182291,
+        1695183700,
+        1986661051,
+        2177026350,
+        2456956037,
+        2730485921,
+        2820302411,
+        3259730800,
+        3345764771,
+        3516065817,
+        3600352804,
+        4094571909,
+        275423344,
+        430227734,
+        506948616,
+        659060556,
+        883997877,
+        958139571,
+        1322822218,
+        1537002063,
+        1747873779,
+        1955562222,
+        2024104815,
+        2227730452,
+        2361852424,
+        2428436474,
+        2756734187,
+        3204031479,
+        3329325298
+      ]);
+      function hashBlocks(w2, v2, p2, pos, len) {
+        var a2, b2, c2, d2, e2, f2, g2, h2, u2, i2, j, t1, t22;
+        while (len >= 64) {
+          a2 = v2[0];
+          b2 = v2[1];
+          c2 = v2[2];
+          d2 = v2[3];
+          e2 = v2[4];
+          f2 = v2[5];
+          g2 = v2[6];
+          h2 = v2[7];
+          for (i2 = 0; i2 < 16; i2++) {
+            j = pos + i2 * 4;
+            w2[i2] = (p2[j] & 255) << 24 | (p2[j + 1] & 255) << 16 | (p2[j + 2] & 255) << 8 | p2[j + 3] & 255;
+          }
+          for (i2 = 16; i2 < 64; i2++) {
+            u2 = w2[i2 - 2];
+            t1 = (u2 >>> 17 | u2 << 32 - 17) ^ (u2 >>> 19 | u2 << 32 - 19) ^ u2 >>> 10;
+            u2 = w2[i2 - 15];
+            t22 = (u2 >>> 7 | u2 << 32 - 7) ^ (u2 >>> 18 | u2 << 32 - 18) ^ u2 >>> 3;
+            w2[i2] = (t1 + w2[i2 - 7] | 0) + (t22 + w2[i2 - 16] | 0);
+          }
+          for (i2 = 0; i2 < 64; i2++) {
+            t1 = (((e2 >>> 6 | e2 << 32 - 6) ^ (e2 >>> 11 | e2 << 32 - 11) ^ (e2 >>> 25 | e2 << 32 - 25)) + (e2 & f2 ^ ~e2 & g2) | 0) + (h2 + (K[i2] + w2[i2] | 0) | 0) | 0;
+            t22 = ((a2 >>> 2 | a2 << 32 - 2) ^ (a2 >>> 13 | a2 << 32 - 13) ^ (a2 >>> 22 | a2 << 32 - 22)) + (a2 & b2 ^ a2 & c2 ^ b2 & c2) | 0;
+            h2 = g2;
+            g2 = f2;
+            f2 = e2;
+            e2 = d2 + t1 | 0;
+            d2 = c2;
+            c2 = b2;
+            b2 = a2;
+            a2 = t1 + t22 | 0;
+          }
+          v2[0] += a2;
+          v2[1] += b2;
+          v2[2] += c2;
+          v2[3] += d2;
+          v2[4] += e2;
+          v2[5] += f2;
+          v2[6] += g2;
+          v2[7] += h2;
+          pos += 64;
+          len -= 64;
+        }
+        return pos;
+      }
+      var Hash2 = (
+        /** @class */
+        (function() {
+          function Hash3() {
+            this.digestLength = exports2.digestLength;
+            this.blockSize = exports2.blockSize;
+            this.state = new Int32Array(8);
+            this.temp = new Int32Array(64);
+            this.buffer = new Uint8Array(128);
+            this.bufferLength = 0;
+            this.bytesHashed = 0;
+            this.finished = false;
+            this.reset();
+          }
+          Hash3.prototype.reset = function() {
+            this.state[0] = 1779033703;
+            this.state[1] = 3144134277;
+            this.state[2] = 1013904242;
+            this.state[3] = 2773480762;
+            this.state[4] = 1359893119;
+            this.state[5] = 2600822924;
+            this.state[6] = 528734635;
+            this.state[7] = 1541459225;
+            this.bufferLength = 0;
+            this.bytesHashed = 0;
+            this.finished = false;
+            return this;
+          };
+          Hash3.prototype.clean = function() {
+            for (var i2 = 0; i2 < this.buffer.length; i2++) {
+              this.buffer[i2] = 0;
+            }
+            for (var i2 = 0; i2 < this.temp.length; i2++) {
+              this.temp[i2] = 0;
+            }
+            this.reset();
+          };
+          Hash3.prototype.update = function(data, dataLength) {
+            if (dataLength === void 0) {
+              dataLength = data.length;
+            }
+            if (this.finished) {
+              throw new Error("SHA256: can't update because hash was finished.");
+            }
+            var dataPos = 0;
+            this.bytesHashed += dataLength;
+            if (this.bufferLength > 0) {
+              while (this.bufferLength < 64 && dataLength > 0) {
+                this.buffer[this.bufferLength++] = data[dataPos++];
+                dataLength--;
+              }
+              if (this.bufferLength === 64) {
+                hashBlocks(this.temp, this.state, this.buffer, 0, 64);
+                this.bufferLength = 0;
+              }
+            }
+            if (dataLength >= 64) {
+              dataPos = hashBlocks(this.temp, this.state, data, dataPos, dataLength);
+              dataLength %= 64;
+            }
+            while (dataLength > 0) {
+              this.buffer[this.bufferLength++] = data[dataPos++];
+              dataLength--;
+            }
+            return this;
+          };
+          Hash3.prototype.finish = function(out) {
+            if (!this.finished) {
+              var bytesHashed = this.bytesHashed;
+              var left = this.bufferLength;
+              var bitLenHi = bytesHashed / 536870912 | 0;
+              var bitLenLo = bytesHashed << 3;
+              var padLength = bytesHashed % 64 < 56 ? 64 : 128;
+              this.buffer[left] = 128;
+              for (var i2 = left + 1; i2 < padLength - 8; i2++) {
+                this.buffer[i2] = 0;
+              }
+              this.buffer[padLength - 8] = bitLenHi >>> 24 & 255;
+              this.buffer[padLength - 7] = bitLenHi >>> 16 & 255;
+              this.buffer[padLength - 6] = bitLenHi >>> 8 & 255;
+              this.buffer[padLength - 5] = bitLenHi >>> 0 & 255;
+              this.buffer[padLength - 4] = bitLenLo >>> 24 & 255;
+              this.buffer[padLength - 3] = bitLenLo >>> 16 & 255;
+              this.buffer[padLength - 2] = bitLenLo >>> 8 & 255;
+              this.buffer[padLength - 1] = bitLenLo >>> 0 & 255;
+              hashBlocks(this.temp, this.state, this.buffer, 0, padLength);
+              this.finished = true;
+            }
+            for (var i2 = 0; i2 < 8; i2++) {
+              out[i2 * 4 + 0] = this.state[i2] >>> 24 & 255;
+              out[i2 * 4 + 1] = this.state[i2] >>> 16 & 255;
+              out[i2 * 4 + 2] = this.state[i2] >>> 8 & 255;
+              out[i2 * 4 + 3] = this.state[i2] >>> 0 & 255;
+            }
+            return this;
+          };
+          Hash3.prototype.digest = function() {
+            var out = new Uint8Array(this.digestLength);
+            this.finish(out);
+            return out;
+          };
+          Hash3.prototype._saveState = function(out) {
+            for (var i2 = 0; i2 < this.state.length; i2++) {
+              out[i2] = this.state[i2];
+            }
+          };
+          Hash3.prototype._restoreState = function(from, bytesHashed) {
+            for (var i2 = 0; i2 < this.state.length; i2++) {
+              this.state[i2] = from[i2];
+            }
+            this.bytesHashed = bytesHashed;
+            this.finished = false;
+            this.bufferLength = 0;
+          };
+          return Hash3;
+        })()
+      );
+      exports2.Hash = Hash2;
+      var HMAC = (
+        /** @class */
+        (function() {
+          function HMAC2(key) {
+            this.inner = new Hash2();
+            this.outer = new Hash2();
+            this.blockSize = this.inner.blockSize;
+            this.digestLength = this.inner.digestLength;
+            var pad = new Uint8Array(this.blockSize);
+            if (key.length > this.blockSize) {
+              new Hash2().update(key).finish(pad).clean();
+            } else {
+              for (var i2 = 0; i2 < key.length; i2++) {
+                pad[i2] = key[i2];
+              }
+            }
+            for (var i2 = 0; i2 < pad.length; i2++) {
+              pad[i2] ^= 54;
+            }
+            this.inner.update(pad);
+            for (var i2 = 0; i2 < pad.length; i2++) {
+              pad[i2] ^= 54 ^ 92;
+            }
+            this.outer.update(pad);
+            this.istate = new Uint32Array(8);
+            this.ostate = new Uint32Array(8);
+            this.inner._saveState(this.istate);
+            this.outer._saveState(this.ostate);
+            for (var i2 = 0; i2 < pad.length; i2++) {
+              pad[i2] = 0;
+            }
+          }
+          HMAC2.prototype.reset = function() {
+            this.inner._restoreState(this.istate, this.inner.blockSize);
+            this.outer._restoreState(this.ostate, this.outer.blockSize);
+            return this;
+          };
+          HMAC2.prototype.clean = function() {
+            for (var i2 = 0; i2 < this.istate.length; i2++) {
+              this.ostate[i2] = this.istate[i2] = 0;
+            }
+            this.inner.clean();
+            this.outer.clean();
+          };
+          HMAC2.prototype.update = function(data) {
+            this.inner.update(data);
+            return this;
+          };
+          HMAC2.prototype.finish = function(out) {
+            if (this.outer.finished) {
+              this.outer.finish(out);
+            } else {
+              this.inner.finish(out);
+              this.outer.update(out, this.digestLength).finish(out);
+            }
+            return this;
+          };
+          HMAC2.prototype.digest = function() {
+            var out = new Uint8Array(this.digestLength);
+            this.finish(out);
+            return out;
+          };
+          return HMAC2;
+        })()
+      );
+      exports2.HMAC = HMAC;
+      function hash2(data) {
+        var h2 = new Hash2().update(data);
+        var digest = h2.digest();
+        h2.clean();
+        return digest;
+      }
+      exports2.hash = hash2;
+      exports2["default"] = hash2;
+      function hmac(key, data) {
+        var h2 = new HMAC(key).update(data);
+        var digest = h2.digest();
+        h2.clean();
+        return digest;
+      }
+      exports2.hmac = hmac;
+      function fillBuffer(buffer, hmac2, info, counter) {
+        var num = counter[0];
+        if (num === 0) {
+          throw new Error("hkdf: cannot expand more");
+        }
+        hmac2.reset();
+        if (num > 1) {
+          hmac2.update(buffer);
+        }
+        if (info) {
+          hmac2.update(info);
+        }
+        hmac2.update(counter);
+        hmac2.finish(buffer);
+        counter[0]++;
+      }
+      var hkdfSalt = new Uint8Array(exports2.digestLength);
+      function hkdf(key, salt, info, length) {
+        if (salt === void 0) {
+          salt = hkdfSalt;
+        }
+        if (length === void 0) {
+          length = 32;
+        }
+        var counter = new Uint8Array([1]);
+        var okm = hmac(salt, key);
+        var hmac_ = new HMAC(okm);
+        var buffer = new Uint8Array(hmac_.digestLength);
+        var bufpos = buffer.length;
+        var out = new Uint8Array(length);
+        for (var i2 = 0; i2 < length; i2++) {
+          if (bufpos === buffer.length) {
+            fillBuffer(buffer, hmac_, info, counter);
+            bufpos = 0;
+          }
+          out[i2] = buffer[bufpos++];
+        }
+        hmac_.clean();
+        buffer.fill(0);
+        counter.fill(0);
+        return out;
+      }
+      exports2.hkdf = hkdf;
+      function pbkdf2(password, salt, iterations, dkLen) {
+        var prf = new HMAC(password);
+        var len = prf.digestLength;
+        var ctr = new Uint8Array(4);
+        var t3 = new Uint8Array(len);
+        var u2 = new Uint8Array(len);
+        var dk = new Uint8Array(dkLen);
+        for (var i2 = 0; i2 * len < dkLen; i2++) {
+          var c2 = i2 + 1;
+          ctr[0] = c2 >>> 24 & 255;
+          ctr[1] = c2 >>> 16 & 255;
+          ctr[2] = c2 >>> 8 & 255;
+          ctr[3] = c2 >>> 0 & 255;
+          prf.reset();
+          prf.update(salt);
+          prf.update(ctr);
+          prf.finish(u2);
+          for (var j = 0; j < len; j++) {
+            t3[j] = u2[j];
+          }
+          for (var j = 2; j <= iterations; j++) {
+            prf.reset();
+            prf.update(u2).finish(u2);
+            for (var k = 0; k < len; k++) {
+              t3[k] ^= u2[k];
+            }
+          }
+          for (var j = 0; j < len && i2 * len + j < dkLen; j++) {
+            dk[i2 * len + j] = t3[j];
+          }
+        }
+        for (var i2 = 0; i2 < len; i2++) {
+          t3[i2] = u2[i2] = 0;
+        }
+        for (var i2 = 0; i2 < 4; i2++) {
+          ctr[i2] = 0;
+        }
+        prf.clean();
+        return dk;
+      }
+      exports2.pbkdf2 = pbkdf2;
+    });
+  }
+});
+
+// node_modules/standardwebhooks/dist/timing_safe_equal.js
+var require_timing_safe_equal = __commonJS({
+  "node_modules/standardwebhooks/dist/timing_safe_equal.js"(exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.timingSafeEqual = timingSafeEqual;
+    function assert2(expr, msg = "") {
+      if (!expr) {
+        throw new Error(msg);
+      }
+    }
+    function timingSafeEqual(a2, b2) {
+      if (a2.byteLength !== b2.byteLength) {
+        return false;
+      }
+      if (!(a2 instanceof DataView)) {
+        a2 = new DataView(ArrayBuffer.isView(a2) ? a2.buffer : a2);
+      }
+      if (!(b2 instanceof DataView)) {
+        b2 = new DataView(ArrayBuffer.isView(b2) ? b2.buffer : b2);
+      }
+      assert2(a2 instanceof DataView);
+      assert2(b2 instanceof DataView);
+      const length = a2.byteLength;
+      let out = 0;
+      let i2 = -1;
+      while (++i2 < length) {
+        out |= a2.getUint8(i2) ^ b2.getUint8(i2);
+      }
+      return out === 0;
+    }
+  }
+});
+
+// node_modules/standardwebhooks/dist/index.js
+var require_dist7 = __commonJS({
+  "node_modules/standardwebhooks/dist/index.js"(exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.Webhook = exports.WebhookVerificationError = void 0;
+    var base643 = require_base64();
+    var sha256 = require_sha256();
+    var timing_safe_equal_1 = require_timing_safe_equal();
+    var WEBHOOK_TOLERANCE_IN_SECONDS = 5 * 60;
+    var ExtendableError = class _ExtendableError extends Error {
+      constructor(message) {
+        super(message);
+        Object.setPrototypeOf(this, _ExtendableError.prototype);
+        this.name = "ExtendableError";
+        this.stack = new Error(message).stack;
+      }
+    };
+    var WebhookVerificationError = class _WebhookVerificationError extends ExtendableError {
+      constructor(message) {
+        super(message);
+        Object.setPrototypeOf(this, _WebhookVerificationError.prototype);
+        this.name = "WebhookVerificationError";
+      }
+    };
+    exports.WebhookVerificationError = WebhookVerificationError;
+    var Webhook2 = class _Webhook {
+      constructor(secret, options) {
+        if ((options === null || options === void 0 ? void 0 : options.format) === "raw") {
+          if (secret instanceof Uint8Array) {
+            this.key = secret;
+          } else {
+            this.key = Uint8Array.from(secret, (c2) => c2.charCodeAt(0));
+          }
+        } else {
+          if (typeof secret !== "string") {
+            throw new Error("Expected secret to be of type string");
+          }
+          if (secret.startsWith(_Webhook.prefix)) {
+            secret = secret.substring(_Webhook.prefix.length);
+          }
+          this.key = base643.decode(secret);
+        }
+        if (this.key.length === 0) {
+          throw new Error("Secret can't be empty.");
+        }
+      }
+      verify(payload, headers, options) {
+        var _a4;
+        const jsonParse = (_a4 = options === null || options === void 0 ? void 0 : options.jsonParse) !== null && _a4 !== void 0 ? _a4 : true;
+        const normalizedHeaders = {};
+        for (const key of Object.keys(headers)) {
+          normalizedHeaders[key.toLowerCase()] = headers[key];
+        }
+        const msgId = normalizedHeaders["webhook-id"];
+        const msgSignature = normalizedHeaders["webhook-signature"];
+        const msgTimestamp = normalizedHeaders["webhook-timestamp"];
+        if (!msgSignature || !msgId || !msgTimestamp) {
+          throw new WebhookVerificationError("Missing required headers");
+        }
+        const timestamp2 = this.verifyTimestamp(msgTimestamp);
+        const computedSignature = this.sign(msgId, timestamp2, payload);
+        const expectedSignature = computedSignature.split(",")[1];
+        const passedSignatures = msgSignature.split(" ");
+        const encoder2 = new globalThis.TextEncoder();
+        for (const versionedSignature of passedSignatures) {
+          const [version4, signature] = versionedSignature.split(",");
+          if (version4 !== "v1") {
+            continue;
+          }
+          if ((0, timing_safe_equal_1.timingSafeEqual)(encoder2.encode(signature), encoder2.encode(expectedSignature))) {
+            const payloadString = payload.toString();
+            if (payloadString === "") {
+              return void 0;
+            }
+            if (jsonParse) {
+              return JSON.parse(payloadString);
+            } else {
+              return void 0;
+            }
+          }
+        }
+        throw new WebhookVerificationError("No matching signature found");
+      }
+      sign(msgId, timestamp2, payload) {
+        if (typeof payload === "string") {
+        } else if (payload.constructor.name === "Buffer") {
+          payload = payload.toString();
+        } else {
+          throw new Error("Expected payload to be of type string or Buffer.");
+        }
+        const encoder2 = new TextEncoder();
+        const timestampNumber = Math.floor(timestamp2.getTime() / 1e3);
+        const toSign = encoder2.encode(`${msgId}.${timestampNumber}.${payload}`);
+        const expectedSignature = base643.encode(sha256.hmac(this.key, toSign));
+        return `v1,${expectedSignature}`;
+      }
+      verifyTimestamp(timestampHeader) {
+        const now = Math.floor(Date.now() / 1e3);
+        const timestamp2 = parseInt(timestampHeader, 10);
+        if (Number.isNaN(timestamp2)) {
+          throw new WebhookVerificationError("Invalid Signature Headers");
+        }
+        if (now - timestamp2 > WEBHOOK_TOLERANCE_IN_SECONDS) {
+          throw new WebhookVerificationError("Message timestamp too old");
+        }
+        if (timestamp2 > now + WEBHOOK_TOLERANCE_IN_SECONDS) {
+          throw new WebhookVerificationError("Message timestamp too new");
+        }
+        return new Date(timestamp2 * 1e3);
+      }
+    };
+    exports.Webhook = Webhook2;
+    Webhook2.prefix = "whsec_";
   }
 });
 
@@ -65361,6 +65362,9 @@ function date6(params) {
   return _coercedDate(ZodDate, params);
 }
 
+// apps/api/src/actions.ts
+var import_web_api = __toESM(require_dist6(), 1);
+
 // node_modules/postal-mime/src/decode-strings.js
 var textEncoder = new TextEncoder();
 var base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -69231,7 +69235,7 @@ var PostalMime = class _PostalMime {
 };
 
 // node_modules/resend/dist/index.mjs
-var import_standardwebhooks = __toESM(require_dist3(), 1);
+var import_standardwebhooks = __toESM(require_dist7(), 1);
 var version3 = "6.39.0";
 function buildPaginationUrl(base, options) {
   const queryString = buildPaginationQuery(options);
@@ -70966,7 +70970,6 @@ var Resend = class {
 };
 
 // apps/api/src/actions.ts
-var import_web_api = __toESM(require_dist6(), 1);
 function str(v2) {
   return v2 != null ? String(v2) : void 0;
 }
@@ -70992,7 +70995,6 @@ async function executeSlack(webhookUrl, message, context) {
   });
   return { ok: response.ok, status: response.status };
 }
-<<<<<<< HEAD
 async function executeEmail(to, subject, body, context) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
@@ -71012,7 +71014,7 @@ async function executeEmail(to, subject, body, context) {
     return { ok: false, error: error62.message };
   }
   return { ok: true };
-=======
+}
 async function executeSlackBot(token, channel, message, context) {
   const text3 = templateMessage(message, context);
   const client = new import_web_api.WebClient(token, {
@@ -71021,7 +71023,6 @@ async function executeSlackBot(token, channel, message, context) {
     slackApiUrl: process.env.SLACK_API_URL
   });
   await client.chat.postMessage({ channel, text: text3 });
->>>>>>> e75ef43 (feat: add Slack Bot Token API support alongside webhooks)
 }
 async function fireActions(repos2, context) {
   if (!context.phase) return [];
