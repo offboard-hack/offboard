@@ -1,6 +1,6 @@
 import { asc, eq, sql } from "drizzle-orm";
 import type { Database } from "../client.ts";
-import { offboardingCases, tasks } from "../schema/index.ts";
+import { integrations, offboardingCases, tasks } from "../schema/index.ts";
 
 export type TaskStatus = "done" | "in_progress" | "todo";
 
@@ -31,6 +31,10 @@ export type NewOffboarding = {
 };
 
 export type BulkOffboardingRow = { name: string; department: string };
+
+export type ConnectionStatus = "connected" | "disconnected" | "reconnect";
+
+export type IntegrationRow = { name: string; status: ConnectionStatus };
 
 function defaultDeadline() {
   const date = new Date();
@@ -128,11 +132,35 @@ export function createRepositories(db: Database) {
     return updated ?? null;
   }
 
+  async function listIntegrations() {
+    const rows = await db
+      .select({ name: integrations.name, status: integrations.status })
+      .from(integrations)
+      .orderBy(asc(integrations.name));
+
+    return rows;
+  }
+
+  async function upsertIntegration(name: string, status: ConnectionStatus) {
+    const [row] = await db
+      .insert(integrations)
+      .values({ name, status })
+      .onConflictDoUpdate({
+        target: integrations.name,
+        set: { status, updatedAt: new Date() },
+      })
+      .returning({ name: integrations.name, status: integrations.status });
+
+    return row;
+  }
+
   return {
     listOffboardings,
     getOffboarding,
     createOffboarding,
     bulkCreateOffboardings,
     updateTaskStatus,
+    listIntegrations,
+    upsertIntegration,
   };
 }

@@ -26,6 +26,14 @@ const task = t.Object({
 
 const offboardingCase = t.Composite([caseSummary, t.Object({ tasks: t.Array(task) })]);
 
+const connectionStatus = t.Union([
+  t.Literal("connected"),
+  t.Literal("disconnected"),
+  t.Literal("reconnect"),
+]);
+
+const integrationRow = t.Object({ name: t.String(), status: connectionStatus });
+
 const notFound = t.Object({ error: t.String() });
 
 const text = t.String({ minLength: 1 });
@@ -92,6 +100,18 @@ export function createApp(webOrigin: string, repos: Repositories) {
         params: t.Object({ id: t.String({ format: "uuid" }) }),
         body: t.Object({ status: taskStatus }),
         response: { 200: task, 404: notFound },
+      },
+    )
+    .get("/integrations", () => repos.listIntegrations(), {
+      response: t.Array(integrationRow),
+    })
+    .put(
+      "/integrations/:name",
+      async ({ params, body }) => repos.upsertIntegration(params.name, body.status),
+      {
+        params: t.Object({ name: t.String() }),
+        body: t.Object({ status: connectionStatus }),
+        response: integrationRow,
       },
     );
 }

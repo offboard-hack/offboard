@@ -10,9 +10,15 @@ import {
   TruckIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import type { ComponentProps } from "react";
+import {
+  integrationsQuery,
+  useToggleIntegration,
+  type ConnectionStatus,
+} from "@/entities/integration";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import { PortalFilter } from "@/shared/ui/select";
 import { Badge } from "@/shared/ui/shadcn/badge";
@@ -34,79 +40,67 @@ const connections = {
   disconnected: { label: "Não conectada", variant: "secondary" },
 } satisfies Record<string, { label: string; variant: ComponentProps<typeof Badge>["variant"] }>;
 
-type Connection = keyof typeof connections;
-
 type Provider = {
   name: string;
   purpose: string;
-  status: Connection;
 };
 
 type Integration = {
   name: string;
   purpose: string;
   category: keyof typeof categories;
-  status: Connection;
   providers?: Provider[];
 } & (
   | { logo: `/brands/${string}.svg`; icon?: never }
   | { icon: ComponentProps<typeof HugeiconsIcon>["icon"]; logo?: never }
 );
 
-const integrations: Integration[] = [
+const catalog: Integration[] = [
   {
     name: "Sistema de folha",
     category: "payroll",
     icon: File01Icon,
     purpose: "Envia cadastro, rescisão, eSocial e FGTS.",
-    status: "connected",
   },
   {
     name: "Sistema de ponto",
     category: "payroll",
     icon: Clock01Icon,
     purpose: "Fecha ponto e banco de horas.",
-    status: "reconnect",
   },
   {
     name: "Google Workspace",
     category: "accounts",
     logo: "/brands/google.svg",
     purpose: "Bloqueia acessos e transfere arquivos.",
-    status: "connected",
   },
   {
     name: "Slack",
     category: "accounts",
     logo: "/brands/slack.svg",
     purpose: "Bloqueia acessos e avisa as áreas responsáveis.",
-    status: "connected",
   },
   {
     name: "HubSpot",
     category: "accounts",
     logo: "/brands/hubspot.svg",
     purpose: "Transfere negócios e contatos.",
-    status: "connected",
   },
   {
     name: "Inventário de TI",
     category: "equipment",
     icon: LaptopIcon,
     purpose: "Lista os bens de cada pessoa e registra a entrada no estoque.",
-    status: "connected",
   },
   {
     name: "Transportadora",
     category: "equipment",
     icon: TruckIcon,
     purpose: "Agenda e rastreia a coleta de equipamentos.",
-    status: "connected",
     providers: [
       {
         name: "Correios",
         purpose: "Logística reversa, etiqueta e rastreio via API dos Correios.",
-        status: "connected",
       },
     ],
   },
@@ -115,28 +109,24 @@ const integrations: Integration[] = [
     category: "payroll",
     icon: MedicalFileIcon,
     purpose: "Agenda o exame demissional.",
-    status: "connected",
   },
   {
     name: "Operadora do plano de saúde",
     category: "payroll",
     icon: HeartCheckIcon,
     purpose: "Informa o direito de manter o plano.",
-    status: "connected",
   },
   {
     name: "Cartão corporativo",
     category: "finance",
     icon: CreditCardIcon,
     purpose: "Cancela cartões e lista despesas em aberto.",
-    status: "disconnected",
   },
   {
     name: "Microsoft 365",
     category: "accounts",
     logo: "/brands/microsoft.svg",
     purpose: "Bloqueia acessos e transfere arquivos de trabalho.",
-    status: "disconnected",
   },
 ];
 
@@ -150,9 +140,13 @@ function searchKey(text: string) {
     .toLocaleLowerCase("pt-BR");
 }
 
-function deriveConnection(item: Integration, overrides: Partial<Record<string, Connection>>) {
+function resolveStatus(statusMap: Map<string, ConnectionStatus>, key: string) {
+  return statusMap.get(key) ?? ("disconnected" satisfies ConnectionStatus);
+}
+
+function deriveConnection(item: Integration, statusMap: Map<string, ConnectionStatus>) {
   if (item.providers) {
-    const statuses = item.providers.map((p) => overrides[`${item.name}::${p.name}`] ?? p.status);
+    const statuses = item.providers.map((p) => resolveStatus(statusMap, `${item.name}::${p.name}`));
 
     if (statuses.includes("connected")) return "connected";
 
@@ -161,7 +155,7 @@ function deriveConnection(item: Integration, overrides: Partial<Record<string, C
     return "disconnected";
   }
 
-  return overrides[item.name] ?? item.status;
+  return resolveStatus(statusMap, item.name);
 }
 
 export function IntegrationsPage() {
@@ -169,13 +163,17 @@ export function IntegrationsPage() {
   const navigate = route.useNavigate();
   const searchInput = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
-  const [overrides, setOverrides] = useState<Partial<Record<string, Connection>>>({});
   const [announcement, setAnnouncement] = useState("");
   const query = searchKey(search);
 
-  const systems = integrations.map((item) => ({
+  const { data: rows } = useSuspenseQuery(integrationsQuery);
+  const toggle = useToggleIntegration();
+
+  const statusMap = new Map(rows.map((r) => [r.name, r.status]));
+
+  const systems = catalog.map((item) => ({
     item,
-    connection: deriveConnection(item, overrides),
+    connection: deriveConnection(item, statusMap),
   }));
 
   const effectiveStatus = status || "connected";
@@ -190,8 +188,8 @@ export function IntegrationsPage() {
       ).includes(query),
   );
 
-  function updateConnection(key: string, connection: Connection) {
-    setOverrides((previous) => ({ ...previous, [key]: connection }));
+  function updateConnection(key: string, connection: ConnectionStatus) {
+    toggle.mutate({ name: key, status: connection });
 
     const displayName = key.includes("::") ? key.split("::")[1] : key;
 
@@ -272,7 +270,7 @@ export function IntegrationsPage() {
                       <IntegrationCard
                         item={item}
                         connection={connection}
-                        overrides={overrides}
+                        statusMap={statusMap}
                         onChange={updateConnection}
                       />
                     </li>
@@ -295,13 +293,13 @@ export function IntegrationsPage() {
 function IntegrationCard({
   item,
   connection,
-  overrides,
+  statusMap,
   onChange,
 }: {
   item: Integration;
-  connection: Connection;
-  overrides: Partial<Record<string, Connection>>;
-  onChange: (key: string, connection: Connection) => void;
+  connection: ConnectionStatus;
+  statusMap: Map<string, ConnectionStatus>;
+  onChange: (key: string, connection: ConnectionStatus) => void;
 }) {
   const { label, variant } = connections[connection];
   const switchButton = useRef<HTMLButtonElement>(null);
@@ -309,7 +307,7 @@ function IntegrationCard({
   const providers = (item.providers ?? []).map((p) => ({
     name: p.name,
     purpose: p.purpose,
-    connection: overrides[`${item.name}::${p.name}`] ?? p.status,
+    connection: resolveStatus(statusMap, `${item.name}::${p.name}`),
   }));
 
   const hasProviders = providers.length > 0;
