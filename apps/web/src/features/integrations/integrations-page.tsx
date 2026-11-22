@@ -4,7 +4,6 @@ import {
   File01Icon,
   HeartCheckIcon,
   LaptopIcon,
-  Mail01Icon,
   MedicalFileIcon,
   RefreshIcon,
   Search01Icon,
@@ -37,18 +36,22 @@ const connections = {
 
 type Connection = keyof typeof connections;
 
+type Provider = {
+  name: string;
+  purpose: string;
+  status: Connection;
+};
+
 type Integration = {
   name: string;
   purpose: string;
   category: keyof typeof categories;
+  status: Connection;
+  providers?: Provider[];
 } & (
   | { logo: `/brands/${string}.svg`; icon?: never }
   | { icon: ComponentProps<typeof HugeiconsIcon>["icon"]; logo?: never }
-) &
-  (
-    | { status: "connected" | "reconnect"; update: string }
-    | { status: "disconnected"; update?: never }
-  );
+);
 
 const integrations: Integration[] = [
   {
@@ -57,7 +60,6 @@ const integrations: Integration[] = [
     icon: File01Icon,
     purpose: "Envia cadastro, rescisão, eSocial e FGTS.",
     status: "connected",
-    update: "8 nov, 7h30 · 23 cadastros atualizados",
   },
   {
     name: "Sistema de ponto",
@@ -65,7 +67,6 @@ const integrations: Integration[] = [
     icon: Clock01Icon,
     purpose: "Fecha ponto e banco de horas.",
     status: "reconnect",
-    update: "4 nov · 23 fechamentos",
   },
   {
     name: "Google Workspace",
@@ -73,7 +74,6 @@ const integrations: Integration[] = [
     logo: "/brands/google.svg",
     purpose: "Bloqueia acessos e transfere arquivos.",
     status: "connected",
-    update: "3 nov · 21 contas atualizadas",
   },
   {
     name: "Slack",
@@ -81,7 +81,6 @@ const integrations: Integration[] = [
     logo: "/brands/slack.svg",
     purpose: "Bloqueia acessos e avisa as áreas responsáveis.",
     status: "connected",
-    update: "8 nov, 8h02 · 14 avisos",
   },
   {
     name: "HubSpot",
@@ -89,7 +88,6 @@ const integrations: Integration[] = [
     logo: "/brands/hubspot.svg",
     purpose: "Transfere negócios e contatos.",
     status: "connected",
-    update: "4 nov · 61 negócios transferidos",
   },
   {
     name: "Inventário de TI",
@@ -97,15 +95,20 @@ const integrations: Integration[] = [
     icon: LaptopIcon,
     purpose: "Lista os bens de cada pessoa e registra a entrada no estoque.",
     status: "connected",
-    update: "8 nov, 9h40 · 2 itens conferidos",
   },
   {
     name: "Transportadora",
     category: "equipment",
     icon: TruckIcon,
-    purpose: "Agenda e rastreia a coleta por transportadora particular.",
+    purpose: "Agenda e rastreia a coleta de equipamentos.",
     status: "connected",
-    update: "8 nov, 9h12 · Coleta confirmada",
+    providers: [
+      {
+        name: "Correios",
+        purpose: "Logística reversa, etiqueta e rastreio via API dos Correios.",
+        status: "connected",
+      },
+    ],
   },
   {
     name: "Clínica ocupacional",
@@ -113,7 +116,6 @@ const integrations: Integration[] = [
     icon: MedicalFileIcon,
     purpose: "Agenda o exame demissional.",
     status: "connected",
-    update: "4 nov · 23 agendamentos",
   },
   {
     name: "Operadora do plano de saúde",
@@ -121,16 +123,6 @@ const integrations: Integration[] = [
     icon: HeartCheckIcon,
     purpose: "Informa o direito de manter o plano.",
     status: "connected",
-    update: "3 nov · 23 avisos",
-  },
-  {
-    name: "Correios",
-    category: "equipment",
-    icon: Mail01Icon,
-    purpose:
-      "Gera etiqueta de logística reversa, agenda coleta e rastreia encomendas via API dos Correios.",
-    status: "connected",
-    update: "8 nov, 10h05 · 3 etiquetas geradas",
   },
   {
     name: "Cartão corporativo",
@@ -158,6 +150,20 @@ function searchKey(text: string) {
     .toLocaleLowerCase("pt-BR");
 }
 
+function deriveConnection(item: Integration, overrides: Partial<Record<string, Connection>>) {
+  if (item.providers) {
+    const statuses = item.providers.map((p) => overrides[`${item.name}::${p.name}`] ?? p.status);
+
+    if (statuses.includes("connected")) return "connected";
+
+    if (statuses.includes("reconnect")) return "reconnect";
+
+    return "disconnected";
+  }
+
+  return overrides[item.name] ?? item.status;
+}
+
 export function IntegrationsPage() {
   const { status = "" } = route.useSearch();
   const navigate = route.useNavigate();
@@ -168,23 +174,28 @@ export function IntegrationsPage() {
   const query = searchKey(search);
 
   const systems = integrations.map((item) => ({
-    ...item,
-    connection: overrides[item.name] ?? item.status,
+    item,
+    connection: deriveConnection(item, overrides),
   }));
 
   const effectiveStatus = status || "connected";
 
   const visible = systems.filter(
-    ({ name, purpose, connection }) =>
+    ({ item, connection }) =>
       (effectiveStatus === "all" ||
         effectiveStatus === connection ||
         (effectiveStatus === "disconnected" && connection === "reconnect")) &&
-      searchKey(`${name} ${purpose}`).includes(query),
+      searchKey(
+        `${item.name} ${item.purpose} ${item.providers?.map((p) => p.name).join(" ") ?? ""}`,
+      ).includes(query),
   );
 
-  function updateConnection(name: string, connection: Connection) {
-    setOverrides((previous) => ({ ...previous, [name]: connection }));
-    setAnnouncement(`${name}: ${connections[connection].label}.`);
+  function updateConnection(key: string, connection: Connection) {
+    setOverrides((previous) => ({ ...previous, [key]: connection }));
+
+    const displayName = key.includes("::") ? key.split("::")[1] : key;
+
+    setAnnouncement(`${displayName}: ${connections[connection].label}.`);
 
     if (status && status !== connection) {
       searchInput.current?.focus({ preventScroll: true });
@@ -237,7 +248,7 @@ export function IntegrationsPage() {
       </div>
       <div className="grid gap-7">
         {Object.entries(categories).map(([category, label]) => {
-          const items = visible.filter((item) => item.category === category);
+          const items = visible.filter(({ item }) => item.category === category);
 
           return (
             items.length > 0 && (
@@ -256,11 +267,12 @@ export function IntegrationsPage() {
                   </span>
                 </h2>
                 <ul role="list" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {items.map((item) => (
+                  {items.map(({ item, connection }) => (
                     <li key={item.name}>
                       <IntegrationCard
                         item={item}
-                        connection={item.connection}
+                        connection={connection}
+                        overrides={overrides}
                         onChange={updateConnection}
                       />
                     </li>
@@ -283,14 +295,25 @@ export function IntegrationsPage() {
 function IntegrationCard({
   item,
   connection,
+  overrides,
   onChange,
 }: {
   item: Integration;
   connection: Connection;
-  onChange: (name: string, connection: Connection) => void;
+  overrides: Partial<Record<string, Connection>>;
+  onChange: (key: string, connection: Connection) => void;
 }) {
   const { label, variant } = connections[connection];
   const switchButton = useRef<HTMLButtonElement>(null);
+
+  const providers = (item.providers ?? []).map((p) => ({
+    name: p.name,
+    purpose: p.purpose,
+    connection: overrides[`${item.name}::${p.name}`] ?? p.status,
+  }));
+
+  const hasProviders = providers.length > 0;
+  const connectedCount = providers.filter((p) => p.connection === "connected").length;
 
   return (
     <Card size="sm" className="flex h-full flex-col gap-3 p-4">
@@ -308,21 +331,59 @@ function IntegrationCard({
             <HugeiconsIcon icon={item.icon} aria-hidden="true" className="size-5" />
           )}
         </span>
-        <Switch
-          ref={switchButton}
-          aria-label={item.name}
-          checked={connection === "connected"}
-          onCheckedChange={(checked) => onChange(item.name, checked ? "connected" : "disconnected")}
-          className="mr-2 data-unchecked:bg-muted-foreground/65 motion-reduce:transition-none motion-reduce:[&_[data-slot=switch-thumb]]:transition-none"
-        />
+
+        {!hasProviders && (
+          <Switch
+            ref={switchButton}
+            aria-label={item.name}
+            checked={connection === "connected"}
+            onCheckedChange={(checked) =>
+              onChange(item.name, checked ? "connected" : "disconnected")
+            }
+            className="mr-2 data-unchecked:bg-muted-foreground/65 motion-reduce:transition-none motion-reduce:[&_[data-slot=switch-thumb]]:transition-none"
+          />
+        )}
       </div>
+
       <div className="grid flex-1 content-start gap-1">
         <h3 className="text-base leading-tight font-semibold">{item.name}</h3>
         <p className="text-sm text-muted-foreground">{item.purpose}</p>
       </div>
+
+      {hasProviders && (
+        <ul role="list" className="grid gap-1 border-t pt-3">
+          {providers.map((provider) => (
+            <li
+              key={provider.name}
+              className="flex items-center justify-between gap-3 rounded-lg px-1 py-1.5"
+            >
+              <div className="grid min-w-0 gap-0.5">
+                <span className="truncate text-sm font-medium">{provider.name}</span>
+
+                <span className="truncate text-xs text-muted-foreground">{provider.purpose}</span>
+              </div>
+
+              <Switch
+                aria-label={provider.name}
+                checked={provider.connection === "connected"}
+                onCheckedChange={(checked) =>
+                  onChange(`${item.name}::${provider.name}`, checked ? "connected" : "disconnected")
+                }
+                className="shrink-0 data-unchecked:bg-muted-foreground/65 motion-reduce:transition-none motion-reduce:[&_[data-slot=switch-thumb]]:transition-none"
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+
       <div className="flex min-h-11 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t pt-3">
         <Badge variant={variant}>{label}</Badge>
-        {connection === "reconnect" ? (
+
+        {hasProviders ? (
+          <span className="text-xs text-muted-foreground">
+            {connectedCount} de {providers.length} ativos
+          </span>
+        ) : connection === "reconnect" ? (
           <Button
             variant="outline"
             size="sm"
@@ -338,9 +399,7 @@ function IntegrationCard({
           </Button>
         ) : (
           <span className="text-xs text-muted-foreground">
-            {connection === "connected"
-              ? (item.update ?? "Sem atividade ainda")
-              : "Ative para conectar"}
+            {connection !== "connected" && "Ative para conectar"}
           </span>
         )}
       </div>
