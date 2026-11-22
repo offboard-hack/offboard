@@ -26,8 +26,15 @@ describe.skipIf(!url)("api", () => {
     enabled?: boolean;
     config?: Record<string, ConfigValue>;
     phase?: string;
-    event?: string;
+    event?: string | { type: string; user?: string };
     payload?: unknown;
+    type?: string;
+    challenge?: string;
+    token?: string;
+    team_id?: string;
+    api_app_id?: string;
+    event_id?: string;
+    event_time?: number;
   };
 
   function call(path: string, method = "GET", body?: Payload) {
@@ -335,6 +342,42 @@ describe.skipIf(!url)("api", () => {
     );
 
     expect(res.status).toBe(500);
+  });
+
+  it("responds to slack url_verification challenge", async () => {
+    const res = await call("/integrations/slack/events", "POST", {
+      type: "url_verification",
+      challenge: "test-challenge-abc123",
+      token: "test-token",
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ challenge: "test-challenge-abc123" });
+  });
+
+  it("returns ok when url_verification lacks challenge", async () => {
+    const res = await call("/integrations/slack/events", "POST", {
+      type: "url_verification",
+      token: "test-token",
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it("accepts slack event_callback with 200", async () => {
+    const res = await call("/integrations/slack/events", "POST", {
+      type: "event_callback",
+      token: "test-token",
+      team_id: "T12345",
+      api_app_id: "A12345",
+      event: { type: "member_joined_channel", user: "U12345" },
+      event_id: "Ev12345",
+      event_time: 1234567890,
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
   });
 
   it("accepts a delivered inbound webhook and marks task done", async () => {

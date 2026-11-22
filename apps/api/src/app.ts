@@ -231,6 +231,33 @@ export function createApp(webOrigin: string, repos: Repositories) {
       },
     )
     .post(
+      "/integrations/slack/events",
+      ({ body }) => {
+        if (body.type === "url_verification" && body.challenge) {
+          return { challenge: body.challenge };
+        }
+
+        console.log("slack event:", body.type);
+
+        return { ok: true } satisfies { ok: true };
+      },
+      {
+        body: t.Object({
+          type: t.String(),
+          challenge: t.Optional(t.String()),
+          event: t.Optional(t.Any()),
+          token: t.Optional(t.String()),
+          team_id: t.Optional(t.String()),
+          api_app_id: t.Optional(t.String()),
+          event_id: t.Optional(t.String()),
+          event_time: t.Optional(t.Number()),
+        }),
+        response: {
+          200: t.Union([t.Object({ challenge: t.String() }), t.Object({ ok: t.Literal(true) })]),
+        },
+      },
+    )
+    .post(
       "/webhooks/inbound/:taskId",
       async ({ params, body, status }) => {
         if (body.event !== "delivered" && body.event !== "completed") {
