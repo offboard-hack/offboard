@@ -153,4 +153,34 @@ describe.skipIf(!url)("api", () => {
     expect(badStatus.status).toBe(422);
     expect(badId.status).toBe(422);
   });
+
+  it("lists integrations from seed", async () => {
+    const res = await call("/integrations");
+    const list = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(list.length).toBeGreaterThan(0);
+    expect(list[0]).toEqual({ name: expect.any(String), status: expect.any(String) });
+  });
+
+  it("creates an integration via upsert", async () => {
+    const res = await call("/integrations/Test%20System", "PUT", { status: "connected" });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ name: "Test System", status: "connected" });
+  });
+
+  it("updates an existing integration status", async () => {
+    await call("/integrations/Test%20Toggle", "PUT", { status: "connected" });
+    const res = await call("/integrations/Test%20Toggle", "PUT", { status: "disconnected" });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ name: "Test Toggle", status: "disconnected" });
+  });
+
+  it("rejects an invalid integration status", async () => {
+    const res = await call("/integrations/Whatever", "PUT", { status: "invalid" });
+
+    expect(res.status).toBe(422);
+  });
 });

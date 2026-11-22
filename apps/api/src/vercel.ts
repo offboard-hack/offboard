@@ -11,4 +11,5 @@ async function handle(request: Request) {
 
 export const GET = handle;
 export const POST = handle;
+export const PUT = handle;
 export const PATCH = handle;
