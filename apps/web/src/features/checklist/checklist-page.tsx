@@ -308,6 +308,8 @@ function completeStepSettings(step: ChecklistStep) {
     deadlineOffset: step.deadlineOffset ?? null,
     rules: step.rules ?? [],
     email: step.email ?? null,
+    slack: step.slack ?? null,
+    webhook: step.webhook ?? null,
   };
 }
 

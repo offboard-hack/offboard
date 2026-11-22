@@ -29,6 +29,8 @@ const storedStepSchema = placementSchema.extend({
   deadlineOffset: stepFormSchema.shape.deadlineOffset.optional(),
   rules: stepFormSchema.shape.rules.optional(),
   email: stepFormSchema.shape.email.optional(),
+  slack: stepFormSchema.shape.slack.optional(),
+  webhook: stepFormSchema.shape.webhook.optional(),
   id: z.string().min(1),
 });
 
