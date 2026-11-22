@@ -26,6 +26,8 @@ describe.skipIf(!url)("api", () => {
     enabled?: boolean;
     config?: Record<string, ConfigValue>;
     phase?: string;
+    event?: string;
+    payload?: unknown;
   };
 
   function call(path: string, method = "GET", body?: Payload) {
@@ -333,5 +335,57 @@ describe.skipIf(!url)("api", () => {
     );
 
     expect(res.status).toBe(500);
+  });
+
+  it("accepts a delivered inbound webhook and marks task done", async () => {
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const todo = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    const res = await call(`/webhooks/inbound/${todo.id}`, "POST", {
+      event: "delivered",
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ accepted: true });
+
+    const after = await (await call(`/offboardings/${list[0].id}`)).json();
+    expect(after.tasks.find((t: { id: string }) => t.id === todo.id).status).toBe("done");
+  });
+
+  it("ignores non-delivered/completed webhook events", async () => {
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const todo = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    const res = await call(`/webhooks/inbound/${todo.id}`, "POST", {
+      event: "in_transit",
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ accepted: false, reason: "event ignored" });
+  });
+
+  it("returns 404 for inbound webhook on unknown task", async () => {
+    const res = await call(`/webhooks/inbound/${missingTaskId}`, "POST", {
+      event: "delivered",
+    });
+
+    expect(res.status).toBe(404);
+  });
+
+  it("fires actions when task status changes to done", async () => {
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+
+    const todo = detail.tasks.find(
+      (t: { status: string; title: string }) =>
+        t.status === "todo" && t.title === "Enviar desligamento ao eSocial",
+    );
+
+    const res = await call(`/tasks/${todo.id}/status`, "PATCH", { status: "done" });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("done");
   });
 });

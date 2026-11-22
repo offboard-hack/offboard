@@ -162,6 +162,12 @@ export function createRepositories(db: Database) {
     return inserted.map((row, i) => ({ id: row.id, ...values[i], completed: 0, total: 0 }));
   }
 
+  async function getTaskPhase(taskId: string) {
+    const [row] = await db.select({ phase: tasks.phase }).from(tasks).where(eq(tasks.id, taskId));
+
+    return row?.phase ?? null;
+  }
+
   async function updateTaskStatus(taskId: string, status: TaskStatus) {
     const [updated] = await db
       .update(tasks)
@@ -227,6 +233,13 @@ export function createRepositories(db: Database) {
     return db.select(actionConfigColumns).from(actionConfigs).orderBy(asc(actionConfigs.actionId));
   }
 
+  async function getActionConfigsByPhase(phase: string) {
+    return db
+      .select(actionConfigColumns)
+      .from(actionConfigs)
+      .where(sql`${actionConfigs.phase} = ${phase} AND ${actionConfigs.enabled} = true`);
+  }
+
   async function getActionConfig(id: string) {
     const [row] = await db
       .select(actionConfigColumns)
@@ -266,11 +279,13 @@ export function createRepositories(db: Database) {
     getOffboarding,
     createOffboarding,
     bulkCreateOffboardings,
+    getTaskPhase,
     updateTaskStatus,
     toggleSubtask,
     listIntegrations,
     upsertIntegration,
     listActionConfigs,
+    getActionConfigsByPhase,
     getActionConfig,
     createActionConfig,
     updateActionConfig,
