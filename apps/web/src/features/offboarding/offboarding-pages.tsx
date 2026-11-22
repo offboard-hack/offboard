@@ -213,7 +213,7 @@ export function CasesPage({
       },
       {
         id: "deadline",
-        header: "Prazo",
+        header: "Data de encerramento",
         cell: ({ row }) => (
           <time dateTime={row.original.deadline} title={formatDeadline(row.original.deadline)}>
             {formatShortDeadline(row.original.deadline)}
@@ -410,7 +410,7 @@ export function CasePage({
                 <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-3 text-sm">
                   <dt className="text-muted-foreground">Área</dt>
                   <dd className="text-right wrap-anywhere">{department}</dd>
-                  <dt className="text-muted-foreground">Prazo</dt>
+                  <dt className="text-muted-foreground">Data de encerramento</dt>
                   <dd className="text-right">
                     <time dateTime={deadline}>{formatDeadline(deadline)}</time>
                   </dd>

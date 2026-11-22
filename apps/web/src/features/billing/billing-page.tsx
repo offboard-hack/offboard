@@ -1,8 +1,10 @@
 import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { useListPagination } from "@/shared/lib/use-list-pagination";
 import { Calendar03Icon, Tick02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import { Badge } from "@/shared/ui/shadcn/badge";
+import { Input } from "@/shared/ui/shadcn/input";
 import { classProps } from "../../shared/lib/class-props";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
@@ -39,6 +41,27 @@ const currency = new Intl.NumberFormat("pt-BR", {
   maximumFractionDigits: 0,
 });
 
+const beneficiaries = [
+  { name: "Marina Lopes", plan: "Gold", status: "Ativo", until: "30 abr" },
+  { name: "Lucas Almeida", plan: "Silver", status: "Convidado", until: "Após ativação" },
+  { name: "Renata Souza", plan: "Platinum", status: "Ativo", until: "22 abr" },
+  { name: "Pedro Santos", plan: "Gold", status: "Ativo", until: "31 mar" },
+  { name: "Carla Mendes", plan: "Silver", status: "Expirado", until: "31 out" },
+];
+
+const beneficiaryColumns: TableColumn<(typeof beneficiaries)[number]>[] = [
+  {
+    id: "name",
+    accessorFn: ({ name }) => name,
+    header: "Pessoa",
+    enableSorting: true,
+    sortFn: "portugueseText",
+  },
+  { id: "plan", accessorFn: ({ plan }) => plan, header: "Plano" },
+  { id: "until", accessorFn: ({ until }) => until, header: "Fim do acesso" },
+  { id: "status", accessorFn: ({ status }) => status, header: "Status" },
+];
+
 const billingColumns: TableColumn<(typeof plans)[number]>[] = [
   {
     id: "area",
@@ -63,6 +86,12 @@ const billingColumns: TableColumn<(typeof plans)[number]>[] = [
 
 export function PlansPage() {
   const navigate = useNavigate({ from: "/planos-e-gastos" });
+  const [beneficiarySearch, setBeneficiarySearch] = useState("");
+  const beneficiaryTerm = beneficiarySearch.trim().toLocaleLowerCase("pt-BR");
+
+  const matchingBeneficiaries = beneficiaries.filter(({ name }) =>
+    name.toLocaleLowerCase("pt-BR").includes(beneficiaryTerm),
+  );
 
   const urlPagination = useListPagination(
     (patch) =>
@@ -81,12 +110,17 @@ export function PlansPage() {
       title="Planos e gastos"
       breadcrumb={<ListBreadcrumb title="Planos e gastos" />}
       metrics={[
-        { label: "Planos contratados", value: plans.length, icon: Tick02Icon, tone: "primary" },
         { label: "Licenças em uso", value: licensesInUse, icon: UserGroupIcon, tone: "success" },
         {
           label: "Licenças disponíveis",
           value: licensesAvailable - licensesInUse,
           icon: UserGroupIcon,
+          tone: "primary",
+        },
+        {
+          label: "Beneficiários",
+          value: beneficiaries.length,
+          icon: Tick02Icon,
           tone: "primary",
         },
         {
@@ -97,24 +131,35 @@ export function PlansPage() {
         },
       ]}
     >
-      <section aria-labelledby="plans-title" className="rounded-2xl border bg-card p-4 sm:p-5">
-        <h2 {...classProps(portalStyles.subheading)} id="plans-title">
-          Planos contratados
-        </h2>
-        <p {...classProps(styles.label, styles.rateUnit)}>
-          Tarifa mensal por acesso ativado. Contrato vigente de 1 nov 2026 a 31 out 2027.
-        </p>
-        <dl {...classProps(styles.planList)}>
-          {plans.map((plan) => (
-            <div {...classProps(styles.plan)} key={plan.name}>
-              <dt {...classProps(styles.planName)}>{plan.name}</dt>
-              <dd {...classProps(styles.planRate)}>{currency.format(plan.price)}</dd>
-              <dd {...classProps(styles.label, styles.planCapacity)}>
-                {plan.active} em uso · {plan.capacity - plan.active} disponíveis
-              </dd>
-            </div>
-          ))}
-        </dl>
+      <section className="min-w-0" aria-labelledby="beneficiarios-title">
+        <DataTable
+          urlPagination={urlPagination}
+          toolbar={
+            <>
+              <h2
+                {...classProps(portalStyles.subheading, "mr-2 w-full sm:w-auto")}
+                id="beneficiarios-title"
+              >
+                Beneficiários
+              </h2>
+              <Input
+                type="search"
+                aria-label="Buscar beneficiários por nome"
+                placeholder="Buscar por nome"
+                value={beneficiarySearch}
+                onChange={(event) => setBeneficiarySearch(event.currentTarget.value)}
+                className="w-full max-w-sm"
+              />
+            </>
+          }
+          data={matchingBeneficiaries}
+          columns={beneficiaryColumns}
+          labelledBy="beneficiarios-title"
+          scrollLabel="Tabela de beneficiários"
+          tableStyle="min-w-lg"
+          getRowId={(person) => person.name}
+          emptyText="Nenhum beneficiário encontrado."
+        />
       </section>
       <div {...classProps(styles.billingGrid)}>
         <section className="min-w-0" aria-labelledby="usage-title">
