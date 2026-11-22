@@ -394,7 +394,10 @@ describe.skipIf(!url)("fireActions", () => {
 
       expect(result).toEqual({ actionId: "email:template", success: true });
 
-      const emailReq = receivedRequests.find((r) => r.url === "/emails");
+      const emailReq = receivedRequests.find(
+        (r) => r.url === "/emails" && r.body.includes("dev@example.com"),
+      );
+
       const parsed = JSON.parse(emailReq!.body);
 
       expect(parsed.from).toBe("Offboard <onboarding@resend.dev>");
@@ -423,8 +426,11 @@ describe.skipIf(!url)("fireActions", () => {
 
       expect(result).toEqual({ actionId: "email:defaults", success: true });
 
-      const emailReq = receivedRequests.find((r) => r.url === "/emails");
-      const parsed = JSON.parse(emailReq!.body);
+      const emailReqs = receivedRequests.filter(
+        (r) => r.url === "/emails" && r.body.includes("dev@example.com"),
+      );
+
+      const parsed = JSON.parse(emailReqs.at(-1)!.body);
 
       expect(parsed.subject).toBe("Offboard: Bloquear acessos — done");
       expect(parsed.html).toBe(

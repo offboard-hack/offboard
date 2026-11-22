@@ -9,11 +9,57 @@ export type SeedActionConfig = {
 
 export const seedActionConfigs: SeedActionConfig[] = [
   {
-    actionId: "email::notify_collaborator",
+    actionId: "email:notify-collaborator",
     enabled: true,
-    config: { subject: "Seu desligamento", body: "Informamos que..." },
+    config: {
+      to: "rh@empresa.com.br",
+      subject: "Offboard: {{task}} — {{status}}",
+      body: "<p>A tarefa <b>{{task}}</b> mudou para <b>{{status}}</b> na fase <b>{{phase}}</b>.</p>",
+    },
     phase: "d0",
   },
-  { actionId: "google::block_account", enabled: true, config: {}, phase: "d0" },
-  { actionId: "slack::send_message", enabled: false, config: { channel: "#rh" }, phase: "d0" },
+  {
+    actionId: "email:notify-manager",
+    enabled: true,
+    config: {
+      to: "gestao@empresa.com.br",
+      subject: "Desligamento: {{task}}",
+      body: "<p>Tarefa <b>{{task}}</b> concluída ({{status}}) — fase {{phase}}.</p>",
+    },
+    phase: "first-week",
+  },
+  {
+    actionId: "slack:rh-channel",
+    enabled: true,
+    config: { channel: "#rh-offboard", message: "✅ {{task}} → {{status}} ({{phase}})" },
+    phase: "d0",
+  },
+  {
+    actionId: "slack:ti-channel",
+    enabled: true,
+    config: { channel: "#ti-offboard", message: "🔒 {{task}} → {{status}} ({{phase}})" },
+    phase: "d0",
+  },
+  {
+    actionId: "webhook:erp-sync",
+    enabled: true,
+    config: { url: "https://erp.empresa.com.br/api/offboard/events", method: "POST" },
+    phase: "first-week",
+  },
+  {
+    actionId: "webhook:audit-log",
+    enabled: true,
+    config: { url: "https://audit.empresa.com.br/api/events", method: "POST" },
+    phase: "d0",
+  },
+  {
+    actionId: "email:farewell",
+    enabled: false,
+    config: {
+      to: "all@empresa.com.br",
+      subject: "Despedida: {{task}}",
+      body: "<p>Comunicamos o desligamento — fase {{phase}}.</p>",
+    },
+    phase: "follow-up",
+  },
 ];

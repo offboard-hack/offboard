@@ -31,6 +31,7 @@ export async function seedDatabase(db: Database) {
             phase: seedTask.phase ?? null,
             description: seedTask.description ?? null,
             dueDate: seedTask.dueDate ?? null,
+            trackingCode: seedTask.trackingCode ?? null,
             position: i,
           })
           .returning({ id: tasks.id });

@@ -9,6 +9,7 @@ export type SeedTask = {
   phase?: string | null;
   description?: string;
   dueDate?: string;
+  trackingCode?: string;
   subtasks?: SeedSubtask[];
 };
 
@@ -111,6 +112,7 @@ export const seedCases: readonly SeedCase[] = [
         status: "in_progress",
         phase: "first-week",
         description: "Agendar logística reversa com a transportadora.",
+        trackingCode: "BR123456789BR",
       },
       {
         team: "TI",
@@ -208,7 +210,13 @@ export const seedCases: readonly SeedCase[] = [
           { title: "Transferir pipelines de CI/CD", done: false },
         ],
       },
-      { team: "TI", title: "Recolher equipamentos", status: "todo", phase: "first-week" },
+      {
+        team: "TI",
+        title: "Recolher equipamentos",
+        status: "todo",
+        phase: "first-week",
+        trackingCode: "BR987654321BR",
+      },
       { team: "Gestão", title: "Confirmar a passagem de trabalho", status: "done", phase: "pre" },
     ],
   },
@@ -237,7 +245,13 @@ export const seedCases: readonly SeedCase[] = [
         phase: "first-week",
         dueDate: "2026-11-18",
       },
-      { team: "TI", title: "Recolher equipamentos", status: "todo", phase: "first-week" },
+      {
+        team: "TI",
+        title: "Recolher equipamentos",
+        status: "todo",
+        phase: "first-week",
+        trackingCode: "BR456789012BR",
+      },
       {
         team: "Gestão",
         title: "Repasse das rotinas de operação",
