@@ -4,7 +4,6 @@ import {
   Alert02Icon,
   ArrowDown01Icon,
   ArrowRight01Icon,
-  Calendar03Icon,
   LaptopIcon,
   Tick02Icon,
   UserGroupIcon,
@@ -148,14 +147,12 @@ export function CasesPage({
       tone: "danger",
     },
     {
-      label: "Vencem hoje",
-      value: cases.filter((item) => getCaseStatus(item, today) === "today").length,
-      icon: Calendar03Icon,
-      tone: "warning",
-    },
-    {
       label: "No prazo",
-      value: cases.filter((item) => getCaseStatus(item, today) === "upcoming").length,
+      value: cases.filter((item) => {
+        const s = getCaseStatus(item, today);
+
+        return s === "upcoming" || s === "today";
+      }).length,
       icon: Tick02Icon,
       tone: "success",
     },
