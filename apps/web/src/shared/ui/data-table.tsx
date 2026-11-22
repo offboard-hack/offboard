@@ -10,11 +10,8 @@ import type { ComponentProps, ReactNode } from "react";
 import { PortalFilter } from "./select";
 import { classProps } from "../lib/class-props";
 import { Button } from "@/shared/ui/shadcn/button";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -147,8 +144,6 @@ export function DataTable<T extends RowData>({
       }
     : undefined;
 
-  const optionalColumns = table.getAllLeafColumns().slice(1);
-
   return (
     <div className={panel ? "min-w-0 overflow-hidden rounded-2xl border bg-card" : "min-w-0"}>
       {filters && filters.length > 0 && (
@@ -161,7 +156,7 @@ export function DataTable<T extends RowData>({
           ))}
         </div>
       )}
-      {(toolbar || toolbarEnd || (panel && optionalColumns.length > 0)) && (
+      {(toolbar || toolbarEnd) && (
         <div
           className={
             panel
@@ -170,26 +165,6 @@ export function DataTable<T extends RowData>({
           }
         >
           {toolbar}
-          {panel && optionalColumns.length > 0 && (
-            <div className="ml-auto">
-              <DropdownMenu>
-                <DropdownMenuTrigger render={<Button variant="outline" className="h-9" />}>
-                  Colunas <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={2} />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {optionalColumns.map((column) => (
-                    <DropdownMenuCheckboxItem
-                      key={column.id}
-                      checked={column.getIsVisible()}
-                      onCheckedChange={(visible) => column.toggleVisibility(visible)}
-                    >
-                      {columns.find(({ id }) => id === column.id)?.header ?? column.id}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          )}
           {toolbarEnd}
         </div>
       )}
