@@ -176,7 +176,7 @@ export function IntegrationsPage() {
     connection: deriveConnection(item, statusMap),
   }));
 
-  const effectiveStatus = status || "connected";
+  const effectiveStatus = status || "all";
 
   const visible = systems.filter(
     ({ item, connection }) =>
