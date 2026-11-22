@@ -3,6 +3,7 @@ import { node } from "@elysia/node";
 import type { createRepositories } from "@offboard/db/repositories";
 import { Elysia, t } from "elysia";
 import { z } from "zod";
+import { fireActions } from "./actions.js";
 
 export type Repositories = ReturnType<typeof createRepositories>;
 
@@ -124,7 +125,20 @@ export function createApp(webOrigin: string, repos: Repositories) {
       async ({ params, body, status }) => {
         const updated = await repos.updateTaskStatus(params.id, body.status);
 
-        return updated ?? status(404, { error: "Task not found" });
+        if (!updated) return status(404, { error: "Task not found" });
+
+        const phase = await repos.getTaskPhase(params.id);
+
+        if (phase) {
+          fireActions(repos, {
+            taskId: params.id,
+            taskTitle: updated.title,
+            status: body.status,
+            phase,
+          }).catch(() => {});
+        }
+
+        return updated;
       },
       {
         params: t.Object({ id: t.String({ format: "uuid" }) }),
@@ -214,6 +228,42 @@ export function createApp(webOrigin: string, repos: Repositories) {
       {
         params: t.Object({ id: t.String({ format: "uuid" }) }),
         response: { 204: t.Void(), 404: notFound },
+      },
+    )
+    .post(
+      "/webhooks/inbound/:taskId",
+      async ({ params, body, status }) => {
+        if (body.event !== "delivered" && body.event !== "completed") {
+          return { accepted: false, reason: "event ignored" };
+        }
+
+        const updated = await repos.updateTaskStatus(params.taskId, "done");
+
+        if (!updated) return status(404, { error: "Task not found" });
+
+        const phase = await repos.getTaskPhase(params.taskId);
+
+        if (phase) {
+          fireActions(repos, {
+            taskId: params.taskId,
+            taskTitle: updated.title,
+            status: "done",
+            phase,
+          }).catch(() => {});
+        }
+
+        return { accepted: true };
+      },
+      {
+        params: t.Object({ taskId: t.String({ format: "uuid" }) }),
+        body: t.Object({
+          event: t.String(),
+          payload: t.Optional(t.Any()),
+        }),
+        response: {
+          200: t.Object({ accepted: t.Boolean(), reason: t.Optional(t.String()) }),
+          404: notFound,
+        },
       },
     );
 }

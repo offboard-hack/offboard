@@ -1172,20 +1172,20 @@ var require_utils = __commonJS({
       }
       return Object.defineProperties(Object.create(Object.getPrototypeOf(config2)), Object.getOwnPropertyDescriptors(config2));
     }
-    var escapeIdentifier2 = function(str) {
-      return '"' + str.replace(/"/g, '""') + '"';
+    var escapeIdentifier2 = function(str2) {
+      return '"' + str2.replace(/"/g, '""') + '"';
     };
-    var escapeLiteral2 = function(str) {
+    var escapeLiteral2 = function(str2) {
       let hasBackslash = false;
       let escaped = "'";
-      if (str == null) {
+      if (str2 == null) {
         return "''";
       }
-      if (typeof str !== "string") {
+      if (typeof str2 !== "string") {
         return "''";
       }
-      for (let i2 = 0; i2 < str.length; i2++) {
-        const c2 = str[i2];
+      for (let i2 = 0; i2 < str2.length; i2++) {
+        const c2 = str2[i2];
         if (c2 === "'") {
           escaped += c2 + c2;
         } else if (c2 === "\\") {
@@ -1600,22 +1600,22 @@ var require_type_overrides = __commonJS({
 var require_pg_connection_string = __commonJS({
   "node_modules/pg-connection-string/index.js"(exports, module) {
     "use strict";
-    function parse4(str, options = {}) {
-      if (str.charAt(0) === "/") {
-        const config3 = str.split(" ");
+    function parse4(str2, options = {}) {
+      if (str2.charAt(0) === "/") {
+        const config3 = str2.split(" ");
         return { host: config3[0], database: config3[1] };
       }
       const config2 = /* @__PURE__ */ Object.create(null);
       let result;
       let dummyHost = false;
-      if (/ |%[^a-f0-9]|%[a-f0-9][^a-f0-9]/i.test(str)) {
-        str = encodeURI(str).replace(/%25(\d\d)/g, "%$1");
+      if (/ |%[^a-f0-9]|%[a-f0-9][^a-f0-9]/i.test(str2)) {
+        str2 = encodeURI(str2).replace(/%25(\d\d)/g, "%$1");
       }
       try {
         try {
-          result = new URL(str, "postgres://base");
+          result = new URL(str2, "postgres://base");
         } catch (e2) {
-          result = new URL(str.replace("@/", "@___DUMMY___/"), "postgres://base");
+          result = new URL(str2.replace("@/", "@___DUMMY___/"), "postgres://base");
           dummyHost = true;
         }
       } catch (err) {
@@ -1761,8 +1761,8 @@ var require_pg_connection_string = __commonJS({
       }, /* @__PURE__ */ Object.create(null));
       return poolConfig;
     }
-    function parseIntoClientConfig(str) {
-      return toClientConfig(parse4(str));
+    function parseIntoClientConfig(str2) {
+      return toClientConfig(parse4(str2));
     }
     function deprecatedSslModeWarning(sslmode) {
       if (!deprecatedSslModeWarning.warned && typeof process !== "undefined" && process.emitWarning) {
@@ -4188,11 +4188,11 @@ var require_client = __commonJS({
       // escapeIdentifier and escapeLiteral moved to utility functions & exported
       // on PG
       // re-exported here for backwards compatibility
-      escapeIdentifier(str) {
-        return utils.escapeIdentifier(str);
+      escapeIdentifier(str2) {
+        return utils.escapeIdentifier(str2);
       }
-      escapeLiteral(str) {
-        return utils.escapeLiteral(str);
+      escapeLiteral(str2) {
+        return utils.escapeLiteral(str2);
       }
       _pulseQueryQueue() {
         if (this.pipeline) {
@@ -6019,13 +6019,13 @@ function decodeWindows1252(bytes) {
   }
   return parts.join("");
 }
-function encodeUTF8(str) {
+function encodeUTF8(str2) {
   const out = [];
-  for (let i2 = 0; i2 < str.length; i2++) {
-    let cp = str.charCodeAt(i2);
+  for (let i2 = 0; i2 < str2.length; i2++) {
+    let cp = str2.charCodeAt(i2);
     if (cp >= 55296 && cp <= 56319) {
-      if (i2 + 1 < str.length) {
-        const lo = str.charCodeAt(i2 + 1);
+      if (i2 + 1 < str2.length) {
+        const lo = str2.charCodeAt(i2 + 1);
         if (lo >= 56320 && lo <= 57343) {
           cp = 65536 + (cp - 55296 << 10) + (lo - 56320);
           i2++;
@@ -6050,13 +6050,13 @@ function encodeUTF8(str) {
   }
   return new Uint8Array(out);
 }
-function encodeUTF16LE(str) {
+function encodeUTF16LE(str2) {
   const units = [];
-  for (let i2 = 0; i2 < str.length; i2++) {
-    const u2 = str.charCodeAt(i2);
+  for (let i2 = 0; i2 < str2.length; i2++) {
+    const u2 = str2.charCodeAt(i2);
     if (u2 >= 55296 && u2 <= 56319) {
-      if (i2 + 1 < str.length) {
-        const lo = str.charCodeAt(i2 + 1);
+      if (i2 + 1 < str2.length) {
+        const lo = str2.charCodeAt(i2 + 1);
         if (lo >= 56320 && lo <= 57343) {
           units.push(u2, lo);
           i2++;
@@ -6083,24 +6083,24 @@ function encodeUTF16LE(str) {
   }
   return out;
 }
-function encodeASCII(str) {
-  const out = new Uint8Array(str.length);
-  for (let i2 = 0; i2 < str.length; i2++) {
-    out[i2] = str.charCodeAt(i2) & 127;
+function encodeASCII(str2) {
+  const out = new Uint8Array(str2.length);
+  for (let i2 = 0; i2 < str2.length; i2++) {
+    out[i2] = str2.charCodeAt(i2) & 127;
   }
   return out;
 }
-function encodeLatin1(str) {
-  const out = new Uint8Array(str.length);
-  for (let i2 = 0; i2 < str.length; i2++) {
-    out[i2] = str.charCodeAt(i2) & 255;
+function encodeLatin1(str2) {
+  const out = new Uint8Array(str2.length);
+  for (let i2 = 0; i2 < str2.length; i2++) {
+    out[i2] = str2.charCodeAt(i2) & 255;
   }
   return out;
 }
-function encodeWindows1252(str) {
-  const out = new Uint8Array(str.length);
-  for (let i2 = 0; i2 < str.length; i2++) {
-    const ch = str[i2];
+function encodeWindows1252(str2) {
+  const out = new Uint8Array(str2.length);
+  for (let i2 = 0; i2 < str2.length; i2++) {
+    const ch = str2[i2];
     const code = ch.charCodeAt(0);
     if (WINDOWS_1252_REVERSE[ch] !== void 0) {
       out[i2] = WINDOWS_1252_REVERSE[ch];
@@ -7413,13 +7413,13 @@ var require_ms = __commonJS({
         "val is not a non-empty string or a valid number. val=" + JSON.stringify(val)
       );
     };
-    function parse4(str) {
-      str = String(str);
-      if (str.length > 100) {
+    function parse4(str2) {
+      str2 = String(str2);
+      if (str2.length > 100) {
         return;
       }
       var match = /^(-?(?:\d+)?\.?\d+) *(milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|years?|yrs?|y)?$/i.exec(
-        str
+        str2
       );
       if (!match) {
         return;
@@ -8135,7 +8135,7 @@ var require_node = __commonJS({
     var { formatters } = module.exports;
     formatters.o = function(v2) {
       this.inspectOpts.colors = this.useColors;
-      return util.inspect(v2, this.inspectOpts).split("\n").map((str) => str.trim()).join(" ");
+      return util.inspect(v2, this.inspectOpts).split("\n").map((str2) => str2.trim()).join(" ");
     };
     formatters.O = function(v2) {
       this.inspectOpts.colors = this.useColors;
@@ -9453,7 +9453,7 @@ async function detectZip(tokenizer) {
           };
         }
         default:
-          if (/classes\d*\.dex/v.test(zipHeader.filename)) {
+          if (new RegExp("classes\\d*\\.dex", "v").test(zipHeader.filename)) {
             fileType2 = {
               ext: "apk",
               mime: "application/vnd.android.package-archive"
@@ -10706,7 +10706,7 @@ var init_source = __esm({
         }
         if (this.checkString("AC")) {
           const version3 = new StringType2(4, "latin1").get(this.buffer, 2);
-          if (/^\d+$/v.test(version3) && version3 >= 1e3 && version3 <= 1050) {
+          if (new RegExp("^\\d+$", "v").test(version3) && version3 >= 1e3 && version3 <= 1050) {
             return {
               ext: "dwg",
               mime: "image/vnd.dwg"
@@ -11338,25 +11338,25 @@ var require_dist2 = __commonJS({
       C2.prototype = /* @__PURE__ */ Object.create(null);
       return C2;
     })();
-    function parseCookie2(str, options) {
+    function parseCookie2(str2, options) {
       const obj = new NullObject();
-      const len = str.length;
+      const len = str2.length;
       if (len < 2)
         return obj;
       const dec = options?.decode || decode6;
       let index2 = 0;
       do {
-        const eqIdx = eqIndex(str, index2, len);
+        const eqIdx = eqIndex(str2, index2, len);
         if (eqIdx === -1)
           break;
-        const endIdx = endIndex(str, index2, len);
+        const endIdx = endIndex(str2, index2, len);
         if (eqIdx > endIdx) {
-          index2 = str.lastIndexOf(";", eqIdx - 1) + 1;
+          index2 = str2.lastIndexOf(";", eqIdx - 1) + 1;
           continue;
         }
-        const key = valueSlice(str, index2, eqIdx);
+        const key = valueSlice(str2, index2, eqIdx);
         if (obj[key] === void 0) {
-          obj[key] = dec(valueSlice(str, eqIdx + 1, endIdx));
+          obj[key] = dec(valueSlice(str2, eqIdx + 1, endIdx));
         }
         index2 = endIdx + 1;
       } while (index2 < len);
@@ -11391,51 +11391,51 @@ var require_dist2 = __commonJS({
       if (!cookieValueRegExp.test(value)) {
         throw new TypeError(`argument val is invalid: ${cookie.value}`);
       }
-      let str = cookie.name + "=" + value;
+      let str2 = cookie.name + "=" + value;
       if (cookie.maxAge !== void 0) {
         if (!Number.isInteger(cookie.maxAge)) {
           throw new TypeError(`option maxAge is invalid: ${cookie.maxAge}`);
         }
-        str += "; Max-Age=" + cookie.maxAge;
+        str2 += "; Max-Age=" + cookie.maxAge;
       }
       if (cookie.domain) {
         if (!domainValueRegExp.test(cookie.domain)) {
           throw new TypeError(`option domain is invalid: ${cookie.domain}`);
         }
-        str += "; Domain=" + cookie.domain;
+        str2 += "; Domain=" + cookie.domain;
       }
       if (cookie.path) {
         if (!pathValueRegExp.test(cookie.path)) {
           throw new TypeError(`option path is invalid: ${cookie.path}`);
         }
-        str += "; Path=" + cookie.path;
+        str2 += "; Path=" + cookie.path;
       }
       if (cookie.expires) {
         if (!isDate(cookie.expires) || !Number.isFinite(cookie.expires.valueOf())) {
           throw new TypeError(`option expires is invalid: ${cookie.expires}`);
         }
-        str += "; Expires=" + cookie.expires.toUTCString();
+        str2 += "; Expires=" + cookie.expires.toUTCString();
       }
       if (cookie.httpOnly) {
-        str += "; HttpOnly";
+        str2 += "; HttpOnly";
       }
       if (cookie.secure) {
-        str += "; Secure";
+        str2 += "; Secure";
       }
       if (cookie.partitioned) {
-        str += "; Partitioned";
+        str2 += "; Partitioned";
       }
       if (cookie.priority) {
         const priority = typeof cookie.priority === "string" ? cookie.priority.toLowerCase() : void 0;
         switch (priority) {
           case "low":
-            str += "; Priority=Low";
+            str2 += "; Priority=Low";
             break;
           case "medium":
-            str += "; Priority=Medium";
+            str2 += "; Priority=Medium";
             break;
           case "high":
-            str += "; Priority=High";
+            str2 += "; Priority=High";
             break;
           default:
             throw new TypeError(`option priority is invalid: ${cookie.priority}`);
@@ -11446,35 +11446,35 @@ var require_dist2 = __commonJS({
         switch (sameSite) {
           case true:
           case "strict":
-            str += "; SameSite=Strict";
+            str2 += "; SameSite=Strict";
             break;
           case "lax":
-            str += "; SameSite=Lax";
+            str2 += "; SameSite=Lax";
             break;
           case "none":
-            str += "; SameSite=None";
+            str2 += "; SameSite=None";
             break;
           default:
             throw new TypeError(`option sameSite is invalid: ${cookie.sameSite}`);
         }
       }
-      return str;
+      return str2;
     }
-    function parseSetCookie(str, options) {
+    function parseSetCookie(str2, options) {
       const dec = options?.decode || decode6;
-      const len = str.length;
-      const endIdx = endIndex(str, 0, len);
-      const eqIdx = eqIndex(str, 0, endIdx);
-      const setCookie = eqIdx === -1 ? { name: "", value: dec(valueSlice(str, 0, endIdx)) } : {
-        name: valueSlice(str, 0, eqIdx),
-        value: dec(valueSlice(str, eqIdx + 1, endIdx))
+      const len = str2.length;
+      const endIdx = endIndex(str2, 0, len);
+      const eqIdx = eqIndex(str2, 0, endIdx);
+      const setCookie = eqIdx === -1 ? { name: "", value: dec(valueSlice(str2, 0, endIdx)) } : {
+        name: valueSlice(str2, 0, eqIdx),
+        value: dec(valueSlice(str2, eqIdx + 1, endIdx))
       };
       let index2 = endIdx + 1;
       while (index2 < len) {
-        const endIdx2 = endIndex(str, index2, len);
-        const eqIdx2 = eqIndex(str, index2, endIdx2);
-        const attr = eqIdx2 === -1 ? valueSlice(str, index2, endIdx2) : valueSlice(str, index2, eqIdx2);
-        const val = eqIdx2 === -1 ? void 0 : valueSlice(str, eqIdx2 + 1, endIdx2);
+        const endIdx2 = endIndex(str2, index2, len);
+        const eqIdx2 = eqIndex(str2, index2, endIdx2);
+        const attr = eqIdx2 === -1 ? valueSlice(str2, index2, endIdx2) : valueSlice(str2, index2, eqIdx2);
+        const val = eqIdx2 === -1 ? void 0 : valueSlice(str2, eqIdx2 + 1, endIdx2);
         switch (attr.toLowerCase()) {
           case "httponly":
             setCookie.httpOnly = true;
@@ -11523,37 +11523,37 @@ var require_dist2 = __commonJS({
       }
       return setCookie;
     }
-    function endIndex(str, min, len) {
-      const index2 = str.indexOf(";", min);
+    function endIndex(str2, min, len) {
+      const index2 = str2.indexOf(";", min);
       return index2 === -1 ? len : index2;
     }
-    function eqIndex(str, min, max) {
-      const index2 = str.indexOf("=", min);
+    function eqIndex(str2, min, max) {
+      const index2 = str2.indexOf("=", min);
       return index2 < max ? index2 : -1;
     }
-    function valueSlice(str, min, max) {
+    function valueSlice(str2, min, max) {
       let start = min;
       let end = max;
       do {
-        const code = str.charCodeAt(start);
+        const code = str2.charCodeAt(start);
         if (code !== 32 && code !== 9)
           break;
       } while (++start < end);
       while (end > start) {
-        const code = str.charCodeAt(end - 1);
+        const code = str2.charCodeAt(end - 1);
         if (code !== 32 && code !== 9)
           break;
         end--;
       }
-      return str.slice(start, end);
+      return str2.slice(start, end);
     }
-    function decode6(str) {
-      if (str.indexOf("%") === -1)
-        return str;
+    function decode6(str2) {
+      if (str2.indexOf("%") === -1)
+        return str2;
       try {
-        return decodeURIComponent(str);
+        return decodeURIComponent(str2);
       } catch (e2) {
-        return str;
+        return str2;
       }
     }
     function isDate(val) {
@@ -12685,8 +12685,8 @@ function sql(strings, ...params) {
     return new SQL(list);
   }
   sql2.fromList = fromList;
-  function raw(str) {
-    return new SQL([new StringChunk(str)]);
+  function raw(str2) {
+    return new SQL([new StringChunk(str2)]);
   }
   sql2.raw = raw;
   function join(chunks, separator) {
@@ -15163,8 +15163,8 @@ var PgDialect = class {
   escapeParam(num) {
     return `$${num + 1}`;
   }
-  escapeString(str) {
-    return `'${str.replace(/'/g, "''")}'`;
+  escapeString(str2) {
+    return `'${str2.replace(/'/g, "''")}'`;
   }
   buildWithCTE(queries) {
     if (!queries?.length) return void 0;
@@ -18823,6 +18823,10 @@ function createRepositories(db) {
     const inserted = await db.insert(offboardingCases).values(values).returning({ id: offboardingCases.id });
     return inserted.map((row, i2) => ({ id: row.id, ...values[i2], completed: 0, total: 0 }));
   }
+  async function getTaskPhase(taskId) {
+    const [row] = await db.select({ phase: tasks.phase }).from(tasks).where(eq(tasks.id, taskId));
+    return row?.phase ?? null;
+  }
   async function updateTaskStatus(taskId, status2) {
     const [updated] = await db.update(tasks).set({ status: status2, updatedAt: /* @__PURE__ */ new Date() }).where(eq(tasks.id, taskId)).returning({
       id: tasks.id,
@@ -18858,6 +18862,9 @@ function createRepositories(db) {
   async function listActionConfigs() {
     return db.select(actionConfigColumns).from(actionConfigs).orderBy(asc(actionConfigs.actionId));
   }
+  async function getActionConfigsByPhase(phase) {
+    return db.select(actionConfigColumns).from(actionConfigs).where(sql`${actionConfigs.phase} = ${phase} AND ${actionConfigs.enabled} = true`);
+  }
   async function getActionConfig(id) {
     const [row] = await db.select(actionConfigColumns).from(actionConfigs).where(eq(actionConfigs.id, id));
     return row ?? null;
@@ -18879,11 +18886,13 @@ function createRepositories(db) {
     getOffboarding,
     createOffboarding,
     bulkCreateOffboardings,
+    getTaskPhase,
     updateTaskStatus,
     toggleSubtask,
     listIntegrations,
     upsertIntegration,
     listActionConfigs,
+    getActionConfigsByPhase,
     getActionConfig,
     createActionConfig,
     updateActionConfig,
@@ -27337,16 +27346,16 @@ function isLeapYear(year) {
 }
 var DATE = /^(\d\d\d\d)-(\d\d)-(\d\d)$/;
 var DAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-function date2(str) {
-  const matches = DATE.exec(str);
+function date2(str2) {
+  const matches = DATE.exec(str2);
   if (!matches) return false;
   const year = +matches[1], month = +matches[2], day = +matches[3];
   return month >= 1 && month <= 12 && day >= 1 && day <= (month === 2 && isLeapYear(year) ? 29 : DAYS[month]);
 }
 var TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
 function getTime(strictTimeZone) {
-  return function(str) {
-    const matches = TIME.exec(str);
+  return function(str2) {
+    const matches = TIME.exec(str2);
     if (!matches) return false;
     const hr = +matches[1], min = +matches[2], sec = +matches[3], tz = matches[4], tzSign = matches[5] === "-" ? -1 : 1, tzH = +(matches[6] || 0), tzM = +(matches[7] || 0);
     if (tzH > 23 || tzM > 59 || strictTimeZone && !tz) return false;
@@ -27355,23 +27364,23 @@ function getTime(strictTimeZone) {
     return (utcHr === 23 || utcHr === -1) && (utcMin === 59 || utcMin === -1) && sec < 61;
   };
 }
-var parseDateTimeEmptySpace = (str) => str.charCodeAt(str.length - 6) === 32 ? str.slice(0, -6) + "+" + str.slice(-5) : str;
+var parseDateTimeEmptySpace = (str2) => str2.charCodeAt(str2.length - 6) === 32 ? str2.slice(0, -6) + "+" + str2.slice(-5) : str2;
 var DATE_TIME_SEPARATOR = /t|\s/i;
 function getDateTime(strictTimeZone) {
   const time4 = getTime(strictTimeZone);
-  return function(str) {
-    const dateTime = str.split(DATE_TIME_SEPARATOR);
+  return function(str2) {
+    const dateTime = str2.split(DATE_TIME_SEPARATOR);
     return dateTime.length === 2 && date2(dateTime[0]) && time4(dateTime[1]);
   };
 }
 var NOT_URI_FRAGMENT = /\/|:/;
 var URI = /^(?:[a-z][a-z0-9+\-.]*:)(?:\/?\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:]|%[0-9a-f]{2})*@)?(?:\[(?:(?:(?:(?:[0-9a-f]{1,4}:){6}|::(?:[0-9a-f]{1,4}:){5}|(?:[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){4}|(?:(?:[0-9a-f]{1,4}:){0,1}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){3}|(?:(?:[0-9a-f]{1,4}:){0,2}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){2}|(?:(?:[0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4})?::[0-9a-f]{1,4}:|(?:(?:[0-9a-f]{1,4}:){0,4}[0-9a-f]{1,4})?::)(?:[0-9a-f]{1,4}:[0-9a-f]{1,4}|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?))|(?:(?:[0-9a-f]{1,4}:){0,5}[0-9a-f]{1,4})?::[0-9a-f]{1,4}|(?:(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4})?::)|[Vv][0-9a-f]+\.[a-z0-9\-._~!$&'()*+,;=:]+)\]|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-z0-9\-._~!$&'()*+,;=]|%[0-9a-f]{2})*)(?::\d*)?(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*|\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)?|(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)(?:\?(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?(?:#(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?$/i;
-function uri(str) {
-  return NOT_URI_FRAGMENT.test(str) && URI.test(str);
+function uri(str2) {
+  return NOT_URI_FRAGMENT.test(str2) && URI.test(str2);
 }
 var BYTE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/gm;
-function byte(str) {
-  return BYTE.lastIndex = 0, BYTE.test(str);
+function byte(str2) {
+  return BYTE.lastIndex = 0, BYTE.test(str2);
 }
 var MIN_INT32 = -(2 ** 31);
 var MAX_INT32 = 2 ** 31 - 1;
@@ -27385,10 +27394,10 @@ function validateNumber() {
   return true;
 }
 var Z_ANCHOR = /[^\\]\\Z/;
-function regex(str) {
-  if (Z_ANCHOR.test(str)) return false;
+function regex(str2) {
+  if (Z_ANCHOR.test(str2)) return false;
   try {
-    return new RegExp(str), true;
+    return new RegExp(str2), true;
   } catch {
     return false;
   }
@@ -28066,11 +28075,11 @@ var sucrose = (lifeCycle, inference = {
 // node_modules/elysia/dist/cookies.mjs
 var import_cookie = __toESM(require_dist2(), 1);
 var import_fast_decode_uri_component = __toESM(require_fast_decode_uri_component(), 1);
-var hashString = (str) => {
+var hashString = (str2) => {
   let hash2 = 2166136261;
-  const len = str.length;
+  const len = str2.length;
   for (let i2 = 0; i2 < len; i2++)
-    hash2 ^= str.charCodeAt(i2), hash2 = Math.imul(hash2, 16777619);
+    hash2 ^= str2.charCodeAt(i2), hash2 = Math.imul(hash2, 16777619);
   return hash2 >>> 0;
 };
 var Cookie = class {
@@ -35685,12 +35694,12 @@ var _Elysia = class _Elysia2 {
    * Beside benchmark purpose, please use 'handle' instead.
    */
   get fetch() {
-    const fetch = this.config.aot ? composeGeneralHandler(this) : createDynamicHandler(this);
+    const fetch2 = this.config.aot ? composeGeneralHandler(this) : createDynamicHandler(this);
     return Object.defineProperty(this, "fetch", {
-      value: fetch,
+      value: fetch2,
       configurable: true,
       writable: true
-    }), fetch;
+    }), fetch2;
   }
   /**
    * Wait until all lazy loaded modules all load is fully
@@ -37748,9 +37757,9 @@ var HOOK_NAMES = [
 function defaultResolve(server, wsOpts) {
   if (wsOpts.resolve) return wsOpts.resolve;
   if (HOOK_NAMES.some((name) => typeof wsOpts[name] === "function")) return;
-  const fetch = server.options.fetch;
-  if (typeof fetch !== "function") throw new Error("[crossws] server has no fetch handler to resolve WebSocket hooks from");
-  return (req) => Promise.resolve(fetch(req)).then((res) => hooksFromFetchResult(res, getWebSocketHooks(req)));
+  const fetch2 = server.options.fetch;
+  if (typeof fetch2 !== "function") throw new Error("[crossws] server has no fetch handler to resolve WebSocket hooks from");
+  return (req) => Promise.resolve(fetch2(req)).then((res) => hooksFromFetchResult(res, getWebSocketHooks(req)));
 }
 function hooksFromFetchResult(res, reqHooks) {
   const crossws = res?.crossws;
@@ -40816,14 +40825,14 @@ function promiseAllObject(promisesObj) {
 }
 function randomString(length = 10) {
   const chars = "abcdefghijklmnopqrstuvwxyz";
-  let str = "";
+  let str2 = "";
   for (let i2 = 0; i2 < length; i2++) {
-    str += chars[Math.floor(Math.random() * chars.length)];
+    str2 += chars[Math.floor(Math.random() * chars.length)];
   }
-  return str;
+  return str2;
 }
-function esc(str) {
-  return JSON.stringify(str);
+function esc(str2) {
+  return JSON.stringify(str2);
 }
 function slugify(input2) {
   return input2.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -40937,8 +40946,8 @@ var primitiveTypes = /* @__PURE__ */ new Set([
   "symbol",
   "undefined"
 ]);
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function escapeRegex(str2) {
+  return str2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function clone(inst, def, params) {
   const cl = new inst._zod.constr(def ?? inst._zod.def);
@@ -41204,13 +41213,13 @@ function getSizableOrigin(input2) {
   return "unknown";
 }
 var highSurrogate = /[\uD800-\uDBFF]/;
-function codePointLength(str) {
-  const units = str.length;
-  if (!highSurrogate.test(str))
+function codePointLength(str2) {
+  const units = str2.length;
+  if (!highSurrogate.test(str2))
     return units;
   let count = units;
   for (let i2 = 0; i2 < units - 1; i2++) {
-    if ((str.charCodeAt(i2) & 64512) === 55296 && (str.charCodeAt(i2 + 1) & 64512) === 56320) {
+    if ((str2.charCodeAt(i2) & 64512) === 55296 && (str2.charCodeAt(i2 + 1) & 64512) === 56320) {
       count--;
       i2++;
     }
@@ -59698,6 +59707,73 @@ function date6(params) {
   return _coercedDate(ZodDate, params);
 }
 
+// apps/api/src/actions.ts
+function str(v2) {
+  return v2 != null ? String(v2) : void 0;
+}
+async function executeWebhook(url2, method, context) {
+  const response = await fetch(url2, {
+    method,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(context),
+    signal: AbortSignal.timeout(1e4)
+  });
+  return { ok: response.ok, status: response.status };
+}
+async function executeSlack(webhookUrl, message, context) {
+  const text3 = message.replaceAll("{{task}}", context.taskTitle).replaceAll("{{status}}", context.status).replaceAll("{{phase}}", context.phase);
+  const response = await fetch(webhookUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text: text3 }),
+    signal: AbortSignal.timeout(1e4)
+  });
+  return { ok: response.ok, status: response.status };
+}
+async function fireActions(repos2, context) {
+  if (!context.phase) return [];
+  const configs = await repos2.getActionConfigsByPhase(context.phase);
+  const results = [];
+  for (const config2 of configs) {
+    try {
+      if (config2.actionId.startsWith("webhook:")) {
+        const url2 = str(config2.config.url);
+        const method = str(config2.config.method) ?? "POST";
+        if (!url2) {
+          results.push({ actionId: config2.actionId, success: false, error: "missing url" });
+          continue;
+        }
+        const { ok, status: status2 } = await executeWebhook(url2, method, context);
+        results.push({
+          actionId: config2.actionId,
+          success: ok,
+          error: ok ? void 0 : `HTTP ${status2}`
+        });
+      } else if (config2.actionId.startsWith("slack:")) {
+        const webhookUrl = str(config2.config.webhookUrl);
+        const message = str(config2.config.message) ?? "Task {{task}} changed to {{status}}";
+        if (!webhookUrl) {
+          results.push({ actionId: config2.actionId, success: false, error: "missing webhookUrl" });
+          continue;
+        }
+        const { ok, status: status2 } = await executeSlack(webhookUrl, message, context);
+        results.push({
+          actionId: config2.actionId,
+          success: ok,
+          error: ok ? void 0 : `HTTP ${status2}`
+        });
+      } else if (config2.actionId.startsWith("email:")) {
+        results.push({ actionId: config2.actionId, success: true });
+      } else {
+        results.push({ actionId: config2.actionId, success: false, error: "unknown action type" });
+      }
+    } catch (error62) {
+      results.push({ actionId: config2.actionId, success: false, error: String(error62) });
+    }
+  }
+  return results;
+}
+
 // apps/api/src/app.ts
 var caseSummary = t.Object({
   id: t.String(),
@@ -59793,7 +59869,18 @@ function createApp(webOrigin, repos2) {
     "/tasks/:id/status",
     async ({ params, body, status: status2 }) => {
       const updated = await repos2.updateTaskStatus(params.id, body.status);
-      return updated ?? status2(404, { error: "Task not found" });
+      if (!updated) return status2(404, { error: "Task not found" });
+      const phase = await repos2.getTaskPhase(params.id);
+      if (phase) {
+        fireActions(repos2, {
+          taskId: params.id,
+          taskTitle: updated.title,
+          status: body.status,
+          phase
+        }).catch(() => {
+        });
+      }
+      return updated;
     },
     {
       params: t.Object({ id: t.String({ format: "uuid" }) }),
@@ -59869,6 +59956,37 @@ function createApp(webOrigin, repos2) {
     {
       params: t.Object({ id: t.String({ format: "uuid" }) }),
       response: { 204: t.Void(), 404: notFound }
+    }
+  ).post(
+    "/webhooks/inbound/:taskId",
+    async ({ params, body, status: status2 }) => {
+      if (body.event !== "delivered" && body.event !== "completed") {
+        return { accepted: false, reason: "event ignored" };
+      }
+      const updated = await repos2.updateTaskStatus(params.taskId, "done");
+      if (!updated) return status2(404, { error: "Task not found" });
+      const phase = await repos2.getTaskPhase(params.taskId);
+      if (phase) {
+        fireActions(repos2, {
+          taskId: params.taskId,
+          taskTitle: updated.title,
+          status: "done",
+          phase
+        }).catch(() => {
+        });
+      }
+      return { accepted: true };
+    },
+    {
+      params: t.Object({ taskId: t.String({ format: "uuid" }) }),
+      body: t.Object({
+        event: t.String(),
+        payload: t.Optional(t.Any())
+      }),
+      response: {
+        200: t.Object({ accepted: t.Boolean(), reason: t.Optional(t.String()) }),
+        404: notFound
+      }
     }
   );
 }

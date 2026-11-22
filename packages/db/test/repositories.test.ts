@@ -238,6 +238,86 @@ describe.skipIf(!url)("repositories", () => {
     expect(updated).toEqual({ name: "Test Repo", status: "disconnected" });
   });
 
+  it("gets task phase", async () => {
+    const list = await repos.listOffboardings();
+    const marina = list.find((c) => c.name === "Marina Lopes")!;
+    const detail = await repos.getOffboarding(marina.id);
+    const task = detail?.tasks.find((t) => t.title === "Calcular a rescisão");
+
+    const phase = await repos.getTaskPhase(task!.id);
+    expect(phase).toBe("first-week");
+  });
+
+  it("returns null for unknown task phase", async () => {
+    expect(await repos.getTaskPhase("00000000-0000-0000-0000-000000000000")).toBeNull();
+  });
+
+  it("gets action configs by phase", async () => {
+    const configs = await repos.getActionConfigsByPhase("d0");
+    expect(configs.length).toBeGreaterThanOrEqual(0);
+
+    for (const config of configs) {
+      expect(config.phase).toBe("d0");
+      expect(config.enabled).toBe(true);
+    }
+  });
+
+  it("lists action configs", async () => {
+    const configs = await repos.listActionConfigs();
+    expect(configs.length).toBeGreaterThan(0);
+  });
+
+  it("gets a single action config", async () => {
+    const configs = await repos.listActionConfigs();
+    const first = configs[0];
+    const found = await repos.getActionConfig(first.id);
+    expect(found).toEqual(first);
+  });
+
+  it("returns null for unknown action config", async () => {
+    expect(await repos.getActionConfig("00000000-0000-0000-0000-000000000000")).toBeNull();
+  });
+
+  it("creates an action config", async () => {
+    const created = await repos.createActionConfig({
+      actionId: "webhook:test-create",
+      phase: "d0",
+      config: { url: "https://example.com" },
+    });
+
+    expect(created).toMatchObject({
+      actionId: "webhook:test-create",
+      phase: "d0",
+      enabled: true,
+    });
+  });
+
+  it("updates an action config", async () => {
+    const created = await repos.createActionConfig({
+      actionId: "webhook:test-update",
+      phase: "d0",
+    });
+
+    const updated = await repos.updateActionConfig(created.id, { enabled: false });
+    expect(updated?.enabled).toBe(false);
+  });
+
+  it("returns null when updating unknown action config", async () => {
+    expect(
+      await repos.updateActionConfig("00000000-0000-0000-0000-000000000000", { enabled: false }),
+    ).toBeNull();
+  });
+
+  it("deletes an action config", async () => {
+    const created = await repos.createActionConfig({
+      actionId: "webhook:test-delete",
+      phase: "d0",
+    });
+
+    expect(await repos.deleteActionConfig(created.id)).toBe(true);
+    expect(await repos.deleteActionConfig(created.id)).toBe(false);
+  });
+
   it("deletes tasks when their case is removed", async () => {
     const list = await repos.listOffboardings();
     const nina = list.find((c) => c.name === "Nina Castro")!;
