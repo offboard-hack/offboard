@@ -119,3 +119,29 @@ export function getCaseStatus({ completed, deadline, total }: CaseSummary, today
 
   return "upcoming";
 }
+
+const nextStatus: Record<Task["status"], Task["status"]> = {
+  todo: "in_progress",
+  in_progress: "done",
+  done: "todo",
+};
+
+export function cycleTaskStatus(current: Task["status"]) {
+  return nextStatus[current];
+}
+
+export async function updateTaskStatus(taskId: string, status: Task["status"]) {
+  const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/status`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to update task status");
+  }
+
+  const updated: Task = await response.json();
+
+  return updated;
+}

@@ -342,11 +342,13 @@ export function CasePage({
   offboardingCase,
   taskFilter,
   onTaskFilterChange,
+  onTaskStatusChange,
   breadcrumb,
 }: {
   offboardingCase: OffboardingCase;
   taskFilter: "pending" | "done" | "";
   onTaskFilterChange: (filter: "pending" | "done" | "") => void;
+  onTaskStatusChange?: (taskId: string, status: Task["status"]) => void;
   breadcrumb: ReactNode;
 }) {
   const { name, role, department, deadline, completed, total, tasks } = offboardingCase;
@@ -477,13 +479,29 @@ export function CasePage({
                     key={task.id}
                   >
                     <span className="min-w-0 wrap-anywhere">{task.title}</span>
-                    <Badge
-                      variant="secondary"
-                      {...classProps(local.taskStatus, taskStatusStyle[task.status])}
-                      data-status={task.status}
-                    >
-                      {statusLabel[task.status]}
-                    </Badge>
+                    {onTaskStatusChange ? (
+                      <button
+                        type="button"
+                        onClick={() => onTaskStatusChange(task.id, task.status)}
+                        {...classProps(local.taskStatusButton)}
+                      >
+                        <Badge
+                          variant="secondary"
+                          {...classProps(local.taskStatus, taskStatusStyle[task.status])}
+                          data-status={task.status}
+                        >
+                          {statusLabel[task.status]}
+                        </Badge>
+                      </button>
+                    ) : (
+                      <Badge
+                        variant="secondary"
+                        {...classProps(local.taskStatus, taskStatusStyle[task.status])}
+                        data-status={task.status}
+                      >
+                        {statusLabel[task.status]}
+                      </Badge>
+                    )}
                   </li>
                 ))}
               </ul>
