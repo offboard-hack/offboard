@@ -127,6 +127,7 @@ export function StepDialog({
   const form = useForm({
     defaultValues: {
       title: step?.title ?? "",
+      deadlineOffset: step?.deadlineOffset ?? null,
       rules: step?.rules ?? [],
       email: step?.email ?? null,
     } satisfies StepSettings,
@@ -193,6 +194,37 @@ export function StepDialog({
                   </div>
                 );
               }}
+            </form.Field>
+            <form.Field name="deadlineOffset">
+              {(field) => (
+                <div className="grid content-start gap-2">
+                  <Label htmlFor={`${id}-offset`}>Prazo relativo ao desligamento (dias)</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id={`${id}-offset`}
+                      type="number"
+                      min={-90}
+                      max={90}
+                      placeholder="Ex: -3, 0, 7"
+                      value={field.state.value ?? ""}
+                      onChange={(event) => {
+                        const raw = event.currentTarget.value;
+                        field.handleChange(raw === "" ? null : Number(raw));
+                      }}
+                      className="h-11 max-w-40"
+                    />
+                    <span className="text-sm text-muted-foreground">
+                      {field.state.value == null
+                        ? "Sem prazo definido"
+                        : field.state.value === 0
+                          ? "No dia do desligamento"
+                          : field.state.value > 0
+                            ? `${field.state.value} dia${field.state.value !== 1 ? "s" : ""} depois`
+                            : `${Math.abs(field.state.value)} dia${Math.abs(field.state.value) !== 1 ? "s" : ""} antes`}
+                    </span>
+                  </div>
+                </div>
+              )}
             </form.Field>
             <section aria-labelledby={`${id}-rules`} className="grid gap-3">
               <form.Field name="rules">
