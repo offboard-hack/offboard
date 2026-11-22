@@ -535,12 +535,44 @@ const demoSubtaskMap = new Map<string, Task["subtasks"]>([
   ],
 ]);
 
+const demoDueDateOffsets = new Map([
+  ["access", 0],
+  ["files", 3],
+  ["collect", 5],
+  ["point", 0],
+  ["invite", 0],
+  ["exam", 7],
+  ["documents", 10],
+  ["review", 14],
+  ["handoff", 5],
+  ["crm", 5],
+  ["card", 7],
+  ["refunds", 10],
+  ["certificates", 7],
+  ["badge", 0],
+  ["confirm", 5],
+  ["survey", 21],
+  ["inventory", 10],
+]);
+
+function demoDueDate(taskId: string, caseDeadline: string) {
+  const offset = demoDueDateOffsets.get(taskId);
+
+  if (offset == null) return undefined;
+
+  const date = new Date(caseDeadline);
+  date.setUTCDate(date.getUTCDate() + offset);
+
+  return date.toISOString().slice(0, 10);
+}
+
 function enrichCase(offboardingCase: OffboardingCase) {
   return {
     ...offboardingCase,
     assets: offboardingCase.assets ?? demoAssets,
     tasks: offboardingCase.tasks.map((task) => ({
       ...task,
+      dueDate: task.dueDate ?? demoDueDate(task.id, offboardingCase.deadline),
       subtasks: task.subtasks ?? demoSubtaskMap.get(task.id),
     })),
   };

@@ -15,6 +15,7 @@ export type Task = {
   title: string;
   team: string;
   status: "done" | "in_progress" | "todo";
+  dueDate?: string;
   note?: string;
   subtasks?: { id: string; title: string; done: boolean }[];
 };
