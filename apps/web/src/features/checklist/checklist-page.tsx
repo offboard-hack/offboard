@@ -286,7 +286,7 @@ export function ChecklistRulesPage() {
                 <dd {...stylex.props(styles.metricValue)}>{teamCount}</dd>
               </div>
             </dl>
-            <h3 {...stylex.props(styles.timelineTitle)}>Prazos do checklist</h3>
+            <h3 {...stylex.props(styles.timelineTitle)}>Datas do checklist</h3>
             <ul {...stylex.props(styles.list, styles.timeline)}>
               <li {...stylex.props(styles.deadline)}>
                 <strong>{baseRule.timing}</strong>

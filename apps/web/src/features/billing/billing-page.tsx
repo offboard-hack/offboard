@@ -1,4 +1,6 @@
 import * as stylex from "@stylexjs/stylex";
+import { Input } from "@base-ui/react/input";
+import { useState } from "react";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
 import { Metrics, PageHeading as ModuleHeading } from "../../shared/ui/page";
@@ -85,6 +87,8 @@ const styles = stylex.create({
     alignItems: "start",
     gap: "1rem",
   },
+  beneficiaryTable: { minWidth: "30rem" },
+  searchInput: { width: "min(100%, 22rem)" },
   invoiceList: {
     display: "grid",
     padding: 0,
@@ -114,6 +118,27 @@ const currency = new Intl.NumberFormat("pt-BR", {
   maximumFractionDigits: 0,
 });
 
+const beneficiaries = [
+  { name: "Marina Lopes", plan: "Gold", status: "Ativo", until: "30 abr" },
+  { name: "Lucas Almeida", plan: "Silver", status: "Convidado", until: "Após ativação" },
+  { name: "Renata Souza", plan: "Platinum", status: "Ativo", until: "22 abr" },
+  { name: "Pedro Santos", plan: "Gold", status: "Ativo", until: "31 mar" },
+  { name: "Carla Mendes", plan: "Silver", status: "Expirado", until: "31 out" },
+];
+
+const beneficiaryColumns: TableColumn<(typeof beneficiaries)[number]>[] = [
+  {
+    id: "name",
+    accessorFn: ({ name }) => name,
+    header: "Pessoa",
+    enableSorting: true,
+    sortFn: "portugueseText",
+  },
+  { id: "plan", accessorFn: ({ plan }) => plan, header: "Plano" },
+  { id: "until", accessorFn: ({ until }) => until, header: "Fim do acesso" },
+  { id: "status", accessorFn: ({ status }) => status, header: "Status" },
+];
+
 const billingColumns: TableColumn<(typeof plans)[number]>[] = [
   {
     id: "area",
@@ -137,6 +162,13 @@ const billingColumns: TableColumn<(typeof plans)[number]>[] = [
 ];
 
 export function PlansPage() {
+  const [beneficiarySearch, setBeneficiarySearch] = useState("");
+  const beneficiaryTerm = beneficiarySearch.trim().toLocaleLowerCase("pt-BR");
+
+  const matchingBeneficiaries = beneficiaries.filter(({ name }) =>
+    name.toLocaleLowerCase("pt-BR").includes(beneficiaryTerm),
+  );
+
   const licensesInUse = plans.reduce((total, plan) => total + plan.active, 0);
   const licensesAvailable = plans.reduce((total, plan) => total + plan.capacity, 0);
   const monthlyTotal = plans.reduce((total, plan) => total + plan.active * plan.price, 0);
@@ -145,7 +177,7 @@ export function PlansPage() {
     <>
       <ModuleHeading
         title="Planos e gastos"
-        description="Consulte o contrato, as licenças e os valores simulados dos acessos ativados."
+        description="Consulte o contrato, as licenças, os beneficiários e os valores simulados dos acessos ativados."
       />
       <Metrics
         items={[
@@ -162,22 +194,38 @@ export function PlansPage() {
           },
         ]}
       />
-      <section aria-labelledby="plans-title">
-        <h2 {...stylex.props(portalStyles.subheading)} id="plans-title">
-          Planos contratados
-        </h2>
-        <p {...stylex.props(styles.label, styles.rateUnit)}>Tarifa mensal por acesso ativado.</p>
-        <dl {...stylex.props(styles.planList)}>
-          {plans.map((plan) => (
-            <div {...stylex.props(styles.plan)} key={plan.name}>
-              <dt {...stylex.props(styles.planName)}>{plan.name}</dt>
-              <dd {...stylex.props(styles.planRate)}>{currency.format(plan.price)}</dd>
-              <dd {...stylex.props(styles.label, styles.planCapacity)}>
-                {plan.active} em uso · {plan.capacity - plan.active} disponíveis
-              </dd>
-            </div>
-          ))}
-        </dl>
+      <section
+        {...stylex.props(portalStyles.panel, styles.separated)}
+        aria-labelledby="beneficiarios-title"
+      >
+        <div {...stylex.props(portalStyles.panelHeader)}>
+          <h2 {...stylex.props(portalStyles.subheading)} id="beneficiarios-title">
+            Beneficiários
+          </h2>
+          <span {...stylex.props(portalStyles.resultCount)} role="status">
+            {matchingBeneficiaries.length === 1
+              ? "1 resultado"
+              : `${matchingBeneficiaries.length} resultados`}
+          </span>
+        </div>
+        <div {...stylex.props(portalStyles.filterBar)}>
+          <Input
+            aria-label="Buscar beneficiários por nome"
+            placeholder="Buscar por nome"
+            value={beneficiarySearch}
+            onValueChange={setBeneficiarySearch}
+            {...stylex.props(portalStyles.filterInput, styles.searchInput)}
+          />
+        </div>
+        <DataTable
+          data={matchingBeneficiaries}
+          columns={beneficiaryColumns}
+          labelledBy="beneficiarios-title"
+          scrollLabel="Tabela de beneficiários"
+          tableStyle={styles.beneficiaryTable}
+          getRowId={(person) => person.name}
+          emptyText="Nenhum beneficiário encontrado."
+        />
       </section>
       <div {...stylex.props(styles.billingGrid, styles.separated)}>
         <section {...stylex.props(portalStyles.panel)} aria-labelledby="usage-title">

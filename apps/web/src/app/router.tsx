@@ -58,7 +58,7 @@ type EquipmentSearch = { status?: string };
 
 type CaseSearch = { tasks?: "pending" | "done" };
 
-type IntegrationsSearch = { status?: "connected" | "disconnected" };
+type IntegrationsSearch = { status?: "connected" | "disconnected" | "all" };
 
 export const queryClient = new QueryClient();
 
@@ -162,7 +162,7 @@ const integrationsRoute = createRoute({
   validateSearch: (search) => {
     const filters: IntegrationsSearch = {
       status:
-        search.status === "connected" || search.status === "disconnected"
+        search.status === "connected" || search.status === "disconnected" || search.status === "all"
           ? search.status
           : undefined,
     };

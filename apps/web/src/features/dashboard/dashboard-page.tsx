@@ -274,7 +274,7 @@ export function DashboardPage({
             </h2>
             <p role="status" {...stylex.props(styles.muted)}>
               {displayedCount} {displayedCount === 1 ? "desligamento" : "desligamentos"}
-              {areaFilter ? ` em ${areaFilter}` : ""} · Por prazo
+              {areaFilter ? ` em ${areaFilter}` : ""} · Por data de encerramento
             </p>
             <div {...stylex.props(styles.filters)}>
               <ToggleGroup<DeadlineFilter>
@@ -286,7 +286,7 @@ export function DashboardPage({
                     onDeadlineChange(next);
                   }
                 }}
-                aria-label="Prazo do desligamento"
+                aria-label="Data de encerramento"
                 {...stylex.props(styles.group)}
               >
                 {filters.map((filter) => (

@@ -146,8 +146,10 @@ export function IntegrationsPage() {
   const { status = "" } = route.useSearch();
   const navigate = route.useNavigate();
 
+  const effectiveStatus = status || "connected";
+
   const visibleIntegrations = integrations.filter(
-    (integration) => !status || integration.status === status,
+    (integration) => effectiveStatus === "all" || integration.status === effectiveStatus,
   );
 
   return (
@@ -161,14 +163,15 @@ export function IntegrationsPage() {
           label="Status da conexão"
           value={status}
           onChange={(next) => {
-            const status = next === "connected" || next === "disconnected" ? next : undefined;
+            const status =
+              next === "connected" || next === "disconnected" || next === "all" ? next : undefined;
 
             void navigate({ search: { status }, resetScroll: false });
           }}
           items={[
-            { value: "", label: "Todas as conexões" },
             { value: "connected", label: "Conectadas" },
             { value: "disconnected", label: "Não conectadas" },
+            { value: "all", label: "Todas as conexões" },
           ]}
         />
         <span role="status" {...stylex.props(portalStyles.resultCount)}>

@@ -90,7 +90,7 @@ export function CasesPage({
       },
       {
         id: "deadline",
-        header: "Prazo",
+        header: "Data de encerramento",
         cell: ({ row }) => (
           <time dateTime={row.original.deadline}>{formatDeadline(row.original.deadline)}</time>
         ),
@@ -114,7 +114,7 @@ export function CasesPage({
             Desligamentos
           </h1>
           <p {...stylex.props(s.description)}>
-            Acompanhe os prazos e as tarefas de cada desligamento.
+            Acompanhe as datas e as tarefas de cada desligamento.
           </p>
         </div>
         {importLink}
@@ -225,7 +225,7 @@ export function CasePage({
           </p>
         </div>
         <dl {...stylex.props(local.deadline)}>
-          <dt {...stylex.props(local.deadlineLabel)}>Prazo do desligamento</dt>
+          <dt {...stylex.props(local.deadlineLabel)}>Data de encerramento</dt>
           <dd {...stylex.props(local.deadlineValue)}>
             <time dateTime={deadline}>{formatDeadline(deadline)}</time>
           </dd>
