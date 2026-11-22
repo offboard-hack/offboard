@@ -6,6 +6,7 @@ import {
   EqualSignIcon,
   FilterHorizontalIcon,
   InformationCircleIcon,
+  Link01Icon,
   NotEqualSignIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -130,6 +131,8 @@ export function StepDialog({
       deadlineOffset: step?.deadlineOffset ?? null,
       rules: step?.rules ?? [],
       email: step?.email ?? null,
+      slack: step?.slack ?? null,
+      webhook: step?.webhook ?? null,
     } satisfies StepSettings,
     validators: { onSubmit: stepFormSchema },
     onSubmit: ({ value }) => onSave(stepFormSchema.parse(value)),
@@ -380,7 +383,7 @@ export function StepDialog({
               <SettingsHeading
                 id={`${id}-actions`}
                 title="Ações"
-                help="O e-mail é destinado à pessoa desligada. O envio automático ainda está indisponível."
+                help="Configure notificações automáticas disparadas quando a etapa mudar de status."
               />
               <form.Field name="email">
                 {(field) =>
@@ -425,9 +428,6 @@ export function StepDialog({
                           <HugeiconsIcon icon={Delete02Icon} aria-hidden="true" />
                         </Button>
                       </div>
-                      <p className="text-muted-foreground">
-                        Para a pessoa desligada. Envio automático indisponível.
-                      </p>
                       <form.Field name="email.subject">
                         {(input) => {
                           const error = input.state.meta.errors[0]?.message;
@@ -462,19 +462,19 @@ export function StepDialog({
 
                           return (
                             <div className="grid gap-1.5">
-                              <Label htmlFor={`${id}-message`}>Mensagem</Label>
+                              <Label htmlFor={`${id}-email-body`}>Mensagem</Label>
                               <textarea
-                                id={`${id}-message`}
+                                id={`${id}-email-body`}
                                 rows={3}
                                 className="w-full min-w-0 resize-y rounded-xl border border-input bg-input/30 px-3 py-2 text-base outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 aria-invalid:border-destructive md:text-sm"
                                 value={input.state.value ?? ""}
                                 onChange={(event) => input.handleChange(event.currentTarget.value)}
                                 aria-invalid={Boolean(error)}
-                                aria-describedby={error ? `${id}-message-error` : undefined}
+                                aria-describedby={error ? `${id}-email-body-error` : undefined}
                               />
                               {error && (
                                 <p
-                                  id={`${id}-message-error`}
+                                  id={`${id}-email-body-error`}
                                   role="alert"
                                   className="text-destructive"
                                 >
@@ -485,6 +485,203 @@ export function StepDialog({
                           );
                         }}
                       </form.Field>
+                    </div>
+                  )
+                }
+              </form.Field>
+              <form.Field name="slack">
+                {(field) =>
+                  field.state.value === null ? (
+                    <Empty className={emptySettings}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => field.handleChange({ channel: "", message: "" })}
+                      >
+                        <img
+                          src="/brands/slack.svg"
+                          alt=""
+                          width={16}
+                          height={16}
+                          className="shrink-0"
+                        />
+                        Notificar no Slack
+                      </Button>
+                    </Empty>
+                  ) : (
+                    <div className="grid gap-3 rounded-xl border bg-muted/25 p-3 sm:p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 font-semibold">
+                          <img
+                            src="/brands/slack.svg"
+                            alt=""
+                            width={16}
+                            height={16}
+                            className="shrink-0"
+                          />
+                          Notificar no Slack
+                        </div>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="icon-sm"
+                          aria-label="Remover ação do Slack"
+                          onClick={() => field.handleChange(null)}
+                        >
+                          <HugeiconsIcon icon={Delete02Icon} aria-hidden="true" />
+                        </Button>
+                      </div>
+                      <form.Field name="slack.channel">
+                        {(input) => {
+                          const error = input.state.meta.errors[0]?.message;
+
+                          return (
+                            <div className="grid gap-1.5">
+                              <Label htmlFor={`${id}-slack-channel`}>Canal</Label>
+                              <Input
+                                id={`${id}-slack-channel`}
+                                className="h-10"
+                                placeholder="#geral"
+                                value={input.state.value ?? ""}
+                                onChange={(event) => input.handleChange(event.currentTarget.value)}
+                                aria-invalid={Boolean(error)}
+                                aria-describedby={error ? `${id}-slack-channel-error` : undefined}
+                              />
+                              {error && (
+                                <p
+                                  id={`${id}-slack-channel-error`}
+                                  role="alert"
+                                  className="text-destructive"
+                                >
+                                  {error}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        }}
+                      </form.Field>
+                      <form.Field name="slack.message">
+                        {(input) => {
+                          const error = input.state.meta.errors[0]?.message;
+
+                          return (
+                            <div className="grid gap-1.5">
+                              <Label htmlFor={`${id}-slack-message`}>Mensagem</Label>
+                              <textarea
+                                id={`${id}-slack-message`}
+                                rows={3}
+                                className="w-full min-w-0 resize-y rounded-xl border border-input bg-input/30 px-3 py-2 text-base outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 aria-invalid:border-destructive md:text-sm"
+                                value={input.state.value ?? ""}
+                                onChange={(event) => input.handleChange(event.currentTarget.value)}
+                                aria-invalid={Boolean(error)}
+                                aria-describedby={error ? `${id}-slack-message-error` : undefined}
+                              />
+                              {error && (
+                                <p
+                                  id={`${id}-slack-message-error`}
+                                  role="alert"
+                                  className="text-destructive"
+                                >
+                                  {error}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        }}
+                      </form.Field>
+                    </div>
+                  )
+                }
+              </form.Field>
+              <form.Field name="webhook">
+                {(field) =>
+                  field.state.value === null ? (
+                    <Empty className={emptySettings}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => field.handleChange({ url: "", method: "POST" })}
+                      >
+                        <HugeiconsIcon
+                          icon={Link01Icon}
+                          className="size-4 shrink-0"
+                          aria-hidden="true"
+                        />
+                        Chamar webhook
+                      </Button>
+                    </Empty>
+                  ) : (
+                    <div className="grid gap-3 rounded-xl border bg-muted/25 p-3 sm:p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 font-semibold">
+                          <HugeiconsIcon
+                            icon={Link01Icon}
+                            className="size-4 shrink-0"
+                            aria-hidden="true"
+                          />
+                          Chamar webhook
+                        </div>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="icon-sm"
+                          aria-label="Remover ação de webhook"
+                          onClick={() => field.handleChange(null)}
+                        >
+                          <HugeiconsIcon icon={Delete02Icon} aria-hidden="true" />
+                        </Button>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-[8rem_1fr]">
+                        <form.Field name="webhook.method">
+                          {(input) => (
+                            <PortalFilter
+                              label="Método HTTP"
+                              className="w-full"
+                              value={input.state.value ?? "POST"}
+                              items={[
+                                { value: "POST", label: "POST" },
+                                { value: "PUT", label: "PUT" },
+                              ]}
+                              onChange={(value) => {
+                                if (value === "POST" || value === "PUT") input.handleChange(value);
+                              }}
+                            />
+                          )}
+                        </form.Field>
+                        <form.Field name="webhook.url">
+                          {(input) => {
+                            const error = input.state.meta.errors[0]?.message;
+
+                            return (
+                              <div className="grid gap-1.5">
+                                <Input
+                                  id={`${id}-webhook-url`}
+                                  className="h-11"
+                                  aria-label="URL do webhook"
+                                  placeholder="https://example.com/webhook"
+                                  value={input.state.value ?? ""}
+                                  onChange={(event) =>
+                                    input.handleChange(event.currentTarget.value)
+                                  }
+                                  aria-invalid={Boolean(error)}
+                                  aria-describedby={error ? `${id}-webhook-url-error` : undefined}
+                                />
+                                {error && (
+                                  <p
+                                    id={`${id}-webhook-url-error`}
+                                    role="alert"
+                                    className="text-destructive"
+                                  >
+                                    {error}
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          }}
+                        </form.Field>
+                      </div>
                     </div>
                   )
                 }
