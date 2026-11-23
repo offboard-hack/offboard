@@ -47,6 +47,13 @@ const appOptions = { auth, cronSecret, webhookSecret, slackSigningSecret };
 const missingTaskId = "00000000-0000-4000-8000-000000000000";
 const missingCaseId = "00000000-0000-4000-8000-000000000001";
 
+type SurveyPayload = {
+  caseId: string;
+  npsScore: number;
+  responses: Record<string, boolean>;
+  topics: string[];
+};
+
 describe.skipIf(!url)("api", () => {
   const db = createClient(url ?? "");
   const repos = createRepositories(db);
@@ -524,6 +531,127 @@ describe.skipIf(!url)("api", () => {
     const res = await call(`/equipment/${missingTaskId}`, "PUT", { status: "invalid" });
 
     expect(res.status).toBe(422);
+  });
+
+  it("lists exit surveys with case names, newest first", async () => {
+    const res = await call("/exit-surveys");
+    const list = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(list).toHaveLength(5);
+    expect(list[0]).toMatchObject({ caseName: "Nina Castro", npsScore: 6 });
+  });
+
+  it("aggregates exit surveys", async () => {
+    const res = await call("/exit-surveys/aggregates");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      totalResponses: 5,
+      averageNps: 6.6,
+      nps: -20,
+      completionRate: 100,
+      activationsByMonth: [
+        { label: "Jun", value: 1 },
+        { label: "Jul", value: 1 },
+        { label: "Ago", value: 1 },
+        { label: "Set", value: 1 },
+        { label: "Out", value: 1 },
+      ],
+      topTopics: [
+        { label: "Clareza de prazos", value: 3 },
+        { label: "Respeito na comunicação", value: 3 },
+        { label: "Apoio emocional", value: 2 },
+        { label: "Devolução de equipamentos", value: 2 },
+        { label: "Acesso a benefícios", value: 1 },
+      ],
+    });
+  });
+
+  it("returns zeroed aggregates without surveys", async () => {
+    await db.$client.query("DELETE FROM exit_surveys");
+    const res = await call("/exit-surveys/aggregates");
+
+    expect(await res.json()).toEqual({
+      totalResponses: 0,
+      averageNps: 0,
+      nps: 0,
+      completionRate: 0,
+      activationsByMonth: [],
+      topTopics: [],
+    });
+  });
+
+  it("submits and resubmits a survey for a case", async () => {
+    const [first] = await (await call("/offboardings")).json();
+    await db.$client.query("DELETE FROM exit_surveys");
+    const payload = { caseId: first.id, npsScore: 10, responses: { ok: true }, topics: ["A"] };
+
+    const created = await app.handle(
+      new Request("http://localhost/api/exit-surveys", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: webOrigin },
+        body: JSON.stringify(payload),
+      }),
+    );
+
+    const again = await app.handle(
+      new Request("http://localhost/api/exit-surveys", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: webOrigin },
+        body: JSON.stringify({ ...payload, npsScore: 2 }),
+      }),
+    );
+
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({ caseId: first.id, npsScore: 10 });
+    expect(again.status).toBe(201);
+    expect(await (await call("/exit-surveys")).json()).toHaveLength(1);
+  });
+
+  it("rejects surveys for unknown cases and out-of-range scores", async () => {
+    const post = (body: SurveyPayload) =>
+      app.handle(
+        new Request("http://localhost/api/exit-surveys", {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: webOrigin },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    const unknown = await post({ caseId: missingCaseId, npsScore: 5, responses: {}, topics: [] });
+    const invalid = await post({ caseId: missingCaseId, npsScore: 11, responses: {}, topics: [] });
+
+    expect(unknown.status).toBe(404);
+    expect(invalid.status).toBe(422);
+  });
+
+  it("restricts survey reads to admin and rh while any role can submit", async () => {
+    const send = (role: string, path: string, method = "GET", body?: SurveyPayload) =>
+      app.handle(
+        new Request(`http://localhost/api${path}`, {
+          method,
+          headers: {
+            "x-test-session": role,
+            origin: webOrigin,
+            "content-type": "application/json",
+          },
+          body: body ? JSON.stringify(body) : undefined,
+        }),
+      );
+
+    expect((await send("rh", "/exit-surveys")).status).toBe(200);
+    expect((await send("gestor", "/exit-surveys")).status).toBe(403);
+    expect((await send("visualizador", "/exit-surveys/aggregates")).status).toBe(403);
+
+    const submit = await send("visualizador", "/exit-surveys", "POST", {
+      caseId: missingCaseId,
+      npsScore: 5,
+      responses: {},
+      topics: [],
+    });
+
+    expect(submit.status).toBe(404);
   });
 
   it("rejects an invalid integration status", async () => {

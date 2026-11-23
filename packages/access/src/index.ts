@@ -17,7 +17,7 @@ export type PortalPrincipal = z.infer<typeof principalSchema>;
 
 export type PortalPermission = [
   "manage" | "read" | "create" | "update",
-  "all" | "Offboarding" | "Team" | "Integrations",
+  "all" | "Offboarding" | "Team" | "Integrations" | "ExitSurveys",
 ];
 
 export function createPortalAbility(role: MemberRole) {
@@ -31,6 +31,7 @@ export function createPortalAbility(role: MemberRole) {
 
   if (role === "rh") {
     can(["create", "update"], "Offboarding");
+    can("read", "ExitSurveys");
   }
 
   return build();

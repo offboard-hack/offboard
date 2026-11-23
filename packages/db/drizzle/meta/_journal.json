@@ -57,6 +57,13 @@
       "when": 1795740000002,
       "tag": "0007_add_equipment",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795740000003,
+      "tag": "0008_add_exit_surveys",
+      "breakpoints": true
     }
   ]
 }

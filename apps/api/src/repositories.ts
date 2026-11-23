@@ -3,6 +3,7 @@ import { createOffboardingsRepository } from "./features/offboardings/repository
 import { createIntegrationsRepository } from "./features/integrations/repository.js";
 import { createActionConfigsRepository } from "./features/action-configs/repository.js";
 import { createEquipmentRepository } from "./features/equipment/repository.js";
+import { createExitSurveysRepository } from "./features/exit-surveys/repository.js";
 import { createTeamRepository } from "./features/team/repository.js";
 
 export function createRepositories(db: Database) {
@@ -12,6 +13,7 @@ export function createRepositories(db: Database) {
     actionConfigs: createActionConfigsRepository(db),
     team: createTeamRepository(db),
     equipment: createEquipmentRepository(db),
+    exitSurveys: createExitSurveysRepository(db),
   };
 }
 

@@ -1,6 +1,7 @@
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   date,
   index,
   integer,
@@ -69,9 +70,37 @@ export const subtasks = pgTable(
   (table) => [index("subtasks_task_id_idx").on(table.taskId)],
 );
 
-export const offboardingCasesRelations = relations(offboardingCases, ({ many }) => ({
+export const exitSurveys = pgTable(
+  "exit_surveys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    caseId: uuid("case_id")
+      .notNull()
+      .references(() => offboardingCases.id, { onDelete: "cascade" }),
+    npsScore: integer("nps_score").notNull(),
+    responses: jsonb("responses").$type<Record<string, ConfigValue>>().notNull().default({}),
+    topics: jsonb("topics").$type<string[]>().notNull().default([]),
+    submittedAt: timestamp("submitted_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("exit_surveys_case_id_idx").on(table.caseId),
+    check("exit_surveys_nps_score_range", sql`${table.npsScore} between 0 and 10`),
+  ],
+);
+
+export const offboardingCasesRelations = relations(offboardingCases, ({ many, one }) => ({
   tasks: many(tasks),
   equipment: many(equipment),
+  exitSurvey: one(exitSurveys),
+}));
+
+export const exitSurveysRelations = relations(exitSurveys, ({ one }) => ({
+  case: one(offboardingCases, {
+    fields: [exitSurveys.caseId],
+    references: [offboardingCases.id],
+  }),
 }));
 
 export const tasksRelations = relations(tasks, ({ one, many }) => ({
