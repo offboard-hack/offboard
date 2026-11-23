@@ -71542,6 +71542,7 @@ function createApp(webOrigin, repos2, correiosBaseUrl = CORREIOS_DEFAULT_URL) {
 var db = createClient(process.env.POSTGRES_URL ?? "");
 var repos = createRepositories(db);
 var app = createApp(process.env.WEB_ORIGIN ?? "*", repos);
+var migrationResult = "pending";
 async function ensureTeamTable() {
   await db.execute(
     sql.raw(
@@ -71554,11 +71555,50 @@ async function ensureTeamTable() {
     )
   );
 }
-var migrated = ensureTeamTable().catch((err) => {
+var migrated = ensureTeamTable().then(() => {
+  migrationResult = "ok";
+}).catch((err) => {
+  migrationResult = `error: ${String(err)}`;
   console.error("Migration failed:", err);
 });
+async function diag() {
+  const parts = [`"migration":"${migrationResult}"`];
+  try {
+    const r2 = await db.execute(
+      sql.raw("SELECT current_database(), current_user, current_schema()")
+    );
+    parts.push(`"dbInfo":${JSON.stringify(r2.rows)}`);
+  } catch (err) {
+    parts.push(`"dbInfo":"${String(err)}"`);
+  }
+  try {
+    const r2 = await db.execute(
+      sql.raw(
+        "SELECT table_schema, column_name, udt_name FROM information_schema.columns WHERE table_name = 'team_members'"
+      )
+    );
+    parts.push(`"columns":${JSON.stringify(r2.rows)}`);
+  } catch (err) {
+    parts.push(`"columns":"${String(err)}"`);
+  }
+  try {
+    const r2 = await db.execute(
+      sql.raw('SELECT "id", "name", "email", "role" FROM "team_members" ORDER BY "name" LIMIT 1')
+    );
+    parts.push(`"select":"ok, rows=${String(r2.rows.length)}"`);
+  } catch (err) {
+    parts.push(`"select":"${String(err)}"`);
+  }
+  return new Response(`{${parts.join(",")}}`, {
+    headers: { "content-type": "application/json" }
+  });
+}
 async function handle(request) {
   await migrated;
+  const url2 = new URL(request.url);
+  if (url2.pathname === "/api/_diag") {
+    return diag();
+  }
   return app.handle(request);
 }
 var GET = handle;
