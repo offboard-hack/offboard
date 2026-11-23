@@ -17,13 +17,13 @@ export type PortalPrincipal = z.infer<typeof principalSchema>;
 
 export type PortalPermission = [
   "manage" | "read" | "create" | "update",
-  "all" | "Offboarding" | "Team" | "Integrations" | "ExitSurveys",
+  "all" | "Offboarding" | "Team" | "Integrations" | "ExitSurveys" | "Billing",
 ];
 
 export function createPortalAbility(role: MemberRole) {
   const { can, build } = new AbilityBuilder<MongoAbility<PortalPermission>>(createMongoAbility);
 
-  can("read", "Offboarding");
+  can("read", ["Offboarding", "Billing"]);
 
   if (role === "admin") {
     can("manage", "all");

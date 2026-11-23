@@ -64,6 +64,13 @@
       "when": 1795740000003,
       "tag": "0008_add_exit_surveys",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795740000004,
+      "tag": "0009_add_billing",
+      "breakpoints": true
     }
   ]
 }

@@ -2,6 +2,7 @@ import { createRequestScopedClient } from "@offboard/db/client";
 import { CloudflareAdapter } from "elysia/adapter/cloudflare-worker";
 import { z } from "zod";
 import { createApp } from "./app.js";
+import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
 import { emailProvider, type CloudflareEmailBinding } from "./features/auth/email.js";
 import { createRepositories } from "./repositories.js";
@@ -16,6 +17,8 @@ const runtimeConfig = z.object({
   CRON_SECRET: z.string().min(1).optional(),
   WEBHOOK_SECRET: z.string().min(1).optional(),
   SLACK_SIGNING_SECRET: z.string().min(1).optional(),
+  ABACATEPAY_API_KEY: z.string().min(1).optional(),
+  ABACATEPAY_WEBHOOK_SECRET: z.string().min(1).optional(),
 });
 
 export type WorkerBindings = Partial<z.input<typeof runtimeConfig>> & {
@@ -57,6 +60,8 @@ export function createWorkerApi(bindings: WorkerBindings) {
     cronSecret: config.data.CRON_SECRET,
     webhookSecret: config.data.WEBHOOK_SECRET,
     slackSigningSecret: config.data.SLACK_SIGNING_SECRET,
+    abacatepay: createAbacatePayGateway(config.data.ABACATEPAY_API_KEY),
+    abacatepayWebhookSecret: config.data.ABACATEPAY_WEBHOOK_SECRET,
   }).compile();
 
   return (request: Request) => run(() => Promise.resolve(app.handle(request)));
