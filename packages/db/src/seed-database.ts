@@ -1,9 +1,11 @@
 import { seedActionConfigs } from "./action-config.fixture.ts";
+import { seedEquipment } from "./equipment.fixture.ts";
 import type { Database } from "./client.ts";
 import { seedIntegrations } from "./integration.fixture.ts";
 import { baseSeedCases, seedCases } from "./offboarding.fixture.ts";
 import {
   actionConfigs,
+  equipment,
   integrations,
   offboardingCases,
   subtasks,
@@ -19,7 +21,10 @@ export async function seedDatabase(
   fixtures = { cases: seedCases, members: seedTeamMembers },
 ) {
   await db.transaction(async (tx) => {
+    const caseIds = new Map<string, string>();
+
     await tx.delete(actionConfigs);
+    await tx.delete(equipment);
     await tx.delete(subtasks);
     await tx.delete(tasks);
     await tx.delete(offboardingCases);
@@ -31,6 +36,8 @@ export async function seedDatabase(
         .insert(offboardingCases)
         .values(item)
         .returning({ id: offboardingCases.id });
+
+      caseIds.set(item.name, created.id);
 
       for (let i = 0; i < caseTasks.length; i++) {
         const seedTask = caseTasks[i];
@@ -61,6 +68,19 @@ export async function seedDatabase(
           );
         }
       }
+    }
+
+    for (const { person, scheduledDate, ...item } of seedEquipment) {
+      const caseId = caseIds.get(person);
+
+      if (!caseId) continue;
+
+      const values = { ...item, caseId, scheduledDate: scheduledDate ?? null };
+
+      await tx
+        .insert(equipment)
+        .values(values)
+        .onConflictDoUpdate({ target: equipment.tag, set: { ...values, updatedAt: new Date() } });
     }
 
     if (seedIntegrations.length > 0) {

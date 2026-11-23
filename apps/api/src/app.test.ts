@@ -472,6 +472,60 @@ describe.skipIf(!url)("api", () => {
     expect(await res.json()).toEqual({ name: "Test Toggle", status: "disconnected" });
   });
 
+  it("lists equipment with the person name", async () => {
+    const res = await call("/equipment");
+    const list = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(list.length).toBeGreaterThan(0);
+    expect(list[0]).toEqual({
+      id: expect.any(String),
+      item: expect.any(String),
+      tag: expect.any(String),
+      person: expect.any(String),
+      returnMethod: expect.stringMatching(/^(pickup|in_person)$/),
+      scheduledDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      status: expect.any(String),
+    });
+  });
+
+  it("updates an equipment status", async () => {
+    const [{ person: _person, ...first }] = await (await call("/equipment")).json();
+    const res = await call(`/equipment/${first.id}`, "PUT", { status: "received" });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ...first, status: "received" });
+  });
+
+  it("returns 404 when updating unknown equipment", async () => {
+    const res = await call(`/equipment/${missingTaskId}`, "PUT", { status: "received" });
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Equipment not found" });
+  });
+
+  it("lets visualizador read but not update equipment", async () => {
+    const headers = { "x-test-session": "visualizador", origin: webOrigin };
+    const list = await app.handle(new Request("http://localhost/api/equipment", { headers }));
+
+    const update = await app.handle(
+      new Request(`http://localhost/api/equipment/${missingTaskId}`, {
+        method: "PUT",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ status: "received" }),
+      }),
+    );
+
+    expect(list.status).toBe(200);
+    expect(update.status).toBe(403);
+  });
+
+  it("rejects an invalid equipment status", async () => {
+    const res = await call(`/equipment/${missingTaskId}`, "PUT", { status: "invalid" });
+
+    expect(res.status).toBe(422);
+  });
+
   it("rejects an invalid integration status", async () => {
     const res = await call("/integrations/Whatever", "PUT", { status: "invalid" });
 
