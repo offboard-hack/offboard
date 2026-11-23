@@ -23,6 +23,20 @@
 
 - For TanStack Start work in `apps/web`, start with [React Start](.agents/skills/react-start/SKILL.md). Use [Start Core](.agents/skills/start-core/SKILL.md) for server functions, middleware, execution boundaries, API routes, authentication, and deployment. Use [Start Server Core](.agents/skills/start-server-core/SKILL.md) for the server runtime and request handling. The bundled subskills live alongside their respective entry points.
 
+### Adding a portal screen
+
+1. Start from [Equipe](apps/web/src/app/routes/_portal.equipe.tsx) for an API-backed list, [Planos e gastos](apps/web/src/app/routes/_portal.planos-e-gastos.tsx) for a fixture-backed screen, or [Checklist](apps/web/src/app/routes/_portal.checklist-automatico.tsx) for a browser-local draft with server actions. Register the file route under `app/routes/_portal.<path>.tsx`, add the title in `head`, and use `requirePortalAccess` for permissions beyond portal sign-in. Add a sidebar entry in `app/portal.tsx` only for primary destinations.
+2. Validate URL filters with Zod in `validateSearch`. Define shared pagination with `listSearchSchema` and connect the route's navigation using `listPagination`. Give additional tables their own pagination state. Keep sorting, column visibility, and person-name search local unless the workflow explicitly requires shareable state.
+3. Define a single `queryOptions` per read. Own it in the feature when only that feature uses it, or in `entities` when several features use it. Use the shared API client and pass Query's abort signal to reads. Load page-critical queries with `context.queryClient.ensureQueryData` and read the same options with `useSuspenseQuery`. Load independent queries in parallel. Use `useQuery` only when the result can arrive after the main content.
+4. Reuse `ListPage`, `ListBreadcrumb`, `DataTable` and the existing shadcn primitives. Use `lazyRouteComponent` for the feature entry or an app-level route binding when multiple features compose the page. Keep placeholders inside `ListPendingPage` and match the layout they replace. Add a route fallback for routes that can wait on required data and keep smaller deferred reads scoped to the affected cells or panels.
+5. Use TanStack Form and Zod for submission, and TanStack Query mutations for writes. Keep the action's pending and error feedback near its trigger. Invalidate the owning query family after writes. Use optimistic updates only when the UI can restore every cache entry it changed.
+
+### Rendering and cache
+
+- Keep portal routes on per-request SSR with a fresh QueryClient and private, no-store responses. Static prerendering is for public, session-independent content only. Let the portal recheck session access during navigation because permissions may be revoked. Client intent preloading uses Query's freshness policy, so keep Router's preload stale time at zero.
+- Use finite, explicit query freshness based on the data. Offboarding and administrative records use 30 seconds, tracking uses 60 seconds. Keep detail keys under their list prefix so one invalidation refreshes both. When a list already contains the full matching case, seed the detail with that row and its original freshness timestamp. Return `notFound()` for missing route records and preserve the route error boundary for failed reads.
+- Read local or session storage only after hydration. When a screen combines browser state with required server data, load the server data in the route and gate only the browser-dependent editor. Preserve a failed save as a draft. For Checklist, retry deletions only against row IDs previously loaded by or created for that draft.
+
 ### Components and visual system
 
 - Use TanStack Form and Zod for forms. Show field-level validation next to the control and pass parsed values to the submit handler.
@@ -46,4 +60,4 @@
 
 - Run `npm test` from the root with `TEST_DATABASE_URL` pointing to a disposable PostgreSQL database. Apply the migrations before the test run. The GitHub verification workflow starts its own PostgreSQL service.
 
-- Verify changed workflows in the browser at desktop and narrow mobile sizes. Exercise focus, keyboard and touch input, and relevant empty, error, and pending states. Run `npm run lint`, `npm run format:check`, and `npm run build -w @offboard/web`.
+- Verify changed workflows in the browser at desktop and narrow mobile sizes. Exercise focus, keyboard and touch input, and relevant empty, error, and pending states. Use [Verify Offboard](.agents/skills/verify-offboard/SKILL.md) with an authenticated local session for portal flows. Run `npm run lint`, `npm run format:check`, `npm run build -w @offboard/web`, and the relevant workspace tests.

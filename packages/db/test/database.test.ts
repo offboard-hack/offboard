@@ -1,11 +1,35 @@
 import { fileURLToPath } from "node:url";
+import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { describe, expect, it } from "vitest";
-import { createClient } from "../src/client.ts";
+import { createClient, createRequestScopedClient } from "../src/client.ts";
 import { offboardingCases, tasks } from "../src/schema/index.ts";
 import { seedCases, seedDatabase } from "../src/seed-database.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+
+it.skipIf(!url)(
+  "allows queries and transactions only inside a database request scope",
+  async () => {
+    const { db, run } = createRequestScopedClient(url ?? "");
+    const query = sql`select 1 as value`;
+
+    expect(() => db.$client.query("select 1")).toThrow(
+      "Database access requires an active request",
+    );
+
+    await run(async () => {
+      expect((await db.execute(query)).rows).toEqual([{ value: 1 }]);
+      await db.transaction(async (transaction) => {
+        expect((await transaction.execute(query)).rows).toEqual([{ value: 1 }]);
+      });
+    });
+
+    expect(() => db.$client.query("select 1")).toThrow(
+      "Database access requires an active request",
+    );
+  },
+);
 
 it.skipIf(!url)("seeds the database with the example cases and tasks", async () => {
   const db = createClient(url ?? "");

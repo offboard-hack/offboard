@@ -10,6 +10,7 @@ export const equipmentStatus = {
 export const trackingStatus = {
   none: "Sem rastreio",
   loading: "Consultando",
+  unavailable: "Rastreio indisponível",
   waiting: "Aguardando coleta",
   transit: "Em trânsito",
   delivered: "Entregue",

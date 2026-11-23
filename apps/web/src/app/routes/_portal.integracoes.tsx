@@ -1,3 +1,4 @@
+import { IntegrationsPending } from "../route-pending";
 import { z } from "zod";
 import { createFileRoute, lazyRouteComponent } from "@tanstack/react-router";
 import { integrationsQuery } from "@/entities/integration";
@@ -17,4 +18,5 @@ export const Route = createFileRoute("/_portal/integracoes")({
     "IntegrationsPage",
   ),
   head: () => ({ meta: [{ title: "Integrações · Offboard" }] }),
+  pendingComponent: IntegrationsPending,
 });

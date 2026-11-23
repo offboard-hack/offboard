@@ -183,6 +183,12 @@ describe.skipIf(!url)("api", () => {
     const principal = await app.handle(new Request("http://localhost/api/session", { headers }));
     const cases = await app.handle(new Request("http://localhost/api/offboardings", { headers }));
 
+    const bundled = await app.handle(
+      new Request("http://localhost/api/offboardings/with-tasks", { headers }),
+    );
+
+    expect(bundled.status).toBe(expected);
+    expect(bundled.headers.get("cache-control")).toBe("no-store");
     expect(principal.status).toBe(expected);
     expect(cases.status).toBe(expected);
     expect(principal.headers.get("cache-control")).toBe("no-store");
@@ -291,6 +297,19 @@ describe.skipIf(!url)("api", () => {
       completed: expect.any(Number),
       total: expect.any(Number),
     });
+  });
+
+  it("lists offboardings with their tasks for an authorized session", async () => {
+    const res = await call("/offboardings/with-tasks");
+    const list = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(list).toContainEqual(
+      expect.objectContaining({
+        name: "Marina Lopes",
+        tasks: expect.arrayContaining([expect.objectContaining({ id: expect.any(String) })]),
+      }),
+    );
   });
 
   it("returns not found for a malformed offboarding id", async () => {

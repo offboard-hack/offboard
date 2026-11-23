@@ -13,7 +13,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/shared/ui/shadcn/dialog";
-import { Spinner } from "@/shared/ui/shadcn/spinner";
+import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 
 export function ImportModal({ children }: { children: ReactNode }) {
   return (
@@ -34,10 +34,20 @@ export function ImportModal({ children }: { children: ReactNode }) {
         <DialogBody>
           <Suspense
             fallback={
-              <p role="status" className="flex items-center gap-2">
-                <Spinner aria-hidden="true" />
-                Carregando importação…
-              </p>
+              <div>
+                <p role="status" className="sr-only">
+                  Carregando importação…
+                </p>
+                <div
+                  aria-hidden="true"
+                  className="grid justify-items-center gap-3 rounded-2xl border border-dashed p-6"
+                >
+                  <Skeleton className="size-10 rounded-full" />
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-3 w-48 max-w-full" />
+                  <Skeleton className="mt-1 h-9 w-32 rounded-full" />
+                </div>
+              </div>
             }
           >
             {children}

@@ -18,7 +18,7 @@ Preconditions: fresh context, seeded cases, passed doctor.
 
 - Open `/painel`. Check regions named `Desligamentos`, `Progresso das tarefas`, and `Pendências por área`.
 - In the `Área responsável` combobox select `TI`. Check the URL contains `area=TI` and that the selected value and queue survive reload. Use the `Prazo do desligamento` group to select `Todos`; restore the area to `Todas as áreas` for a baseline comparison.
-- Click the queue link whose accessible name starts with `Marina Lopes`. Verify `/desligamentos/marina-lopes` and the `Marina Lopes` heading.
+- Click the queue link whose accessible name starts with `Marina Lopes`. Verify the case URL from the Marina Lopes link and the `Marina Lopes` heading.
 
 ## Gotchas
 

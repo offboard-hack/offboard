@@ -132,7 +132,8 @@ export const initialSteps: ChecklistStep[] = [
 
 const modelStorageKey = "offboard:checklist-model:v1";
 
-const storageKey = "offboard:checklist-draft:v2";
+const storageKey = "offboard:checklist-draft:v3";
+const stepsStorageKey = "offboard:checklist-draft:v2";
 const legacyStorageKey = "offboard:checklist-draft:v1";
 const placementsSchema = z.array(placementSchema.extend({ id: z.string() }));
 
@@ -183,9 +184,27 @@ export function saveModel(steps: ChecklistStep[]) {
   }
 }
 
-export function readDraftSteps(fallback: ChecklistStep[]) {
+const draftSnapshotSchema = z.object({
+  steps: draftSchema,
+  knownRowIds: z.array(z.string()),
+  needsSave: z.boolean(),
+});
+
+type DraftSnapshot = z.infer<typeof draftSnapshotSchema>;
+
+export function readDraftSnapshot() {
   try {
     const raw = window.sessionStorage.getItem(storageKey);
+
+    return raw ? draftSnapshotSchema.safeParse(JSON.parse(raw)).data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function readLegacyDraftSteps(fallback: ChecklistStep[]) {
+  try {
+    const raw = window.sessionStorage.getItem(stepsStorageKey);
 
     if (raw) {
       const draft = draftSchema.safeParse(JSON.parse(raw));
@@ -215,17 +234,20 @@ export function readDraftSteps(fallback: ChecklistStep[]) {
   }
 }
 
-export function saveDraftSteps(steps: ChecklistStep[]) {
+export function saveDraftSnapshot(snapshot: DraftSnapshot) {
   try {
-    window.sessionStorage.setItem(storageKey, JSON.stringify(steps));
+    window.sessionStorage.setItem(storageKey, JSON.stringify(snapshot));
+
+    return true;
   } catch {
-    return;
+    return false;
   }
 }
 
 export function clearDraftSteps() {
   try {
     window.sessionStorage.removeItem(legacyStorageKey);
+    window.sessionStorage.removeItem(stepsStorageKey);
     window.sessionStorage.removeItem(storageKey);
   } catch {
     return;

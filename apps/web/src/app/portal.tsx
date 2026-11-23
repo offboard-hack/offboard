@@ -1,38 +1,21 @@
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/shared/ui/shadcn/breadcrumb";
 import { classProps } from "../shared/lib/class-props";
 import { Button } from "../shared/ui/button";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryErrorResetBoundary } from "@tanstack/react-query";
 import {
   HeadContent,
   Link,
   Outlet,
   Scripts,
   getRouteApi,
-  lazyRouteComponent,
-  notFound,
   useLocation,
+  useMatches,
   useRouter,
 } from "@tanstack/react-router";
 import { createPortalAbility, type PortalPrincipal } from "@offboard/access";
 import type { ErrorComponentProps } from "@tanstack/react-router";
+import type { FileRoutesByTo } from "./routeTree.gen";
 import { useCallback } from "react";
 import type { ReactNode } from "react";
-import {
-  cycleTaskStatus,
-  offboardingTeams,
-  offboardingsQuery,
-  toggleSubtask,
-  updateTaskStatus,
-} from "../entities/offboarding";
-import type { CaseSummary, OffboardingCase, PersonAsset, Task } from "../entities/offboarding";
-import { offboardingStyles } from "../features/offboarding/offboarding.styles";
 import { PortalLayout } from "./shell";
 import {
   SidebarGroup,
@@ -44,40 +27,7 @@ import {
 } from "@/shared/ui/shadcn/sidebar";
 import { portalStyles as s } from "../shared/ui/surface.styles";
 
-const CaseActions = lazyRouteComponent(() => import("./case-actions"), "CaseActions");
-
-const CasesPage = lazyRouteComponent(
-  () => import("../features/offboarding/offboarding-pages"),
-  "CasesPage",
-);
-
-const CasePage = lazyRouteComponent(
-  () => import("../features/offboarding/offboarding-pages"),
-  "CasePage",
-);
-
-const ImportPage = lazyRouteComponent(
-  () => import("../features/bulk-import/import-page"),
-  "ImportPage",
-);
-
-const DashboardPage = lazyRouteComponent(
-  () => import("../features/dashboard/dashboard-page"),
-  "DashboardPage",
-);
-
 const portalRoute = getRouteApi("/_portal");
-const dashboardRoute = getRouteApi("/_portal/painel");
-const casesRoute = getRouteApi("/_portal/desligamentos");
-const caseRoute = getRouteApi("/_portal/desligamentos_/$caseId");
-const importRoute = getRouteApi("/_portal/desligamentos_/importar");
-const checklistRoute = getRouteApi("/_portal/checklist-automatico");
-const equipmentRoute = getRouteApi("/_portal/bens-e-coleta");
-const integrationsRoute = getRouteApi("/_portal/integracoes");
-const applicationsRoute = getRouteApi("/_portal/candidaturas-assistidas");
-const feedbackRoute = getRouteApi("/_portal/resultados-e-feedback");
-const accessRoute = getRouteApi("/_portal/equipe");
-const plansRoute = getRouteApi("/_portal/planos-e-gastos");
 
 export function Document({ children }: { children: ReactNode }) {
   return (
@@ -95,17 +45,13 @@ export function Document({ children }: { children: ReactNode }) {
 
 export function Portal() {
   const { principal } = portalRoute.useRouteContext();
-  const caseMatch = caseRoute.useMatch({ shouldThrow: false });
-  const listMatch = casesRoute.useMatch({ shouldThrow: false });
-  const dashboardMatch = dashboardRoute.useMatch({ shouldThrow: false });
-  const checklistMatch = checklistRoute.useMatch({ shouldThrow: false });
-  const applicationsMatch = applicationsRoute.useMatch({ shouldThrow: false });
-  const feedbackMatch = feedbackRoute.useMatch({ shouldThrow: false });
-  const integrationsMatch = integrationsRoute.useMatch({ shouldThrow: false });
-  const equipmentMatch = equipmentRoute.useMatch({ shouldThrow: false });
-  const accessMatch = accessRoute.useMatch({ shouldThrow: false });
-  const plansMatch = plansRoute.useMatch({ shouldThrow: false });
-  const importMatch = importRoute.useMatch({ shouldThrow: false });
+  const activeRoute = useMatches({ select: (matches) => matches.at(-1)?.routeId ?? "" });
+  const importActive = activeRoute === "/_portal/desligamentos_/importar";
+  const caseActive = activeRoute === "/_portal/desligamentos_/$caseId";
+
+  const fullWidth =
+    activeRoute.startsWith("/_portal/") && !importActive && activeRoute !== "/_portal/sem-acesso";
+
   const portalRouter = useRouter();
 
   const observeMain = useCallback(
@@ -174,22 +120,11 @@ export function Portal() {
 
   return (
     <PortalLayout
-      fullWidth={Boolean(
-        listMatch ||
-        caseMatch ||
-        dashboardMatch ||
-        checklistMatch ||
-        applicationsMatch ||
-        feedbackMatch ||
-        equipmentMatch ||
-        accessMatch ||
-        plansMatch ||
-        integrationsMatch,
-      )}
+      fullWidth={fullWidth}
       mainRef={observeMain}
       principal={principal}
       navigation={
-        <PortalNavigation principal={principal} detailActive={Boolean(caseMatch || importMatch)} />
+        <PortalNavigation principal={principal} detailActive={caseActive || importActive} />
       }
     >
       <Outlet />
@@ -199,7 +134,12 @@ export function Portal() {
 
 const navigationGroups: {
   label: string;
-  links: { to: string; label: string; icon: string; subject?: "Team" | "Integrations" }[];
+  links: {
+    to: keyof FileRoutesByTo;
+    label: string;
+    icon: string;
+    subject?: "Team" | "Integrations";
+  }[];
 }[] = [
   {
     label: "Operação",
@@ -338,284 +278,6 @@ function PortalNavigation({
   );
 }
 
-function CaseLink(item: CaseSummary) {
-  return (
-    <Link
-      to="/desligamentos/$caseId"
-      params={{ caseId: item.id }}
-      {...classProps(offboardingStyles.caseLink)}
-    >
-      {item.name}
-    </Link>
-  );
-}
-
-export function Dashboard() {
-  const { data: cases } = useSuspenseQuery(offboardingsQuery);
-  const { area = "", deadline = "all" } = dashboardRoute.useSearch();
-  const navigate = dashboardRoute.useNavigate();
-
-  return (
-    <DashboardPage
-      cases={cases}
-      areaFilter={area}
-      deadlineFilter={deadline}
-      onAreaChange={(next) =>
-        void navigate({
-          search: (previous) => ({
-            ...previous,
-            area: offboardingTeams.find((team) => team === next),
-          }),
-          resetScroll: false,
-        })
-      }
-      onDeadlineChange={(next) =>
-        void navigate({
-          search: (previous) => ({ ...previous, deadline: next === "all" ? undefined : next }),
-          resetScroll: false,
-        })
-      }
-      renderCaseLink={(id, content, xstyle) => (
-        <Link to="/desligamentos/$caseId" params={{ caseId: id }} {...classProps(xstyle)}>
-          {content}
-        </Link>
-      )}
-    />
-  );
-}
-
-export function Cases() {
-  const { principal } = portalRoute.useRouteContext();
-  const canCreateCase = createPortalAbility(principal.role).can("create", "Offboarding");
-  const { data: cases } = useSuspenseQuery(offboardingsQuery);
-  const { area, status = "", team = "", page } = casesRoute.useSearch();
-  const navigate = casesRoute.useNavigate();
-  const department = area ?? "";
-
-  return (
-    <CasesPage
-      cases={cases}
-      department={department}
-      status={status}
-      team={team}
-      onStatusChange={(next) =>
-        void navigate({
-          search: (previous) => ({ ...previous, status: next || undefined, page: undefined }),
-          resetScroll: false,
-        })
-      }
-      onTeamChange={(next) =>
-        void navigate({
-          search: (previous) => ({
-            ...previous,
-            team: offboardingTeams.find((team) => team === next),
-            page: undefined,
-          }),
-          resetScroll: false,
-        })
-      }
-      onResetFilters={() =>
-        void navigate({
-          search: (previous) => ({ pageSize: previous.pageSize }),
-          resetScroll: false,
-        })
-      }
-      onNameSearchChange={() => {
-        if (page) {
-          void navigate({
-            search: (previous) => ({ ...previous, page: undefined }),
-            replace: true,
-            resetScroll: false,
-          });
-        }
-      }}
-      onDepartmentChange={(next) => {
-        if (department !== next) {
-          void navigate({
-            search: (previous) => ({ ...previous, area: next || undefined, page: undefined }),
-            resetScroll: false,
-          });
-        }
-      }}
-      renderCaseLink={CaseLink}
-      onOpenCase={({ id }) => {
-        void navigate({ to: "/desligamentos/$caseId", params: { caseId: id } });
-      }}
-      breadcrumb={
-        <Breadcrumb aria-label="Localização">
-          <BreadcrumbList>
-            <BreadcrumbItem>
-              <BreadcrumbLink render={<Link to="/painel" />}>Painel</BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage>Desligamentos</BreadcrumbPage>
-            </BreadcrumbItem>
-          </BreadcrumbList>
-        </Breadcrumb>
-      }
-      actions={canCreateCase ? <CaseActions /> : undefined}
-    />
-  );
-}
-
-export function Case() {
-  const { principal } = portalRoute.useRouteContext();
-  const canUpdateCase = createPortalAbility(principal.role).can("update", "Offboarding");
-  const { caseId } = caseRoute.useParams();
-  const { tasks } = caseRoute.useSearch();
-  const navigate = caseRoute.useNavigate();
-  const queryClient = useQueryClient();
-  const { data: cases } = useSuspenseQuery(offboardingsQuery);
-  const offboardingCase = getCase(cases, caseId);
-
-  const statusMutation = useMutation({
-    mutationFn: ({ taskId, status }: { taskId: string; status: Task["status"] }) =>
-      updateTaskStatus(taskId, cycleTaskStatus(status)),
-    onMutate: async ({ taskId, status }) => {
-      await queryClient.cancelQueries({ queryKey: offboardingsQuery.queryKey });
-      const previous = queryClient.getQueryData(offboardingsQuery.queryKey);
-
-      queryClient.setQueryData(offboardingsQuery.queryKey, (old: OffboardingCase[] | undefined) =>
-        old?.map((c) =>
-          c.id === caseId
-            ? {
-                ...c,
-                tasks: c.tasks.map((t) =>
-                  t.id === taskId ? { ...t, status: cycleTaskStatus(status) } : t,
-                ),
-                completed: c.tasks.reduce(
-                  (sum, t) =>
-                    sum +
-                    (t.id === taskId
-                      ? cycleTaskStatus(status) === "done"
-                        ? 1
-                        : 0
-                      : t.status === "done"
-                        ? 1
-                        : 0),
-                  0,
-                ),
-              }
-            : c,
-        ),
-      );
-
-      return { previous };
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(offboardingsQuery.queryKey, context.previous);
-      }
-    },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: offboardingsQuery.queryKey });
-    },
-  });
-
-  const subtaskMutation = useMutation({
-    mutationFn: (subtaskId: string) => toggleSubtask(subtaskId),
-    onMutate: async (subtaskId) => {
-      await queryClient.cancelQueries({ queryKey: offboardingsQuery.queryKey });
-      const previous = queryClient.getQueryData(offboardingsQuery.queryKey);
-
-      queryClient.setQueryData(offboardingsQuery.queryKey, (old: OffboardingCase[] | undefined) =>
-        old?.map((c) =>
-          c.id === caseId
-            ? {
-                ...c,
-                tasks: c.tasks.map((t) => ({
-                  ...t,
-                  subtasks: t.subtasks.map((s) =>
-                    s.id === subtaskId ? { ...s, done: !s.done } : s,
-                  ),
-                })),
-              }
-            : c,
-        ),
-      );
-
-      return { previous };
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(offboardingsQuery.queryKey, context.previous);
-      }
-    },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: offboardingsQuery.queryKey });
-    },
-  });
-
-  return (
-    <CasePage
-      offboardingCase={offboardingCase}
-      taskFilter={tasks ?? ""}
-      onTaskFilterChange={(next) =>
-        void navigate({ search: { tasks: next || undefined }, resetScroll: false })
-      }
-      onTaskStatusChange={
-        canUpdateCase ? (taskId, status) => statusMutation.mutate({ taskId, status }) : undefined
-      }
-      onSubtaskToggle={canUpdateCase ? (subtaskId) => subtaskMutation.mutate(subtaskId) : undefined}
-      breadcrumb={
-        <Breadcrumb aria-label="Localização">
-          <BreadcrumbList>
-            <BreadcrumbItem>
-              <BreadcrumbLink render={<Link to="/painel" />}>Painel</BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbLink render={<Link to="/desligamentos" activeOptions={{ exact: true }} />}>
-                Desligamentos
-              </BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage>{offboardingCase.name}</BreadcrumbPage>
-            </BreadcrumbItem>
-          </BreadcrumbList>
-        </Breadcrumb>
-      }
-    />
-  );
-}
-
-const demoAssets: PersonAsset[] = [
-  { item: "Notebook Dell Latitude 5440", tag: "AUR-0412", status: "scheduled" },
-  { item: "Monitor Dell 27″", tag: "AUR-3104", status: "withPerson" },
-  { item: "Celular Galaxy A55", tag: "AUR-2210", status: "received" },
-];
-
-function enrichCase(offboardingCase: OffboardingCase) {
-  return {
-    ...offboardingCase,
-    assets: offboardingCase.assets ?? demoAssets,
-  };
-}
-
-export function getCase(cases: OffboardingCase[], caseId: string) {
-  const offboardingCase = cases.find((item) => item.id === caseId);
-
-  if (!offboardingCase) {
-    throw notFound();
-  }
-
-  return enrichCase(offboardingCase);
-}
-
-export function BulkImport() {
-  return (
-    <ImportPage
-      returnLink={
-        <Link to="/desligamentos" {...classProps(s.backLink)}>
-          Voltar para desligamentos
-        </Link>
-      }
-    />
-  );
-}
-
 export function NotFoundPage() {
   return (
     <section {...classProps(s.panel, s.panelEmpty)}>
@@ -631,23 +293,22 @@ export function NotFoundPage() {
 
 export function RouteError({ reset }: ErrorComponentProps) {
   const router = useRouter();
+  const queryError = useQueryErrorResetBoundary();
 
   return (
     <section {...classProps(s.panel, s.panelEmpty)} role="alert">
       <h1 {...classProps(s.heading)} id="titulo-pagina" tabIndex={-1} data-error-heading>
         Não foi possível carregar a página
       </h1>
-      <Button type="button" onClick={() => void router.invalidate({ sync: true }).then(reset)}>
+      <Button
+        type="button"
+        onClick={() => {
+          queryError.reset();
+          void router.invalidate({ sync: true }).then(reset);
+        }}
+      >
         Tentar novamente
       </Button>
     </section>
   );
 }
-
-Dashboard.preload = DashboardPage.preload;
-
-Cases.preload = CasesPage.preload;
-
-Case.preload = CasePage.preload;
-
-BulkImport.preload = ImportPage.preload;

@@ -1,3 +1,4 @@
+import { EquipmentPending } from "../route-pending";
 import { listSearchSchema } from "@/shared/lib/list-search";
 import { z } from "zod";
 import { createFileRoute, lazyRouteComponent } from "@tanstack/react-router";
@@ -16,4 +17,5 @@ export const Route = createFileRoute("/_portal/bens-e-coleta")({
     "EquipmentPage",
   ),
   head: () => ({ meta: [{ title: "Bens e coleta · Offboard" }] }),
+  pendingComponent: EquipmentPending,
 });

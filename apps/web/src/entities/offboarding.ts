@@ -1,5 +1,5 @@
 import type { ApiClient, Treaty } from "@offboard/api-client";
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import { getApiClient } from "@/shared/lib/api-client";
 
 export type CaseSummary = Treaty.Data<ApiClient["api"]["offboardings"]["get"]>[number];
@@ -35,31 +35,43 @@ export const offboardingTeams = [
 ] as const;
 
 async function listOffboardings({ signal }: { signal: AbortSignal }) {
-  const { offboardings } = getApiClient().api;
-  const { data, error } = await offboardings.get({ fetch: { signal } });
+  const { data, error } = await getApiClient().api.offboardings["with-tasks"].get({
+    fetch: { signal },
+  });
 
   if (error) throw new Error("Failed to fetch offboardings");
 
-  return Promise.all(
-    data.map(async (summary) => {
-      const detail = await offboardings({ id: encodeURIComponent(summary.id) }).get({
-        fetch: { signal },
-      });
-
-      if (detail.status === 401 || detail.status === 403) {
-        throw new Error("Portal access is required");
-      }
-
-      return detail.error ? { ...summary, tasks: [] } : detail.data;
-    }),
-  );
+  return data;
 }
+
+const offboardingsStaleTime = 30_000;
 
 export const offboardingsQuery = queryOptions({
   queryKey: ["offboardings"],
   queryFn: listOffboardings,
-  staleTime: 30_000,
+  staleTime: offboardingsStaleTime,
 });
+
+export function offboardingQuery(caseId: string, client: QueryClient) {
+  return queryOptions<CaseDetail | null>({
+    queryKey: ["offboardings", caseId],
+    queryFn: async ({ signal }) => {
+      const { data, error, status } = await getApiClient()
+        .api.offboardings({ id: encodeURIComponent(caseId) })
+        .get({ fetch: { signal } });
+
+      if (status === 404) return null;
+
+      if (error) throw new Error("Failed to fetch offboarding");
+
+      return data;
+    },
+    staleTime: offboardingsStaleTime,
+    initialData: () =>
+      client.getQueryData(offboardingsQuery.queryKey)?.find(({ id }) => id === caseId),
+    initialDataUpdatedAt: () => client.getQueryState(offboardingsQuery.queryKey)?.dataUpdatedAt,
+  });
+}
 
 const deadlineFormat = new Intl.DateTimeFormat("pt-BR", {
   day: "numeric",

@@ -61,6 +61,15 @@ describe.skipIf(!url)("repositories", () => {
     expect(list[3]).toMatchObject({ name: "André Lima", completed: 1, total: 4 });
   });
 
+  it("returns cases with the same ordered tasks as their detail records", async () => {
+    const summary = await repos.offboardings.listOffboardings();
+    const bundled = await repos.offboardings.listOffboardingsWithTasks();
+
+    expect(bundled).toEqual(
+      await Promise.all(summary.map(({ id }) => repos.offboardings.getOffboarding(id))),
+    );
+  });
+
   it("lists cases without tasks as zero of zero", async () => {
     await repos.offboardings.createOffboarding({
       name: "Sem Tarefas",

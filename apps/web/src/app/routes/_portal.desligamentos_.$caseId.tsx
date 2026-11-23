@@ -1,17 +1,24 @@
+import { CasePending } from "../route-pending";
 import { z } from "zod";
-import { createFileRoute } from "@tanstack/react-router";
-import { offboardingsQuery } from "@/entities/offboarding";
-import { Case, getCase } from "../portal";
+import { createFileRoute, lazyRouteComponent, notFound } from "@tanstack/react-router";
+import { offboardingQuery } from "@/entities/offboarding";
 
 export const Route = createFileRoute("/_portal/desligamentos_/$caseId")({
   validateSearch: z.object({ tasks: z.enum(["pending", "done"]).optional().catch(undefined) }),
   loader: async ({ context, params }) => {
-    const cases = await context.queryClient.ensureQueryData(offboardingsQuery);
+    if (!z.guid().safeParse(params.caseId).success) throw notFound();
 
-    return getCase(cases, params.caseId).name;
+    const result = await context.queryClient.ensureQueryData(
+      offboardingQuery(params.caseId, context.queryClient),
+    );
+
+    if (!result) throw notFound();
+
+    return result.name;
   },
-  component: Case,
+  component: lazyRouteComponent(() => import("../case-route"), "Case"),
   head: ({ loaderData }) => ({
     meta: [{ title: loaderData ? `${loaderData} · Offboard` : "Desligamento · Offboard" }],
   }),
+  pendingComponent: CasePending,
 });

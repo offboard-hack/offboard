@@ -13,10 +13,10 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { createAuthMiddleware } from "better-auth/api";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { and, eq, sql } from "drizzle-orm";
-import { Resend } from "resend";
 import { z } from "zod";
 
 import type { PortalAuth } from "../../shared/portal-auth.js";
+import { createEmailSender, type CloudflareEmailBinding } from "./email.js";
 
 const authPath = "/api/auth";
 const verifyPath = "/magic-link/verify";
@@ -46,11 +46,7 @@ const originSchema = z
   })
   .transform((value) => new URL(value).origin);
 
-const emailConfig = z.object({
-  BETTER_AUTH_SECRET: z.string().min(32),
-  RESEND_API_KEY: z.string().min(1),
-  AUTH_EMAIL_FROM: z.string().min(1),
-});
+const authSecret = z.string().min(32);
 
 const memberLinkToken = z
   .string()
@@ -66,12 +62,14 @@ export function createAuth({
   secret,
   sendLink,
   onVercel = false,
+  ipAddressHeaders = onVercel ? ["x-vercel-forwarded-for"] : [],
 }: {
   db: Database;
   origin: string;
   secret: string;
   sendLink: (message: { email: string; url: string }) => Promise<void>;
   onVercel?: boolean;
+  ipAddressHeaders?: string[];
 }) {
   const schema = {
     user: authUser,
@@ -106,7 +104,7 @@ export function createAuth({
     trustedOrigins: [origin],
     advanced: {
       useSecureCookies: origin.startsWith("https:"),
-      ipAddress: { ipAddressHeaders: onVercel ? ["x-vercel-forwarded-for"] : [] },
+      ipAddress: { ipAddressHeaders },
     },
     rateLimit: { enabled: true, storage: "database" },
     session: {
@@ -214,31 +212,39 @@ export function createAuth({
   } satisfies PortalAuth;
 }
 
-export function createRuntimeAuth(db: Database, webOrigin?: string) {
-  const env = emailConfig.parse(process.env);
+export function createRuntimeAuth(
+  db: Database,
+  webOrigin?: string,
+  {
+    env = process.env,
+    ipAddressHeaders,
+    cloudflareEmail,
+  }: {
+    env?: Record<string, string | undefined>;
+    ipAddressHeaders?: string[];
+    cloudflareEmail?: CloudflareEmailBinding;
+  } = {},
+) {
+  const secret = authSecret.parse(env.BETTER_AUTH_SECRET);
 
   const previewOrigin =
-    process.env.VERCEL_ENV === "preview" && process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : undefined;
+    env.VERCEL_ENV === "preview" && env.VERCEL_URL ? `https://${env.VERCEL_URL}` : undefined;
 
-  const origin = originSchema.parse(process.env.BETTER_AUTH_URL ?? previewOrigin ?? webOrigin);
-  const resend = new Resend(env.RESEND_API_KEY);
+  const origin = originSchema.parse(env.BETTER_AUTH_URL ?? previewOrigin ?? webOrigin);
+  const sender = createEmailSender(env, cloudflareEmail);
 
   const auth = createAuth({
     db,
     origin,
-    secret: env.BETTER_AUTH_SECRET,
-    onVercel: process.env.VERCEL === "1",
-    async sendLink({ email, url }) {
-      const { error } = await resend.emails.send({
-        from: env.AUTH_EMAIL_FROM,
+    secret,
+    onVercel: env.VERCEL === "1",
+    ipAddressHeaders,
+    sendLink({ email, url }) {
+      return sender.send({
         to: email,
         subject: "Seu link de acesso ao Offboard",
         text: `Entre no Offboard: ${url}\n\nO link expira em 10 minutos e só pode ser usado uma vez.`,
       });
-
-      if (error) throw new Error("Could not send the Offboard sign-in link");
     },
   });
 

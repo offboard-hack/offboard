@@ -7,6 +7,9 @@ import type { ChecklistStep } from "./checklist-draft";
 import {
   actionConfigsQuery,
   applyActionConfigs,
+  clearSyncedRemovals,
+  knownActionRowIds,
+  mergeStepSettings,
   syncActionConfigs as syncConfigs,
   type ActionConfigRow,
 } from "./action-config";
@@ -15,6 +18,7 @@ type Received = { method: string; url: string; body: unknown };
 
 const received: Received[] = [];
 let failing = false;
+let failUpdates = false;
 let listBody: ActionConfigRow[] = [];
 
 const server = createServer((req, res) => {
@@ -25,7 +29,7 @@ const server = createServer((req, res) => {
   req.on("end", () => {
     received.push({ method: req.method ?? "", url: req.url ?? "", body: raw && JSON.parse(raw) });
 
-    if (failing) {
+    if (failing || (failUpdates && req.method === "PUT")) {
       res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "Unavailable" }));
 
@@ -57,6 +61,7 @@ afterAll(async () => {
 beforeEach(() => {
   received.length = 0;
   failing = false;
+  failUpdates = false;
   listBody = [];
 });
 
@@ -76,8 +81,15 @@ function runInRequest<T>(operation: () => Promise<T>) {
   });
 }
 
-function syncActionConfigs(...args: Parameters<typeof syncConfigs>) {
-  return runInRequest(() => syncConfigs(...args));
+function syncActionConfigs(
+  steps: ChecklistStep[],
+  existing: ActionConfigRow[],
+  previousSteps?: ChecklistStep[],
+  knownRowIds?: string[],
+) {
+  return runInRequest(() =>
+    syncConfigs(steps, existing, knownRowIds ?? knownActionRowIds(previousSteps ?? [], existing)),
+  );
 }
 
 const email = { subject: "Assunto", body: "Mensagem" };
@@ -169,10 +181,19 @@ describe("syncActionConfigs", () => {
     ]);
   });
 
-  it("deletes configs no longer desired", async () => {
-    await syncActionConfigs([step()], [row()]);
+  it("deletes configs explicitly removed from a step", async () => {
+    await syncActionConfigs([step({ email: null })], [row()], [step({ email })]);
 
     expect(received).toEqual([{ method: "DELETE", url: "/api/action-configs/r1", body: "" }]);
+  });
+
+  it("preserves unrelated server rows and configs the draft has never loaded", async () => {
+    await syncActionConfigs(
+      [step()],
+      [row(), row({ id: "r-unrelated", actionId: "email:another-step" })],
+    );
+
+    expect(received).toEqual([]);
   });
 
   it("ignores existing rows of unknown kinds", async () => {
@@ -182,7 +203,7 @@ describe("syncActionConfigs", () => {
   });
 
   it("skips unchanged configs", async () => {
-    await syncActionConfigs([step({ email })], [row()]);
+    await syncActionConfigs([step({ email })], [row()], [step({ email })]);
 
     expect(received).toEqual([]);
   });
@@ -205,6 +226,7 @@ describe("syncActionConfigs", () => {
         row({ id: "r-b", actionId: "slack:b", config: slack }),
         row({ id: "r-gone", actionId: "webhook:gone", config: webhook }),
       ],
+      [step({ id: "gone", webhook })],
     );
 
     expect([...received].sort(byUrl)).toEqual(
@@ -220,12 +242,65 @@ describe("syncActionConfigs", () => {
     );
   });
 
-  it("rejects when the server fails", async () => {
+  it("preserves newly recreated actions when a draft retries removal", async () => {
+    const originalRows = ["r1"];
+    const recreatedRows = [row({ id: "r-new" })];
+
+    await syncActionConfigs([step({ email: null })], [row()], [], originalRows);
+    await syncActionConfigs([step({ email: null })], recreatedRows, [], originalRows);
+    await syncActionConfigs([], recreatedRows, [step({ email })], originalRows);
+
+    expect(received).toEqual([{ method: "DELETE", url: "/api/action-configs/r1", body: "" }]);
+  });
+
+  it("reports created rows when another write fails so the draft can remove them", async () => {
+    failUpdates = true;
+    const updateRow = row({ id: "r2", actionId: "email:update" });
+
+    const result = await syncActionConfigs(
+      [step({ email }), step({ id: "update", phase: "pre", email })],
+      [updateRow],
+    );
+
+    expect(result).toEqual({ createdRowIds: ["r1"], failed: true });
+    await syncActionConfigs([], [row()], [], result.createdRowIds);
+    expect(received).toContainEqual({ method: "DELETE", url: "/api/action-configs/r1", body: "" });
+  });
+
+  it("reports failed writes", async () => {
     failing = true;
 
-    await expect(syncActionConfigs([step({ email })], [])).rejects.toThrow(
-      "Failed to save action config",
-    );
+    await expect(syncActionConfigs([step({ email })], [])).resolves.toEqual({
+      createdRowIds: [],
+      failed: true,
+    });
+  });
+});
+
+describe("mergeStepSettings", () => {
+  it("distinguishes a title edit from removing a configured action", async () => {
+    const settings = {
+      title: "Nome atualizado",
+      deadlineOffset: null,
+      rules: [],
+      email: null,
+      slack: null,
+      webhook: null,
+    };
+
+    const configured = step({ email });
+    const removal = mergeStepSettings(configured, settings);
+    const cleared = clearSyncedRemovals([removal]);
+    const renamed = mergeStepSettings(cleared[0], settings);
+
+    expect(removal.email).toBeNull();
+    expect(renamed.email).toBeUndefined();
+    expect(mergeStepSettings(step(), { ...settings, email }).email).toEqual(email);
+
+    await syncActionConfigs([removal], [row()], [configured]);
+    await syncActionConfigs([renamed], [row()]);
+
+    expect(received).toEqual([{ method: "DELETE", url: "/api/action-configs/r1", body: "" }]);
   });
 });
 
@@ -244,6 +319,32 @@ describe("applyActionConfigs", () => {
     const [result] = applyActionConfigs([step({ email: local })], [row()]);
 
     expect(result.email).toEqual(local);
+  });
+
+  it("preserves explicit draft removals across all action types", () => {
+    const rows = [
+      row(),
+      row({ id: "r2", actionId: "slack:s1", config: slack }),
+      row({ id: "r3", actionId: "webhook:s1", config: webhook }),
+    ];
+
+    const draft = [step({ email: null, slack: null, webhook: null })];
+
+    expect(applyActionConfigs(draft, rows)[0]).toMatchObject({
+      email: null,
+      slack: null,
+      webhook: null,
+    });
+    expect(applyActionConfigs(clearSyncedRemovals(draft), rows)[0]).toMatchObject({
+      email,
+      slack,
+      webhook,
+    });
+    expect(clearSyncedRemovals([step({ email, slack, webhook })])[0]).toMatchObject({
+      email,
+      slack,
+      webhook,
+    });
   });
 
   it("ignores invalid server config", () => {

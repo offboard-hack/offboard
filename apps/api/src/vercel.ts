@@ -1,4 +1,5 @@
 import { createClient } from "@offboard/db/client";
+import { node } from "@elysia/node";
 import { createRepositories } from "./repositories.js";
 import { z } from "zod";
 import { createApp } from "./app.js";
@@ -8,6 +9,7 @@ const db = createClient(z.string().min(1).parse(process.env.POSTGRES_URL));
 const { auth, origin } = createRuntimeAuth(db, process.env.WEB_ORIGIN);
 
 const app = createApp(origin, createRepositories(db), {
+  adapter: node(),
   auth,
   cronSecret: process.env.CRON_SECRET,
   webhookSecret: process.env.WEBHOOK_SECRET,

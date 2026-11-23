@@ -12,7 +12,7 @@ HR can look up employees, inspect a case's task progress, and create a case in t
 ## How to get to it (user POV)
 
 - Use **Desligamentos** in the sidebar or open `/desligamentos`.
-- Click a row or use the person's link. A seeded example is `/desligamentos/marina-lopes`.
+- Click a row or use the person's link. Use the seeded Marina Lopes link to obtain the generated case URL.
 - Use **Desligamento** in the toolbar to open the creation dialog.
 
 ## Driving it with Playwright
@@ -26,5 +26,5 @@ Preconditions: fresh context with Marina Lopes in the case list.
 
 ## Gotchas
 
-- Creation modifies the current portal's in-memory case list. Full reload or a fresh context seeds the list again. Check the created record by navigating within the app.
+- Creation persists through the API. Reopen the case in a fresh authenticated tab to verify it.
 - Case details have a different checklist from the template at `/checklist-automatico`.

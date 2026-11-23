@@ -27,26 +27,31 @@ const newCaseSchema = z.object({
   deadline: z.iso.date({ error: "Informe uma data válida." }),
 });
 
-type NewCase = z.output<typeof newCaseSchema>;
+export type NewCase = z.output<typeof newCaseSchema>;
 
 const textFields = [
   { name: "name", label: "Nome", type: "text" },
   { name: "role", label: "Cargo", type: "text" },
 ] as const;
 
-export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => void }) {
+export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => Promise<void> }) {
   const id = useId();
   const [open, setOpen] = useState(false);
+  const [submitError, setSubmitError] = useState(false);
 
   const form = useForm({
     defaultValues: { name: "", role: "", department: "", deadline: "" },
     validators: { onSubmit: newCaseSchema },
-    onSubmit: ({ value }) => {
-      const record = newCaseSchema.parse(value);
+    onSubmit: async ({ value }) => {
+      setSubmitError(false);
 
-      setOpen(false);
-      form.reset();
-      onCreate(record);
+      try {
+        await onCreate(newCaseSchema.parse(value));
+        setOpen(false);
+        form.reset();
+      } catch {
+        setSubmitError(true);
+      }
     },
   });
 
@@ -57,6 +62,7 @@ export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => voi
         setOpen(next);
 
         if (!next) {
+          setSubmitError(false);
           form.reset();
         }
       }}
@@ -176,15 +182,24 @@ export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => voi
               }}
             </form.Field>
           </DialogBody>
+          {submitError && (
+            <p role="alert" className="px-5 py-2 text-sm text-destructive">
+              Não foi possível criar o desligamento. Tente novamente.
+            </p>
+          )}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" className="min-h-11" />}>
               <HugeiconsIcon icon={Cancel01Icon} data-icon="inline-start" aria-hidden="true" />
               Cancelar
             </DialogClose>
-            <Button type="submit" className="min-h-11">
-              <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" aria-hidden="true" />
-              Criar desligamento
-            </Button>
+            <form.Subscribe selector={(state) => state.isSubmitting}>
+              {(submitting) => (
+                <Button type="submit" className="min-h-11" disabled={submitting}>
+                  <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" aria-hidden="true" />
+                  {submitting ? "Criando desligamento…" : "Criar desligamento"}
+                </Button>
+              )}
+            </form.Subscribe>
           </DialogFooter>
         </form>
       </DialogContent>

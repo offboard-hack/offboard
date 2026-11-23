@@ -48,8 +48,9 @@ public health endpoint at `http://127.0.0.1:3001/api/health` returns
 | `DATABASE_URL`         | Database connection string for Drizzle migrations and seed.                                                                                                                                         |
 | `BETTER_AUTH_URL`      | Browser-facing portal origin. Locally defaults to `WEB_ORIGIN` or `http://localhost:5173`. Vercel previews can use the default deployment URL. Set the canonical HTTPS portal origin in production. |
 | `BETTER_AUTH_SECRET`   | At least 32 characters. Generate a random secret for each environment.                                                                                                                              |
-| `AUTH_EMAIL_FROM`      | Sign-in sender address on a domain verified in Resend.                                                                                                                                              |
-| `RESEND_API_KEY`       | Resend API key for sign-in links.                                                                                                                                                                   |
+| `EMAIL_PROVIDER`       | `resend` by default, or `cloudflare` when deploying to Workers with the `EMAIL` binding.                                                                                                            |
+| `AUTH_EMAIL_FROM`      | Sign-in sender on a domain verified by the selected provider. Use a bare email address for Cloudflare.                                                                                              |
+| `RESEND_API_KEY`       | Resend API key. Required only for the Resend provider.                                                                                                                                              |
 | `CRON_SECRET`          | Bearer secret for `/api/correios/check`. Vercel Cron sends this automatically.                                                                                                                      |
 | `WEBHOOK_SECRET`       | Bearer secret for `/api/webhooks/inbound/:taskId`.                                                                                                                                                  |
 | `SLACK_SIGNING_SECRET` | Slack app signing secret for `/api/integrations/slack/events`.                                                                                                                                      |
@@ -83,3 +84,49 @@ API requests reach the protected deployment. Visit the preview origin used by
 Vercel builds the API bundle with `npm run build:vercel -w @offboard/api` and
 routes `/api/auth/*` and `/api/session` to Elysia. TanStack Start forwards
 the incoming session cookie for SSR API calls.
+
+## Deploy a Cloudflare preview
+
+Run `npx cf auth login` from the repository root and select the account for
+the test deployment. Run `npm run deploy:cloudflare -w @offboard/web` to
+publish the login screen and get the `workers.dev` URL. TanStack Start serves
+the portal and routes `/api/*` to Elysia within the same Worker.
+
+To enable login and data access, migrate a disposable PostgreSQL database the
+Worker can reach and add a test administrator to its roster. Set
+`POSTGRES_URL`, `BETTER_AUTH_URL` (the HTTPS preview origin), a generated
+`BETTER_AUTH_SECRET`, and `AUTH_EMAIL_FROM` in a private secrets file outside
+the repository.
+
+For Resend, add `RESEND_API_KEY` to the file and use the default provider:
+
+```sh
+OFFBOARD_API_CONFIGURED=1 npm run deploy:cloudflare -w @offboard/web -- --secrets-file /path/to/preview-secrets.env
+```
+
+For Cloudflare Email, onboard the sender domain in Cloudflare Email Service
+and use a bare address on that domain as `AUTH_EMAIL_FROM`. Set
+`EMAIL_PROVIDER=cloudflare` for the deploy so it adds the native `EMAIL`
+binding:
+
+```sh
+EMAIL_PROVIDER=cloudflare OFFBOARD_API_CONFIGURED=1 npm run deploy:cloudflare -w @offboard/web -- --secrets-file /path/to/preview-secrets.env
+```
+
+Include `WEBHOOK_SECRET` and `SLACK_SIGNING_SECRET` in that file if you plan to
+test the corresponding integrations. To enable the Correios schedule, include
+`CRON_SECRET` and set `OFFBOARD_ENABLE_CRON=1` for the build and deploy. The
+trigger runs daily at 08:00 UTC. Use one scheduler per database.
+
+For a local Worker preview, put the test bindings in
+`apps/web/.dev.vars.cloudflare` and set `BETTER_AUTH_URL` to
+`http://127.0.0.1:8788`. Build with `OFFBOARD_API_CONFIGURED=1` and the
+provider you want to test:
+
+```sh
+OFFBOARD_API_CONFIGURED=1 npm run build:cloudflare -w @offboard/web
+npm run start -w @offboard/web -- --mode cloudflare --host 127.0.0.1 --port 8788
+```
+
+With `EMAIL_PROVIDER=cloudflare`, the local runtime captures messages under
+Email Sending in Local Explorer at `http://127.0.0.1:8788/cdn-cgi/local/explorer`.
