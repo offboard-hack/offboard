@@ -2,11 +2,10 @@ import { createClient } from "@offboard/db/client";
 import { node } from "@elysia/node";
 import { sql } from "drizzle-orm";
 import { createRepositories } from "./repositories.js";
-import { z } from "zod";
 import { createApp } from "./app.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
 
-const db = createClient(z.string().min(1).parse(process.env.POSTGRES_URL));
+const db = createClient(process.env.POSTGRES_URL ?? "");
 const { auth, origin } = createRuntimeAuth(db, process.env.WEB_ORIGIN);
 
 const app = createApp(origin, createRepositories(db), {
