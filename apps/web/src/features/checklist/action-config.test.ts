@@ -3,7 +3,7 @@ import { createServerEntry } from "@tanstack/react-start/server";
 import { QueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { ChecklistStep } from "@/features/checklist/checklist-draft";
+import type { ChecklistStep } from "./checklist-draft";
 import {
   actionConfigsQuery,
   applyActionConfigs,
@@ -24,8 +24,23 @@ const server = createServer((req, res) => {
   });
   req.on("end", () => {
     received.push({ method: req.method ?? "", url: req.url ?? "", body: raw && JSON.parse(raw) });
-    res.writeHead(failing ? 500 : 200, { "content-type": "application/json" });
-    res.end(req.method === "GET" ? JSON.stringify(listBody) : undefined);
+
+    if (failing) {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "Unavailable" }));
+
+      return;
+    }
+
+    if (req.method === "DELETE") {
+      res.writeHead(204);
+      res.end();
+
+      return;
+    }
+
+    res.writeHead(req.method === "POST" ? 201 : 200, { "content-type": "application/json" });
+    res.end(JSON.stringify(req.method === "GET" ? listBody : row()));
   });
 });
 

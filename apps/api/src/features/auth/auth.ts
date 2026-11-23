@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import type { PortalPrincipal } from "@offboard/access";
 import type { Database } from "@offboard/db/client";
 import {
   authAccount,
@@ -17,15 +16,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { Resend } from "resend";
 import { z } from "zod";
 
-export type PortalAccess =
-  | { kind: "anonymous" }
-  | { kind: "forbidden" }
-  | { kind: "authenticated"; principal: PortalPrincipal };
-
-export type PortalAuth = {
-  handler: (request: Request) => Promise<Response>;
-  resolvePrincipal: (headers: Headers) => Promise<PortalAccess>;
-};
+import type { PortalAuth } from "../../shared/portal-auth.js";
 
 const authPath = "/api/auth";
 const verifyPath = "/magic-link/verify";

@@ -1,6 +1,7 @@
+import { createApiClient } from "@offboard/api-client";
 import { getRequestHeader, setResponseHeader } from "@tanstack/react-start/server";
 
-export function fetchServerApi(path: `/api/${string}`, init?: RequestInit) {
+export function createServerApiClient() {
   const deploymentHost = process.env.VERCEL_URL;
   const deploymentOrigin = deploymentHost ? `https://${deploymentHost}` : undefined;
 
@@ -9,18 +10,24 @@ export function fetchServerApi(path: `/api/${string}`, init?: RequestInit) {
     (deploymentOrigin && (process.env.BETTER_AUTH_URL ?? deploymentOrigin)) ??
     "http://localhost:3001";
 
-  const url = new URL(path, origin);
-  const headers = new Headers(init?.headers);
+  const headers = new Headers();
   const cookie = getRequestHeader("cookie");
+  const requestOrigin = getRequestHeader("origin");
   const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
 
   if (cookie) headers.set("cookie", cookie);
 
-  if (bypass && url.origin === deploymentOrigin) {
+  if (requestOrigin) headers.set("origin", requestOrigin);
+
+  if (bypass && new URL(origin).origin === deploymentOrigin) {
     headers.set("x-vercel-protection-bypass", bypass);
   }
 
   setResponseHeader("Cache-Control", "private, no-store");
 
-  return fetch(url, { ...init, headers, cache: "no-store", redirect: "error" });
+  return createApiClient(origin, {
+    headers,
+    parseDate: false,
+    fetch: { cache: "no-store", redirect: "error" },
+  });
 }

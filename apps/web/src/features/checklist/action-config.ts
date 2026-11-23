@@ -1,38 +1,21 @@
 import { queryOptions } from "@tanstack/react-query";
-import { z } from "zod";
-import type { ChecklistStep } from "@/features/checklist/checklist-draft";
-import { stepFormSchema } from "@/features/checklist/step-settings";
-import { apiFetch } from "@/shared/lib/api-fetch";
+import type { ApiClient, Treaty } from "@offboard/api-client";
+import type { ChecklistStep } from "./checklist-draft";
+import { stepFormSchema } from "./step-settings";
+import { getApiClient } from "@/shared/lib/api-client";
 
 const kinds = ["email", "slack", "webhook"] as const;
 
-const configValues = z.record(z.string(), z.string());
+export type ActionConfigRow = Treaty.Data<ApiClient["api"]["action-configs"]["get"]>[number];
 
-const actionConfigRowSchema = z.object({
-  id: z.string(),
-  actionId: z.string(),
-  enabled: z.boolean(),
-  config: configValues,
-  phase: z.string(),
-});
-
-export type ActionConfigRow = z.infer<typeof actionConfigRowSchema>;
-
-type ActionConfigPayload = {
-  actionId?: string;
-  phase?: string;
-  enabled?: boolean;
-  config?: z.infer<typeof configValues>;
-};
+type NewActionConfig = Parameters<ApiClient["api"]["action-configs"]["post"]>[0];
 
 async function listActionConfigs({ signal }: { signal: AbortSignal }) {
-  const response = await apiFetch("/api/action-configs", { signal });
+  const { data, error } = await getApiClient().api["action-configs"].get({ fetch: { signal } });
 
-  if (!response.ok) {
-    throw new Error("Failed to fetch action configs");
-  }
+  if (error) throw new Error("Failed to fetch action configs");
 
-  return z.array(actionConfigRowSchema).parse(await response.json());
+  return data;
 }
 
 export const actionConfigsQuery = queryOptions({
@@ -41,20 +24,14 @@ export const actionConfigsQuery = queryOptions({
   staleTime: 30_000,
 });
 
-async function send(path: string, method: string, body?: ActionConfigPayload) {
-  const response = await apiFetch(`/api/action-configs${path}`, {
-    method,
-    headers: { "content-type": "application/json" },
-    body: body && JSON.stringify(body),
-  });
+async function checkWrite(request: Promise<{ error: object | null }>) {
+  const { error } = await request;
 
-  if (!response.ok) {
-    throw new Error("Failed to save action config");
-  }
+  if (error) throw new Error("Failed to save action config");
 }
 
 function desiredConfigs(steps: ChecklistStep[]) {
-  return new Map<string, { phase: string; config: z.infer<typeof configValues> }>(
+  return new Map<string, Pick<NewActionConfig, "phase" | "config">>(
     steps.flatMap((step) =>
       kinds.flatMap((kind) => {
         const config = step[kind];
@@ -68,23 +45,26 @@ function desiredConfigs(steps: ChecklistStep[]) {
 }
 
 export async function syncActionConfigs(steps: ChecklistStep[], existing: ActionConfigRow[]) {
+  const api = getApiClient().api["action-configs"];
   const desired = desiredConfigs(steps);
   const current = new Map(existing.map((row) => [row.actionId, row]));
 
   const removals = existing.flatMap((row) =>
     kinds.some((kind) => row.actionId.startsWith(`${kind}:`)) && !desired.has(row.actionId)
-      ? [send(`/${row.id}`, "DELETE")]
+      ? [checkWrite(api({ id: encodeURIComponent(row.id) }).delete())]
       : [],
   );
 
   const writes = [...desired].flatMap(([actionId, { phase, config }]) => {
     const row = current.get(actionId);
 
-    if (!row) return [send("", "POST", { actionId, phase, enabled: true, config })];
+    if (!row) return [checkWrite(api.post({ actionId, phase, enabled: true, config }))];
 
     const unchanged = row.phase === phase && JSON.stringify(row.config) === JSON.stringify(config);
 
-    return unchanged ? [] : [send(`/${row.id}`, "PUT", { phase, config })];
+    return unchanged
+      ? []
+      : [checkWrite(api({ id: encodeURIComponent(row.id) }).put({ phase, config }))];
   });
 
   await Promise.all([...removals, ...writes]);
@@ -93,7 +73,7 @@ export async function syncActionConfigs(steps: ChecklistStep[], existing: Action
 export function applyActionConfigs(steps: ChecklistStep[], rows: ActionConfigRow[]) {
   const byActionId = new Map(rows.map((row) => [row.actionId, row]));
 
-  return steps.map((step) => {
+  return steps.map<ChecklistStep>((step) => {
     const email =
       step.email ??
       stepFormSchema.shape.email.safeParse(byActionId.get(`email:${step.id}`)?.config).data;

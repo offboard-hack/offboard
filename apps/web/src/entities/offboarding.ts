@@ -1,26 +1,12 @@
+import type { ApiClient, Treaty } from "@offboard/api-client";
 import { queryOptions } from "@tanstack/react-query";
-import { apiFetch } from "@/shared/lib/api-fetch";
+import { getApiClient } from "@/shared/lib/api-client";
 
-export type CaseSummary = {
-  id: string;
-  name: string;
-  role: string;
-  department: string;
-  deadline: string;
-  completed: number;
-  total: number;
-};
+export type CaseSummary = Treaty.Data<ApiClient["api"]["offboardings"]["get"]>[number];
 
-export type Task = {
-  id: string;
-  title: string;
-  team: string;
-  status: "done" | "in_progress" | "todo";
-  description: string | null;
-  dueDate: string | null;
-  trackingCode: string | null;
-  subtasks: { id: string; title: string; done: boolean }[];
-};
+type CaseDetail = Treaty.Data<ReturnType<ApiClient["api"]["offboardings"]>["get"]>;
+
+export type Task = CaseDetail["tasks"][number];
 
 export type PersonAsset = {
   item: string;
@@ -28,7 +14,7 @@ export type PersonAsset = {
   status: "withPerson" | "scheduled" | "transit" | "received" | "failed";
 };
 
-export type OffboardingCase = CaseSummary & { tasks: Task[]; assets?: PersonAsset[] };
+export type OffboardingCase = CaseDetail & { assets?: PersonAsset[] };
 
 export const offboardingDepartments = [
   "Marketing",
@@ -49,31 +35,22 @@ export const offboardingTeams = [
 ] as const;
 
 async function listOffboardings({ signal }: { signal: AbortSignal }) {
-  const response = await apiFetch("/api/offboardings", { signal });
+  const { offboardings } = getApiClient().api;
+  const { data, error } = await offboardings.get({ fetch: { signal } });
 
-  if (!response.ok) {
-    throw new Error("Failed to fetch offboardings");
-  }
-
-  const summaries: CaseSummary[] = await response.json();
+  if (error) throw new Error("Failed to fetch offboardings");
 
   return Promise.all(
-    summaries.map(async (summary) => {
-      const detail = await apiFetch(`/api/offboardings/${encodeURIComponent(summary.id)}`, {
-        signal,
+    data.map(async (summary) => {
+      const detail = await offboardings({ id: encodeURIComponent(summary.id) }).get({
+        fetch: { signal },
       });
 
       if (detail.status === 401 || detail.status === 403) {
         throw new Error("Portal access is required");
       }
 
-      if (!detail.ok) {
-        return { ...summary, tasks: [] };
-      }
-
-      const found: OffboardingCase = await detail.json();
-
-      return found;
+      return detail.error ? { ...summary, tasks: [] } : detail.data;
     }),
   );
 }
@@ -150,55 +127,40 @@ export function cycleTaskStatus(current: Task["status"]) {
 }
 
 export async function toggleSubtask(subtaskId: string) {
-  const response = await fetch(`/api/subtasks/${encodeURIComponent(subtaskId)}/toggle`, {
-    method: "PATCH",
-  });
+  const { data, error } = await getApiClient()
+    .api.subtasks({ id: encodeURIComponent(subtaskId) })
+    .toggle.patch();
 
-  if (!response.ok) {
-    throw new Error("Failed to toggle subtask");
-  }
+  if (error) throw new Error("Failed to toggle subtask");
 
-  const updated: Task["subtasks"][number] = await response.json();
-
-  return updated;
+  return data;
 }
 
 export async function updateTaskStatus(taskId: string, status: Task["status"]) {
-  const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/status`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ status }),
-  });
+  const result = await getApiClient()
+    .api.tasks({ id: encodeURIComponent(taskId) })
+    .status.patch({ status });
 
-  if (!response.ok) {
-    throw new Error("Failed to update task status");
-  }
+  if (result.error) throw new Error("Failed to update task status");
 
-  const updated: Task = await response.json();
-
-  return updated;
+  return result.data;
 }
 
-export type TaskTracking = {
-  trackingCode: string | null;
-  tracking: { delivered: boolean; lastEvent: string; lastUpdate: string } | null;
-};
+export type TaskTracking = Treaty.Data<ReturnType<ApiClient["api"]["tasks"]>["tracking"]["get"]>;
 
 export function taskTrackingQuery(taskId: string) {
   return queryOptions({
     queryKey: ["task-tracking", taskId],
     queryFn: async ({ signal }) => {
-      const response = await apiFetch(`/api/tasks/${encodeURIComponent(taskId)}/tracking`, {
-        signal,
-      });
+      const { data, error } = await getApiClient()
+        .api.tasks({ id: encodeURIComponent(taskId) })
+        .tracking.get({
+          fetch: { signal },
+        });
 
-      if (!response.ok) {
-        throw new Error("Failed to fetch tracking");
-      }
+      if (error) throw new Error("Failed to fetch tracking");
 
-      const result: TaskTracking = await response.json();
-
-      return result;
+      return data;
     },
     staleTime: 60_000,
   });

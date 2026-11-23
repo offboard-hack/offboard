@@ -7,15 +7,22 @@
     "**/next-env.d.ts",
     ".turbo/",
     "tools/oxlint/anti-slop/",
+    "tools/oxlint/offboard/",
+    ".claude/skills/",
     ".agents/skills/"
   ],
   "jsPlugins": [
     {
       "name": "anti-slop",
       "specifier": "./tools/oxlint/anti-slop/index.ts"
+    },
+    {
+      "name": "offboard",
+      "specifier": "./tools/oxlint/offboard/index.mts"
     }
   ],
   "rules": {
+    "offboard/import-boundaries": "error",
     "eslint/no-restricted-imports": [
       "error",
       {

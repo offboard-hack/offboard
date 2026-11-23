@@ -1,28 +1,27 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { principalSchema } from "@offboard/access";
-import { apiFetch } from "@/shared/lib/api-fetch";
+import { getApiClient } from "@/shared/lib/api-client";
 import { safeReturnPath } from "@/features/sign-in/return-path";
 import { Portal } from "../portal";
 
 export const Route = createFileRoute("/_portal")({
   beforeLoad: async ({ context, location }) => {
-    const response = await apiFetch("/api/session");
+    const { status, data, error } = await getApiClient().api.session.get();
 
-    if (response.status === 401 || response.status === 403) {
+    if (status === 401 || status === 403) {
       context.queryClient.clear();
       throw redirect({
         to: "/entrar",
         search: {
           voltar: safeReturnPath(location.href),
-          acesso: response.status === 403 ? "revogado" : undefined,
+          acesso: status === 403 ? "revogado" : undefined,
         },
         replace: true,
       });
     }
 
-    if (!response.ok) throw new Error("Failed to verify portal session");
+    if (error) throw new Error("Failed to verify portal session");
 
-    return { principal: principalSchema.parse(await response.json()) };
+    return { principal: data };
   },
   component: Portal,
 });

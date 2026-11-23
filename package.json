@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "lint": "oxlint && turbo lint",
+    "lint": "turbo boundaries && oxlint && turbo lint",
+    "test": "npm test --workspaces --if-present",
     "format": "oxfmt --write",
     "format:check": "oxfmt --check"
   },

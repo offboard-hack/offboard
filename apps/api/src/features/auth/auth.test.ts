@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { createClient } from "@offboard/db/client";
-import { createRepositories } from "@offboard/db/repositories";
+import { createRepositories } from "../../repositories.js";
 import { authRateLimit, authUser } from "@offboard/db/schema";
 import { eq, like } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +14,7 @@ const origin = "https://offboard.example";
 describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
   if (!databaseUrl) return;
   const db = createClient(databaseUrl);
-  const repos = createRepositories(db);
+  const { team: repos } = createRepositories(db);
   const delivered = new Map<string, string>();
 
   const auth = createAuth({

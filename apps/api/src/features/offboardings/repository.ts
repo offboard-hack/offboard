@@ -1,85 +1,15 @@
+import type { Database } from "@offboard/db/client";
 import { and, asc, eq, isNotNull, ne, sql } from "drizzle-orm";
-import type { Database } from "../client.ts";
-import type { ConfigValue } from "../schema/index.ts";
-import {
-  actionConfigs,
-  integrations,
-  offboardingCases,
-  subtasks,
-  tasks,
-  teamMembers,
-} from "../schema/index.ts";
+import { offboardingCases, subtasks, tasks } from "@offboard/db/schema";
 
-export type TaskStatus = "done" | "in_progress" | "todo";
+type TaskStatus = (typeof tasks.$inferSelect)["status"];
 
-export type MemberRole = "admin" | "gestor" | "rh" | "visualizador";
+type NewOffboarding = Pick<
+  typeof offboardingCases.$inferInsert,
+  "name" | "role" | "department" | "deadline"
+>;
 
-export type NewTeamMember = { name: string; email: string; role: MemberRole };
-
-export type CaseSummary = {
-  id: string;
-  name: string;
-  role: string;
-  department: string;
-  deadline: string;
-  completed: number;
-  total: number;
-};
-
-export type SubtaskRow = {
-  id: string;
-  title: string;
-  done: boolean;
-};
-
-export type OffboardingTask = {
-  id: string;
-  title: string;
-  team: string;
-  status: TaskStatus;
-  description: string | null;
-  dueDate: string | null;
-  trackingCode: string | null;
-  subtasks: SubtaskRow[];
-};
-
-export type OffboardingCase = CaseSummary & { tasks: OffboardingTask[] };
-
-export type NewOffboarding = {
-  name: string;
-  role: string;
-  department: string;
-  deadline: string;
-};
-
-export type BulkOffboardingRow = { name: string; department: string };
-
-export type ConnectionStatus = "connected" | "disconnected" | "reconnect";
-
-export type IntegrationRow = { name: string; status: ConnectionStatus };
-
-export type ActionConfigRow = {
-  id: string;
-  actionId: string;
-  enabled: boolean;
-  config: Record<string, ConfigValue>;
-  phase: string;
-};
-
-export type NewActionConfig = {
-  actionId: string;
-  enabled?: boolean;
-  config?: Record<string, ConfigValue>;
-  phase: string;
-};
-
-const actionConfigColumns = {
-  id: actionConfigs.id,
-  actionId: actionConfigs.actionId,
-  enabled: actionConfigs.enabled,
-  config: actionConfigs.config,
-  phase: actionConfigs.phase,
-};
+type BulkOffboardingRow = Pick<NewOffboarding, "name" | "department">;
 
 function defaultDeadline() {
   const date = new Date();
@@ -88,7 +18,7 @@ function defaultDeadline() {
   return date.toISOString().slice(0, 10);
 }
 
-export function createRepositories(db: Database) {
+export function createOffboardingsRepository(db: Database) {
   async function listOffboardings() {
     const rows = await db
       .select({
@@ -121,7 +51,7 @@ export function createRepositories(db: Database) {
 
     if (!found) return null;
 
-    const caseTasks: OffboardingTask[] = found.tasks.map((task) => ({
+    const caseTasks = found.tasks.map((task) => ({
       id: task.id,
       title: task.title,
       team: task.team,
@@ -221,73 +151,6 @@ export function createRepositories(db: Database) {
     return row ?? null;
   }
 
-  async function listIntegrations() {
-    const rows = await db
-      .select({ name: integrations.name, status: integrations.status })
-      .from(integrations)
-      .orderBy(asc(integrations.name));
-
-    return rows;
-  }
-
-  async function upsertIntegration(name: string, status: ConnectionStatus) {
-    const [row] = await db
-      .insert(integrations)
-      .values({ name, status })
-      .onConflictDoUpdate({
-        target: integrations.name,
-        set: { status, updatedAt: new Date() },
-      })
-      .returning({ name: integrations.name, status: integrations.status });
-
-    return row;
-  }
-
-  async function listActionConfigs() {
-    return db.select(actionConfigColumns).from(actionConfigs).orderBy(asc(actionConfigs.actionId));
-  }
-
-  async function getActionConfigsByPhase(phase: string) {
-    return db
-      .select(actionConfigColumns)
-      .from(actionConfigs)
-      .where(sql`${actionConfigs.phase} = ${phase} AND ${actionConfigs.enabled} = true`);
-  }
-
-  async function getActionConfig(id: string) {
-    const [row] = await db
-      .select(actionConfigColumns)
-      .from(actionConfigs)
-      .where(eq(actionConfigs.id, id));
-
-    return row ?? null;
-  }
-
-  async function createActionConfig(data: NewActionConfig) {
-    const [row] = await db.insert(actionConfigs).values(data).returning(actionConfigColumns);
-
-    return row;
-  }
-
-  async function updateActionConfig(id: string, data: Partial<NewActionConfig>) {
-    const [row] = await db
-      .update(actionConfigs)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(actionConfigs.id, id))
-      .returning(actionConfigColumns);
-
-    return row ?? null;
-  }
-
-  async function deleteActionConfig(id: string) {
-    const rows = await db
-      .delete(actionConfigs)
-      .where(eq(actionConfigs.id, id))
-      .returning({ id: actionConfigs.id });
-
-    return rows.length > 0;
-  }
-
   async function getTrackedTasks() {
     return db
       .select({
@@ -319,35 +182,6 @@ export function createRepositories(db: Database) {
     return row ?? null;
   }
 
-  const memberColumns = {
-    id: teamMembers.id,
-    name: teamMembers.name,
-    email: teamMembers.email,
-    role: teamMembers.role,
-  };
-
-  async function listTeamMembers() {
-    return db.select(memberColumns).from(teamMembers).orderBy(asc(teamMembers.name));
-  }
-
-  async function createTeamMember({ name, email, role }: NewTeamMember) {
-    const [row] = await db
-      .insert(teamMembers)
-      .values({ name, email: email.trim().toLowerCase(), role })
-      .returning(memberColumns);
-
-    return row;
-  }
-
-  async function deleteTeamMember(id: string) {
-    const rows = await db
-      .delete(teamMembers)
-      .where(eq(teamMembers.id, id))
-      .returning({ id: teamMembers.id });
-
-    return rows.length > 0;
-  }
-
   return {
     listOffboardings,
     getOffboarding,
@@ -356,19 +190,10 @@ export function createRepositories(db: Database) {
     getTaskPhase,
     updateTaskStatus,
     toggleSubtask,
-    listIntegrations,
-    upsertIntegration,
-    listActionConfigs,
-    getActionConfigsByPhase,
-    getActionConfig,
-    createActionConfig,
-    updateActionConfig,
-    deleteActionConfig,
     getTrackedTasks,
     setTrackingCode,
     getTaskTrackingCode,
-    listTeamMembers,
-    createTeamMember,
-    deleteTeamMember,
   };
 }
+
+export type OffboardingsRepository = ReturnType<typeof createOffboardingsRepository>;

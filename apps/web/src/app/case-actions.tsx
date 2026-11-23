@@ -1,6 +1,7 @@
+import { getApiClient } from "@/shared/lib/api-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, lazyRouteComponent } from "@tanstack/react-router";
-import { offboardingsQuery, type OffboardingCase } from "@/entities/offboarding";
+import { offboardingsQuery } from "@/entities/offboarding";
 import { ImportModal } from "@/features/bulk-import/import-modal";
 import { NewCaseDialog } from "@/features/offboarding/new-case-dialog";
 
@@ -23,22 +24,9 @@ export function CaseActions() {
       <NewCaseDialog
         onCreate={(record) =>
           void (async () => {
-            const response = await fetch("/api/offboardings", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                name: record.name,
-                role: record.role,
-                department: record.department,
-                deadline: record.deadline,
-              }),
-            });
+            const { data: created, error } = await getApiClient().api.offboardings.post(record);
 
-            if (!response.ok) {
-              throw new Error("Failed to create offboarding");
-            }
-
-            const created: OffboardingCase = await response.json();
+            if (error) throw new Error("Failed to create offboarding");
 
             await queryClient.invalidateQueries({ queryKey: offboardingsQuery.queryKey });
             await navigate({ to: "/desligamentos/$caseId", params: { caseId: created.id } });

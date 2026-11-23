@@ -4,6 +4,7 @@
     "package-lock.json",
     "apps/web/src/app/routeTree.gen.ts",
     "dist/",
+    ".claude/skills/",
     ".agents/skills/",
     "tools/oxlint/anti-slop/"
   ]

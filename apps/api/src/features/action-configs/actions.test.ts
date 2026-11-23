@@ -1,11 +1,12 @@
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
-import { createRepositories } from "@offboard/db/repositories";
+import { createActionConfigsRepository } from "./repository.js";
 import { seedDatabase } from "@offboard/db/seed-database";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { fireActions, type ActionContext } from "./actions.ts";
+import type { ActionContext } from "../../shared/action-dispatch.js";
+import { fireActions } from "./actions.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 
@@ -18,7 +19,7 @@ const context: ActionContext = {
 
 describe.skipIf(!url)("fireActions", () => {
   const db = createClient(url ?? "");
-  const repos = createRepositories(db);
+  const repos = createActionConfigsRepository(db);
 
   let serverUrl = "";
   const receivedRequests: { method: string; url: string; body: string }[] = [];
@@ -79,7 +80,9 @@ describe.skipIf(!url)("fireActions", () => {
 
   beforeAll(async () => {
     await migrate(db, {
-      migrationsFolder: fileURLToPath(new URL("../../../packages/db/drizzle", import.meta.url)),
+      migrationsFolder: fileURLToPath(
+        new URL("../../../../../packages/db/drizzle", import.meta.url),
+      ),
     });
 
     await new Promise<void>((resolve) => {

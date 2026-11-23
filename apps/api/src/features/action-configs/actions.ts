@@ -1,14 +1,9 @@
 import { WebClient } from "@slack/web-api";
 import type { ConfigValue } from "@offboard/db/schema";
 import { Resend } from "resend";
-import type { Repositories } from "./app.js";
+import type { ActionConfigsRepository } from "./repository.js";
 
-export type ActionContext = {
-  taskId: string;
-  taskTitle: string;
-  status: string;
-  phase: string;
-};
+import type { ActionContext } from "../../shared/action-dispatch.js";
 
 export type ActionResult = {
   actionId: string;
@@ -100,7 +95,10 @@ async function executeSlackBot(
   await client.chat.postMessage({ channel, text });
 }
 
-export async function fireActions(repos: Repositories, context: ActionContext) {
+export async function fireActions(
+  repos: Pick<ActionConfigsRepository, "getActionConfigsByPhase">,
+  context: ActionContext,
+) {
   if (!context.phase) return [] satisfies ActionResult[];
 
   const configs = await repos.getActionConfigsByPhase(context.phase);

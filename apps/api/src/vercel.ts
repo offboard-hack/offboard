@@ -1,8 +1,8 @@
 import { createClient } from "@offboard/db/client";
-import { createRepositories } from "@offboard/db/repositories";
+import { createRepositories } from "./repositories.js";
 import { z } from "zod";
 import { createApp } from "./app.js";
-import { createRuntimeAuth } from "./auth.js";
+import { createRuntimeAuth } from "./features/auth/auth.js";
 
 const db = createClient(z.string().min(1).parse(process.env.POSTGRES_URL));
 const { auth, origin } = createRuntimeAuth(db, process.env.WEB_ORIGIN);

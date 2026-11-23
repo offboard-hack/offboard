@@ -1,24 +1,19 @@
+import type { ApiClient, Treaty } from "@offboard/api-client";
 import { queryOptions } from "@tanstack/react-query";
-import { apiFetch } from "@/shared/lib/api-fetch";
+import { getApiClient } from "@/shared/lib/api-client";
 
-import type { MemberRole } from "@offboard/access";
+export type TeamMember = Treaty.Data<ApiClient["api"]["team"]["get"]>[number];
 
-export type { MemberRole } from "@offboard/access";
+export type MemberRole = TeamMember["role"];
 
-export type TeamMember = { id: string; name: string; email: string; role: MemberRole };
-
-export type NewTeamMember = Omit<TeamMember, "id">;
+export type NewTeamMember = Parameters<ApiClient["api"]["team"]["post"]>[0];
 
 async function listTeam({ signal }: { signal: AbortSignal }) {
-  const response = await apiFetch("/api/team", { signal });
+  const { data, error } = await getApiClient().api.team.get({ fetch: { signal } });
 
-  if (!response.ok) {
-    throw new Error("Failed to fetch team");
-  }
+  if (error) throw new Error("Failed to fetch team");
 
-  const rows: TeamMember[] = await response.json();
-
-  return rows;
+  return data;
 }
 
 export const teamQuery = queryOptions({
@@ -28,23 +23,15 @@ export const teamQuery = queryOptions({
 });
 
 export async function createTeamMember(member: NewTeamMember) {
-  const response = await fetch("/api/team", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(member),
-  });
+  const { error } = await getApiClient().api.team.post(member);
 
-  if (!response.ok) {
-    throw new Error("Failed to create team member");
-  }
+  if (error) throw new Error("Failed to create team member");
 }
 
 export async function deleteTeamMember(id: string) {
-  const response = await fetch(`/api/team/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  });
+  const { error } = await getApiClient()
+    .api.team({ id: encodeURIComponent(id) })
+    .delete();
 
-  if (!response.ok) {
-    throw new Error("Failed to delete team member");
-  }
+  if (error) throw new Error("Failed to delete team member");
 }

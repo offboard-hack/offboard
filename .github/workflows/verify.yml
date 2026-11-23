@@ -1,0 +1,45 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: offboard
+          POSTGRES_PASSWORD: offboard
+          POSTGRES_DB: offboard_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U offboard -d offboard_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://offboard:offboard@127.0.0.1:5432/offboard_test
+      TEST_DATABASE_URL: postgresql://offboard:offboard@127.0.0.1:5432/offboard_test
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run migrate -w @offboard/db
+      - run: npm test
+      - run: npm run build -w @offboard/web
+      - run: npm run build:vercel -w @offboard/api

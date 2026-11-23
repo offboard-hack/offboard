@@ -1,20 +1,17 @@
+import type { ApiClient, Treaty } from "@offboard/api-client";
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/shared/lib/api-fetch";
+import { getApiClient } from "@/shared/lib/api-client";
 
-export type ConnectionStatus = "connected" | "disconnected" | "reconnect";
+export type IntegrationRow = Treaty.Data<ApiClient["api"]["integrations"]["get"]>[number];
 
-export type IntegrationRow = { name: string; status: ConnectionStatus };
+export type ConnectionStatus = IntegrationRow["status"];
 
 async function listIntegrations({ signal }: { signal: AbortSignal }) {
-  const response = await apiFetch("/api/integrations", { signal });
+  const { data, error } = await getApiClient().api.integrations.get({ fetch: { signal } });
 
-  if (!response.ok) {
-    throw new Error("Failed to fetch integrations");
-  }
+  if (error) throw new Error("Failed to fetch integrations");
 
-  const rows: IntegrationRow[] = await response.json();
-
-  return rows;
+  return data;
 }
 
 export const integrationsQuery = queryOptions({
@@ -24,19 +21,13 @@ export const integrationsQuery = queryOptions({
 });
 
 async function putIntegration(name: string, status: ConnectionStatus) {
-  const response = await fetch(`/api/integrations/${encodeURIComponent(name)}`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ status }),
-  });
+  const { data, error } = await getApiClient()
+    .api.integrations({ name: encodeURIComponent(name) })
+    .put({ status });
 
-  if (!response.ok) {
-    throw new Error("Failed to update integration");
-  }
+  if (error) throw new Error("Failed to update integration");
 
-  const updated: IntegrationRow = await response.json();
-
-  return updated;
+  return data;
 }
 
 export function useToggleIntegration() {

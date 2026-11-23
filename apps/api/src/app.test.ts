@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
-import { createRepositories } from "@offboard/db/repositories";
+import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
 import { tasks } from "@offboard/db/schema";
 import { seedDatabase } from "@offboard/db/seed-database";
@@ -11,7 +11,7 @@ import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.ts";
-import type { PortalAuth } from "./auth.ts";
+import type { PortalAuth } from "./shared/portal-auth.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const webOrigin = "http://localhost:5173";
@@ -291,6 +291,12 @@ describe.skipIf(!url)("api", () => {
       completed: expect.any(Number),
       total: expect.any(Number),
     });
+  });
+
+  it("returns not found for a malformed offboarding id", async () => {
+    const res = await call("/offboardings/not-a-uuid");
+
+    expect(res.status).toBe(404);
   });
 
   it("gets an offboarding with its tasks", async () => {
@@ -602,8 +608,11 @@ describe.skipIf(!url)("api", () => {
     const failing = createApp(
       webOrigin,
       {
-        ...createRepositories(db),
-        createActionConfig: () => Promise.reject(new Error("boom")),
+        ...repos,
+        actionConfigs: {
+          ...repos.actionConfigs,
+          createActionConfig: () => Promise.reject(new Error("boom")),
+        },
       },
       appOptions,
     );
@@ -623,8 +632,11 @@ describe.skipIf(!url)("api", () => {
     const failing = createApp(
       webOrigin,
       {
-        ...createRepositories(db),
-        createTeamMember: () => Promise.reject(new Error("boom")),
+        ...repos,
+        team: {
+          ...repos.team,
+          createTeamMember: () => Promise.reject(new Error("boom")),
+        },
       },
       appOptions,
     );
@@ -923,10 +935,13 @@ describe.skipIf(!url)("api", () => {
       webOrigin,
       {
         ...repos,
-        getTrackedTasks: () =>
-          Promise.resolve([
-            { id: missingTaskId, title: "Gone", phase: "d0", trackingCode: "ZZ999999999BR" },
-          ]),
+        offboardings: {
+          ...repos.offboardings,
+          getTrackedTasks: () =>
+            Promise.resolve([
+              { id: missingTaskId, title: "Gone", phase: "d0", trackingCode: "ZZ999999999BR" },
+            ]),
+        },
       },
       { ...appOptions, correiosBaseUrl },
     );
@@ -959,7 +974,10 @@ describe.skipIf(!url)("api", () => {
       webOrigin,
       {
         ...repos,
-        createActionConfig: () => Promise.reject(new Error("boom")),
+        actionConfigs: {
+          ...repos.actionConfigs,
+          createActionConfig: () => Promise.reject(new Error("boom")),
+        },
       },
       appOptions,
     );

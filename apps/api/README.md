@@ -1,5 +1,28 @@
 # Offboard API
 
+## Project structure
+
+`apps/api/src/app.ts` composes Elysia. Each directory under
+`apps/api/src/features` owns its routes, validation, services, and repositories.
+The local Node and Vercel entry points use the same composition. That
+composition passes each route plugin its own repository and injects the
+action dispatcher used by offboarding. Shared request and response
+contracts live under `apps/api/src/shared`.
+
+Run `npm run lint` to check imports between workspaces, API features,
+and frontend layers.
+
+`packages/db` owns the Drizzle schema, relations, database connection,
+migrations, and development seeds. The API imports these primitives and
+keeps feature queries in its own repositories.
+
+The web app calls the API through Eden using `@offboard/api-client`.
+Eden derives the contract from the composed Elysia `App` type. A response
+alias can use `Treaty.Data<ApiClient["api"]["team"]["get"]>`. A mutation body
+can use `Parameters<ApiClient["api"]["team"]["post"]>[0]`. Web code creates
+the client through `getApiClient()`, which forwards session cookies on
+server renders and uses the browser origin on the client.
+
 ## Run locally
 
 From the repository root, run `npm install` and start PostgreSQL with
