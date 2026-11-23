@@ -60,7 +60,7 @@ type Integration = {
 
 const catalog: Integration[] = [
   {
-    name: "E-mail (Resend)",
+    name: "E-mail",
     category: "communication",
     icon: Mail01Icon,
     purpose: "Envia notificações e links de acesso por e-mail.",
