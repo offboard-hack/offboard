@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
+import { apiFetch } from "@/shared/lib/api-fetch";
 
 export type CaseSummary = {
   id: string;
@@ -47,17 +48,8 @@ export const offboardingTeams = [
   "Pessoa desligada",
 ] as const;
 
-export function apiBase() {
-  if (typeof window === "undefined") {
-    return process.env.API_URL ?? "http://localhost:3001";
-  }
-
-  return "";
-}
-
-async function listOffboardings() {
-  const base = apiBase();
-  const response = await fetch(`${base}/api/offboardings`);
+async function listOffboardings({ signal }: { signal: AbortSignal }) {
+  const response = await apiFetch("/api/offboardings", { signal });
 
   if (!response.ok) {
     throw new Error("Failed to fetch offboardings");
@@ -67,7 +59,13 @@ async function listOffboardings() {
 
   return Promise.all(
     summaries.map(async (summary) => {
-      const detail = await fetch(`${base}/api/offboardings/${encodeURIComponent(summary.id)}`);
+      const detail = await apiFetch(`/api/offboardings/${encodeURIComponent(summary.id)}`, {
+        signal,
+      });
+
+      if (detail.status === 401 || detail.status === 403) {
+        throw new Error("Portal access is required");
+      }
 
       if (!detail.ok) {
         return { ...summary, tasks: [] };
@@ -189,8 +187,10 @@ export type TaskTracking = {
 export function taskTrackingQuery(taskId: string) {
   return queryOptions({
     queryKey: ["task-tracking", taskId],
-    queryFn: async () => {
-      const response = await fetch(`${apiBase()}/api/tasks/${encodeURIComponent(taskId)}/tracking`);
+    queryFn: async ({ signal }) => {
+      const response = await apiFetch(`/api/tasks/${encodeURIComponent(taskId)}/tracking`, {
+        signal,
+      });
 
       if (!response.ok) {
         throw new Error("Failed to fetch tracking");

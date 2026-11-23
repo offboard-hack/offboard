@@ -1,7 +1,8 @@
+import { Outlet } from "@tanstack/react-router";
 import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext } from "@tanstack/react-router";
 import stylesUrl from "@/styles.css?url";
-import { Document, NotFoundPage, Portal } from "../portal";
+import { Document, NotFoundPage } from "../portal";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({
@@ -18,6 +19,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
   }),
   shellComponent: Document,
-  component: Portal,
+  component: Outlet,
   notFoundComponent: NotFoundPage,
 });

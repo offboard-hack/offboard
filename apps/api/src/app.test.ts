@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -10,8 +11,39 @@ import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.ts";
+import type { PortalAuth } from "./auth.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+const webOrigin = "http://localhost:5173";
+const cronSecret = "test-cron-secret";
+const webhookSecret = "test-webhook-secret";
+const slackSigningSecret = "test-slack-secret";
+
+const auth: PortalAuth = {
+  async handler(request) {
+    const payload = request.method === "POST" ? await request.text() : null;
+
+    return Response.json({ path: new URL(request.url).pathname, payload });
+  },
+  resolvePrincipal(headers) {
+    const session = headers.get("x-test-session");
+
+    if (session === "anonymous") return Promise.resolve({ kind: "anonymous" });
+
+    if (session === "revoked") return Promise.resolve({ kind: "forbidden" });
+
+    const role =
+      session === "rh" || session === "gestor" || session === "visualizador" ? session : "admin";
+
+    return Promise.resolve({
+      kind: "authenticated",
+      principal: { id: "test-member", name: "Test Member", email: "member@example.com", role },
+    });
+  },
+};
+
+const appOptions = { auth, cronSecret, webhookSecret, slackSigningSecret };
+
 const missingTaskId = "00000000-0000-4000-8000-000000000000";
 const missingCaseId = "00000000-0000-4000-8000-000000000001";
 
@@ -29,7 +61,7 @@ describe.skipIf(!url)("api", () => {
 
   let correiosBaseUrl: string;
 
-  const app = createApp("http://localhost:5173", repos);
+  const app = createApp(webOrigin, repos, appOptions);
 
   type Payload = {
     name?: string;
@@ -55,13 +87,43 @@ describe.skipIf(!url)("api", () => {
   };
 
   function call(path: string, method = "GET", body?: Payload) {
+    const encoded = body === undefined ? undefined : JSON.stringify(body);
+    const headers = new Headers({ "content-type": "application/json", origin: webOrigin });
+
+    if (path.startsWith("/webhooks/inbound/")) {
+      headers.set("authorization", `Bearer ${webhookSecret}`);
+    }
+
+    if (path === "/integrations/slack/events") {
+      return app.handle(slackRequest(encoded ?? ""));
+    }
+
     return app.handle(
-      new Request(`http://localhost/api${path}`, {
-        method,
-        headers: { "content-type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      }),
+      new Request(`http://localhost/api${path}`, { method, headers, body: encoded }),
     );
+  }
+
+  function slackRequest(body: string, timestamp = String(Math.floor(Date.now() / 1000))) {
+    const signature = createHmac("sha256", slackSigningSecret)
+      .update(`v0:${timestamp}:${body}`)
+      .digest("hex");
+
+    return new Request("http://localhost/api/integrations/slack/events", {
+      method: "POST",
+      body,
+      headers: {
+        "content-type": "application/json",
+        "x-slack-request-timestamp": timestamp,
+        "x-slack-signature": `v0=${signature}`,
+      },
+    });
+  }
+
+  function cronRequest(method = "GET") {
+    return new Request("http://localhost/api/correios/check", {
+      method,
+      headers: { authorization: `Bearer ${cronSecret}` },
+    });
   }
 
   beforeAll(async () => {
@@ -94,6 +156,124 @@ describe.skipIf(!url)("api", () => {
     const res = await call("/health");
 
     expect(await res.json()).toEqual({ status: "ok" });
+  });
+
+  it("forwards magic link requests through the API prefix without consuming the body", async () => {
+    const verification = await call("/auth/magic-link/verify");
+    expect(await verification.json()).toEqual({
+      path: "/api/auth/magic-link/verify",
+      payload: null,
+    });
+
+    const requested = await call("/auth/sign-in/magic-link", "POST", {
+      email: "member@example.com",
+    });
+
+    expect(await requested.json()).toEqual({
+      path: "/api/auth/sign-in/magic-link",
+      payload: JSON.stringify({ email: "member@example.com" }),
+    });
+  });
+
+  it.each([
+    ["anonymous", 401],
+    ["revoked", 403],
+  ])("denies a %s session before reading protected records", async (session, expected) => {
+    const headers = { "x-test-session": session };
+    const principal = await app.handle(new Request("http://localhost/api/session", { headers }));
+    const cases = await app.handle(new Request("http://localhost/api/offboardings", { headers }));
+
+    expect(principal.status).toBe(expected);
+    expect(cases.status).toBe(expected);
+    expect(principal.headers.get("cache-control")).toBe("no-store");
+    expect(cases.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it.each([
+    ["admin", 201, 200],
+    ["rh", 201, 403],
+    ["gestor", 403, 403],
+    ["visualizador", 403, 403],
+  ])("enforces the %s permission matrix on the API", async (role, createStatus, teamStatus) => {
+    const headers = {
+      "x-test-session": role,
+      origin: webOrigin,
+      "content-type": "application/json",
+    };
+
+    const principal = await app.handle(new Request("http://localhost/api/session", { headers }));
+    const cases = await app.handle(new Request("http://localhost/api/offboardings", { headers }));
+    const team = await app.handle(new Request("http://localhost/api/team", { headers }));
+
+    const created = await app.handle(
+      new Request("http://localhost/api/offboardings", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          name: "Test",
+          role: "Analyst",
+          department: "RH",
+          deadline: "2026-12-01",
+        }),
+      }),
+    );
+
+    expect(principal.status).toBe(200);
+    expect(await principal.json()).toMatchObject({ role });
+    expect(cases.status).toBe(200);
+    expect(team.status).toBe(teamStatus);
+    expect(created.status).toBe(createStatus);
+  });
+
+  it("rejects an otherwise authorized request from another origin", async () => {
+    const response = await app.handle(
+      new Request("http://localhost/api/team", {
+        method: "POST",
+        headers: { origin: "https://another.example", "content-type": "application/json" },
+        body: JSON.stringify({ name: "Test", email: "test@example.com", role: "rh" }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects missing and incorrect machine credentials", async () => {
+    const noSecret = createApp(webOrigin, repos, { auth });
+    const cronWithoutConfig = await noSecret.handle(cronRequest());
+
+    const webhookWithoutCredential = await app.handle(
+      new Request(`http://localhost/api/webhooks/inbound/${missingTaskId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{"event":"delivered"}',
+      }),
+    );
+
+    const wrongCredential = await app.handle(
+      new Request("http://localhost/api/correios/check", {
+        headers: { authorization: "Bearer test-cron-wrong!" },
+      }),
+    );
+
+    expect(cronWithoutConfig.status).toBe(401);
+    expect(webhookWithoutCredential.status).toBe(401);
+    expect(wrongCredential.status).toBe(401);
+  });
+
+  it("rejects an unsigned Slack event and a correctly signed event with an expired timestamp", async () => {
+    const request = slackRequest('{"type":"event_callback"}');
+    request.headers.delete("x-slack-signature");
+
+    expect((await app.handle(request)).status).toBe(401);
+    expect((await app.handle(slackRequest('{"type":"event_callback"}', "1"))).status).toBe(401);
+
+    const noSecret = createApp(webOrigin, repos, { auth });
+    expect((await noSecret.handle(slackRequest('{"type":"event_callback"}'))).status).toBe(401);
+  });
+
+  it("rejects incorrectly formatted Slack bodies even when the signature is valid", async () => {
+    expect((await app.handle(slackRequest("{"))).status).toBe(422);
+    expect((await app.handle(slackRequest("{}"))).status).toBe(422);
   });
 
   it("lists offboardings", async () => {
@@ -419,15 +599,19 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("rethrows unexpected create errors", async () => {
-    const failing = createApp("http://localhost:5173", {
-      ...createRepositories(db),
-      createActionConfig: () => Promise.reject(new Error("boom")),
-    });
+    const failing = createApp(
+      webOrigin,
+      {
+        ...createRepositories(db),
+        createActionConfig: () => Promise.reject(new Error("boom")),
+      },
+      appOptions,
+    );
 
     const res = await failing.handle(
       new Request("http://localhost/api/action-configs", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", origin: webOrigin },
         body: JSON.stringify({ actionId: "x::y", phase: "d0" }),
       }),
     );
@@ -436,15 +620,19 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("rethrows unexpected team member create errors", async () => {
-    const failing = createApp("http://localhost:5173", {
-      ...createRepositories(db),
-      createTeamMember: () => Promise.reject(new Error("boom")),
-    });
+    const failing = createApp(
+      webOrigin,
+      {
+        ...createRepositories(db),
+        createTeamMember: () => Promise.reject(new Error("boom")),
+      },
+      appOptions,
+    );
 
     const res = await failing.handle(
       new Request("http://localhost/api/team", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", origin: webOrigin },
         body: JSON.stringify({ name: "A", email: "a@b.com", role: "rh" }),
       }),
     );
@@ -541,7 +729,7 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("returns tracking info for a task with tracking code", async () => {
-    const correiosApp = createApp("http://localhost:5173", repos, correiosBaseUrl);
+    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
 
     correiosStatus = 200;
     correiosBody = JSON.stringify({
@@ -600,7 +788,7 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("checks tracked shipments via GET and marks delivered tasks done", async () => {
-    const correiosApp = createApp("http://localhost:5173", repos, correiosBaseUrl);
+    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
 
     correiosStatus = 200;
     correiosBody = JSON.stringify({
@@ -624,7 +812,7 @@ describe.skipIf(!url)("api", () => {
 
     await db.update(tasks).set({ trackingCode: "CD987654321BR" }).where(eq(tasks.id, todo.id));
 
-    const res = await correiosApp.handle(new Request("http://localhost/api/correios/check"));
+    const res = await correiosApp.handle(cronRequest());
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -636,14 +824,12 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("checks tracked shipments via POST", async () => {
-    const correiosApp = createApp("http://localhost:5173", repos, correiosBaseUrl);
+    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
 
     correiosStatus = 200;
     correiosBody = JSON.stringify({ objetos: [] });
 
-    const res = await correiosApp.handle(
-      new Request("http://localhost/api/correios/check", { method: "POST" }),
-    );
+    const res = await correiosApp.handle(cronRequest("POST"));
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -652,7 +838,7 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("does not mark non-delivered tracked tasks as done", async () => {
-    const correiosApp = createApp("http://localhost:5173", repos, correiosBaseUrl);
+    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
 
     correiosStatus = 200;
     correiosBody = JSON.stringify({
@@ -676,7 +862,7 @@ describe.skipIf(!url)("api", () => {
 
     await db.update(tasks).set({ trackingCode: "EF111222333BR" }).where(eq(tasks.id, todo.id));
 
-    const res = await correiosApp.handle(new Request("http://localhost/api/correios/check"));
+    const res = await correiosApp.handle(cronRequest());
 
     const body = await res.json();
     expect(body.delivered).toEqual([]);
@@ -686,7 +872,7 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("fires actions for delivered tasks with a phase", async () => {
-    const correiosApp = createApp("http://localhost:5173", repos, correiosBaseUrl);
+    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
 
     correiosStatus = 200;
     correiosBody = JSON.stringify({
@@ -718,7 +904,7 @@ describe.skipIf(!url)("api", () => {
       .set({ trackingCode: "GH444555666BR" })
       .where(eq(tasks.id, taskWithPhase.id));
 
-    const res = await correiosApp.handle(new Request("http://localhost/api/correios/check"));
+    const res = await correiosApp.handle(cronRequest());
 
     const body = await res.json();
     expect(body.delivered).toContain(taskWithPhase.id);
@@ -734,7 +920,7 @@ describe.skipIf(!url)("api", () => {
 
   it("handles task deletion during correios check gracefully", async () => {
     const stubbedApp = createApp(
-      "http://localhost:5173",
+      webOrigin,
       {
         ...repos,
         getTrackedTasks: () =>
@@ -742,7 +928,7 @@ describe.skipIf(!url)("api", () => {
             { id: missingTaskId, title: "Gone", phase: "d0", trackingCode: "ZZ999999999BR" },
           ]),
       },
-      correiosBaseUrl,
+      { ...appOptions, correiosBaseUrl },
     );
 
     correiosStatus = 200;
@@ -761,7 +947,7 @@ describe.skipIf(!url)("api", () => {
       ],
     });
 
-    const res = await stubbedApp.handle(new Request("http://localhost/api/correios/check"));
+    const res = await stubbedApp.handle(cronRequest());
 
     const body = await res.json();
     expect(body.checked).toBe(1);
@@ -769,15 +955,19 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("rethrows unexpected create errors", async () => {
-    const failing = createApp("http://localhost:5173", {
-      ...repos,
-      createActionConfig: () => Promise.reject(new Error("boom")),
-    });
+    const failing = createApp(
+      webOrigin,
+      {
+        ...repos,
+        createActionConfig: () => Promise.reject(new Error("boom")),
+      },
+      appOptions,
+    );
 
     const res = await failing.handle(
       new Request("http://localhost/api/action-configs", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", origin: webOrigin },
         body: JSON.stringify({ actionId: "x::y", phase: "d0" }),
       }),
     );

@@ -229,7 +229,7 @@ const equipmentColumns: TableColumn<Equipment>[] = [
   },
 ];
 
-const route = getRouteApi("/bens-e-coleta");
+const route = getRouteApi("/_portal/bens-e-coleta");
 
 export function EquipmentPage() {
   const navigate = route.useNavigate();

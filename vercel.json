@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npm run build --workspace=apps/web",
+  "buildCommand": "npm run build:vercel -w @offboard/api && npm run build -w @offboard/web",
   "installCommand": "npm install",
   "framework": null,
   "outputDirectory": "apps/web/dist/client",
@@ -9,12 +9,15 @@
     },
     "api/offboard.mjs": {
       "memory": 256,
-      "maxDuration": 10
+      "maxDuration": 10,
+      "includeFiles": "apps/api/dist/**"
     }
   },
   "crons": [{ "path": "/api/correios/check", "schedule": "0 8 * * *" }],
   "rewrites": [
     { "source": "/api/health", "destination": "/api/offboard" },
+    { "source": "/api/auth/:path*", "destination": "/api/offboard" },
+    { "source": "/api/session", "destination": "/api/offboard" },
     { "source": "/api/offboardings", "destination": "/api/offboard" },
     { "source": "/api/offboardings/:path*", "destination": "/api/offboard" },
     { "source": "/api/tasks/:path*", "destination": "/api/offboard" },
@@ -24,7 +27,6 @@
     { "source": "/api/action-configs", "destination": "/api/offboard" },
     { "source": "/api/action-configs/:path*", "destination": "/api/offboard" },
     { "source": "/api/team", "destination": "/api/offboard" },
-    { "source": "/api/_diag", "destination": "/api/offboard" },
     { "source": "/api/team/:path*", "destination": "/api/offboard" },
     { "source": "/api/webhooks/:path*", "destination": "/api/offboard" },
     { "source": "/api/correios/:path*", "destination": "/api/offboard" },

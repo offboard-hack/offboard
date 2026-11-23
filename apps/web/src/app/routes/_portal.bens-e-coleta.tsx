@@ -4,7 +4,7 @@ import { createFileRoute, lazyRouteComponent } from "@tanstack/react-router";
 import { offboardingsQuery } from "@/entities/offboarding";
 import { equipmentStatus } from "@/features/asset-returns/status";
 
-export const Route = createFileRoute("/bens-e-coleta")({
+export const Route = createFileRoute("/_portal/bens-e-coleta")({
   validateSearch: listSearchSchema.extend({
     status: z.enum(Object.keys(equipmentStatus)).optional().catch(undefined),
   }),

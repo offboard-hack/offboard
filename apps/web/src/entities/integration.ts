@@ -1,13 +1,12 @@
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiBase } from "./offboarding";
+import { apiFetch } from "@/shared/lib/api-fetch";
 
 export type ConnectionStatus = "connected" | "disconnected" | "reconnect";
 
 export type IntegrationRow = { name: string; status: ConnectionStatus };
 
-async function listIntegrations() {
-  const base = apiBase();
-  const response = await fetch(`${base}/api/integrations`);
+async function listIntegrations({ signal }: { signal: AbortSignal }) {
+  const response = await apiFetch("/api/integrations", { signal });
 
   if (!response.ok) {
     throw new Error("Failed to fetch integrations");
@@ -25,9 +24,7 @@ export const integrationsQuery = queryOptions({
 });
 
 async function putIntegration(name: string, status: ConnectionStatus) {
-  const base = apiBase();
-
-  const response = await fetch(`${base}/api/integrations/${encodeURIComponent(name)}`, {
+  const response = await fetch(`/api/integrations/${encodeURIComponent(name)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ status }),

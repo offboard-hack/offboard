@@ -9,7 +9,7 @@ import {
 } from "@/entities/offboarding";
 import { Cases } from "../portal";
 
-export const Route = createFileRoute("/desligamentos")({
+export const Route = createFileRoute("/_portal/desligamentos")({
   validateSearch: listSearchSchema.extend({
     area: z.enum(offboardingDepartments).optional().catch(undefined),
     status: z.enum(Object.keys(caseStatusLabels)).optional().catch(undefined),

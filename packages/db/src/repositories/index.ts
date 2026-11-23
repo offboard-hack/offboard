@@ -333,7 +333,7 @@ export function createRepositories(db: Database) {
   async function createTeamMember({ name, email, role }: NewTeamMember) {
     const [row] = await db
       .insert(teamMembers)
-      .values({ name, email, role })
+      .values({ name, email: email.trim().toLowerCase(), role })
       .returning(memberColumns);
 
     return row;

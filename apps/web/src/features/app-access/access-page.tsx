@@ -23,8 +23,8 @@ const styles = {
 
 const roleDetails = {
   admin: { label: "Admin", access: "Acesso total" },
-  rh: { label: "RH", access: "Cadastro e painel" },
-  gestor: { label: "Gestor", access: "Equipe e aprovações" },
+  rh: { label: "RH", access: "Operação de desligamentos" },
+  gestor: { label: "Gestor", access: "Somente leitura" },
   visualizador: { label: "Visualizador", access: "Somente leitura" },
 } satisfies Record<MemberRole, { label: string; access: string }>;
 
@@ -54,14 +54,14 @@ const roleCards: {
     label: "RH",
     icon: UserGroupIcon,
     tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200",
-    capabilities: "Cria e acompanha desligamentos, executa checklist, envia comunicações",
+    capabilities: "Cria, importa e acompanha desligamentos, atualiza tarefas e subtarefas",
   },
   {
     role: "gestor",
     label: "Gestor",
     icon: UserCheck01Icon,
     tone: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-200",
-    capabilities: "Acompanha equipe, aprova tarefas, recebe notificações",
+    capabilities: "Consulta desligamentos e tarefas",
   },
   {
     role: "visualizador",
@@ -82,7 +82,7 @@ const roleBadges: Record<
   visualizador: { variant: "outline", className: "bg-muted text-muted-foreground" },
 };
 
-const route = getRouteApi("/equipe");
+const route = getRouteApi("/_portal/equipe");
 
 export function AccessPage() {
   const navigate = route.useNavigate();
@@ -172,6 +172,13 @@ export function AccessPage() {
       </p>
 
       <section className="min-w-0" aria-labelledby="equipe">
+        {(add.isError || remove.isError) && (
+          <p role="alert" className="mb-3 text-sm text-destructive">
+            {add.isError
+              ? "Não foi possível autorizar o acesso. Confira se o e-mail já foi cadastrado."
+              : "Não foi possível remover o acesso. Atualize a página e tente novamente."}
+          </p>
+        )}
         <DataTable
           toolbar={
             <h2 {...classProps(s.subheading)} id="equipe">

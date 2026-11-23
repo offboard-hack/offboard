@@ -130,7 +130,7 @@ const catalog: Integration[] = [
   },
 ];
 
-const route = getRouteApi("/integracoes");
+const route = getRouteApi("/_portal/integracoes");
 
 function searchKey(text: string) {
   return text

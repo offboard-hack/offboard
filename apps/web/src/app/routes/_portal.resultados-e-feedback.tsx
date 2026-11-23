@@ -1,9 +1,9 @@
 import { createFileRoute, lazyRouteComponent } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/candidaturas-assistidas")({
-  head: () => ({ meta: [{ title: "Candidaturas assistidas · Offboard" }] }),
+export const Route = createFileRoute("/_portal/resultados-e-feedback")({
+  head: () => ({ meta: [{ title: "Resultados e feedback · Offboard" }] }),
   component: lazyRouteComponent(
     () => import("@/features/transition-insights/insights-pages"),
-    "ApplicationsPage",
+    "FeedbackPage",
   ),
 });

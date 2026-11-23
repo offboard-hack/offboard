@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { createServerEntry } from "@tanstack/react-start/server";
 import { QueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -6,7 +7,7 @@ import type { ChecklistStep } from "@/features/checklist/checklist-draft";
 import {
   actionConfigsQuery,
   applyActionConfigs,
-  syncActionConfigs,
+  syncActionConfigs as syncConfigs,
   type ActionConfigRow,
 } from "./action-config";
 
@@ -44,6 +45,26 @@ beforeEach(() => {
   listBody = [];
 });
 
+function runInRequest<T>(operation: () => Promise<T>) {
+  return new Promise<T>((resolve, reject) => {
+    const entry = createServerEntry({
+      async fetch() {
+        await operation().then(resolve, reject);
+
+        return new Response(null, { status: 204 });
+      },
+    });
+
+    void Promise.resolve(entry.fetch(new Request("http://localhost/checklist-automatico"))).catch(
+      reject,
+    );
+  });
+}
+
+function syncActionConfigs(...args: Parameters<typeof syncConfigs>) {
+  return runInRequest(() => syncConfigs(...args));
+}
+
 const email = { subject: "Assunto", body: "Mensagem" };
 const slack = { channel: "#rh", message: "Oi" };
 const webhook = { url: "https://example.com/hook", method: "POST" as const };
@@ -73,7 +94,8 @@ const byUrl = (a: Received, b: Received) =>
   );
 
 describe("actionConfigsQuery", () => {
-  const fetchRows = () => new QueryClient().fetchQuery({ ...actionConfigsQuery, retry: false });
+  const fetchRows = () =>
+    runInRequest(() => new QueryClient().fetchQuery({ ...actionConfigsQuery, retry: false }));
 
   it("fetches and parses rows", async () => {
     listBody = [row()];

@@ -10,126 +10,156 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as BensEColetaRouteImport } from './routes/bens-e-coleta'
-import { Route as CandidaturasAssistidasRouteImport } from './routes/candidaturas-assistidas'
-import { Route as ChecklistAutomaticoRouteImport } from './routes/checklist-automatico'
-import { Route as DesligamentosRouteImport } from './routes/desligamentos'
-import { Route as EquipeRouteImport } from './routes/equipe'
-import { Route as IntegracoesRouteImport } from './routes/integracoes'
-import { Route as PainelRouteImport } from './routes/painel'
-import { Route as PlanosEGastosRouteImport } from './routes/planos-e-gastos'
-import { Route as ResultadosEFeedbackRouteImport } from './routes/resultados-e-feedback'
-import { Route as DesligamentosCaseIdRouteImport } from './routes/desligamentos_.$caseId'
-import { Route as DesligamentosImportarRouteImport } from './routes/desligamentos_.importar'
+import { Route as PortalRouteImport } from './routes/_portal'
+import { Route as EntrarRouteImport } from './routes/entrar'
+import { Route as PortalBensEColetaRouteImport } from './routes/_portal.bens-e-coleta'
+import { Route as PortalCandidaturasAssistidasRouteImport } from './routes/_portal.candidaturas-assistidas'
+import { Route as PortalChecklistAutomaticoRouteImport } from './routes/_portal.checklist-automatico'
+import { Route as PortalDesligamentosRouteImport } from './routes/_portal.desligamentos'
+import { Route as PortalEquipeRouteImport } from './routes/_portal.equipe'
+import { Route as PortalIntegracoesRouteImport } from './routes/_portal.integracoes'
+import { Route as PortalPainelRouteImport } from './routes/_portal.painel'
+import { Route as PortalPlanosEGastosRouteImport } from './routes/_portal.planos-e-gastos'
+import { Route as PortalResultadosEFeedbackRouteImport } from './routes/_portal.resultados-e-feedback'
+import { Route as PortalSemAcessoRouteImport } from './routes/_portal.sem-acesso'
+import { Route as PortalDesligamentosCaseIdRouteImport } from './routes/_portal.desligamentos_.$caseId'
+import { Route as PortalDesligamentosImportarRouteImport } from './routes/_portal.desligamentos_.importar'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const BensEColetaRoute = BensEColetaRouteImport.update({
+const PortalRoute = PortalRouteImport.update({
+  id: '/_portal',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EntrarRoute = EntrarRouteImport.update({
+  id: '/entrar',
+  path: '/entrar',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PortalBensEColetaRoute = PortalBensEColetaRouteImport.update({
   id: '/bens-e-coleta',
   path: '/bens-e-coleta',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => PortalRoute,
 } as any)
-const CandidaturasAssistidasRoute = CandidaturasAssistidasRouteImport.update({
-  id: '/candidaturas-assistidas',
-  path: '/candidaturas-assistidas',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ChecklistAutomaticoRoute = ChecklistAutomaticoRouteImport.update({
-  id: '/checklist-automatico',
-  path: '/checklist-automatico',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DesligamentosRoute = DesligamentosRouteImport.update({
+const PortalCandidaturasAssistidasRoute =
+  PortalCandidaturasAssistidasRouteImport.update({
+    id: '/candidaturas-assistidas',
+    path: '/candidaturas-assistidas',
+    getParentRoute: () => PortalRoute,
+  } as any)
+const PortalChecklistAutomaticoRoute =
+  PortalChecklistAutomaticoRouteImport.update({
+    id: '/checklist-automatico',
+    path: '/checklist-automatico',
+    getParentRoute: () => PortalRoute,
+  } as any)
+const PortalDesligamentosRoute = PortalDesligamentosRouteImport.update({
   id: '/desligamentos',
   path: '/desligamentos',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => PortalRoute,
 } as any)
-const EquipeRoute = EquipeRouteImport.update({
+const PortalEquipeRoute = PortalEquipeRouteImport.update({
   id: '/equipe',
   path: '/equipe',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => PortalRoute,
 } as any)
-const IntegracoesRoute = IntegracoesRouteImport.update({
+const PortalIntegracoesRoute = PortalIntegracoesRouteImport.update({
   id: '/integracoes',
   path: '/integracoes',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => PortalRoute,
 } as any)
-const PainelRoute = PainelRouteImport.update({
+const PortalPainelRoute = PortalPainelRouteImport.update({
   id: '/painel',
   path: '/painel',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => PortalRoute,
 } as any)
-const PlanosEGastosRoute = PlanosEGastosRouteImport.update({
+const PortalPlanosEGastosRoute = PortalPlanosEGastosRouteImport.update({
   id: '/planos-e-gastos',
   path: '/planos-e-gastos',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => PortalRoute,
 } as any)
-const ResultadosEFeedbackRoute = ResultadosEFeedbackRouteImport.update({
-  id: '/resultados-e-feedback',
-  path: '/resultados-e-feedback',
-  getParentRoute: () => rootRouteImport,
+const PortalResultadosEFeedbackRoute =
+  PortalResultadosEFeedbackRouteImport.update({
+    id: '/resultados-e-feedback',
+    path: '/resultados-e-feedback',
+    getParentRoute: () => PortalRoute,
+  } as any)
+const PortalSemAcessoRoute = PortalSemAcessoRouteImport.update({
+  id: '/sem-acesso',
+  path: '/sem-acesso',
+  getParentRoute: () => PortalRoute,
 } as any)
-const DesligamentosCaseIdRoute = DesligamentosCaseIdRouteImport.update({
-  id: '/desligamentos_/$caseId',
-  path: '/desligamentos/$caseId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DesligamentosImportarRoute = DesligamentosImportarRouteImport.update({
-  id: '/desligamentos_/importar',
-  path: '/desligamentos/importar',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const PortalDesligamentosCaseIdRoute =
+  PortalDesligamentosCaseIdRouteImport.update({
+    id: '/desligamentos_/$caseId',
+    path: '/desligamentos/$caseId',
+    getParentRoute: () => PortalRoute,
+  } as any)
+const PortalDesligamentosImportarRoute =
+  PortalDesligamentosImportarRouteImport.update({
+    id: '/desligamentos_/importar',
+    path: '/desligamentos/importar',
+    getParentRoute: () => PortalRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/bens-e-coleta': typeof BensEColetaRoute
-  '/candidaturas-assistidas': typeof CandidaturasAssistidasRoute
-  '/checklist-automatico': typeof ChecklistAutomaticoRoute
-  '/desligamentos': typeof DesligamentosRoute
-  '/equipe': typeof EquipeRoute
-  '/integracoes': typeof IntegracoesRoute
-  '/painel': typeof PainelRoute
-  '/planos-e-gastos': typeof PlanosEGastosRoute
-  '/resultados-e-feedback': typeof ResultadosEFeedbackRoute
-  '/desligamentos/$caseId': typeof DesligamentosCaseIdRoute
-  '/desligamentos/importar': typeof DesligamentosImportarRoute
+  '/entrar': typeof EntrarRoute
+  '/bens-e-coleta': typeof PortalBensEColetaRoute
+  '/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
+  '/checklist-automatico': typeof PortalChecklistAutomaticoRoute
+  '/desligamentos': typeof PortalDesligamentosRoute
+  '/equipe': typeof PortalEquipeRoute
+  '/integracoes': typeof PortalIntegracoesRoute
+  '/painel': typeof PortalPainelRoute
+  '/planos-e-gastos': typeof PortalPlanosEGastosRoute
+  '/resultados-e-feedback': typeof PortalResultadosEFeedbackRoute
+  '/sem-acesso': typeof PortalSemAcessoRoute
+  '/desligamentos/$caseId': typeof PortalDesligamentosCaseIdRoute
+  '/desligamentos/importar': typeof PortalDesligamentosImportarRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/bens-e-coleta': typeof BensEColetaRoute
-  '/candidaturas-assistidas': typeof CandidaturasAssistidasRoute
-  '/checklist-automatico': typeof ChecklistAutomaticoRoute
-  '/desligamentos': typeof DesligamentosRoute
-  '/equipe': typeof EquipeRoute
-  '/integracoes': typeof IntegracoesRoute
-  '/painel': typeof PainelRoute
-  '/planos-e-gastos': typeof PlanosEGastosRoute
-  '/resultados-e-feedback': typeof ResultadosEFeedbackRoute
-  '/desligamentos/$caseId': typeof DesligamentosCaseIdRoute
-  '/desligamentos/importar': typeof DesligamentosImportarRoute
+  '/entrar': typeof EntrarRoute
+  '/bens-e-coleta': typeof PortalBensEColetaRoute
+  '/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
+  '/checklist-automatico': typeof PortalChecklistAutomaticoRoute
+  '/desligamentos': typeof PortalDesligamentosRoute
+  '/equipe': typeof PortalEquipeRoute
+  '/integracoes': typeof PortalIntegracoesRoute
+  '/painel': typeof PortalPainelRoute
+  '/planos-e-gastos': typeof PortalPlanosEGastosRoute
+  '/resultados-e-feedback': typeof PortalResultadosEFeedbackRoute
+  '/sem-acesso': typeof PortalSemAcessoRoute
+  '/desligamentos/$caseId': typeof PortalDesligamentosCaseIdRoute
+  '/desligamentos/importar': typeof PortalDesligamentosImportarRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/bens-e-coleta': typeof BensEColetaRoute
-  '/candidaturas-assistidas': typeof CandidaturasAssistidasRoute
-  '/checklist-automatico': typeof ChecklistAutomaticoRoute
-  '/desligamentos': typeof DesligamentosRoute
-  '/equipe': typeof EquipeRoute
-  '/integracoes': typeof IntegracoesRoute
-  '/painel': typeof PainelRoute
-  '/planos-e-gastos': typeof PlanosEGastosRoute
-  '/resultados-e-feedback': typeof ResultadosEFeedbackRoute
-  '/desligamentos_/$caseId': typeof DesligamentosCaseIdRoute
-  '/desligamentos_/importar': typeof DesligamentosImportarRoute
+  '/_portal': typeof PortalRouteWithChildren
+  '/entrar': typeof EntrarRoute
+  '/_portal/bens-e-coleta': typeof PortalBensEColetaRoute
+  '/_portal/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
+  '/_portal/checklist-automatico': typeof PortalChecklistAutomaticoRoute
+  '/_portal/desligamentos': typeof PortalDesligamentosRoute
+  '/_portal/equipe': typeof PortalEquipeRoute
+  '/_portal/integracoes': typeof PortalIntegracoesRoute
+  '/_portal/painel': typeof PortalPainelRoute
+  '/_portal/planos-e-gastos': typeof PortalPlanosEGastosRoute
+  '/_portal/resultados-e-feedback': typeof PortalResultadosEFeedbackRoute
+  '/_portal/sem-acesso': typeof PortalSemAcessoRoute
+  '/_portal/desligamentos_/$caseId': typeof PortalDesligamentosCaseIdRoute
+  '/_portal/desligamentos_/importar': typeof PortalDesligamentosImportarRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/entrar'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
     | '/checklist-automatico'
@@ -139,11 +169,13 @@ export interface FileRouteTypes {
     | '/painel'
     | '/planos-e-gastos'
     | '/resultados-e-feedback'
+    | '/sem-acesso'
     | '/desligamentos/$caseId'
     | '/desligamentos/importar'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/entrar'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
     | '/checklist-automatico'
@@ -153,37 +185,32 @@ export interface FileRouteTypes {
     | '/painel'
     | '/planos-e-gastos'
     | '/resultados-e-feedback'
+    | '/sem-acesso'
     | '/desligamentos/$caseId'
     | '/desligamentos/importar'
   id:
     | '__root__'
     | '/'
-    | '/bens-e-coleta'
-    | '/candidaturas-assistidas'
-    | '/checklist-automatico'
-    | '/desligamentos'
-    | '/equipe'
-    | '/integracoes'
-    | '/painel'
-    | '/planos-e-gastos'
-    | '/resultados-e-feedback'
-    | '/desligamentos_/$caseId'
-    | '/desligamentos_/importar'
+    | '/_portal'
+    | '/entrar'
+    | '/_portal/bens-e-coleta'
+    | '/_portal/candidaturas-assistidas'
+    | '/_portal/checklist-automatico'
+    | '/_portal/desligamentos'
+    | '/_portal/equipe'
+    | '/_portal/integracoes'
+    | '/_portal/painel'
+    | '/_portal/planos-e-gastos'
+    | '/_portal/resultados-e-feedback'
+    | '/_portal/sem-acesso'
+    | '/_portal/desligamentos_/$caseId'
+    | '/_portal/desligamentos_/importar'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  BensEColetaRoute: typeof BensEColetaRoute
-  CandidaturasAssistidasRoute: typeof CandidaturasAssistidasRoute
-  ChecklistAutomaticoRoute: typeof ChecklistAutomaticoRoute
-  DesligamentosRoute: typeof DesligamentosRoute
-  EquipeRoute: typeof EquipeRoute
-  IntegracoesRoute: typeof IntegracoesRoute
-  PainelRoute: typeof PainelRoute
-  PlanosEGastosRoute: typeof PlanosEGastosRoute
-  ResultadosEFeedbackRoute: typeof ResultadosEFeedbackRoute
-  DesligamentosCaseIdRoute: typeof DesligamentosCaseIdRoute
-  DesligamentosImportarRoute: typeof DesligamentosImportarRoute
+  PortalRoute: typeof PortalRouteWithChildren
+  EntrarRoute: typeof EntrarRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -195,99 +222,144 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/bens-e-coleta': {
-      id: '/bens-e-coleta'
+    '/_portal': {
+      id: '/_portal'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof PortalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/entrar': {
+      id: '/entrar'
+      path: '/entrar'
+      fullPath: '/entrar'
+      preLoaderRoute: typeof EntrarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_portal/bens-e-coleta': {
+      id: '/_portal/bens-e-coleta'
       path: '/bens-e-coleta'
       fullPath: '/bens-e-coleta'
-      preLoaderRoute: typeof BensEColetaRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof PortalBensEColetaRouteImport
+      parentRoute: typeof PortalRoute
     }
-    '/candidaturas-assistidas': {
-      id: '/candidaturas-assistidas'
+    '/_portal/candidaturas-assistidas': {
+      id: '/_portal/candidaturas-assistidas'
       path: '/candidaturas-assistidas'
       fullPath: '/candidaturas-assistidas'
-      preLoaderRoute: typeof CandidaturasAssistidasRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof PortalCandidaturasAssistidasRouteImport
+      parentRoute: typeof PortalRoute
     }
-    '/checklist-automatico': {
-      id: '/checklist-automatico'
+    '/_portal/checklist-automatico': {
+      id: '/_portal/checklist-automatico'
       path: '/checklist-automatico'
       fullPath: '/checklist-automatico'
-      preLoaderRoute: typeof ChecklistAutomaticoRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof PortalChecklistAutomaticoRouteImport
+      parentRoute: typeof PortalRoute
     }
-    '/desligamentos': {
-      id: '/desligamentos'
+    '/_portal/desligamentos': {
+      id: '/_portal/desligamentos'
       path: '/desligamentos'
       fullPath: '/desligamentos'
-      preLoaderRoute: typeof DesligamentosRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof PortalDesligamentosRouteImport
+      parentRoute: typeof PortalRoute
     }
-    '/equipe': {
-      id: '/equipe'
+    '/_portal/equipe': {
+      id: '/_portal/equipe'
       path: '/equipe'
       fullPath: '/equipe'
-      preLoaderRoute: typeof EquipeRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof PortalEquipeRouteImport
+      parentRoute: typeof PortalRoute
     }
-    '/integracoes': {
-      id: '/integracoes'
+    '/_portal/integracoes': {
+      id: '/_portal/integracoes'
       path: '/integracoes'
       fullPath: '/integracoes'
-      preLoaderRoute: typeof IntegracoesRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof PortalIntegracoesRouteImport
+      parentRoute: typeof PortalRoute
     }
-    '/painel': {
-      id: '/painel'
+    '/_portal/painel': {
+      id: '/_portal/painel'
       path: '/painel'
       fullPath: '/painel'
-      preLoaderRoute: typeof PainelRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof PortalPainelRouteImport
+      parentRoute: typeof PortalRoute
     }
-    '/planos-e-gastos': {
-      id: '/planos-e-gastos'
+    '/_portal/planos-e-gastos': {
+      id: '/_portal/planos-e-gastos'
       path: '/planos-e-gastos'
       fullPath: '/planos-e-gastos'
-      preLoaderRoute: typeof PlanosEGastosRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof PortalPlanosEGastosRouteImport
+      parentRoute: typeof PortalRoute
     }
-    '/resultados-e-feedback': {
-      id: '/resultados-e-feedback'
+    '/_portal/resultados-e-feedback': {
+      id: '/_portal/resultados-e-feedback'
       path: '/resultados-e-feedback'
       fullPath: '/resultados-e-feedback'
-      preLoaderRoute: typeof ResultadosEFeedbackRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof PortalResultadosEFeedbackRouteImport
+      parentRoute: typeof PortalRoute
     }
-    '/desligamentos_/$caseId': {
-      id: '/desligamentos_/$caseId'
+    '/_portal/sem-acesso': {
+      id: '/_portal/sem-acesso'
+      path: '/sem-acesso'
+      fullPath: '/sem-acesso'
+      preLoaderRoute: typeof PortalSemAcessoRouteImport
+      parentRoute: typeof PortalRoute
+    }
+    '/_portal/desligamentos_/$caseId': {
+      id: '/_portal/desligamentos_/$caseId'
       path: '/desligamentos/$caseId'
       fullPath: '/desligamentos/$caseId'
-      preLoaderRoute: typeof DesligamentosCaseIdRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof PortalDesligamentosCaseIdRouteImport
+      parentRoute: typeof PortalRoute
     }
-    '/desligamentos_/importar': {
-      id: '/desligamentos_/importar'
+    '/_portal/desligamentos_/importar': {
+      id: '/_portal/desligamentos_/importar'
       path: '/desligamentos/importar'
       fullPath: '/desligamentos/importar'
-      preLoaderRoute: typeof DesligamentosImportarRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof PortalDesligamentosImportarRouteImport
+      parentRoute: typeof PortalRoute
     }
   }
 }
 
+interface PortalRouteChildren {
+  PortalBensEColetaRoute: typeof PortalBensEColetaRoute
+  PortalCandidaturasAssistidasRoute: typeof PortalCandidaturasAssistidasRoute
+  PortalChecklistAutomaticoRoute: typeof PortalChecklistAutomaticoRoute
+  PortalDesligamentosRoute: typeof PortalDesligamentosRoute
+  PortalEquipeRoute: typeof PortalEquipeRoute
+  PortalIntegracoesRoute: typeof PortalIntegracoesRoute
+  PortalPainelRoute: typeof PortalPainelRoute
+  PortalPlanosEGastosRoute: typeof PortalPlanosEGastosRoute
+  PortalResultadosEFeedbackRoute: typeof PortalResultadosEFeedbackRoute
+  PortalSemAcessoRoute: typeof PortalSemAcessoRoute
+  PortalDesligamentosCaseIdRoute: typeof PortalDesligamentosCaseIdRoute
+  PortalDesligamentosImportarRoute: typeof PortalDesligamentosImportarRoute
+}
+
+const PortalRouteChildren: PortalRouteChildren = {
+  PortalBensEColetaRoute: PortalBensEColetaRoute,
+  PortalCandidaturasAssistidasRoute: PortalCandidaturasAssistidasRoute,
+  PortalChecklistAutomaticoRoute: PortalChecklistAutomaticoRoute,
+  PortalDesligamentosRoute: PortalDesligamentosRoute,
+  PortalEquipeRoute: PortalEquipeRoute,
+  PortalIntegracoesRoute: PortalIntegracoesRoute,
+  PortalPainelRoute: PortalPainelRoute,
+  PortalPlanosEGastosRoute: PortalPlanosEGastosRoute,
+  PortalResultadosEFeedbackRoute: PortalResultadosEFeedbackRoute,
+  PortalSemAcessoRoute: PortalSemAcessoRoute,
+  PortalDesligamentosCaseIdRoute: PortalDesligamentosCaseIdRoute,
+  PortalDesligamentosImportarRoute: PortalDesligamentosImportarRoute,
+}
+
+const PortalRouteWithChildren =
+  PortalRoute._addFileChildren(PortalRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  BensEColetaRoute: BensEColetaRoute,
-  CandidaturasAssistidasRoute: CandidaturasAssistidasRoute,
-  ChecklistAutomaticoRoute: ChecklistAutomaticoRoute,
-  DesligamentosRoute: DesligamentosRoute,
-  EquipeRoute: EquipeRoute,
-  IntegracoesRoute: IntegracoesRoute,
-  PainelRoute: PainelRoute,
-  PlanosEGastosRoute: PlanosEGastosRoute,
-  ResultadosEFeedbackRoute: ResultadosEFeedbackRoute,
-  DesligamentosCaseIdRoute: DesligamentosCaseIdRoute,
-  DesligamentosImportarRoute: DesligamentosImportarRoute,
+  PortalRoute: PortalRouteWithChildren,
+  EntrarRoute: EntrarRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

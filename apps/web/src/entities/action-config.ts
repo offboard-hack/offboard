@@ -2,7 +2,7 @@ import { queryOptions } from "@tanstack/react-query";
 import { z } from "zod";
 import type { ChecklistStep } from "@/features/checklist/checklist-draft";
 import { stepFormSchema } from "@/features/checklist/step-settings";
-import { apiBase } from "./offboarding";
+import { apiFetch } from "@/shared/lib/api-fetch";
 
 const kinds = ["email", "slack", "webhook"] as const;
 
@@ -25,8 +25,8 @@ type ActionConfigPayload = {
   config?: z.infer<typeof configValues>;
 };
 
-async function listActionConfigs() {
-  const response = await fetch(`${apiBase()}/api/action-configs`);
+async function listActionConfigs({ signal }: { signal: AbortSignal }) {
+  const response = await apiFetch("/api/action-configs", { signal });
 
   if (!response.ok) {
     throw new Error("Failed to fetch action configs");
@@ -42,7 +42,7 @@ export const actionConfigsQuery = queryOptions({
 });
 
 async function send(path: string, method: string, body?: ActionConfigPayload) {
-  const response = await fetch(`${apiBase()}/api/action-configs${path}`, {
+  const response = await apiFetch(`/api/action-configs${path}`, {
     method,
     headers: { "content-type": "application/json" },
     body: body && JSON.stringify(body),

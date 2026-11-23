@@ -4,7 +4,7 @@
   "plugins": ["unicorn", "typescript", "oxc", "react"],
   "ignorePatterns": [
     "dist/",
-    "api/offboard.mjs",
+    "**/next-env.d.ts",
     ".turbo/",
     "tools/oxlint/anti-slop/",
     ".agents/skills/"

@@ -4,7 +4,7 @@ import { offboardingsQuery, type OffboardingCase } from "@/entities/offboarding"
 import { ImportModal } from "@/features/bulk-import/import-modal";
 import { NewCaseDialog } from "@/features/offboarding/new-case-dialog";
 
-const route = getRouteApi("/desligamentos");
+const route = getRouteApi("/_portal/desligamentos");
 
 const ImportPage = lazyRouteComponent(
   () => import("@/features/bulk-import/import-page"),

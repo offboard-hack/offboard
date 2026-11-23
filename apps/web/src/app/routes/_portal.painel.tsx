@@ -4,7 +4,7 @@ import { offboardingTeams, offboardingsQuery } from "@/entities/offboarding";
 import { deadlineGroups } from "@/features/dashboard/deadline";
 import { Dashboard } from "../portal";
 
-export const Route = createFileRoute("/painel")({
+export const Route = createFileRoute("/_portal/painel")({
   validateSearch: z.object({
     area: z.enum(offboardingTeams).optional().catch(undefined),
     deadline: z.enum(deadlineGroups).optional().catch(undefined),
