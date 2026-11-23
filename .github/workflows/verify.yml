@@ -43,3 +43,40 @@ jobs:
       - run: npm test
       - run: npm run build -w @offboard/web
       - run: npm run build:vercel -w @offboard/api
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    concurrency:
+      group: offboard-cloudflare
+      cancel-in-progress: false
+    env:
+      EMAIL_PROVIDER: cloudflare
+      OFFBOARD_API_CONFIGURED: "1"
+      OFFBOARD_HYPERDRIVE_ID: ${{ vars.OFFBOARD_HYPERDRIVE_ID }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:cloudflare -w @offboard/web
+      - name: Deploy current main to Cloudflare
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -e
+          current_main=$(git ls-remote --exit-code origin refs/heads/main | cut -f 1)
+          if [ "$current_main" != "$GITHUB_SHA" ]; then
+            echo "A newer commit is on main. Skipping this deployment."
+            exit 0
+          fi
+          ../../node_modules/.bin/cf deploy --prebuilt --mode cloudflare --no-provision
+          curl --fail --silent --show-error --retry 5 https://app.off-board.xyz/api/health
+          curl --fail --silent --show-error --retry 5 https://app.off-board.xyz/entrar --output /dev/null

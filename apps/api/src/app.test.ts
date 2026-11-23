@@ -6,7 +6,7 @@ import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
 import { tasks } from "@offboard/db/schema";
-import { seedDatabase } from "@offboard/db/seed-database";
+import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -141,7 +141,7 @@ describe.skipIf(!url)("api", () => {
   });
 
   beforeEach(async () => {
-    await seedDatabase(db);
+    await seedDatabase(db, testSeedFixtures);
   });
 
   afterAll(async () => {

@@ -7,7 +7,7 @@ import { emailProvider, type CloudflareEmailBinding } from "./features/auth/emai
 import { createRepositories } from "./repositories.js";
 
 const runtimeConfig = z.object({
-  POSTGRES_URL: z.string().min(1),
+  POSTGRES_URL: z.string().min(1).optional(),
   BETTER_AUTH_URL: z.url(),
   BETTER_AUTH_SECRET: z.string().min(32),
   EMAIL_PROVIDER: emailProvider,
@@ -20,12 +20,19 @@ const runtimeConfig = z.object({
 
 export type WorkerBindings = Partial<z.input<typeof runtimeConfig>> & {
   EMAIL?: CloudflareEmailBinding;
+  HYPERDRIVE?: { connectionString: string };
 };
 
 export function createWorkerApi(bindings: WorkerBindings) {
   const config = runtimeConfig.safeParse(bindings);
+  const hyperdrive = bindings.HYPERDRIVE;
+  const directUrl = config.data?.POSTGRES_URL;
 
-  if (!config.success) {
+  const getDatabaseUrl = hyperdrive
+    ? () => hyperdrive.connectionString
+    : directUrl && (() => directUrl);
+
+  if (!config.success || !getDatabaseUrl) {
     return async (request: Request) => {
       const session = request.method === "GET" && new URL(request.url).pathname === "/api/session";
 
@@ -36,7 +43,7 @@ export function createWorkerApi(bindings: WorkerBindings) {
     };
   }
 
-  const { db, run } = createRequestScopedClient(config.data.POSTGRES_URL);
+  const { db, run } = createRequestScopedClient(getDatabaseUrl);
 
   const { auth, origin } = createRuntimeAuth(db, undefined, {
     env: config.data,

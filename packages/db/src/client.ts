@@ -15,11 +15,11 @@ export function createClient(url: string) {
   return drizzle(createPool(url), { schema });
 }
 
-export function createRequestScopedClient(url: string) {
+export function createRequestScopedClient(getUrl: () => string) {
   const requestPool = new AsyncLocalStorage<pg.Pool>();
 
   const db = drizzle(
-    new Proxy(createPool(url), {
+    new Proxy(new pg.Pool(), {
       get(defaultPool, key: keyof pg.Pool) {
         if (key !== "connect" && key !== "query") return defaultPool[key];
 
@@ -36,7 +36,7 @@ export function createRequestScopedClient(url: string) {
   return {
     db,
     async run<T>(handle: () => Promise<T>) {
-      const pool = createPool(url);
+      const pool = createPool(getUrl());
 
       try {
         return await requestPool.run(pool, handle);

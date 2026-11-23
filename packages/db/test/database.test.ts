@@ -11,7 +11,7 @@ const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 it.skipIf(!url)(
   "allows queries and transactions only inside a database request scope",
   async () => {
-    const { db, run } = createRequestScopedClient(url ?? "");
+    const { db, run } = createRequestScopedClient(() => url ?? "");
     const query = sql`select 1 as value`;
 
     expect(() => db.$client.query("select 1")).toThrow(

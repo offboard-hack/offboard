@@ -4,10 +4,14 @@ type MemberRole = (typeof teamMembers.$inferSelect)["role"];
 
 export type SeedTeamMember = { name: string; email: string; role: MemberRole };
 
-export const seedTeamMembers: SeedTeamMember[] = [
+export const baseSeedTeamMembers: SeedTeamMember[] = [
   { name: "Beatriz Castro", email: "beatriz.castro@offboard.com", role: "admin" },
   { name: "Camila Rocha", email: "camila.rocha@offboard.com", role: "rh" },
   { name: "Diego Alves", email: "diego.alves@offboard.com", role: "gestor" },
+];
+
+export const seedTeamMembers: SeedTeamMember[] = [
+  ...baseSeedTeamMembers,
   { name: "Fernanda Lima", email: "fernanda.lima@offboard.com", role: "rh" },
   { name: "Lucas Pereira", email: "lucas.pereira@offboard.com", role: "gestor" },
   { name: "Mariana Santos", email: "mariana.santos@offboard.com", role: "visualizador" },
