@@ -24,7 +24,6 @@
     { "source": "/api/action-configs", "destination": "/api/offboard" },
     { "source": "/api/action-configs/:path*", "destination": "/api/offboard" },
     { "source": "/api/team", "destination": "/api/offboard" },
-    { "source": "/api/_diag", "destination": "/api/offboard" },
     { "source": "/api/team/:path*", "destination": "/api/offboard" },
     { "source": "/api/webhooks/:path*", "destination": "/api/offboard" },
     { "source": "/api/correios/:path*", "destination": "/api/offboard" },
