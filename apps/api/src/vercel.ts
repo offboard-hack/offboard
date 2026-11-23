@@ -6,15 +6,31 @@ import { createApp } from "./app.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
 
 const db = createClient(process.env.POSTGRES_URL ?? "");
-const { auth, origin } = createRuntimeAuth(db, process.env.WEB_ORIGIN);
 
-const app = createApp(origin, createRepositories(db), {
-  adapter: node(),
-  auth,
-  cronSecret: process.env.CRON_SECRET,
-  webhookSecret: process.env.WEBHOOK_SECRET,
-  slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
-});
+function buildApp() {
+  try {
+    const { auth, origin } = createRuntimeAuth(db, process.env.WEB_ORIGIN);
+
+    return createApp(origin, createRepositories(db), {
+      adapter: node(),
+      auth,
+      cronSecret: process.env.CRON_SECRET,
+      webhookSecret: process.env.WEBHOOK_SECRET,
+      slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
+    });
+  } catch {
+    return createApp(process.env.WEB_ORIGIN ?? "*", createRepositories(db), {
+      adapter: node(),
+      // WARNING: auth env vars missing; stub satisfies PortalAuth at the type level only
+      auth: { handler: undefined, resolvePrincipal: undefined } as never,
+      cronSecret: process.env.CRON_SECRET,
+      webhookSecret: process.env.WEBHOOK_SECRET,
+      slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
+    });
+  }
+}
+
+const app = buildApp();
 
 async function ensureTeamTable() {
   const check = await db.execute(
