@@ -39,6 +39,22 @@ def require_listener(port, process):
     return sorted(pids)
 
 
+def check_portal_gate(web_url):
+    with urlopen(f"{web_url}/desligamentos", timeout=8) as response:
+        html = response.read().decode("utf-8")
+        if urlparse(response.geturl()).path != "/entrar" or "Entrar · Offboard" not in html:
+            raise RuntimeError("The protected case list should redirect anonymous visitors to sign-in")
+
+
+def existing_doctor(web_url):
+    with urlopen(f"{web_url}/api/health", timeout=4) as response:
+        health = json.load(response)
+        if health != {"status": "ok"}:
+            raise RuntimeError("The API proxied by the portal failed its health check")
+    check_portal_gate(web_url)
+    return {"web": {"url": web_url}, "api": {"health": health}}
+
+
 def doctor(web_port, api_port, web, api):
     web_url = f"http://{HOST}:{web_port}"
     api_url = f"http://{HOST}:{api_port}/api/health"
@@ -48,10 +64,7 @@ def doctor(web_port, api_port, web, api):
         health = json.load(response)
         if health != {"status": "ok"} or response.headers.get("Access-Control-Allow-Origin") != web_url:
             raise RuntimeError("API health or CORS differs from the verification instance")
-    with urlopen(f"{web_url}/desligamentos", timeout=8) as response:
-        html = response.read().decode("utf-8")
-        if urlparse(response.geturl()).path != "/entrar" or "Entrar · Offboard" not in html:
-            raise RuntimeError("The protected case list should redirect anonymous visitors to sign-in")
+    check_portal_gate(web_url)
     return {
         "web": {"url": web_url, "listener_pids": web_pids},
         "api": {"url": api_url, "listener_pids": api_pids, "health": health},
@@ -98,18 +111,35 @@ def run(evidence, driver):
             raise RuntimeError("Set OFFBOARD_VERIFY_STORAGE_STATE to an authenticated Playwright storage state file")
         evidence.mkdir(parents=True, exist_ok=False)
         doctor_note = {"revision": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain"))}
-        (evidence / "doctor.json").write_text(json.dumps(doctor_note, indent=2) + "\n")
-        env = {**os.environ, "OFFBOARD_VERIFY_EVIDENCE": str(evidence)}
+        web_url = f"{origin.scheme}://{origin.netloc}"
+        doctor_path = evidence / "doctor.json"
         try:
-            with (evidence / "drive.log").open("w") as output:
-                result = subprocess.run(
-                    ["node", str(driver)], cwd=ROOT, env=env, stdout=output,
-                    stderr=subprocess.STDOUT, timeout=150, check=False,
-                )
-        except subprocess.TimeoutExpired as error:
-            raise RuntimeError("Browser drive exceeded 150 seconds. See drive.log.") from error
-        if result.returncode:
-            raise RuntimeError(f"Browser drive exited {result.returncode}. See drive.log.")
+            doctor_note.update(existing_doctor(web_url))
+        except (OSError, RuntimeError, ValueError) as error:
+            doctor_note["error"] = str(error)
+            doctor_path.write_text(json.dumps(doctor_note, indent=2) + "\n")
+            raise RuntimeError(f"Doctor did not pass: {error}") from error
+        doctor_path.write_text(json.dumps(doctor_note, indent=2) + "\n")
+        env = {**os.environ, "OFFBOARD_VERIFY_EVIDENCE": str(evidence)}
+        with (evidence / "drive.log").open("w") as output:
+            drive = subprocess.Popen(
+                ["node", str(driver)], cwd=ROOT, env=env, stdout=output,
+                stderr=subprocess.STDOUT, start_new_session=True,
+            )
+            try:
+                result = drive.wait(timeout=150)
+            except subprocess.TimeoutExpired:
+                result = 124
+            finally:
+                stop_group(drive)
+        if result:
+            try:
+                doctor_note.update(existing_doctor(web_url))
+                doctor_note["after_failed_drive"] = "healthy"
+            except (RuntimeError, OSError, ValueError) as error:
+                doctor_note["after_failed_drive"] = str(error)
+            doctor_path.write_text(json.dumps(doctor_note, indent=2) + "\n")
+            raise RuntimeError(f"Browser drive exited {result}. See drive.log.")
         return
 
     if not shutil.which("lsof"):

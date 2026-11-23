@@ -14,10 +14,10 @@ The dashboard summarizes offboarding and unfinished tasks, with filters for the 
 
 ## Driving it with Playwright
 
-Preconditions: fresh context, seeded cases, passed doctor.
+Preconditions: fresh authenticated context with seeded cases.
 
 - Open `/painel`. Check regions named `Desligamentos`, `Progresso das tarefas`, and `Pendências por área`.
-- In the `Área responsável` combobox select `TI`. Check the URL contains `area=TI` and that the selected value and queue survive reload. Use the `Prazo do desligamento` group to select `Todos`; restore the area to `Todas as áreas` for a baseline comparison.
+- In the `Área responsável` combobox select `TI`. Check the URL contains `area=TI` and that the selected value and queue survive reload. In the `Data de encerramento` group select Marina’s current bucket. Check both `area=TI` and `deadline=overdue|today|upcoming` persist after reload and Marina remains in the queue. Reset to `Todos` and `Todas as áreas` and check both parameters clear.
 - Click the queue link whose accessible name starts with `Marina Lopes`. Verify the case URL from the Marina Lopes link and the `Marina Lopes` heading.
 
 ## Gotchas
