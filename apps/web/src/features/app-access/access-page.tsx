@@ -82,7 +82,7 @@ const roleBadges: Record<
   visualizador: { variant: "outline", className: "bg-muted text-muted-foreground" },
 };
 
-const route = getRouteApi("/acessos-ao-app");
+const route = getRouteApi("/equipe");
 
 export function AccessPage() {
   const navigate = route.useNavigate();
