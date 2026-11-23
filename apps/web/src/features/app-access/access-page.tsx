@@ -12,7 +12,6 @@ import { classProps } from "../../shared/lib/class-props";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
 import { Badge } from "../../shared/ui/shadcn/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "../../shared/ui/shadcn/card";
 import { portalStyles as s } from "../../shared/ui/surface.styles";
 import { AddMemberDialog } from "./add-member-dialog";
 import type { NewMember } from "./add-member-dialog";
@@ -154,19 +153,20 @@ export function AccessPage() {
       title="Equipe e permissões"
       breadcrumb={<ListBreadcrumb title="Equipe e permissões" />}
     >
-      <section className="grid min-w-0 gap-3 sm:grid-cols-2" aria-label="Capacidades por papel">
+      <ul
+        className="flex min-w-0 flex-wrap gap-x-6 gap-y-2 text-sm"
+        aria-label="Capacidades por papel"
+      >
         {roleCards.map(({ label, icon, tone, capabilities }) => (
-          <Card key={label}>
-            <CardHeader className="flex-row items-center gap-3">
-              <span className={`flex size-8 items-center justify-center rounded-lg ${tone}`}>
-                <HugeiconsIcon icon={icon} size={16} />
-              </span>
-              <CardTitle>{label}</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">{capabilities}</CardContent>
-          </Card>
+          <li key={label} className="flex items-center gap-2">
+            <span className={`flex size-6 shrink-0 items-center justify-center rounded-md ${tone}`}>
+              <HugeiconsIcon icon={icon} size={14} />
+            </span>
+            <span className="font-medium">{label}</span>
+            <span className="text-muted-foreground">{capabilities}</span>
+          </li>
         ))}
-      </section>
+      </ul>
 
       <p className="text-sm text-muted-foreground">
         <strong className="font-semibold text-foreground">Total de membros: {team.length}</strong>
