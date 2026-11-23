@@ -71542,12 +71542,14 @@ function createApp(webOrigin, repos2, correiosBaseUrl = CORREIOS_DEFAULT_URL) {
 var db = createClient(process.env.POSTGRES_URL ?? "");
 var repos = createRepositories(db);
 var app = createApp(process.env.WEB_ORIGIN ?? "*", repos);
-var migrated = db.$client.query(`
+async function ensureTeamTable() {
+  await db.execute(sql`
     DO $$ BEGIN
       CREATE TYPE "member_role" AS ENUM ('admin', 'rh', 'gestor', 'visualizador');
     EXCEPTION WHEN duplicate_object THEN NULL;
-    END $$;
-
+    END $$
+  `);
+  await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "team_members" (
       "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
       "name" varchar(255) NOT NULL,
@@ -71556,8 +71558,11 @@ var migrated = db.$client.query(`
       "created_at" timestamp DEFAULT now(),
       "updated_at" timestamp DEFAULT now(),
       CONSTRAINT "team_members_email_unique" UNIQUE("email")
-    );
-  `).catch(() => {
+    )
+  `);
+}
+var migrated = ensureTeamTable().catch((err) => {
+  console.error("Migration failed:", err);
 });
 async function handle(request) {
   await migrated;
