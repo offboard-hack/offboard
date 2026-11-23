@@ -4,6 +4,7 @@ import { actionConfigsRoutes } from "./features/action-configs/routes.js";
 import { fireActions } from "./features/action-configs/actions.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 import { authRoutes } from "./features/auth/routes.js";
+import { equipmentRoutes } from "./features/equipment/routes.js";
 import { integrationsRoutes } from "./features/integrations/routes.js";
 import { offboardingsRoutes } from "./features/offboardings/routes.js";
 import { teamRoutes } from "./features/team/routes.js";
@@ -42,6 +43,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     )
     .use(actionConfigsRoutes(repos.actionConfigs, access))
     .use(teamRoutes(repos.team, access))
+    .use(equipmentRoutes(repos.equipment, access))
     .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret));
 }
 

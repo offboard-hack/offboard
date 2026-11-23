@@ -8,6 +8,8 @@ import { getTrackingStatus, equipmentStatus, trackingStatus } from "./status";
 import { formatShortDeadline, offboardingsQuery, taskTrackingQuery } from "@/entities/offboarding";
 import { useQueries, useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
+import { equipmentQuery } from "@/entities/equipment";
+import type { EquipmentReturnMethod, EquipmentStatus } from "@/entities/equipment";
 import { useMemo } from "react";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
@@ -33,85 +35,24 @@ type Equipment = {
   item: string;
   tag: string;
   person: string;
-  method: "Coleta em casa" | "Entrega no escritório";
+  method: string;
   date: { iso: string; label: string } | null;
   status: keyof typeof equipmentStatus;
 };
 
-const equipment: Equipment[] = [
-  {
-    item: "Notebook Dell Latitude 5440",
-    tag: "AUR-0412",
-    person: "Marina Lopes",
-    method: "Coleta em casa",
-    date: { iso: "2026-11-10", label: "10 nov" },
-    status: "scheduled",
-  },
-  {
-    item: "Notebook MacBook Air M3",
-    tag: "AUR-0398",
-    person: "Léo Andrade",
-    method: "Coleta em casa",
-    date: null,
-    status: "received",
-  },
-  {
-    item: "Notebook Dell Latitude 5440",
-    tag: "AUR-0377",
-    person: "Rafa Souza",
-    method: "Coleta em casa",
-    date: { iso: "2026-11-09", label: "9 nov" },
-    status: "failed",
-  },
-  {
-    item: "Celular Galaxy A55",
-    tag: "AUR-2210",
-    person: "Otávio Lima",
-    method: "Entrega no escritório",
-    date: null,
-    status: "inventory",
-  },
-  {
-    item: "Notebook ThinkPad T14",
-    tag: "AUR-0455",
-    person: "Igor Santos",
-    method: "Coleta em casa",
-    date: null,
-    status: "transit",
-  },
-  {
-    item: "Monitor Dell 27″",
-    tag: "AUR-3104",
-    person: "Igor Santos",
-    method: "Coleta em casa",
-    date: null,
-    status: "transit",
-  },
-  {
-    item: "Notebook MacBook Pro 14",
-    tag: "AUR-0301",
-    person: "Sofia Ramos",
-    method: "Coleta em casa",
-    date: { iso: "2026-11-12", label: "12 nov" },
-    status: "withPerson",
-  },
-  {
-    item: "Kit EPI e rádio",
-    tag: "AUR-5520",
-    person: "Marcos Vieira",
-    method: "Entrega no escritório",
-    date: null,
-    status: "received",
-  },
-  {
-    item: "Notebook Dell Latitude 5440",
-    tag: "AUR-0419",
-    person: "Ju Martins",
-    method: "Coleta em casa",
-    date: { iso: "2026-11-11", label: "11 nov" },
-    status: "scheduled",
-  },
-];
+const returnMethodLabels: Record<EquipmentReturnMethod, string> = {
+  pickup: "Coleta em casa",
+  in_person: "Entrega no escritório",
+};
+
+const statusKeys: Record<EquipmentStatus, keyof typeof equipmentStatus> = {
+  with_person: "withPerson",
+  scheduled: "scheduled",
+  transit: "transit",
+  received: "received",
+  inventory: "inventory",
+  failed: "failed",
+};
 
 const assetBadges = {
   scheduled: null,
@@ -269,6 +210,23 @@ export function EquipmentPage() {
 
   const { data: cases } = useSuspenseQuery(offboardingsQuery);
 
+  const { data: equipmentRows } = useSuspenseQuery(equipmentQuery);
+
+  const equipment: Equipment[] = useMemo(
+    () =>
+      equipmentRows.map((row) => ({
+        item: row.item,
+        tag: row.tag,
+        person: row.person,
+        method: returnMethodLabels[row.returnMethod],
+        date: row.scheduledDate
+          ? { iso: row.scheduledDate, label: formatShortDeadline(row.scheduledDate) }
+          : null,
+        status: statusKeys[row.status],
+      })),
+    [equipmentRows],
+  );
+
   const tasks = useMemo(
     () =>
       cases.flatMap((entry) =>
@@ -302,7 +260,7 @@ export function EquipmentPage() {
 
   const visibleEquipment = useMemo(
     () => (status ? equipment.filter((entry) => entry.status === status) : equipment),
-    [status],
+    [equipment, status],
   );
 
   return (

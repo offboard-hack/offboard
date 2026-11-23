@@ -71,6 +71,7 @@ export const subtasks = pgTable(
 
 export const offboardingCasesRelations = relations(offboardingCases, ({ many }) => ({
   tasks: many(tasks),
+  equipment: many(equipment),
 }));
 
 export const tasksRelations = relations(tasks, ({ one, many }) => ({
@@ -85,6 +86,42 @@ export const subtasksRelations = relations(subtasks, ({ one }) => ({
   task: one(tasks, {
     fields: [subtasks.taskId],
     references: [tasks.id],
+  }),
+}));
+
+export const equipmentReturnMethodEnum = pgEnum("equipment_return_method", ["pickup", "in_person"]);
+
+export const equipmentStatusEnum = pgEnum("equipment_status", [
+  "with_person",
+  "scheduled",
+  "transit",
+  "received",
+  "inventory",
+  "failed",
+]);
+
+export const equipment = pgTable(
+  "equipment",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    caseId: uuid("case_id")
+      .notNull()
+      .references(() => offboardingCases.id, { onDelete: "cascade" }),
+    item: varchar("item", { length: 255 }).notNull(),
+    tag: varchar("tag", { length: 50 }).notNull().unique(),
+    returnMethod: equipmentReturnMethodEnum("return_method").notNull(),
+    scheduledDate: date("scheduled_date"),
+    status: equipmentStatusEnum("status").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [index("equipment_case_id_idx").on(table.caseId)],
+);
+
+export const equipmentRelations = relations(equipment, ({ one }) => ({
+  case: one(offboardingCases, {
+    fields: [equipment.caseId],
+    references: [offboardingCases.id],
   }),
 }));
 

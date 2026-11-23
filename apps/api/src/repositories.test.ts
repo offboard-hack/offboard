@@ -250,6 +250,32 @@ describe.skipIf(!url)("repositories", () => {
     expect(list[0]).toEqual({ name: expect.any(String), status: expect.any(String) });
   });
 
+  it("lists equipment joined with the case name", async () => {
+    const list = await repos.equipment.listEquipment();
+
+    const tags = list.map((row) => row.tag);
+
+    expect(tags).toEqual(tags.toSorted());
+    expect(list.find((row) => row.tag === "AUR-0412")).toMatchObject({
+      person: "Marina Lopes",
+      returnMethod: "pickup",
+      scheduledDate: "2026-11-10",
+      status: "scheduled",
+    });
+  });
+
+  it("updates equipment status and returns null for unknown ids", async () => {
+    const [first] = await repos.equipment.listEquipment();
+
+    expect(await repos.equipment.updateEquipmentStatus(first.id, "failed")).toMatchObject({
+      id: first.id,
+      status: "failed",
+    });
+    expect(
+      await repos.equipment.updateEquipmentStatus("00000000-0000-4000-8000-000000000000", "failed"),
+    ).toBeNull();
+  });
+
   it("upserts an integration", async () => {
     const created = await repos.integrations.upsertIntegration("Test Repo", "connected");
     expect(created).toEqual({ name: "Test Repo", status: "connected" });

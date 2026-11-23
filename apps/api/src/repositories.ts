@@ -2,6 +2,7 @@ import type { Database } from "@offboard/db/client";
 import { createOffboardingsRepository } from "./features/offboardings/repository.js";
 import { createIntegrationsRepository } from "./features/integrations/repository.js";
 import { createActionConfigsRepository } from "./features/action-configs/repository.js";
+import { createEquipmentRepository } from "./features/equipment/repository.js";
 import { createTeamRepository } from "./features/team/repository.js";
 
 export function createRepositories(db: Database) {
@@ -10,6 +11,7 @@ export function createRepositories(db: Database) {
     integrations: createIntegrationsRepository(db),
     actionConfigs: createActionConfigsRepository(db),
     team: createTeamRepository(db),
+    equipment: createEquipmentRepository(db),
   };
 }
 
