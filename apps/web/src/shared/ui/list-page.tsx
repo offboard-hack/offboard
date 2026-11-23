@@ -37,18 +37,24 @@ export type ListMetric = {
 
 export function ListPage({
   title,
+  pending = false,
   breadcrumb,
   metrics,
   children,
 }: {
   title: string;
+  pending?: boolean;
   breadcrumb?: ReactNode;
   metrics?: ListMetric[];
   children: ReactNode;
 }) {
   return (
     <div className="mx-auto grid w-full min-w-0 max-w-[100rem] gap-5 px-3 py-4 sm:px-6 sm:py-6">
-      <h1 id="titulo-pagina" tabIndex={-1} className="sr-only">
+      <h1
+        id={pending ? undefined : "titulo-pagina"}
+        tabIndex={pending ? undefined : -1}
+        className="sr-only"
+      >
         {title}
       </h1>
       {breadcrumb}

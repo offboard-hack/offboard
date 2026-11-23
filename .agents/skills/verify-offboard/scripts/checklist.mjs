@@ -13,19 +13,33 @@ if (!OFFBOARD_PLAYWRIGHT_DIR || !OFFBOARD_VERIFY_URL || !OFFBOARD_VERIFY_EVIDENC
 const require = createRequire(join(resolve(OFFBOARD_PLAYWRIGHT_DIR), "package.json"));
 const { chromium } = require("playwright");
 
+const width = Number(process.env.OFFBOARD_VERIFY_WIDTH ?? 1440);
+if (!Number.isSafeInteger(width) || width <= 0) {
+  throw new Error("OFFBOARD_VERIFY_WIDTH must be a positive integer.");
+}
+
+const narrow = width < 768;
 const browser = await chromium.launch({
   executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
 });
 
-const context = await browser.newContext({ viewport: { width: 1440, height: 1080 } });
+const context = await browser.newContext({
+  viewport: { width, height: 1080 },
+  hasTouch: narrow,
+  storageState: process.env.OFFBOARD_VERIFY_STORAGE_STATE,
+});
+
 const cardName = "Editar etapa: Bloquear acessos";
 
 await context.tracing.start({ screenshots: true, snapshots: true });
 
 try {
+  console.log(`Viewport width: ${width}px`);
   const page = await context.newPage();
 
   await page.goto(new URL("/painel", OFFBOARD_VERIFY_URL).href, { waitUntil: "networkidle" });
+  if (narrow) await page.getByRole("button", { name: "Menu do portal" }).tap();
+
   await page.getByRole("link", { name: "Checklist automático", exact: true }).click();
 
   const title = page.getByRole("heading", { name: "Modelo padrão", exact: true });
@@ -54,7 +68,9 @@ try {
   console.log("Moved with Space, ArrowRight, Space: TI / Primeira semana");
 
   await page.getByRole("button", { name: "Salvar modelo", exact: true }).click();
-  assert.equal(await page.getByRole("button", { name: "Salvar modelo", exact: true }).isDisabled(), true);
+  await page.getByRole("button", { name: "Salvar modelo", exact: true }).and(page.locator(":disabled")).waitFor();
+  assert.equal(await page.getByRole("alert").count(), 0);
+  assert.equal(await page.getByRole("button", { name: "Desfazer", exact: true }).isDisabled(), true);
 
   const newTab = await context.newPage();
 
@@ -72,6 +88,42 @@ try {
     join(OFFBOARD_VERIFY_EVIDENCE, "checklist-saved.aria.txt"),
     await newTab.getByRole("main").ariaSnapshot(),
   );
+
+  const movedInNewTab = newTab
+    .locator('[data-checklist-cell="cell:TI:first-week"]')
+    .getByRole("button", { name: cardName, exact: true });
+
+  await movedInNewTab.press("Space");
+  await movedInNewTab.press("ArrowLeft");
+  await movedInNewTab.press("Space");
+  const unsavedCard = newTab
+    .locator('[data-checklist-cell="cell:TI:d0"]')
+    .getByRole("button", { name: cardName, exact: true });
+
+  await unsavedCard.waitFor();
+  await newTab.evaluate(() => {
+    const setItem = Storage.prototype.setItem;
+
+    Storage.prototype.setItem = function (key, value) {
+      if (this === window.localStorage && key === "offboard:checklist-model:v1") {
+        throw new DOMException("Verification storage quota", "QuotaExceededError");
+      }
+
+      setItem.call(this, key, value);
+    };
+  });
+  const retryableSave = newTab.getByRole("button", { name: "Salvar modelo", exact: true });
+
+  await retryableSave.click();
+  await newTab.getByRole("alert").filter({ hasText: "O navegador não conseguiu salvar o modelo" }).waitFor();
+  assert.equal(await retryableSave.isEnabled(), true);
+  assert.equal(await newTab.getByRole("button", { name: "Desfazer", exact: true }).isEnabled(), true);
+  await unsavedCard.waitFor();
+  await newTab.reload();
+  await unsavedCard.waitFor();
+  await retryableSave.click();
+  await retryableSave.and(newTab.locator(":disabled")).waitFor();
+  console.log("Storage failure retained the draft across reload; retry saved.");
 } finally {
   try {
     await context.tracing.stop({ path: join(OFFBOARD_VERIFY_EVIDENCE, "checklist-trace.zip") });

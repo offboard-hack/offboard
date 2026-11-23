@@ -1,3 +1,4 @@
+import { ChecklistPending } from "./checklist-pending";
 import { createLocalId } from "@/shared/lib/create-local-id";
 import { pointerIntersection } from "@dnd-kit/collision";
 import { Accessibility, PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
@@ -12,11 +13,14 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useHydrated } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState, type KeyboardEvent } from "react";
 import {
   actionConfigsQuery,
   applyActionConfigs,
+  clearSyncedRemovals,
+  knownActionRowIds,
+  mergeStepSettings,
   syncActionConfigs,
   type ActionConfigRow,
 } from "./action-config";
@@ -30,9 +34,10 @@ import {
   initialSteps,
   moveStep,
   phases,
-  readDraftSteps,
+  readDraftSnapshot,
+  readLegacyDraftSteps,
   readSavedModel,
-  saveDraftSteps,
+  saveDraftSnapshot,
   saveModel,
   teams,
   type ChecklistStep,
@@ -322,37 +327,31 @@ function completeStepSettings(step: ChecklistStep) {
 
 export function ChecklistRulesPage() {
   const hydrated = useHydrated();
+  const { data } = useSuspenseQuery(actionConfigsQuery);
 
-  const actionConfigs = useQuery({ ...actionConfigsQuery, enabled: hydrated });
+  if (!hydrated) return <ChecklistPending />;
 
-  return (
-    <ChecklistEditor
-      key={`${hydrated ? "browser" : "server"}:${actionConfigs.data ? "actions" : "local"}`}
-      restored={hydrated}
-      actionRows={actionConfigs.data ?? []}
-    />
-  );
+  return <ChecklistEditor actionRows={data} />;
 }
 
-function ChecklistEditor({
-  restored,
-  actionRows,
-}: {
-  restored: boolean;
-  actionRows: ActionConfigRow[];
-}) {
+function ChecklistEditor({ actionRows }: { actionRows: ActionConfigRow[] }) {
   const client = useQueryClient();
 
-  const [saved, setSaved] = useState(() => {
-    const model = restored ? readSavedModel() : undefined;
+  const [saved, setSaved] = useState<ChecklistStep[]>(() =>
+    applyActionConfigs(clearSyncedRemovals(readSavedModel() ?? initialSteps), actionRows),
+  );
 
-    return restored ? applyActionConfigs(model ?? initialSteps, actionRows) : model;
-  });
+  const [restoredDraft] = useState(readDraftSnapshot);
+
+  const [knownRowIds, setKnownRowIds] = useState(
+    () => restoredDraft?.knownRowIds ?? knownActionRowIds(saved, actionRows),
+  );
+
+  const [needsSave, setNeedsSave] = useState(restoredDraft?.needsSave ?? false);
+  const [draftStorageError, setDraftStorageError] = useState(false);
 
   const [{ steps, history, message }, setDraft] = useState<Draft>(() => ({
-    steps: restored
-      ? applyActionConfigs(readDraftSteps(saved ?? initialSteps), actionRows)
-      : initialSteps,
+    steps: applyActionConfigs(restoredDraft?.steps ?? readLegacyDraftSteps(saved), actionRows),
     history: [],
     message: "",
   }));
@@ -361,11 +360,11 @@ function ChecklistEditor({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [keyboardDrag, setKeyboardDrag] = useState<KeyboardDrag | null>(null);
   const [saveError, setSaveError] = useState(false);
-  const [syncError, setSyncError] = useState(false);
 
   const baseline = saved ?? initialSteps;
 
   const isSaved =
+    !needsSave &&
     baseline.length === steps.length &&
     steps.every((step, index) => {
       const original = baseline[index];
@@ -389,8 +388,14 @@ function ChecklistEditor({
     setDialogOpen(true);
   }
 
+  function persistDraft(next: ChecklistStep[], rowIds: string[], pendingSave: boolean) {
+    setDraftStorageError(
+      !saveDraftSnapshot({ steps: next, knownRowIds: rowIds, needsSave: pendingSave }),
+    );
+  }
+
   function commit(next: ChecklistStep[], message: string, undoMessage: string) {
-    saveDraftSteps(next);
+    persistDraft(next, knownRowIds, needsSave);
     setDraft({ steps: next, history: [...history, { steps, undoMessage }], message });
   }
 
@@ -487,7 +492,9 @@ function ChecklistEditor({
 
   function editStep(settings: StepSettings, step: ChecklistStep) {
     if (!sameStepSettings(completeStepSettings(step), settings)) {
-      const next = steps.map((item) => (item.id === step.id ? { ...item, ...settings } : item));
+      const next = steps.map((item) =>
+        item.id === step.id ? mergeStepSettings(item, settings) : item,
+      );
 
       commit(next, `“${settings.title}” atualizada.`, `Alterações em “${step.title}” desfeitas.`);
     }
@@ -495,28 +502,42 @@ function ChecklistEditor({
     setDialogOpen(false);
   }
 
-  async function commitModel() {
-    if (!saveModel(steps)) {
-      setSaveError(true);
-
-      return;
-    }
-
-    try {
+  const saveMutation = useMutation({
+    onMutate: () => setSaveError(false),
+    mutationFn: async () => {
       const existing = await client.fetchQuery({ ...actionConfigsQuery, staleTime: 0 });
 
-      await syncActionConfigs(steps, existing);
-      await client.invalidateQueries(actionConfigsQuery);
-      setSyncError(false);
-    } catch {
-      setSyncError(true);
-    }
+      const { createdRowIds, failed } = await syncActionConfigs(steps, existing, knownRowIds);
+      const nextRowIds = [...knownRowIds, ...createdRowIds];
 
-    clearDraftSteps();
-    setSaved(steps);
-    setSaveError(false);
-    setDraft({ steps, history, message: "Modelo salvo neste navegador." });
-  }
+      setKnownRowIds(nextRowIds);
+      setNeedsSave(true);
+      persistDraft(steps, nextRowIds, true);
+      await client.invalidateQueries(actionConfigsQuery);
+
+      if (failed) throw new Error("Failed to save action config");
+
+      return nextRowIds;
+    },
+    onSuccess: (rowIds) => {
+      const synced = clearSyncedRemovals(steps);
+
+      if (!saveModel(synced)) {
+        setSaveError(true);
+
+        return;
+      }
+
+      clearDraftSteps();
+      const currentRows = client.getQueryData(actionConfigsQuery.queryKey) ?? actionRows;
+
+      setKnownRowIds([...new Set([...rowIds, ...knownActionRowIds(synced, currentRows)])]);
+      setNeedsSave(false);
+      setDraftStorageError(false);
+      setSaved(synced);
+      setDraft({ steps: synced, history: [], message: "Modelo salvo neste navegador." });
+    },
+  });
 
   function deleteStep(step: ChecklistStep) {
     commit(
@@ -532,7 +553,7 @@ function ChecklistEditor({
 
     if (!previous) return;
 
-    saveDraftSteps(previous.steps);
+    persistDraft(previous.steps, knownRowIds, needsSave);
     setDraft({
       steps: previous.steps,
       history: history.slice(0, -1),
@@ -571,18 +592,30 @@ function ChecklistEditor({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={undoChange} disabled={history.length === 0}>
+            <Button
+              variant="outline"
+              onClick={undoChange}
+              disabled={history.length === 0 || saveMutation.isPending}
+            >
               <HugeiconsIcon icon={Undo02Icon} aria-hidden="true" />
               Desfazer
             </Button>
-            <Button onClick={commitModel} disabled={isSaved}>
+            <Button
+              onClick={() => saveMutation.mutate()}
+              disabled={isSaved || saveMutation.isPending}
+            >
               <HugeiconsIcon icon={Tick02Icon} aria-hidden="true" />
-              Salvar modelo
+              {saveMutation.isPending ? "Salvando modelo…" : "Salvar modelo"}
             </Button>
           </div>
-          {syncError && (
+          {saveMutation.isError && (
             <p role="alert" className="basis-full text-sm text-destructive">
               Não foi possível salvar as ações no servidor. Tente novamente.
+            </p>
+          )}
+          {draftStorageError && (
+            <p role="alert" className="basis-full text-sm text-destructive">
+              O navegador não conseguiu guardar o rascunho. Mantenha esta aba aberta até salvar.
             </p>
           )}
           {saveError && (
@@ -612,6 +645,7 @@ function ChecklistEditor({
           <div
             role="region"
             aria-label="Matriz de etapas por equipe e fase"
+            inert={saveMutation.isPending}
             tabIndex={0}
             className="min-w-0 overflow-x-auto overscroll-x-contain rounded-b-2xl border-t outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
           >

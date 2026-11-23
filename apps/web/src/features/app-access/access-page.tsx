@@ -5,7 +5,7 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { getRouteApi } from "@tanstack/react-router";
 import { createTeamMember, deleteTeamMember, teamQuery } from "@/entities/team";
 import type { MemberRole, TeamMember } from "@/entities/team";
-import { useListPagination } from "@/shared/lib/use-list-pagination";
+import { listPagination } from "@/shared/lib/list-pagination";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import { Button } from "@/shared/ui/shadcn/button";
 import { classProps } from "../../shared/lib/class-props";
@@ -94,8 +94,10 @@ export function AccessPage() {
   const add = useMutation({ mutationFn: createTeamMember, onSettled: refresh });
   const remove = useMutation({ mutationFn: deleteTeamMember, onSettled: refresh });
 
-  const addMember = ({ name, email, role }: NewMember) =>
-    add.mutate({ name, email, role: roleByLabel[role] });
+  async function addMember({ name, email, role }: NewMember) {
+    await add.mutateAsync({ name, email, role: roleByLabel[role] });
+    remove.reset();
+  }
 
   const teamColumns: TableColumn<TeamMember>[] = [
     { id: "name", accessorFn: ({ name }) => name, header: "Membro" },
@@ -134,7 +136,8 @@ export function AccessPage() {
     },
   ];
 
-  const teamPagination = useListPagination(
+  const teamPagination = listPagination(
+    route.useSearch(),
     (patch) =>
       void navigate({
         search: (previous) => ({ ...previous, ...patch }),
@@ -172,11 +175,9 @@ export function AccessPage() {
       </p>
 
       <section className="min-w-0" aria-labelledby="equipe">
-        {(add.isError || remove.isError) && (
+        {remove.isError && (
           <p role="alert" className="mb-3 text-sm text-destructive">
-            {add.isError
-              ? "Não foi possível autorizar o acesso. Confira se o e-mail já foi cadastrado."
-              : "Não foi possível remover o acesso. Atualize a página e tente novamente."}
+            Não foi possível remover o acesso. Atualize a página e tente novamente.
           </p>
         )}
         <DataTable

@@ -96,6 +96,10 @@ export function offboardingsRoutes(
       permit: ["read", "Offboarding"],
       response: t.Array(caseSummary),
     })
+    .get("/offboardings/with-tasks", () => repos.listOffboardingsWithTasks(), {
+      permit: ["read", "Offboarding"],
+      response: t.Array(offboardingCase),
+    })
     .post(
       "/offboardings",
       async ({ body, set }) => {

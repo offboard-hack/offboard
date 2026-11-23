@@ -1,5 +1,5 @@
-import { useNavigate } from "@tanstack/react-router";
-import { useListPagination } from "@/shared/lib/use-list-pagination";
+import { getRouteApi } from "@tanstack/react-router";
+import { listPagination } from "@/shared/lib/list-pagination";
 import {
   Alert02Icon,
   ArrowDown01Icon,
@@ -78,6 +78,8 @@ function searchKey(text: string) {
     .toLocaleLowerCase("pt-BR");
 }
 
+const route = getRouteApi("/_portal/desligamentos");
+
 export function CasesPage({
   cases,
   department,
@@ -107,9 +109,10 @@ export function CasesPage({
   breadcrumb: ReactNode;
   onOpenCase: (record: CaseSummary) => void;
 }) {
-  const navigate = useNavigate({ from: "/desligamentos" });
+  const navigate = route.useNavigate();
 
-  const urlPagination = useListPagination(
+  const urlPagination = listPagination(
+    route.useSearch(),
     (patch) =>
       void navigate({
         search: (previous) => ({ ...previous, ...patch }),
@@ -364,6 +367,8 @@ export function CasesPage({
 export function CasePage({
   offboardingCase,
   taskFilter,
+  taskWritePending,
+  taskWriteError,
   onTaskFilterChange,
   onTaskStatusChange,
   onSubtaskToggle,
@@ -371,6 +376,8 @@ export function CasePage({
 }: {
   offboardingCase: OffboardingCase;
   taskFilter: "pending" | "done" | "";
+  taskWritePending: boolean;
+  taskWriteError: boolean;
   onTaskFilterChange: (filter: "pending" | "done" | "") => void;
   onTaskStatusChange?: (taskId: string, status: Task["status"]) => void;
   onSubtaskToggle?: (subtaskId: string) => void;
@@ -497,6 +504,14 @@ export function CasePage({
         </section>
 
         <section className="grid min-w-0 gap-3" aria-labelledby="checklist-title">
+          {taskWriteError && (
+            <p role="alert" className="text-sm text-destructive">
+              Não foi possível atualizar a tarefa. Tente novamente.
+            </p>
+          )}
+          <p role="status" className="sr-only">
+            {taskWritePending ? "Atualizando tarefa…" : ""}
+          </p>
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 rounded-2xl border bg-muted/45 p-3 sm:px-4">
             <div className="grid gap-1">
               <h2 id="checklist-title" className="text-base font-semibold">
@@ -584,6 +599,7 @@ export function CasePage({
                         {onTaskStatusChange ? (
                           <button
                             type="button"
+                            disabled={taskWritePending}
                             onClick={() => onTaskStatusChange(task.id, task.status)}
                             {...classProps(local.taskStatusButton)}
                           >
@@ -616,6 +632,7 @@ export function CasePage({
                                       type="button"
                                       aria-label={`${sub.done ? "Desmarcar" : "Marcar"}: ${sub.title}`}
                                       className="flex items-center gap-2 text-left"
+                                      disabled={taskWritePending}
                                       onClick={() => onSubtaskToggle(sub.id)}
                                     >
                                       <SubtaskLabel subtask={sub} />

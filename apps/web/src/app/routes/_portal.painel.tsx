@@ -1,8 +1,8 @@
+import { DashboardPending } from "../route-pending";
 import { z } from "zod";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, lazyRouteComponent } from "@tanstack/react-router";
 import { offboardingTeams, offboardingsQuery } from "@/entities/offboarding";
 import { deadlineGroups } from "@/features/dashboard/deadline";
-import { Dashboard } from "../portal";
 
 export const Route = createFileRoute("/_portal/painel")({
   validateSearch: z.object({
@@ -12,6 +12,7 @@ export const Route = createFileRoute("/_portal/painel")({
   loader: async ({ context }) => {
     await context.queryClient.ensureQueryData(offboardingsQuery);
   },
-  component: Dashboard,
+  component: lazyRouteComponent(() => import("../dashboard-route"), "Dashboard"),
   head: () => ({ meta: [{ title: "Painel de desligamentos · Offboard" }] }),
+  pendingComponent: DashboardPending,
 });

@@ -189,11 +189,16 @@ export function IntegrationsPage() {
   );
 
   function updateConnection(key: string, connection: ConnectionStatus) {
-    toggle.mutate({ name: key, status: connection });
+    if (toggle.isPending) return;
+
+    setAnnouncement("");
 
     const displayName = key.includes("::") ? key.split("::")[1] : key;
 
-    setAnnouncement(`${displayName}: ${connections[connection].label}.`);
+    toggle.mutate(
+      { name: key, status: connection },
+      { onSuccess: () => setAnnouncement(`${displayName}: ${connections[connection].label}.`) },
+    );
 
     if (status && status !== connection) {
       searchInput.current?.focus({ preventScroll: true });
@@ -203,8 +208,13 @@ export function IntegrationsPage() {
   return (
     <ListPage title="Integrações" breadcrumb={<ListBreadcrumb title="Integrações" />}>
       <p role="status" className="sr-only">
-        {announcement}
+        {toggle.isPending ? "Atualizando conexão…" : announcement}
       </p>
+      {toggle.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          Não foi possível atualizar a conexão. Tente novamente.
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative w-full sm:max-w-xs">
           <HugeiconsIcon
@@ -272,6 +282,7 @@ export function IntegrationsPage() {
                         connection={connection}
                         statusMap={statusMap}
                         onChange={updateConnection}
+                        pending={toggle.isPending}
                       />
                     </li>
                   ))}
@@ -295,10 +306,12 @@ function IntegrationCard({
   connection,
   statusMap,
   onChange,
+  pending,
 }: {
   item: Integration;
   connection: ConnectionStatus;
   statusMap: Map<string, ConnectionStatus>;
+  pending: boolean;
   onChange: (key: string, connection: ConnectionStatus) => void;
 }) {
   const { label, variant } = connections[connection];
@@ -333,6 +346,7 @@ function IntegrationCard({
         {!hasProviders && (
           <Switch
             ref={switchButton}
+            disabled={pending}
             aria-label={item.name}
             checked={connection === "connected"}
             onCheckedChange={(checked) =>
@@ -363,6 +377,7 @@ function IntegrationCard({
 
               <Switch
                 aria-label={provider.name}
+                disabled={pending}
                 checked={provider.connection === "connected"}
                 onCheckedChange={(checked) =>
                   onChange(`${item.name}::${provider.name}`, checked ? "connected" : "disconnected")
@@ -387,6 +402,7 @@ function IntegrationCard({
             size="sm"
             className="min-h-10"
             aria-label={`Reconectar ${item.name}`}
+            disabled={pending}
             onClick={() => {
               switchButton.current?.focus({ preventScroll: true });
               onChange(item.name, "connected");

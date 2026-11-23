@@ -1,6 +1,6 @@
-import { useNavigate } from "@tanstack/react-router";
+import { getRouteApi } from "@tanstack/react-router";
 import { useState } from "react";
-import { useListPagination } from "@/shared/lib/use-list-pagination";
+import { listPagination } from "@/shared/lib/list-pagination";
 import { Calendar03Icon, Tick02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import { Badge } from "@/shared/ui/shadcn/badge";
@@ -84,8 +84,10 @@ const billingColumns: TableColumn<(typeof plans)[number]>[] = [
   },
 ];
 
+const route = getRouteApi("/_portal/planos-e-gastos");
+
 export function PlansPage() {
-  const navigate = useNavigate({ from: "/planos-e-gastos" });
+  const navigate = route.useNavigate();
   const [beneficiarySearch, setBeneficiarySearch] = useState("");
   const beneficiaryTerm = beneficiarySearch.trim().toLocaleLowerCase("pt-BR");
 
@@ -93,7 +95,8 @@ export function PlansPage() {
     name.toLocaleLowerCase("pt-BR").includes(beneficiaryTerm),
   );
 
-  const urlPagination = useListPagination(
+  const urlPagination = listPagination(
+    route.useSearch(),
     (patch) =>
       void navigate({
         search: (previous) => ({ ...previous, ...patch }),
@@ -164,7 +167,6 @@ export function PlansPage() {
       <div {...classProps(styles.billingGrid)}>
         <section className="min-w-0" aria-labelledby="usage-title">
           <DataTable
-            urlPagination={urlPagination}
             toolbar={
               <h2 {...classProps(portalStyles.subheading)} id="usage-title">
                 Consumo de novembro

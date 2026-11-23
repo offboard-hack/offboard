@@ -1,4 +1,5 @@
-import { useListPagination } from "@/shared/lib/use-list-pagination";
+import { Skeleton } from "@/shared/ui/shadcn/skeleton";
+import { listPagination } from "@/shared/lib/list-pagination";
 import { Alert02Icon, Calendar03Icon, Tick02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import { Badge } from "@/shared/ui/shadcn/badge";
@@ -133,6 +134,7 @@ type Shipment = {
 const trackingBadges = {
   none: styles.trackingNone,
   loading: styles.trackingNone,
+  unavailable: styles.trackingNone,
   waiting: styles.trackingWaiting,
   transit: styles.trackingTransit,
   delivered: styles.trackingDelivered,
@@ -177,6 +179,15 @@ const shipmentColumns: TableColumn<Shipment>[] = [
     header: "Rastreio",
     cell: ({ row }) => {
       const { status } = row.original;
+
+      if (status === "loading") {
+        return (
+          <>
+            <Skeleton aria-hidden="true" className="h-5 w-24 rounded-full" />
+            <span className="sr-only">Consultando rastreio</span>
+          </>
+        );
+      }
 
       return (
         <Badge variant="secondary" {...classProps(styles.badge, trackingBadges[status])}>
@@ -234,7 +245,8 @@ const route = getRouteApi("/_portal/bens-e-coleta");
 export function EquipmentPage() {
   const navigate = route.useNavigate();
 
-  const urlPagination = useListPagination(
+  const urlPagination = listPagination(
+    route.useSearch(),
     (patch) =>
       void navigate({
         search: (previous) => ({ ...previous, ...patch }),
@@ -280,10 +292,10 @@ export function EquipmentPage() {
       title: task.title,
       person,
       trackingCode: task.trackingCode,
-      status: getTrackingStatus(
-        task.trackingCode,
-        trackings[index]?.isError ? { delivered: false, lastUpdate: "" } : tracking,
-      ),
+      status:
+        trackings[index]?.isError && !tracking
+          ? "unavailable"
+          : getTrackingStatus(task.trackingCode, tracking),
       date: iso ? { iso, label: formatShortDeadline(iso) } : null,
     };
   });

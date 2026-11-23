@@ -38,19 +38,24 @@ const textFields = [
   { name: "email", label: "E-mail", type: "email" },
 ] as const;
 
-export function AddMemberDialog({ onAdd }: { onAdd: (member: NewMember) => void }) {
+export function AddMemberDialog({ onAdd }: { onAdd: (member: NewMember) => Promise<void> }) {
   const id = useId();
   const [open, setOpen] = useState(false);
+  const [submitError, setSubmitError] = useState(false);
 
   const form = useForm({
     defaultValues: { name: "", email: "", role: "" },
     validators: { onSubmit: memberSchema },
-    onSubmit: ({ value }) => {
-      const member = memberSchema.parse(value);
+    onSubmit: async ({ value }) => {
+      setSubmitError(false);
 
-      setOpen(false);
-      form.reset();
-      onAdd(member);
+      try {
+        await onAdd(memberSchema.parse(value));
+        setOpen(false);
+        form.reset();
+      } catch {
+        setSubmitError(true);
+      }
     },
   });
 
@@ -61,6 +66,7 @@ export function AddMemberDialog({ onAdd }: { onAdd: (member: NewMember) => void 
         setOpen(next);
 
         if (!next) {
+          setSubmitError(false);
           form.reset();
         }
       }}
@@ -152,15 +158,24 @@ export function AddMemberDialog({ onAdd }: { onAdd: (member: NewMember) => void 
               }}
             </form.Field>
           </DialogBody>
+          {submitError && (
+            <p role="alert" className="px-5 py-2 text-sm text-destructive">
+              Não foi possível autorizar o acesso. Confira se o e-mail já foi cadastrado.
+            </p>
+          )}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" className="min-h-11" />}>
               <HugeiconsIcon icon={Cancel01Icon} data-icon="inline-start" aria-hidden="true" />
               Cancelar
             </DialogClose>
-            <Button type="submit" className="min-h-11">
-              <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" aria-hidden="true" />
-              Autorizar
-            </Button>
+            <form.Subscribe selector={(state) => state.isSubmitting}>
+              {(submitting) => (
+                <Button type="submit" className="min-h-11" disabled={submitting}>
+                  <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" aria-hidden="true" />
+                  {submitting ? "Autorizando…" : "Autorizar"}
+                </Button>
+              )}
+            </form.Subscribe>
           </DialogFooter>
         </form>
       </DialogContent>

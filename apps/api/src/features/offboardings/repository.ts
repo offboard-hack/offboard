@@ -38,8 +38,8 @@ export function createOffboardingsRepository(db: Database) {
     return rows;
   }
 
-  async function getOffboarding(id: string) {
-    const found = await db.query.offboardingCases.findFirst({
+  function fetchOffboarding(id: string) {
+    return db.query.offboardingCases.findFirst({
       where: eq(offboardingCases.id, id),
       with: {
         tasks: {
@@ -48,9 +48,17 @@ export function createOffboardingsRepository(db: Database) {
         },
       },
     });
+  }
+
+  async function getOffboarding(id: string) {
+    const found = await fetchOffboarding(id);
 
     if (!found) return null;
 
+    return serializeOffboarding(found);
+  }
+
+  function serializeOffboarding(found: NonNullable<Awaited<ReturnType<typeof fetchOffboarding>>>) {
     const caseTasks = found.tasks.map((task) => ({
       id: task.id,
       title: task.title,
@@ -76,6 +84,20 @@ export function createOffboardingsRepository(db: Database) {
       total: caseTasks.length,
       tasks: caseTasks,
     };
+  }
+
+  async function listOffboardingsWithTasks() {
+    const rows = await db.query.offboardingCases.findMany({
+      orderBy: [asc(offboardingCases.deadline), asc(offboardingCases.name)],
+      with: {
+        tasks: {
+          orderBy: asc(tasks.position),
+          with: { subtasks: { orderBy: asc(subtasks.position) } },
+        },
+      },
+    });
+
+    return rows.map(serializeOffboarding);
   }
 
   async function createOffboarding(data: NewOffboarding) {
@@ -184,6 +206,7 @@ export function createOffboardingsRepository(db: Database) {
 
   return {
     listOffboardings,
+    listOffboardingsWithTasks,
     getOffboarding,
     createOffboarding,
     bulkCreateOffboardings,

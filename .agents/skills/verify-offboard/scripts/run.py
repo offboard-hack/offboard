@@ -8,11 +8,11 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[4]
 HOST = "127.0.0.1"
-DEFAULT_API_ORIGIN = "http://localhost:5173"
 
 
 def endpoints():
@@ -44,14 +44,14 @@ def doctor(web_port, api_port, web, api):
     api_url = f"http://{HOST}:{api_port}/api/health"
     web_pids = require_listener(web_port, web)
     api_pids = require_listener(api_port, api)
-    with urlopen(Request(api_url, headers={"Origin": DEFAULT_API_ORIGIN}), timeout=4) as response:
+    with urlopen(Request(api_url, headers={"Origin": web_url}), timeout=4) as response:
         health = json.load(response)
-        if health != {"status": "ok"} or response.headers.get("Access-Control-Allow-Origin") != DEFAULT_API_ORIGIN:
+        if health != {"status": "ok"} or response.headers.get("Access-Control-Allow-Origin") != web_url:
             raise RuntimeError("API health or CORS differs from the verification instance")
     with urlopen(f"{web_url}/desligamentos", timeout=8) as response:
         html = response.read().decode("utf-8")
-        if "Marina Lopes" not in html or "Desligamentos" not in html:
-            raise RuntimeError("The Offboard case list did not render its seeded records")
+        if urlparse(response.geturl()).path != "/entrar" or "Entrar · Offboard" not in html:
+            raise RuntimeError("The protected case list should redirect anonymous visitors to sign-in")
     return {
         "web": {"url": web_url, "listener_pids": web_pids},
         "api": {"url": api_url, "listener_pids": api_pids, "health": health},
@@ -85,10 +85,35 @@ def git(*args):
 
 
 def run(evidence, driver):
-    if not shutil.which("lsof"):
-        raise RuntimeError("lsof is required to verify listener ownership")
     if not driver.is_file():
         raise RuntimeError(f"Driver file does not exist: {driver}")
+
+    existing_url = os.environ.get("OFFBOARD_VERIFY_URL")
+    storage_state = os.environ.get("OFFBOARD_VERIFY_STORAGE_STATE")
+    if existing_url:
+        origin = urlparse(existing_url)
+        if origin.scheme not in ("http", "https") or origin.hostname not in ("127.0.0.1", "localhost", "::1"):
+            raise RuntimeError("OFFBOARD_VERIFY_URL must point to a local development server")
+        if not storage_state or not Path(storage_state).is_file():
+            raise RuntimeError("Set OFFBOARD_VERIFY_STORAGE_STATE to an authenticated Playwright storage state file")
+        evidence.mkdir(parents=True, exist_ok=False)
+        doctor_note = {"revision": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain"))}
+        (evidence / "doctor.json").write_text(json.dumps(doctor_note, indent=2) + "\n")
+        env = {**os.environ, "OFFBOARD_VERIFY_EVIDENCE": str(evidence)}
+        try:
+            with (evidence / "drive.log").open("w") as output:
+                result = subprocess.run(
+                    ["node", str(driver)], cwd=ROOT, env=env, stdout=output,
+                    stderr=subprocess.STDOUT, timeout=150, check=False,
+                )
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError("Browser drive exceeded 150 seconds. See drive.log.") from error
+        if result.returncode:
+            raise RuntimeError(f"Browser drive exited {result.returncode}. See drive.log.")
+        return
+
+    if not shutil.which("lsof"):
+        raise RuntimeError("lsof is required to verify listener ownership")
 
     evidence.mkdir(parents=True, exist_ok=False)
     web_port, api_port = endpoints()
@@ -100,7 +125,7 @@ def run(evidence, driver):
         "OFFBOARD_VERIFY_URL": web_url,
         "OFFBOARD_VERIFY_EVIDENCE": str(evidence),
     }
-    env.pop("WEB_ORIGIN", None)
+    env.update(API_URL=f"http://{HOST}:{api_port}", WEB_ORIGIN=web_url, BETTER_AUTH_URL=web_url)
     processes = []
     servers = []
     doctor_note = {"revision": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain"))}

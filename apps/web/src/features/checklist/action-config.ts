@@ -1,7 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { ApiClient, Treaty } from "@offboard/api-client";
 import type { ChecklistStep } from "./checklist-draft";
-import { stepFormSchema } from "./step-settings";
+import { stepFormSchema, type StepSettings } from "./step-settings";
 import { getApiClient } from "@/shared/lib/api-client";
 
 const kinds = ["email", "slack", "webhook"] as const;
@@ -44,21 +44,48 @@ function desiredConfigs(steps: ChecklistStep[]) {
   );
 }
 
-export async function syncActionConfigs(steps: ChecklistStep[], existing: ActionConfigRow[]) {
+export function knownActionRowIds(steps: ChecklistStep[], rows: ActionConfigRow[]) {
+  const actions = desiredConfigs(steps);
+
+  return rows.flatMap(({ id, actionId }) => (actions.has(actionId) ? [id] : []));
+}
+
+export async function syncActionConfigs(
+  steps: ChecklistStep[],
+  existing: ActionConfigRow[],
+  knownRowIds: readonly string[],
+) {
   const api = getApiClient().api["action-configs"];
   const desired = desiredConfigs(steps);
   const current = new Map(existing.map((row) => [row.actionId, row]));
 
-  const removals = existing.flatMap((row) =>
-    kinds.some((kind) => row.actionId.startsWith(`${kind}:`)) && !desired.has(row.actionId)
-      ? [checkWrite(api({ id: encodeURIComponent(row.id) }).delete())]
-      : [],
-  );
+  const stepsById = new Map(steps.map((step) => [step.id, step]));
+  const knownRows = new Set(knownRowIds);
 
-  const writes = [...desired].flatMap(([actionId, { phase, config }]) => {
+  const removals = existing.flatMap(({ id, actionId }) => {
+    const kind = kinds.find((kind) => actionId.startsWith(`${kind}:`));
+
+    if (!kind || !knownRows.has(id)) return [];
+
+    const step = stepsById.get(actionId.slice(kind.length + 1));
+
+    return !step || step[kind] === null
+      ? [checkWrite(api({ id: encodeURIComponent(id) }).delete())]
+      : [];
+  });
+
+  async function createConfig(body: NewActionConfig) {
+    const { data, error } = await api.post(body);
+
+    if (error) throw new Error("Failed to save action config");
+
+    return data.id;
+  }
+
+  const writes = [...desired].flatMap<Promise<string | void>>(([actionId, { phase, config }]) => {
     const row = current.get(actionId);
 
-    if (!row) return [checkWrite(api.post({ actionId, phase, enabled: true, config }))];
+    if (!row) return [createConfig({ actionId, phase, enabled: true, config })];
 
     const unchanged = row.phase === phase && JSON.stringify(row.config) === JSON.stringify(config);
 
@@ -67,7 +94,37 @@ export async function syncActionConfigs(steps: ChecklistStep[], existing: Action
       : [checkWrite(api({ id: encodeURIComponent(row.id) }).put({ phase, config }))];
   });
 
-  await Promise.all([...removals, ...writes]);
+  const results = await Promise.allSettled([...removals, ...writes]);
+
+  return {
+    createdRowIds: results.flatMap((result) =>
+      result.status === "fulfilled" && result.value ? [result.value] : [],
+    ),
+    failed: results.some(({ status }) => status === "rejected"),
+  };
+}
+
+function editedAction<T>(previous: T | null | undefined, next: T | null) {
+  return next === null && previous === undefined ? undefined : next;
+}
+
+export function mergeStepSettings(step: ChecklistStep, settings: StepSettings) {
+  return {
+    ...step,
+    ...settings,
+    email: editedAction(step.email, settings.email),
+    slack: editedAction(step.slack, settings.slack),
+    webhook: editedAction(step.webhook, settings.webhook),
+  } satisfies ChecklistStep;
+}
+
+export function clearSyncedRemovals(steps: ChecklistStep[]) {
+  return steps.map<ChecklistStep>((step) => ({
+    ...step,
+    email: step.email ?? undefined,
+    slack: step.slack ?? undefined,
+    webhook: step.webhook ?? undefined,
+  }));
 }
 
 export function applyActionConfigs(steps: ChecklistStep[], rows: ActionConfigRow[]) {
@@ -75,16 +132,19 @@ export function applyActionConfigs(steps: ChecklistStep[], rows: ActionConfigRow
 
   return steps.map<ChecklistStep>((step) => {
     const email =
-      step.email ??
-      stepFormSchema.shape.email.safeParse(byActionId.get(`email:${step.id}`)?.config).data;
+      step.email === undefined
+        ? stepFormSchema.shape.email.safeParse(byActionId.get(`email:${step.id}`)?.config).data
+        : step.email;
 
     const slack =
-      step.slack ??
-      stepFormSchema.shape.slack.safeParse(byActionId.get(`slack:${step.id}`)?.config).data;
+      step.slack === undefined
+        ? stepFormSchema.shape.slack.safeParse(byActionId.get(`slack:${step.id}`)?.config).data
+        : step.slack;
 
     const webhook =
-      step.webhook ??
-      stepFormSchema.shape.webhook.safeParse(byActionId.get(`webhook:${step.id}`)?.config).data;
+      step.webhook === undefined
+        ? stepFormSchema.shape.webhook.safeParse(byActionId.get(`webhook:${step.id}`)?.config).data
+        : step.webhook;
 
     return { ...step, email, slack, webhook };
   });
