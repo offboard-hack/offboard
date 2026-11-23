@@ -1,4 +1,4 @@
-import { Delete02Icon } from "@hugeicons/core-free-icons";
+import { Delete02Icon, HelpCircleIcon } from "@hugeicons/core-free-icons";
 import { Shield01Icon, UserGroupIcon, UserCheck01Icon, ViewIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
@@ -8,6 +8,7 @@ import type { MemberRole, TeamMember } from "@/entities/team";
 import { listPagination } from "@/shared/lib/list-pagination";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import { Button } from "@/shared/ui/shadcn/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/shadcn/popover";
 import { classProps } from "../../shared/lib/class-props";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
@@ -144,36 +145,11 @@ export function AccessPage() {
       }),
   );
 
-  const roleSummary = roleCards
-    .map(({ role, label }) => `${team.filter((member) => member.role === role).length} ${label}`)
-    .join(" · ");
-
   return (
     <ListPage
       title="Equipe e permissões"
       breadcrumb={<ListBreadcrumb title="Equipe e permissões" />}
     >
-      <ul
-        className="flex min-w-0 flex-wrap gap-x-6 gap-y-2 text-sm"
-        aria-label="Capacidades por papel"
-      >
-        {roleCards.map(({ label, icon, tone, capabilities }) => (
-          <li key={label} className="flex items-center gap-2">
-            <span className={`flex size-6 shrink-0 items-center justify-center rounded-md ${tone}`}>
-              <HugeiconsIcon icon={icon} size={14} />
-            </span>
-            <span className="font-medium">{label}</span>
-            <span className="text-muted-foreground">{capabilities}</span>
-          </li>
-        ))}
-      </ul>
-
-      <p className="text-sm text-muted-foreground">
-        <strong className="font-semibold text-foreground">Total de membros: {team.length}</strong>
-        {" · "}
-        {roleSummary}
-      </p>
-
       <section className="min-w-0" aria-labelledby="equipe">
         {remove.isError && (
           <p role="alert" className="mb-3 text-sm text-destructive">
@@ -182,9 +158,36 @@ export function AccessPage() {
         )}
         <DataTable
           toolbar={
-            <h2 {...classProps(s.subheading)} id="equipe">
-              Equipe RH e permissões
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 {...classProps(s.subheading)} id="equipe">
+                Equipe RH e permissões
+              </h2>
+              <Popover>
+                <PopoverTrigger
+                  className="inline-flex size-6 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label="Ver papéis e permissões"
+                >
+                  <HugeiconsIcon icon={HelpCircleIcon} size={16} />
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-80">
+                  <ul className="flex flex-col gap-3">
+                    {roleCards.map(({ label, icon, tone, capabilities }) => (
+                      <li key={label} className="flex items-start gap-2 text-sm">
+                        <span
+                          className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded ${tone}`}
+                        >
+                          <HugeiconsIcon icon={icon} size={12} />
+                        </span>
+                        <div>
+                          <span className="font-medium">{label}</span>
+                          <span className="text-muted-foreground"> — {capabilities}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </PopoverContent>
+              </Popover>
+            </div>
           }
           toolbarEnd={<AddMemberDialog onAdd={addMember} />}
           urlPagination={teamPagination}
