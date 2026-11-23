@@ -1,19 +1,18 @@
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "@offboard/db/repositories";
-import { sql } from "drizzle-orm";
 import { createApp } from "./app.js";
 
 const db = createClient(process.env.POSTGRES_URL ?? "");
 const repos = createRepositories(db);
 const app = createApp(process.env.WEB_ORIGIN ?? "*", repos);
 
-const migrated = db
-  .execute(
-    sql.raw(`
+const migrated = db.$client
+  .query(`
     DO $$ BEGIN
       CREATE TYPE "member_role" AS ENUM ('admin', 'rh', 'gestor', 'visualizador');
     EXCEPTION WHEN duplicate_object THEN NULL;
     END $$;
+
     CREATE TABLE IF NOT EXISTS "team_members" (
       "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
       "name" varchar(255) NOT NULL,
@@ -23,8 +22,7 @@ const migrated = db
       "updated_at" timestamp DEFAULT now(),
       CONSTRAINT "team_members_email_unique" UNIQUE("email")
     );
-  `),
-  )
+  `)
   .catch(() => {});
 
 async function handle(request: Request) {
