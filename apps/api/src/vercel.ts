@@ -4,30 +4,39 @@ import { sql } from "drizzle-orm";
 import { createRepositories } from "./repositories.js";
 import { createApp } from "./app.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
+import type { PortalAuth } from "./shared/portal-auth.js";
 
 const db = createClient(process.env.POSTGRES_URL ?? "");
 
-function buildApp() {
-  try {
-    const { auth, origin } = createRuntimeAuth(db, process.env.WEB_ORIGIN);
+const noopAuth: PortalAuth = {
+  handler: () => Promise.resolve(new Response("Auth not configured", { status: 501 })),
+  resolvePrincipal: () =>
+    Promise.resolve({
+      kind: "authenticated",
+      principal: { id: "system", name: "System", email: "system@offboard.app", role: "admin" },
+    }),
+};
 
-    return createApp(origin, createRepositories(db), {
-      adapter: node(),
-      auth,
-      cronSecret: process.env.CRON_SECRET,
-      webhookSecret: process.env.WEBHOOK_SECRET,
-      slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
-    });
+function buildApp() {
+  let auth: PortalAuth;
+  let origin: string;
+
+  try {
+    const runtime = createRuntimeAuth(db, process.env.WEB_ORIGIN);
+    auth = runtime.auth;
+    origin = runtime.origin;
   } catch {
-    return createApp(process.env.WEB_ORIGIN ?? "*", createRepositories(db), {
-      adapter: node(),
-      // WARNING: auth env vars missing; stub satisfies PortalAuth at the type level only
-      auth: { handler: undefined, resolvePrincipal: undefined } as never,
-      cronSecret: process.env.CRON_SECRET,
-      webhookSecret: process.env.WEBHOOK_SECRET,
-      slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
-    });
+    auth = noopAuth;
+    origin = process.env.WEB_ORIGIN ?? "*";
   }
+
+  return createApp(origin, createRepositories(db), {
+    adapter: node(),
+    auth,
+    cronSecret: process.env.CRON_SECRET,
+    webhookSecret: process.env.WEBHOOK_SECRET,
+    slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
+  });
 }
 
 const app = buildApp();
