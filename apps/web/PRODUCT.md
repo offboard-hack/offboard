@@ -32,7 +32,7 @@ The product is named Offboard. The HR workspace is labeled “Portal do RH” in
 
 - `src/entities/offboarding.ts` contains example departure cases and tasks.
 - `public/modelo-desligamentos.csv` is the bulk-import template.
-- `public/offboard-icon.svg` is the app icon and favicon; `public/offboard-logo.svg` and `public/offboard-logo-branco.svg` are the full logo for light and dark surfaces.
+- `public/offboard-logo.svg` contains the Open O mark and wordmark. `public/offboard-icon.svg` is the source for the favicon and app icons.
 
 ## Product Principles
 
