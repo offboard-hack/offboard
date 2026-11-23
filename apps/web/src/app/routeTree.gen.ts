@@ -10,11 +10,11 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AcessosAoAppRouteImport } from './routes/acessos-ao-app'
 import { Route as BensEColetaRouteImport } from './routes/bens-e-coleta'
 import { Route as CandidaturasAssistidasRouteImport } from './routes/candidaturas-assistidas'
 import { Route as ChecklistAutomaticoRouteImport } from './routes/checklist-automatico'
 import { Route as DesligamentosRouteImport } from './routes/desligamentos'
+import { Route as EquipeRouteImport } from './routes/equipe'
 import { Route as IntegracoesRouteImport } from './routes/integracoes'
 import { Route as PainelRouteImport } from './routes/painel'
 import { Route as PlanosEGastosRouteImport } from './routes/planos-e-gastos'
@@ -25,11 +25,6 @@ import { Route as DesligamentosImportarRouteImport } from './routes/desligamento
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AcessosAoAppRoute = AcessosAoAppRouteImport.update({
-  id: '/acessos-ao-app',
-  path: '/acessos-ao-app',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BensEColetaRoute = BensEColetaRouteImport.update({
@@ -50,6 +45,11 @@ const ChecklistAutomaticoRoute = ChecklistAutomaticoRouteImport.update({
 const DesligamentosRoute = DesligamentosRouteImport.update({
   id: '/desligamentos',
   path: '/desligamentos',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EquipeRoute = EquipeRouteImport.update({
+  id: '/equipe',
+  path: '/equipe',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IntegracoesRoute = IntegracoesRouteImport.update({
@@ -85,11 +85,11 @@ const DesligamentosImportarRoute = DesligamentosImportarRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/acessos-ao-app': typeof AcessosAoAppRoute
   '/bens-e-coleta': typeof BensEColetaRoute
   '/candidaturas-assistidas': typeof CandidaturasAssistidasRoute
   '/checklist-automatico': typeof ChecklistAutomaticoRoute
   '/desligamentos': typeof DesligamentosRoute
+  '/equipe': typeof EquipeRoute
   '/integracoes': typeof IntegracoesRoute
   '/painel': typeof PainelRoute
   '/planos-e-gastos': typeof PlanosEGastosRoute
@@ -99,11 +99,11 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/acessos-ao-app': typeof AcessosAoAppRoute
   '/bens-e-coleta': typeof BensEColetaRoute
   '/candidaturas-assistidas': typeof CandidaturasAssistidasRoute
   '/checklist-automatico': typeof ChecklistAutomaticoRoute
   '/desligamentos': typeof DesligamentosRoute
+  '/equipe': typeof EquipeRoute
   '/integracoes': typeof IntegracoesRoute
   '/painel': typeof PainelRoute
   '/planos-e-gastos': typeof PlanosEGastosRoute
@@ -114,11 +114,11 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/acessos-ao-app': typeof AcessosAoAppRoute
   '/bens-e-coleta': typeof BensEColetaRoute
   '/candidaturas-assistidas': typeof CandidaturasAssistidasRoute
   '/checklist-automatico': typeof ChecklistAutomaticoRoute
   '/desligamentos': typeof DesligamentosRoute
+  '/equipe': typeof EquipeRoute
   '/integracoes': typeof IntegracoesRoute
   '/painel': typeof PainelRoute
   '/planos-e-gastos': typeof PlanosEGastosRoute
@@ -130,11 +130,11 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/acessos-ao-app'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
     | '/checklist-automatico'
     | '/desligamentos'
+    | '/equipe'
     | '/integracoes'
     | '/painel'
     | '/planos-e-gastos'
@@ -144,11 +144,11 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/acessos-ao-app'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
     | '/checklist-automatico'
     | '/desligamentos'
+    | '/equipe'
     | '/integracoes'
     | '/painel'
     | '/planos-e-gastos'
@@ -158,11 +158,11 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/acessos-ao-app'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
     | '/checklist-automatico'
     | '/desligamentos'
+    | '/equipe'
     | '/integracoes'
     | '/painel'
     | '/planos-e-gastos'
@@ -173,11 +173,11 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AcessosAoAppRoute: typeof AcessosAoAppRoute
   BensEColetaRoute: typeof BensEColetaRoute
   CandidaturasAssistidasRoute: typeof CandidaturasAssistidasRoute
   ChecklistAutomaticoRoute: typeof ChecklistAutomaticoRoute
   DesligamentosRoute: typeof DesligamentosRoute
+  EquipeRoute: typeof EquipeRoute
   IntegracoesRoute: typeof IntegracoesRoute
   PainelRoute: typeof PainelRoute
   PlanosEGastosRoute: typeof PlanosEGastosRoute
@@ -193,13 +193,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/acessos-ao-app': {
-      id: '/acessos-ao-app'
-      path: '/acessos-ao-app'
-      fullPath: '/acessos-ao-app'
-      preLoaderRoute: typeof AcessosAoAppRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/bens-e-coleta': {
@@ -228,6 +221,13 @@ declare module '@tanstack/react-router' {
       path: '/desligamentos'
       fullPath: '/desligamentos'
       preLoaderRoute: typeof DesligamentosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/equipe': {
+      id: '/equipe'
+      path: '/equipe'
+      fullPath: '/equipe'
+      preLoaderRoute: typeof EquipeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/integracoes': {
@@ -277,11 +277,11 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AcessosAoAppRoute: AcessosAoAppRoute,
   BensEColetaRoute: BensEColetaRoute,
   CandidaturasAssistidasRoute: CandidaturasAssistidasRoute,
   ChecklistAutomaticoRoute: ChecklistAutomaticoRoute,
   DesligamentosRoute: DesligamentosRoute,
+  EquipeRoute: EquipeRoute,
   IntegracoesRoute: IntegracoesRoute,
   PainelRoute: PainelRoute,
   PlanosEGastosRoute: PlanosEGastosRoute,

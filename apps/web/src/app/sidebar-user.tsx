@@ -65,7 +65,7 @@ export function SidebarUser() {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  render={<Link to="/acessos-ao-app" />}
+                  render={<Link to="/equipe" />}
                   onClick={() => setOpenMobile(false)}
                 >
                   <HugeiconsIcon icon={UserAccountIcon} aria-hidden="true" />

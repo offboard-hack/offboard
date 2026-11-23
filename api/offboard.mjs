@@ -24244,13 +24244,13 @@ function construct(client, config2 = {}) {
   }
   const driver = new NodePgDriver(client, dialect, { logger, cache: config2.cache });
   const session = driver.createSession(schema);
-  const db = new NodePgDatabase(dialect, session, schema);
-  db.$client = client;
-  db.$cache = config2.cache;
-  if (db.$cache) {
-    db.$cache["invalidate"] = config2.cache?.onMutate;
+  const db2 = new NodePgDatabase(dialect, session, schema);
+  db2.$client = client;
+  db2.$cache = config2.cache;
+  if (db2.$cache) {
+    db2.$cache["invalidate"] = config2.cache?.onMutate;
   }
-  return db;
+  return db2;
 }
 function drizzle(...params) {
   if (typeof params[0] === "string") {
@@ -24405,9 +24405,9 @@ function defaultDeadline() {
   date7.setUTCDate(date7.getUTCDate() + 14);
   return date7.toISOString().slice(0, 10);
 }
-function createRepositories(db) {
+function createRepositories(db2) {
   async function listOffboardings() {
-    const rows = await db.select({
+    const rows = await db2.select({
       id: offboardingCases.id,
       name: offboardingCases.name,
       role: offboardingCases.role,
@@ -24419,7 +24419,7 @@ function createRepositories(db) {
     return rows;
   }
   async function getOffboarding(id) {
-    const found = await db.query.offboardingCases.findFirst({
+    const found = await db2.query.offboardingCases.findFirst({
       where: eq(offboardingCases.id, id),
       with: {
         tasks: {
@@ -24455,7 +24455,7 @@ function createRepositories(db) {
     };
   }
   async function createOffboarding(data) {
-    const [inserted] = await db.insert(offboardingCases).values(data).returning({ id: offboardingCases.id });
+    const [inserted] = await db2.insert(offboardingCases).values(data).returning({ id: offboardingCases.id });
     return { id: inserted.id, ...data, completed: 0, total: 0 };
   }
   async function bulkCreateOffboardings(rows) {
@@ -24466,15 +24466,15 @@ function createRepositories(db) {
       role: "N\xE3o informado",
       deadline
     }));
-    const inserted = await db.insert(offboardingCases).values(values).returning({ id: offboardingCases.id });
+    const inserted = await db2.insert(offboardingCases).values(values).returning({ id: offboardingCases.id });
     return inserted.map((row, i2) => ({ id: row.id, ...values[i2], completed: 0, total: 0 }));
   }
   async function getTaskPhase(taskId) {
-    const [row] = await db.select({ phase: tasks.phase }).from(tasks).where(eq(tasks.id, taskId));
+    const [row] = await db2.select({ phase: tasks.phase }).from(tasks).where(eq(tasks.id, taskId));
     return row?.phase ?? null;
   }
   async function updateTaskStatus(taskId, status2) {
-    const [updated] = await db.update(tasks).set({ status: status2, updatedAt: /* @__PURE__ */ new Date() }).where(eq(tasks.id, taskId)).returning({
+    const [updated] = await db2.update(tasks).set({ status: status2, updatedAt: /* @__PURE__ */ new Date() }).where(eq(tasks.id, taskId)).returning({
       id: tasks.id,
       title: tasks.title,
       team: tasks.team,
@@ -24484,11 +24484,11 @@ function createRepositories(db) {
       trackingCode: tasks.trackingCode
     });
     if (!updated) return null;
-    const subs = await db.select({ id: subtasks.id, title: subtasks.title, done: subtasks.done }).from(subtasks).where(eq(subtasks.taskId, taskId)).orderBy(asc(subtasks.position));
+    const subs = await db2.select({ id: subtasks.id, title: subtasks.title, done: subtasks.done }).from(subtasks).where(eq(subtasks.taskId, taskId)).orderBy(asc(subtasks.position));
     return { ...updated, subtasks: subs };
   }
   async function toggleSubtask(subtaskId) {
-    const [row] = await db.update(subtasks).set({ done: sql`NOT ${subtasks.done}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq(subtasks.id, subtaskId)).returning({
+    const [row] = await db2.update(subtasks).set({ done: sql`NOT ${subtasks.done}`, updatedAt: /* @__PURE__ */ new Date() }).where(eq(subtasks.id, subtaskId)).returning({
       id: subtasks.id,
       title: subtasks.title,
       done: subtasks.done
@@ -24496,40 +24496,40 @@ function createRepositories(db) {
     return row ?? null;
   }
   async function listIntegrations() {
-    const rows = await db.select({ name: integrations.name, status: integrations.status }).from(integrations).orderBy(asc(integrations.name));
+    const rows = await db2.select({ name: integrations.name, status: integrations.status }).from(integrations).orderBy(asc(integrations.name));
     return rows;
   }
   async function upsertIntegration(name, status2) {
-    const [row] = await db.insert(integrations).values({ name, status: status2 }).onConflictDoUpdate({
+    const [row] = await db2.insert(integrations).values({ name, status: status2 }).onConflictDoUpdate({
       target: integrations.name,
       set: { status: status2, updatedAt: /* @__PURE__ */ new Date() }
     }).returning({ name: integrations.name, status: integrations.status });
     return row;
   }
   async function listActionConfigs() {
-    return db.select(actionConfigColumns).from(actionConfigs).orderBy(asc(actionConfigs.actionId));
+    return db2.select(actionConfigColumns).from(actionConfigs).orderBy(asc(actionConfigs.actionId));
   }
   async function getActionConfigsByPhase(phase) {
-    return db.select(actionConfigColumns).from(actionConfigs).where(sql`${actionConfigs.phase} = ${phase} AND ${actionConfigs.enabled} = true`);
+    return db2.select(actionConfigColumns).from(actionConfigs).where(sql`${actionConfigs.phase} = ${phase} AND ${actionConfigs.enabled} = true`);
   }
   async function getActionConfig(id) {
-    const [row] = await db.select(actionConfigColumns).from(actionConfigs).where(eq(actionConfigs.id, id));
+    const [row] = await db2.select(actionConfigColumns).from(actionConfigs).where(eq(actionConfigs.id, id));
     return row ?? null;
   }
   async function createActionConfig(data) {
-    const [row] = await db.insert(actionConfigs).values(data).returning(actionConfigColumns);
+    const [row] = await db2.insert(actionConfigs).values(data).returning(actionConfigColumns);
     return row;
   }
   async function updateActionConfig(id, data) {
-    const [row] = await db.update(actionConfigs).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(actionConfigs.id, id)).returning(actionConfigColumns);
+    const [row] = await db2.update(actionConfigs).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(actionConfigs.id, id)).returning(actionConfigColumns);
     return row ?? null;
   }
   async function deleteActionConfig(id) {
-    const rows = await db.delete(actionConfigs).where(eq(actionConfigs.id, id)).returning({ id: actionConfigs.id });
+    const rows = await db2.delete(actionConfigs).where(eq(actionConfigs.id, id)).returning({ id: actionConfigs.id });
     return rows.length > 0;
   }
   async function getTrackedTasks() {
-    return db.select({
+    return db2.select({
       id: tasks.id,
       title: tasks.title,
       phase: tasks.phase,
@@ -24537,11 +24537,11 @@ function createRepositories(db) {
     }).from(tasks).where(and(isNotNull(tasks.trackingCode), ne(tasks.status, "done")));
   }
   async function setTrackingCode(taskId, code) {
-    const [row] = await db.update(tasks).set({ trackingCode: code, updatedAt: /* @__PURE__ */ new Date() }).where(eq(tasks.id, taskId)).returning({ id: tasks.id, trackingCode: tasks.trackingCode });
+    const [row] = await db2.update(tasks).set({ trackingCode: code, updatedAt: /* @__PURE__ */ new Date() }).where(eq(tasks.id, taskId)).returning({ id: tasks.id, trackingCode: tasks.trackingCode });
     return row ?? null;
   }
   async function getTaskTrackingCode(taskId) {
-    const [row] = await db.select({ id: tasks.id, trackingCode: tasks.trackingCode, status: tasks.status }).from(tasks).where(eq(tasks.id, taskId));
+    const [row] = await db2.select({ id: tasks.id, trackingCode: tasks.trackingCode, status: tasks.status }).from(tasks).where(eq(tasks.id, taskId));
     return row ?? null;
   }
   const memberColumns = {
@@ -24551,14 +24551,14 @@ function createRepositories(db) {
     role: teamMembers.role
   };
   async function listTeamMembers() {
-    return db.select(memberColumns).from(teamMembers).orderBy(asc(teamMembers.name));
+    return db2.select(memberColumns).from(teamMembers).orderBy(asc(teamMembers.name));
   }
   async function createTeamMember({ name, email: email3, role }) {
-    const [row] = await db.insert(teamMembers).values({ name, email: email3, role }).returning(memberColumns);
+    const [row] = await db2.insert(teamMembers).values({ name, email: email3, role }).returning(memberColumns);
     return row;
   }
   async function deleteTeamMember(id) {
-    const rows = await db.delete(teamMembers).where(eq(teamMembers.id, id)).returning({ id: teamMembers.id });
+    const rows = await db2.delete(teamMembers).where(eq(teamMembers.id, id)).returning({ id: teamMembers.id });
     return rows.length > 0;
   }
   return {
@@ -71539,9 +71539,29 @@ function createApp(webOrigin, repos2, correiosBaseUrl = CORREIOS_DEFAULT_URL) {
 }
 
 // apps/api/src/vercel.ts
-var repos = createRepositories(createClient(process.env.POSTGRES_URL ?? ""));
+var db = createClient(process.env.POSTGRES_URL ?? "");
+var repos = createRepositories(db);
 var app = createApp(process.env.WEB_ORIGIN ?? "*", repos);
+var migrated = db.execute(
+  sql.raw(`
+    DO $$ BEGIN
+      CREATE TYPE "member_role" AS ENUM ('admin', 'rh', 'gestor', 'visualizador');
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+    CREATE TABLE IF NOT EXISTS "team_members" (
+      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+      "name" varchar(255) NOT NULL,
+      "email" varchar(255) NOT NULL,
+      "role" member_role NOT NULL,
+      "created_at" timestamp DEFAULT now(),
+      "updated_at" timestamp DEFAULT now(),
+      CONSTRAINT "team_members_email_unique" UNIQUE("email")
+    );
+  `)
+).catch(() => {
+});
 async function handle(request) {
+  await migrated;
   return app.handle(request);
 }
 var GET = handle;
