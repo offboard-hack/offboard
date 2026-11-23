@@ -4,6 +4,7 @@ import {
   File01Icon,
   HeartCheckIcon,
   LaptopIcon,
+  Mail01Icon,
   MedicalFileIcon,
   RefreshIcon,
   Search01Icon,
@@ -28,6 +29,7 @@ import { Input } from "@/shared/ui/shadcn/input";
 import { Switch } from "@/shared/ui/shadcn/switch";
 
 const categories = {
+  communication: "Comunicação",
   payroll: "Folha e benefícios",
   accounts: "Acessos e contas",
   equipment: "Bens e coleta",
@@ -50,6 +52,7 @@ type Integration = {
   purpose: string;
   category: keyof typeof categories;
   providers?: Provider[];
+  comingSoon?: boolean;
 } & (
   | { logo: `/brands/${string}.svg`; icon?: never }
   | { icon: ComponentProps<typeof HugeiconsIcon>["icon"]; logo?: never }
@@ -57,46 +60,59 @@ type Integration = {
 
 const catalog: Integration[] = [
   {
+    name: "E-mail",
+    category: "communication",
+    icon: Mail01Icon,
+    purpose: "Envia notificações e links de acesso por e-mail.",
+  },
+  {
     name: "Sistema de folha",
     category: "payroll",
     icon: File01Icon,
     purpose: "Envia cadastro, rescisão, eSocial e FGTS.",
+    comingSoon: true,
   },
   {
     name: "Sistema de ponto",
     category: "payroll",
     icon: Clock01Icon,
     purpose: "Fecha ponto e banco de horas.",
+    comingSoon: true,
   },
   {
     name: "Google Workspace",
     category: "accounts",
     logo: "/brands/google.svg",
     purpose: "Bloqueia acessos e transfere arquivos.",
+    comingSoon: true,
   },
   {
     name: "Slack",
     category: "accounts",
     logo: "/brands/slack.svg",
     purpose: "Bloqueia acessos e avisa as áreas responsáveis.",
+    comingSoon: true,
   },
   {
     name: "HubSpot",
     category: "accounts",
     logo: "/brands/hubspot.svg",
     purpose: "Transfere negócios e contatos.",
+    comingSoon: true,
   },
   {
     name: "Inventário de TI",
     category: "equipment",
     icon: LaptopIcon,
     purpose: "Lista os bens de cada pessoa e registra a entrada no estoque.",
+    comingSoon: true,
   },
   {
     name: "Transportadora",
     category: "equipment",
     icon: TruckIcon,
     purpose: "Agenda e rastreia a coleta de equipamentos.",
+    comingSoon: true,
     providers: [
       {
         name: "Correios",
@@ -109,24 +125,28 @@ const catalog: Integration[] = [
     category: "payroll",
     icon: MedicalFileIcon,
     purpose: "Agenda o exame demissional.",
+    comingSoon: true,
   },
   {
     name: "Operadora do plano de saúde",
     category: "payroll",
     icon: HeartCheckIcon,
     purpose: "Informa o direito de manter o plano.",
+    comingSoon: true,
   },
   {
     name: "Cartão corporativo",
     category: "finance",
     icon: CreditCardIcon,
     purpose: "Cancela cartões e lista despesas em aberto.",
+    comingSoon: true,
   },
   {
     name: "Microsoft 365",
     category: "accounts",
     logo: "/brands/microsoft.svg",
     purpose: "Bloqueia acessos e transfere arquivos de trabalho.",
+    comingSoon: true,
   },
 ];
 
@@ -325,6 +345,35 @@ function IntegrationCard({
 
   const hasProviders = providers.length > 0;
   const connectedCount = providers.filter((p) => p.connection === "connected").length;
+
+  if (item.comingSoon) {
+    return (
+      <Card size="sm" className="flex h-full flex-col gap-3 p-4 opacity-50 grayscale">
+        <div className="flex items-center justify-between gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl border bg-muted/30 text-muted-foreground">
+            {item.logo ? (
+              <img
+                src={item.logo}
+                alt=""
+                width={22}
+                height={22}
+                className="size-[22px] object-contain"
+              />
+            ) : (
+              <HugeiconsIcon icon={item.icon} aria-hidden="true" className="size-5" />
+            )}
+          </span>
+        </div>
+        <div className="grid flex-1 content-start gap-1">
+          <h3 className="text-base leading-tight font-semibold">{item.name}</h3>
+          <p className="text-sm text-muted-foreground">{item.purpose}</p>
+        </div>
+        <div className="flex min-h-11 items-center border-t pt-3">
+          <Badge variant="outline">Em breve</Badge>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card size="sm" className="flex h-full flex-col gap-3 p-4">
