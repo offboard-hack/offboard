@@ -17,12 +17,12 @@ HR can look up employees, inspect a case's task progress, and create a case in t
 
 ## Driving it with Playwright
 
-Preconditions: fresh context with Marina Lopes in the case list.
+Preconditions: fresh authenticated context with seeded cases. Use an admin or RH member and a disposable database for creation.
 
-- Fill the searchbox named `Buscar desligamentos por nome` with `Marina`. Confirm Marina Lopes and the absence of Rafael Mendes. Search for `ZZ Verificação` and confirm `Nenhum desligamento corresponde aos filtros.`; then clear.
+- Confirm Marina Lopes and Rafael Mendes are visible. Fill the searchbox named `Buscar desligamentos por nome` with `Marina`. Confirm Marina Lopes and the absence of Rafael Mendes. Search for `ZZ Verificação` and confirm `Nenhum desligamento corresponde aos filtros.`; then clear.
 - Click a non-link cell in the Marina Lopes row. Verify the case URL and heading. Return and activate the `Marina Lopes` link with Enter to exercise the second entry point.
-- In the case, open the `Status das tarefas` combobox. Select the option whose name starts with `Concluídas`. Check the checklist shows only `Concluída` badges and that the selection survives reload.
-- In the list, open the `Desligamento` button and submit `Criar desligamento` with blank fields. Check `Informe o nome.`. Fill `Nome` with `Caso Verificação` and `Cargo` with `Analista`. Select `Marketing` in the `Área` combobox and an enabled day through `Escolha a data`. Submit, verify the `Caso Verificação` heading, then return through the sidebar and search for it in the list.
+- In the case, open the `Status das tarefas` combobox. Select the option whose name starts with `Concluídas`. Check the checklist shows at least one task and only `Concluída` badges. Confirm `tasks=done` and the filtered results survive reload.
+- In the list, open the `Desligamento` button and submit `Criar desligamento` with blank fields. Check `Informe o nome.`. Within `Novo desligamento`, fill `Nome` with a unique test name and `Cargo` with `Analista`. Select `Marketing` in `Área` and choose an enabled day with the `Data de encerramento Escolha a data` button. Submit, verify the new case heading, then return through the sidebar and search for the case in the list.
 
 ## Gotchas
 

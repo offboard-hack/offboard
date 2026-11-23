@@ -1,6 +1,6 @@
 ---
 name: verify-offboard
-description: Verify Offboard's HR portal in a real browser. Use for end-to-end checks of dashboard filters, offboarding cases, CSV review, checklist templates, and equipment returns. Launches an isolated local session and captures evidence with Playwright.
+description: Verify Offboard's HR portal in a real browser. Use for end-to-end checks of portal sign-in, offboarding workflows, and administration. Checks local app health and captures evidence with Playwright.
 ---
 
 # Verify Offboard
@@ -14,10 +14,10 @@ in with a member permitted to exercise the workflow.
 
 Use an existing loopback development server and an authenticated Playwright
 storage-state file for that origin. Keep the state file outside the checkout.
-It carries the session cookie. The checklist driver saves changes to the model,
-so point it at a disposable development database and browser context.
+It carries the session cookie. Use a disposable database for case creation, CSV imports, checklist action changes, and other mutations. Use an admin account to cover the full map.
 
 ```sh
+verify_skill=.agents/skills/verify-offboard
 verify_tools=$(mktemp -d /tmp/offboard-verify-tools.XXXXXX)
 npm install --prefix "$verify_tools" --no-save --package-lock=false playwright@1.65.1
 "$verify_tools/node_modules/.bin/playwright" install chromium
@@ -26,13 +26,12 @@ export OFFBOARD_VERIFY_URL=http://127.0.0.1:5173
 export OFFBOARD_VERIFY_STORAGE_STATE=/absolute/path/outside/repo/storage-state.json
 
 proof_root=$(mktemp -d /tmp/offboard-verification-proof.XXXXXX)
-.agents/skills/verify-offboard/scripts/run.py "$proof_root/checklist" .agents/skills/verify-offboard/scripts/checklist.mjs
+"$verify_skill/scripts/run.py" "$proof_root/checklist" "$verify_skill/scripts/checklist.mjs"
 ```
 
 Obtain the storage state with Playwright's `--save-storage` option after signing
 in. Use the same host name in the browser and `OFFBOARD_VERIFY_URL`. The runner
-leaves an existing server running and writes the browser driver's evidence to
-the named directory.
+checks the portal’s proxied API health and anonymous redirect before opening the driver. It checks both again if a drive fails and leaves the existing server running.
 
 For public-flow checks, omit `OFFBOARD_VERIFY_URL` and use a driver that does not
 require authentication. The runner starts isolated API and web listeners on
@@ -52,9 +51,9 @@ Copy the Playwright loader and tracing setup from `scripts/checklist.mjs`. The r
 
 ## Evidence
 
-Write browser action logs, screenshots of the starting and resulting state, an ARIA snapshot, and a Playwright trace into the evidence directory. For a mutation, verify the observable result from a second view when the behavior supports one. Case creation persists through the API, so open the created case in a fresh authenticated tab. The checklist model layout is stored in the browser and action configs sync through the API. Verify the model in another tab of the same browser context, and confirm action changes with the authenticated API when applicable. To prove CSV preview creates no case, return to the list and search for the fixture you uploaded. A failed or unreachable entry point needs the attempted action and the concrete failure in `drive.log`.
+Write browser action logs, screenshots of the starting and resulting state, an ARIA snapshot, and a Playwright trace into the evidence directory. For a mutation, verify the observable result from a second view when the behavior supports one. Case creation persists through the API, so open the created case in a fresh authenticated tab. The checklist model layout is stored in the browser and action configs sync through the API. Verify the model in another tab of the same browser context, and confirm action changes with the authenticated API when applicable. For a confirmed CSV import, open the imported case in a fresh authenticated tab. Use a unique fixture name for each entry point. A failed or unreachable entry point needs the attempted action and the concrete failure in `drive.log`.
 
-The isolated runner writes `web.log`, `api.log`, `drive.log`, and `cleanup.json`. With an existing server it writes `drive.log` and the driver artifacts. Inspect the files after cleanup. Open the recorded trace with:
+Both launch modes write `doctor.json` and `drive.log` when the doctor passes. The isolated runner also writes `web.log`, `api.log`, and `cleanup.json`. Inspect the files after cleanup. Open the recorded trace with:
 
 ```sh
 "$verify_tools/node_modules/.bin/playwright" show-trace "$proof_root/checklist/checklist-trace.zip"
