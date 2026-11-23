@@ -6,7 +6,6 @@
   "exports": {
     "./client": "./src/client.ts",
     "./schema": "./src/schema/index.ts",
-    "./repositories": "./src/repositories/index.ts",
     "./seed-database": "./src/seed-database.ts"
   },
   "scripts": {
@@ -17,7 +16,7 @@
     "lint": "tsc --noEmit && oxlint src"
   },
   "dependencies": {
-    "drizzle-orm": "^0.44.0",
+    "drizzle-orm": "^0.45.4",
     "pg": "^8.16.0"
   },
   "devDependencies": {

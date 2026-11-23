@@ -11,6 +11,7 @@ import {
   DialogBody,
   DialogClose,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -22,7 +23,11 @@ const memberRoles = ["Admin", "RH", "Gestor", "Visualizador"] as const;
 
 const memberSchema = z.object({
   name: z.string().trim().min(1, "Informe o nome."),
-  email: z.email({ error: "Informe um e-mail válido." }),
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .pipe(z.email({ error: "Informe um e-mail válido." })),
   role: z.enum(memberRoles, { error: "Escolha o papel." }),
 });
 
@@ -62,13 +67,16 @@ export function AddMemberDialog({ onAdd }: { onAdd: (member: NewMember) => void 
     >
       <DialogTrigger render={<Button />}>
         <HugeiconsIcon icon={Add01Icon} aria-hidden="true" />
-        Adicionar pessoa
+        Autorizar acesso
       </DialogTrigger>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle className="text-xl leading-tight font-semibold sm:text-2xl">
-            Adicionar pessoa
+            Autorizar acesso
           </DialogTitle>
+          <DialogDescription>
+            A pessoa poderá solicitar um link de entrada com o e-mail cadastrado.
+          </DialogDescription>
         </DialogHeader>
         <form
           className="flex min-h-0 flex-col"
@@ -151,7 +159,7 @@ export function AddMemberDialog({ onAdd }: { onAdd: (member: NewMember) => void 
             </DialogClose>
             <Button type="submit" className="min-h-11">
               <HugeiconsIcon icon={Add01Icon} data-icon="inline-start" aria-hidden="true" />
-              Adicionar
+              Autorizar
             </Button>
           </DialogFooter>
         </form>

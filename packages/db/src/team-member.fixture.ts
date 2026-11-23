@@ -1,4 +1,6 @@
-import type { MemberRole } from "./repositories/index.ts";
+import type { teamMembers } from "./schema/index.ts";
+
+type MemberRole = (typeof teamMembers.$inferSelect)["role"];
 
 export type SeedTeamMember = { name: string; email: string; role: MemberRole };
 

@@ -67,3 +67,5 @@ export async function seedDatabase(db: Database) {
     await tx.insert(actionConfigs).values(seedActionConfigs);
   });
 }
+
+export { seedCases };

@@ -7,14 +7,32 @@
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": [
+        "API_HOST",
+        "API_PORT",
+        "API_URL",
+        "AUTH_EMAIL_FROM",
+        "BETTER_AUTH_SECRET",
+        "BETTER_AUTH_URL",
+        "CRON_SECRET",
+        "POSTGRES_URL",
+        "RESEND_API_KEY",
+        "RESEND_BASE_URL",
+        "SLACK_API_URL",
+        "SLACK_BOT_TOKEN",
+        "SLACK_SIGNING_SECRET",
+        "WEBHOOK_SECRET",
+        "WEB_ORIGIN"
+      ]
     },
     "lint": {
       "dependsOn": ["^build"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/.oxlintrc.json",
-        "$TURBO_ROOT$/tools/oxlint/anti-slop/**"
+        "$TURBO_ROOT$/tools/oxlint/anti-slop/**",
+        "$TURBO_ROOT$/tools/oxlint/offboard/**"
       ]
     }
   }

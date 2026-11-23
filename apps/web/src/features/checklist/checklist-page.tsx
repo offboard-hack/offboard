@@ -19,7 +19,7 @@ import {
   applyActionConfigs,
   syncActionConfigs,
   type ActionConfigRow,
-} from "@/entities/action-config";
+} from "./action-config";
 import { cn } from "@/shared/lib/utils";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import { Badge } from "@/shared/ui/shadcn/badge";

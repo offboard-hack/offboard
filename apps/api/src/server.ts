@@ -1,7 +1,8 @@
 import { createClient } from "@offboard/db/client";
-import { createRepositories } from "@offboard/db/repositories";
+import { createRepositories } from "./repositories.js";
 import { z } from "zod";
 import { createApp } from "./app.js";
+import { createRuntimeAuth } from "./features/auth/auth.js";
 
 const config = z
   .object({
@@ -15,7 +16,15 @@ const config = z
   })
   .parse(process.env);
 
-createApp(config.WEB_ORIGIN, createRepositories(createClient(config.POSTGRES_URL))).listen({
+const db = createClient(config.POSTGRES_URL);
+const { auth, origin } = createRuntimeAuth(db, config.WEB_ORIGIN);
+
+createApp(origin, createRepositories(db), {
+  auth,
+  cronSecret: process.env.CRON_SECRET,
+  webhookSecret: process.env.WEBHOOK_SECRET,
+  slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
+}).listen({
   hostname: config.API_HOST,
   reusePort: false,
   port: config.API_PORT,

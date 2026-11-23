@@ -1,18 +1,29 @@
-# Offboard frontend
+# Offboard
 
-## Feature slices
+## API and shared database
+
+- Keep Elysia composition in `apps/api/src/app.ts` and runtime entry points in `apps/api/src`. Put routes, validation, services, repositories, and feature tests under `apps/api/src/features/<feature>`. Wire dependencies between slices explicitly in the app composition.
+- Keep Drizzle schemas, inferred database types, relations, migrations, connection setup, and developer seeds in `packages/db`. Keep workflow queries and persistence behavior in the API feature that owns them.
+- Export the composed Elysia `App` as a type-only contract. Use Eden via `@offboard/api-client` for Offboard API calls. Infer response and body types from the client with `Treaty.Data` and `Parameters`. Keep locally defined types for UI state and form validation.
+- Use the web app’s shared API client factory for SSR and browser calls so session cookies and private caching rules apply consistently.
+- Keep API features independent. Import within a feature or from `shared`, and pass cross-feature services through app composition. Feature tests may use the repository composition to set up integration data.
+
+## Frontend
+
+### Feature slices
 
 - Keep composition, the shell, and TanStack Start route setup in `apps/web/src/app`.
 - Keep each workflow in its own directory under `apps/web/src/features`. Colocate its screens, workflow state, and fixtures used only by that slice.
 - Put domain types and data shared by multiple features in `apps/web/src/entities`. Keep general UI primitives in `apps/web/src/shared/ui` and the Tailwind theme in `apps/web/src/styles.css`.
 - Features can depend on `entities` and `shared`. Compose workflows and wire routes in `app`. Cross-feature data should move through a shared domain model or explicit inputs.
+- Keep web imports directed from `app` through `features` and `entities` to `shared`. Features may use their own slice, entities, and shared modules. `npm run lint` checks these rules and workspace boundaries.
 - Use TanStack Query for server state, TanStack Start routes for shareable navigation and filters, TanStack Table for tabular state, and XState for multi-step workflows. Keep person-name searches local to the page.
 
-## TanStack Start skills
+### TanStack Start skills
 
 - For TanStack Start work in `apps/web`, start with [React Start](.agents/skills/react-start/SKILL.md). Use [Start Core](.agents/skills/start-core/SKILL.md) for server functions, middleware, execution boundaries, API routes, authentication, and deployment. Use [Start Server Core](.agents/skills/start-server-core/SKILL.md) for the server runtime and request handling. The bundled subskills live alongside their respective entry points.
 
-## Components and visual system
+### Components and visual system
 
 - Use TanStack Form and Zod for forms. Show field-level validation next to the control and pass parsed values to the submit handler.
 - Use shared shadcn/ui Base components whenever there is a matching interactive component. Use `Select` for choosing a value, `DropdownMenu` for actions, `Combobox` for searchable choices, and `Sheet`, `Drawer`, or `Dialog` for modal surfaces. Prefer the existing shared implementation when one exists.
@@ -21,7 +32,7 @@
 - Keep working surfaces flat with thin dividers. Use subtle gradients on summary cards in the corresponding icon color. Apply the shared `menu-tint` utility to select, dropdown, and submenu surfaces. Keep global CSS limited to theme setup and shared visual utilities.
 - Use shadcn/ui and Base UI state attributes for input and overlay transitions. Keep motion brief and interruptible, honor reduced-motion preferences, and give every gesture an equivalent visible control or keyboard path.
 
-## Navigation and data views
+### Navigation and data views
 
 - Use the shared shadcn/sidebar for the app shell and group links by workflow. Keep the sidebar for primary destinations. Expose bulk import via **Importar** in **Desligamentos**, and mark **Desligamentos** active during import.
 - Use the shared shadcn breadcrumb to orient the user on Desligamentos. Keep the accessible page heading and omit a duplicate visible heading or introductory block.
@@ -31,6 +42,8 @@
 - Follow the shadcn sortable-column pattern with a ghost trigger, a dropdown for ascending and descending order, and an option to clear active sorting. Keep the sort state exposed through `aria-sort`.
 - On case lists, make the whole row open the case and retain the person’s semantic link for keyboard navigation. Left-align the name and role, show at most two pending teams with a `+N` indicator for the rest, and confine horizontal scrolling to the table on narrow screens.
 
-## Verification
+### Verification
+
+- Run `npm test` from the root with `TEST_DATABASE_URL` pointing to a disposable PostgreSQL database. Apply the migrations before the test run. The GitHub verification workflow starts its own PostgreSQL service.
 
 - Verify changed workflows in the browser at desktop and narrow mobile sizes. Exercise focus, keyboard and touch input, and relevant empty, error, and pending states. Run `npm run lint`, `npm run format:check`, and `npm run build -w @offboard/web`.

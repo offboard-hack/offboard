@@ -1,42 +1,85 @@
 # Offboard API
 
-From the repository root, run `npm install` and `npm run dev` to start
-TanStack Start and the Elysia API together. To start only the API, run
-`npm run dev -w @offboard/api`.
+## Project structure
 
-The health endpoint is available at
-`http://127.0.0.1:3001/api/health`. It returns `{"status":"ok"}`.
+`apps/api/src/app.ts` composes Elysia. Each directory under
+`apps/api/src/features` owns its routes, validation, services, and repositories.
+The local Node and Vercel entry points use the same composition. That
+composition passes each route plugin its own repository and injects the
+action dispatcher used by offboarding. Shared request and response
+contracts live under `apps/api/src/shared`.
 
-| Environment variable | Default                 |
-| -------------------- | ----------------------- |
-| `API_HOST`           | `127.0.0.1`             |
-| `API_PORT`           | `3001`                  |
-| `WEB_ORIGIN`         | `http://localhost:5173` |
+Run `npm run lint` to check imports between workspaces, API features,
+and frontend layers.
 
-Set `WEB_ORIGIN` to the web app's origin when it differs from the default.
-For a production build, run `npm run build -w @offboard/api` followed by
-`npm run start -w @offboard/api`.
+`packages/db` owns the Drizzle schema, relations, database connection,
+migrations, and development seeds. The API imports these primitives and
+keeps feature queries in its own repositories.
 
-## Local PostgreSQL
+The web app calls the API through Eden using `@offboard/api-client`.
+Eden derives the contract from the composed Elysia `App` type. A response
+alias can use `Treaty.Data<ApiClient["api"]["team"]["get"]>`. A mutation body
+can use `Parameters<ApiClient["api"]["team"]["post"]>[0]`. Web code creates
+the client through `getApiClient()`, which forwards session cookies on
+server renders and uses the browser origin on the client.
 
-From the repository root, start the local database with `docker compose up -d postgres`.
-The development connection URL is `postgresql://offboard:offboard@127.0.0.1:5432/offboard`.
-The API currently exposes its HTTP health endpoint independently of the database.
+## Run locally
 
-## Shared Eden client
+From the repository root, run `npm install` and start PostgreSQL with
+`docker compose up -d postgres`. Set `DATABASE_URL` and `POSTGRES_URL` to
+`postgresql://offboard:offboard@127.0.0.1:5432/offboard`.
 
-The web workspace declares `@offboard/api-client` for future API calls.
-The current screens use local fixtures. Pass the API origin to the client factory.
-Pass the origin without the `/api` prefix, which Eden infers from the routes.
+Run `npm run migrate -w @offboard/db` to apply the database migrations.
+For a disposable development database, `npm run seed -w @offboard/db` loads
+sample cases and replaces the team roster. Add a team row for an email
+address you control before requesting a link.
 
-```ts
-import { createApiClient } from "@offboard/api-client";
+Set the auth variables below, then run `npm run dev` to start the API and
+the portal. To run only the API, use `npm run dev -w @offboard/api`. The
+public health endpoint at `http://127.0.0.1:3001/api/health` returns
+`{"status":"ok"}`.
 
-const client = createApiClient("http://127.0.0.1:3001");
-const { data, error } = await client.api.health.get();
-```
+| Variable               | Value                                                                                                                                                                                               |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `API_HOST`             | Local listener address. Defaults to `127.0.0.1`.                                                                                                                                                    |
+| `API_PORT`             | Local listener port. Defaults to `3001`.                                                                                                                                                            |
+| `API_URL`              | API origin for the web server and Vite proxy. Locally defaults to `http://localhost:3001`.                                                                                                          |
+| `POSTGRES_URL`         | API database connection string.                                                                                                                                                                     |
+| `DATABASE_URL`         | Database connection string for Drizzle migrations and seed.                                                                                                                                         |
+| `BETTER_AUTH_URL`      | Browser-facing portal origin. Locally defaults to `WEB_ORIGIN` or `http://localhost:5173`. Vercel previews can use the default deployment URL. Set the canonical HTTPS portal origin in production. |
+| `BETTER_AUTH_SECRET`   | At least 32 characters. Generate a random secret for each environment.                                                                                                                              |
+| `AUTH_EMAIL_FROM`      | Sign-in sender address on a domain verified in Resend.                                                                                                                                              |
+| `RESEND_API_KEY`       | Resend API key for sign-in links.                                                                                                                                                                   |
+| `CRON_SECRET`          | Bearer secret for `/api/correios/check`. Vercel Cron sends this automatically.                                                                                                                      |
+| `WEBHOOK_SECRET`       | Bearer secret for `/api/webhooks/inbound/:taskId`.                                                                                                                                                  |
+| `SLACK_SIGNING_SECRET` | Slack app signing secret for `/api/integrations/slack/events`.                                                                                                                                      |
 
-The shared package consumes the Elysia contract through a type-only export.
-The listener runs through the API workspace's server entry point. Keep Elysia
-versions aligned across the API and client as described in the
-[Eden installation guide](https://elysiajs.com/eden/installation).
+## Grant and revoke access
+
+For a new environment, insert the first administrator in `team_members`
+with their real email and the `admin` role. They can then add invited
+addresses under **Equipe**. Invitees enter their address at `/entrar` to
+request a one-time link. A link expires after ten minutes.
+
+| Role                        | Access                                                                |
+| --------------------------- | --------------------------------------------------------------------- |
+| `admin`                     | All portal workflows, including team access and integration settings. |
+| `rh`                        | Read, create, and import offboardings. Update cases and tasks.        |
+| `gestor` and `visualizador` | Read offboardings and tasks.                                          |
+
+Remove a member in **Equipe** to revoke access. Elysia checks the current
+roster on every protected request. Adding the same email again creates a
+new invitation and requires a fresh link.
+
+## Prepare a Vercel preview
+
+Use a dedicated preview database and apply the checked-in migrations before
+deploying. Configure the database and auth variables for Preview, and add
+test recipients to its roster. If Deployment Protection is enabled, expose
+Vercel's `VERCEL_AUTOMATION_BYPASS_SECRET` to the server so its internal
+API requests reach the protected deployment. Visit the preview origin used by
+`BETTER_AUTH_URL`, or the deployment URL when the variable is unset.
+
+Vercel builds the API bundle with `npm run build:vercel -w @offboard/api` and
+routes `/api/auth/*` and `/api/session` to Elysia. TanStack Start forwards
+the incoming session cookie for SSR API calls.

@@ -611,31 +611,23 @@ export function CasePage({
                             <ul className="grid gap-1.5">
                               {task.subtasks.map((sub) => (
                                 <li key={sub.id} className="flex items-center gap-2 text-sm">
-                                  <button
-                                    type="button"
-                                    aria-label={`${sub.done ? "Desmarcar" : "Marcar"}: ${sub.title}`}
-                                    className="flex items-center gap-2 text-left"
-                                    onClick={() => onSubtaskToggle?.(sub.id)}
-                                  >
-                                    <span
-                                      className={`inline-block size-3.5 shrink-0 rounded-sm border ${sub.done ? "border-primary bg-primary" : "border-muted-foreground/40"}`}
-                                      aria-hidden="true"
+                                  {onSubtaskToggle ? (
+                                    <button
+                                      type="button"
+                                      aria-label={`${sub.done ? "Desmarcar" : "Marcar"}: ${sub.title}`}
+                                      className="flex items-center gap-2 text-left"
+                                      onClick={() => onSubtaskToggle(sub.id)}
                                     >
-                                      {sub.done && (
-                                        <HugeiconsIcon
-                                          icon={Tick02Icon}
-                                          className="size-3.5 text-primary-foreground"
-                                        />
-                                      )}
+                                      <SubtaskLabel subtask={sub} />
+                                    </button>
+                                  ) : (
+                                    <span className="flex items-center gap-2">
+                                      <SubtaskLabel subtask={sub} />
+                                      <span className="sr-only">
+                                        {sub.done ? "Concluída" : "Pendente"}
+                                      </span>
                                     </span>
-                                    <span
-                                      className={
-                                        sub.done ? "text-muted-foreground line-through" : ""
-                                      }
-                                    >
-                                      {sub.title}
-                                    </span>
-                                  </button>
+                                  )}
                                 </li>
                               ))}
                             </ul>
@@ -654,6 +646,22 @@ export function CasePage({
         </section>
       </div>
     </div>
+  );
+}
+
+function SubtaskLabel({ subtask: sub }: { subtask: Task["subtasks"][number] }) {
+  return (
+    <>
+      <span
+        className={`inline-block size-3.5 shrink-0 rounded-sm border ${sub.done ? "border-primary bg-primary" : "border-muted-foreground/40"}`}
+        aria-hidden="true"
+      >
+        {sub.done && (
+          <HugeiconsIcon icon={Tick02Icon} className="size-3.5 text-primary-foreground" />
+        )}
+      </span>
+      <span className={sub.done ? "text-muted-foreground line-through" : ""}>{sub.title}</span>
+    </>
   );
 }
 

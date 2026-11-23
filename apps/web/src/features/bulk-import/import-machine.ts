@@ -1,3 +1,4 @@
+import { getApiClient } from "@/shared/lib/api-client";
 import { assign, fromPromise, setup } from "xstate";
 
 export type ImportRow = {
@@ -116,13 +117,11 @@ const readPeople = fromPromise<ImportRow[], File | null>(async ({ input: file })
 });
 
 const submitPeople = fromPromise<void, ImportRow[]>(async ({ input: rows }) => {
-  const response = await fetch("/api/offboardings/import", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ rows: rows.map(({ name, department }) => ({ name, department })) }),
+  const { error } = await getApiClient().api.offboardings.import.post({
+    rows: rows.map(({ name, department }) => ({ name, department })),
   });
 
-  if (!response.ok) {
+  if (error) {
     throw new Error("Não foi possível importar as pessoas. Tente novamente.");
   }
 });

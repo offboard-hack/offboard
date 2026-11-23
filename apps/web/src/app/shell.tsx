@@ -1,4 +1,5 @@
 import type { ReactNode, Ref } from "react";
+import type { PortalPrincipal } from "@offboard/access";
 import {
   Sidebar,
   SidebarContent,
@@ -16,11 +17,13 @@ export function PortalLayout({
   navigation,
   mainRef,
   fullWidth,
+  principal,
 }: {
   children: ReactNode;
   navigation: ReactNode;
   mainRef: Ref<HTMLElement>;
   fullWidth: boolean;
+  principal: PortalPrincipal;
 }) {
   return (
     <SidebarProvider>
@@ -54,7 +57,7 @@ export function PortalLayout({
           </div>
         </SidebarHeader>
         <SidebarContent>{navigation}</SidebarContent>
-        <SidebarUser />
+        <SidebarUser principal={principal} />
       </Sidebar>
       <SidebarInset id="conteudo" ref={mainRef} tabIndex={-1} className="min-w-0">
         <header className="flex min-h-12 items-center gap-2 border-b px-2">

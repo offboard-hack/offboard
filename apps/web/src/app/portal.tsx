@@ -20,6 +20,7 @@ import {
   useLocation,
   useRouter,
 } from "@tanstack/react-router";
+import { createPortalAbility, type PortalPrincipal } from "@offboard/access";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useCallback } from "react";
 import type { ReactNode } from "react";
@@ -65,17 +66,18 @@ const DashboardPage = lazyRouteComponent(
   "DashboardPage",
 );
 
-const dashboardRoute = getRouteApi("/painel");
-const casesRoute = getRouteApi("/desligamentos");
-const caseRoute = getRouteApi("/desligamentos_/$caseId");
-const importRoute = getRouteApi("/desligamentos_/importar");
-const checklistRoute = getRouteApi("/checklist-automatico");
-const equipmentRoute = getRouteApi("/bens-e-coleta");
-const integrationsRoute = getRouteApi("/integracoes");
-const applicationsRoute = getRouteApi("/candidaturas-assistidas");
-const feedbackRoute = getRouteApi("/resultados-e-feedback");
-const accessRoute = getRouteApi("/equipe");
-const plansRoute = getRouteApi("/planos-e-gastos");
+const portalRoute = getRouteApi("/_portal");
+const dashboardRoute = getRouteApi("/_portal/painel");
+const casesRoute = getRouteApi("/_portal/desligamentos");
+const caseRoute = getRouteApi("/_portal/desligamentos_/$caseId");
+const importRoute = getRouteApi("/_portal/desligamentos_/importar");
+const checklistRoute = getRouteApi("/_portal/checklist-automatico");
+const equipmentRoute = getRouteApi("/_portal/bens-e-coleta");
+const integrationsRoute = getRouteApi("/_portal/integracoes");
+const applicationsRoute = getRouteApi("/_portal/candidaturas-assistidas");
+const feedbackRoute = getRouteApi("/_portal/resultados-e-feedback");
+const accessRoute = getRouteApi("/_portal/equipe");
+const plansRoute = getRouteApi("/_portal/planos-e-gastos");
 
 export function Document({ children }: { children: ReactNode }) {
   return (
@@ -92,6 +94,7 @@ export function Document({ children }: { children: ReactNode }) {
 }
 
 export function Portal() {
+  const { principal } = portalRoute.useRouteContext();
   const caseMatch = caseRoute.useMatch({ shouldThrow: false });
   const listMatch = casesRoute.useMatch({ shouldThrow: false });
   const dashboardMatch = dashboardRoute.useMatch({ shouldThrow: false });
@@ -184,14 +187,20 @@ export function Portal() {
         integrationsMatch,
       )}
       mainRef={observeMain}
-      navigation={<PortalNavigation detailActive={Boolean(caseMatch || importMatch)} />}
+      principal={principal}
+      navigation={
+        <PortalNavigation principal={principal} detailActive={Boolean(caseMatch || importMatch)} />
+      }
     >
       <Outlet />
     </PortalLayout>
   );
 }
 
-const navigationGroups = [
+const navigationGroups: {
+  label: string;
+  links: { to: string; label: string; icon: string; subject?: "Team" | "Integrations" }[];
+}[] = [
   {
     label: "Operação",
     links: [
@@ -204,6 +213,7 @@ const navigationGroups = [
       {
         to: "/checklist-automatico",
         label: "Checklist automático",
+        subject: "Integrations",
         icon: "m3 6 2 2 3-3m3 2h10M3 13l2 2 3-3m3 2h10m-10 6h10",
       },
       {
@@ -229,6 +239,7 @@ const navigationGroups = [
       {
         to: "/equipe",
         label: "Equipe",
+        subject: "Team",
         icon: "M14 8a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM3 20a7 5 0 0 1 14 0m2-13v6m-3-3h6",
       },
     ],
@@ -239,73 +250,90 @@ const navigationGroups = [
       {
         to: "/integracoes",
         label: "Integrações",
+        subject: "Integrations",
         icon: "M9 4v4m6-4v4M6 8h12v2a6 6 0 0 1-6 6v4M6 8v2a6 6 0 0 0 6 6",
       },
       {
         to: "/planos-e-gastos",
         label: "Planos e gastos",
+        subject: "Integrations",
         icon: "M5 3h14v18l-3-2-4 2-4-2-3 2zM9 8h6m-6 4h6",
       },
     ],
   },
 ];
 
-function PortalNavigation({ detailActive }: { detailActive: boolean }) {
+function PortalNavigation({
+  principal,
+  detailActive,
+}: {
+  principal: PortalPrincipal;
+  detailActive: boolean;
+}) {
   const pathname = useLocation({ select: (location) => location.pathname });
   const { setOpenMobile } = useSidebar();
+  const ability = createPortalAbility(principal.role);
+
+  const groups = navigationGroups.map(({ label, links }) => ({
+    label,
+    links: links.filter(({ subject }) => !subject || ability.can("manage", subject)),
+  }));
 
   return (
     <nav aria-label="Portal do RH">
-      {navigationGroups.map(({ label, links }) => (
-        <SidebarGroup key={label} role="group" aria-label={label}>
-          <SidebarGroupLabel>{label}</SidebarGroupLabel>
-          <SidebarMenu>
-            {links.map(({ to, label, icon }) => {
-              const parentActive = to === "/desligamentos" && detailActive;
+      {groups.map(
+        ({ label, links }) =>
+          links.length > 0 && (
+            <SidebarGroup key={label} role="group" aria-label={label}>
+              <SidebarGroupLabel>{label}</SidebarGroupLabel>
+              <SidebarMenu>
+                {links.map(({ to, label, icon }) => {
+                  const parentActive = to === "/desligamentos" && detailActive;
 
-              return (
-                <SidebarMenuItem key={to}>
-                  <SidebarMenuButton
-                    isActive={pathname === to || parentActive}
-                    tooltip={label}
-                    render={
-                      <Link
-                        to={to}
-                        aria-label={label}
-                        activeOptions={{ exact: true }}
-                        aria-current={parentActive ? "location" : undefined}
-                        onClick={(event) => {
-                          if (
-                            !event.metaKey &&
-                            !event.ctrlKey &&
-                            !event.shiftKey &&
-                            !event.altKey
-                          ) {
-                            setOpenMobile(false);
-                          }
-                        }}
-                      />
-                    }
-                  >
-                    <svg
-                      aria-hidden="true"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d={icon} />
-                    </svg>
-                    <span>{label}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              );
-            })}
-          </SidebarMenu>
-        </SidebarGroup>
-      ))}
+                  return (
+                    <SidebarMenuItem key={to}>
+                      <SidebarMenuButton
+                        isActive={pathname === to || parentActive}
+                        tooltip={label}
+                        render={
+                          <Link
+                            to={to}
+                            aria-label={label}
+                            activeOptions={{ exact: true }}
+                            aria-current={parentActive ? "location" : undefined}
+                            onClick={(event) => {
+                              if (
+                                !event.metaKey &&
+                                !event.ctrlKey &&
+                                !event.shiftKey &&
+                                !event.altKey
+                              ) {
+                                setOpenMobile(false);
+                              }
+                            }}
+                          />
+                        }
+                      >
+                        <svg
+                          aria-hidden="true"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d={icon} />
+                        </svg>
+                        <span>{label}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroup>
+          ),
+      )}
     </nav>
   );
 }
@@ -357,6 +385,8 @@ export function Dashboard() {
 }
 
 export function Cases() {
+  const { principal } = portalRoute.useRouteContext();
+  const canCreateCase = createPortalAbility(principal.role).can("create", "Offboarding");
   const { data: cases } = useSuspenseQuery(offboardingsQuery);
   const { area, status = "", team = "", page } = casesRoute.useSearch();
   const navigate = casesRoute.useNavigate();
@@ -424,12 +454,14 @@ export function Cases() {
           </BreadcrumbList>
         </Breadcrumb>
       }
-      actions={<CaseActions />}
+      actions={canCreateCase ? <CaseActions /> : undefined}
     />
   );
 }
 
 export function Case() {
+  const { principal } = portalRoute.useRouteContext();
+  const canUpdateCase = createPortalAbility(principal.role).can("update", "Offboarding");
   const { caseId } = caseRoute.useParams();
   const { tasks } = caseRoute.useSearch();
   const navigate = caseRoute.useNavigate();
@@ -522,8 +554,10 @@ export function Case() {
       onTaskFilterChange={(next) =>
         void navigate({ search: { tasks: next || undefined }, resetScroll: false })
       }
-      onTaskStatusChange={(taskId, status) => statusMutation.mutate({ taskId, status })}
-      onSubtaskToggle={(subtaskId) => subtaskMutation.mutate(subtaskId)}
+      onTaskStatusChange={
+        canUpdateCase ? (taskId, status) => statusMutation.mutate({ taskId, status }) : undefined
+      }
+      onSubtaskToggle={canUpdateCase ? (subtaskId) => subtaskMutation.mutate(subtaskId) : undefined}
       breadcrumb={
         <Breadcrumb aria-label="Localização">
           <BreadcrumbList>

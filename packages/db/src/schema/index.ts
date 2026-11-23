@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   date,
@@ -13,6 +13,8 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+
+export { authAccount, authRateLimit, authSession, authUser, authVerification } from "./auth.ts";
 
 export type ConfigValue =
   | boolean
@@ -106,14 +108,18 @@ export const integrations = pgTable(
 
 export const memberRoleEnum = pgEnum("member_role", ["admin", "rh", "gestor", "visualizador"]);
 
-export const teamMembers = pgTable("team_members", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: varchar("name", { length: 255 }).notNull(),
-  email: varchar("email", { length: 255 }).notNull().unique(),
-  role: memberRoleEnum("role").notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 255 }).notNull(),
+    email: varchar("email", { length: 255 }).notNull().unique(),
+    role: memberRoleEnum("role").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [uniqueIndex("team_members_email_lower_idx").on(sql`lower(${table.email})`)],
+);
 
 export const actionConfigs = pgTable(
   "action_configs",
