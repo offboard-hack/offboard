@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "arial",
+        "createdAt": "2026-11-23T18:14:17.175Z",
+        "reason": "Codex: Arial is an intentional web-safe font for the Offboard sign-in email. It preserves readable rendering in email clients without requiring a web font."
+      }
+    ]
+  }
+}

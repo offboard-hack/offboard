@@ -17,6 +17,7 @@ import { z } from "zod";
 
 import type { PortalAuth } from "../../shared/portal-auth.js";
 import { createEmailSender, type CloudflareEmailBinding } from "./email.js";
+import { signInEmail, signInLinkMinutes } from "./sign-in-email.js";
 
 const authPath = "/api/auth";
 const verifyPath = "/magic-link/verify";
@@ -154,7 +155,7 @@ export function createAuth({
     },
     plugins: [
       magicLink({
-        expiresIn: 10 * 60,
+        expiresIn: signInLinkMinutes * 60,
         storeToken: "hashed",
         async generateToken(email) {
           const member = await findMember(email);
@@ -239,12 +240,8 @@ export function createRuntimeAuth(
     secret,
     onVercel: env.VERCEL === "1",
     ipAddressHeaders,
-    sendLink({ email, url }) {
-      return sender.send({
-        to: email,
-        subject: "Seu link de acesso ao Offboard",
-        text: `Entre no Offboard: ${url}\n\nO link expira em 10 minutos e só pode ser usado uma vez.`,
-      });
+    sendLink(message) {
+      return sender.send(signInEmail(message));
     },
   });
 
