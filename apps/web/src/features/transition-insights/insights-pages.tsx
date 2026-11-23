@@ -1,4 +1,6 @@
 import { Alert02Icon, Calendar03Icon, Tick02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { exitSurveyAggregatesQuery } from "@/entities/exit-survey";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import type { ListMetric } from "@/shared/ui/list-page";
 import { Bar, BarChart, LabelList, XAxis } from "recharts";
@@ -56,29 +58,9 @@ const sharedJobs = [
   { title: "Analista de dados", company: "Vértice Educação" },
 ];
 
-const feedbackMetrics: ListMetric[] = [
-  { label: "Ativação", value: "86%", icon: UserGroupIcon, tone: "primary" },
-  { label: "Engajamento no mês", value: "77%", icon: Calendar03Icon, tone: "primary" },
-  { label: "Etapas da saída concluídas", value: "68%", icon: Tick02Icon, tone: "success" },
-  { label: "NPS de saída", value: "+42", icon: Alert02Icon, tone: "primary" },
-];
-
-const activations = [
-  { label: "Jun", value: 22 },
-  { label: "Jul", value: 27 },
-  { label: "Ago", value: 32 },
-  { label: "Set", value: 36 },
-  { label: "Out", value: 43 },
-  { label: "Nov", value: 48 },
-];
-
-const feedbackResponses = 24;
-
-const feedbackTopics = [
-  { label: "Respeito na comunicação", value: 15 },
-  { label: "Clareza de prazos", value: 12 },
-  { label: "Devolução de equipamentos", value: 10 },
-];
+function formatNps(value: number) {
+  return value > 0 ? `+${value}` : String(value);
+}
 
 export function ApplicationsPage() {
   return (
@@ -147,6 +129,21 @@ export function ApplicationsPage() {
 }
 
 export function FeedbackPage() {
+  const { data } = useSuspenseQuery(exitSurveyAggregatesQuery);
+  const { totalResponses, averageNps, nps, completionRate, activationsByMonth, topTopics } = data;
+
+  const feedbackMetrics: ListMetric[] = [
+    { label: "Respostas", value: String(totalResponses), icon: UserGroupIcon, tone: "primary" },
+    { label: "Taxa de resposta", value: `${completionRate}%`, icon: Tick02Icon, tone: "success" },
+    {
+      label: "Nota média",
+      value: averageNps.toLocaleString("pt-BR"),
+      icon: Calendar03Icon,
+      tone: "primary",
+    },
+    { label: "NPS de saída", value: formatNps(nps), icon: Alert02Icon, tone: "primary" },
+  ];
+
   return (
     <ListPage
       title="Resultados e feedback"
@@ -159,7 +156,11 @@ export function FeedbackPage() {
             Ativações por mês
           </h2>
           <ChartContainer className="aspect-auto h-48 w-full min-w-0" aria-hidden="true">
-            <BarChart data={activations} margin={{ top: 20, bottom: 4 }} accessibilityLayer={false}>
+            <BarChart
+              data={activationsByMonth}
+              margin={{ top: 20, bottom: 4 }}
+              accessibilityLayer={false}
+            >
               <XAxis dataKey="label" axisLine={false} tickLine={false} />
               <Bar
                 dataKey="value"
@@ -173,7 +174,7 @@ export function FeedbackPage() {
             </BarChart>
           </ChartContainer>
           <ol className="sr-only">
-            {activations.map(({ label, value }) => (
+            {activationsByMonth.map(({ label, value }) => (
               <li key={label}>
                 {label}: {value}
               </li>
@@ -195,16 +196,16 @@ export function FeedbackPage() {
           O que aparece nos feedbacks
         </h2>
         <p {...classProps(styles.placementCopy)}>
-          {feedbackResponses} respostas anônimas. Temas mais citados:
+          {totalResponses} respostas anônimas. Temas mais citados:
         </p>
         <ul role="list" {...classProps(styles.topics)}>
-          {feedbackTopics.map(({ label, value }) => (
+          {topTopics.map(({ label, value }) => (
             <li key={label} {...classProps(styles.topic)}>
               <span>{label}</span>
               <div {...classProps(styles.track, styles.topicTrack)} aria-hidden="true">
                 <div
                   {...classProps(styles.bar)}
-                  style={{ width: `${(value / feedbackResponses) * 100}%` }}
+                  style={{ width: `${(value / totalResponses) * 100}%` }}
                 />
               </div>
               <span {...classProps(styles.topicValue)}>{value}</span>

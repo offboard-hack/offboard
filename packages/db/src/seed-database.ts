@@ -1,11 +1,13 @@
 import { seedActionConfigs } from "./action-config.fixture.ts";
 import { seedEquipment } from "./equipment.fixture.ts";
 import type { Database } from "./client.ts";
+import { seedExitSurveys } from "./exit-survey.fixture.ts";
 import { seedIntegrations } from "./integration.fixture.ts";
 import { baseSeedCases, seedCases } from "./offboarding.fixture.ts";
 import {
   actionConfigs,
   equipment,
+  exitSurveys,
   integrations,
   offboardingCases,
   subtasks,
@@ -21,15 +23,16 @@ export async function seedDatabase(
   fixtures = { cases: seedCases, members: seedTeamMembers },
 ) {
   await db.transaction(async (tx) => {
-    const caseIds = new Map<string, string>();
-
     await tx.delete(actionConfigs);
     await tx.delete(equipment);
+    await tx.delete(exitSurveys);
     await tx.delete(subtasks);
     await tx.delete(tasks);
     await tx.delete(offboardingCases);
     await tx.delete(integrations);
     await tx.delete(teamMembers);
+
+    const caseIds = new Map<string, string>();
 
     for (const { tasks: caseTasks, ...item } of fixtures.cases) {
       const [created] = await tx
@@ -81,6 +84,17 @@ export async function seedDatabase(
         .insert(equipment)
         .values(values)
         .onConflictDoUpdate({ target: equipment.tag, set: { ...values, updatedAt: new Date() } });
+    }
+
+    for (const { caseName, ...survey } of seedExitSurveys) {
+      const caseId = caseIds.get(caseName);
+
+      if (!caseId) continue;
+
+      await tx
+        .insert(exitSurveys)
+        .values({ caseId, ...survey })
+        .onConflictDoUpdate({ target: exitSurveys.caseId, set: survey });
     }
 
     if (seedIntegrations.length > 0) {
