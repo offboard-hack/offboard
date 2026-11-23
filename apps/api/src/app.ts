@@ -4,6 +4,8 @@ import { actionConfigsRoutes } from "./features/action-configs/routes.js";
 import { fireActions } from "./features/action-configs/actions.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 import { authRoutes } from "./features/auth/routes.js";
+import { createAbacatePayGateway, type AbacatePayGateway } from "./features/billing/abacatepay.js";
+import { billingRoutes } from "./features/billing/routes.js";
 import { equipmentRoutes } from "./features/equipment/routes.js";
 import { exitSurveysRoutes } from "./features/exit-surveys/routes.js";
 import { integrationsRoutes } from "./features/integrations/routes.js";
@@ -19,6 +21,8 @@ type AppOptions = {
   cronSecret?: string;
   webhookSecret?: string;
   slackSigningSecret?: string;
+  abacatepay?: AbacatePayGateway;
+  abacatepayWebhookSecret?: string;
 };
 
 export function createApp(webOrigin: string, repos: Repositories, options: AppOptions) {
@@ -46,7 +50,16 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     .use(teamRoutes(repos.team, access))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
-    .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret));
+    .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret))
+    .use(
+      billingRoutes(
+        repos.billing,
+        access,
+        options.abacatepay ?? createAbacatePayGateway(undefined),
+        webOrigin,
+        options.abacatepayWebhookSecret,
+      ),
+    );
 }
 
 export type App = ReturnType<typeof createApp>;

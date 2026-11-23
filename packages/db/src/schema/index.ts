@@ -200,3 +200,77 @@ export const actionConfigs = pgTable(
   },
   (table) => [uniqueIndex("action_configs_action_id_idx").on(table.actionId)],
 );
+
+export const subscriptionStatusEnum = pgEnum("subscription_status", [
+  "active",
+  "past_due",
+  "canceled",
+  "trialing",
+]);
+
+export const invoiceStatusEnum = pgEnum("invoice_status", [
+  "pending",
+  "paid",
+  "failed",
+  "refunded",
+]);
+
+export const plans = pgTable("plans", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 100 }).notNull(),
+  slug: varchar("slug", { length: 50 }).notNull().unique(),
+  monthlyPriceCents: integer("monthly_price_cents").notNull(),
+  maxEmployees: integer("max_employees").notNull(),
+  features: jsonb("features").$type<string[]>().notNull().default([]),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const subscriptions = pgTable("subscriptions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  planId: uuid("plan_id")
+    .notNull()
+    .references(() => plans.id),
+  status: subscriptionStatusEnum("status").notNull().default("active"),
+  currentPeriodStart: date("current_period_start").notNull(),
+  currentPeriodEnd: date("current_period_end").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const invoices = pgTable(
+  "invoices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    subscriptionId: uuid("subscription_id")
+      .notNull()
+      .references(() => subscriptions.id, { onDelete: "cascade" }),
+    amountCents: integer("amount_cents").notNull(),
+    status: invoiceStatusEnum("status").notNull().default("pending"),
+    abacatepayBillingId: varchar("abacatepay_billing_id", { length: 255 }),
+    paidAt: timestamp("paid_at"),
+    dueDate: date("due_date").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("invoices_subscription_id_idx").on(table.subscriptionId),
+    index("invoices_abacatepay_billing_id_idx").on(table.abacatepayBillingId),
+  ],
+);
+
+export const plansRelations = relations(plans, ({ many }) => ({
+  subscriptions: many(subscriptions),
+}));
+
+export const subscriptionsRelations = relations(subscriptions, ({ one, many }) => ({
+  plan: one(plans, { fields: [subscriptions.planId], references: [plans.id] }),
+  invoices: many(invoices),
+}));
+
+export const invoicesRelations = relations(invoices, ({ one }) => ({
+  subscription: one(subscriptions, {
+    fields: [invoices.subscriptionId],
+    references: [subscriptions.id],
+  }),
+}));

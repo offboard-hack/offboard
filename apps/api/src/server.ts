@@ -3,6 +3,7 @@ import { node } from "@elysia/node";
 import { createRepositories } from "./repositories.js";
 import { z } from "zod";
 import { createApp } from "./app.js";
+import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
 
 const config = z
@@ -26,6 +27,8 @@ createApp(origin, createRepositories(db), {
   cronSecret: process.env.CRON_SECRET,
   webhookSecret: process.env.WEBHOOK_SECRET,
   slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
+  abacatepay: createAbacatePayGateway(process.env.ABACATEPAY_API_KEY),
+  abacatepayWebhookSecret: process.env.ABACATEPAY_WEBHOOK_SECRET,
 }).listen({
   hostname: config.API_HOST,
   reusePort: false,

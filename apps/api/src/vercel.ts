@@ -3,6 +3,7 @@ import { node } from "@elysia/node";
 import { sql } from "drizzle-orm";
 import { createRepositories } from "./repositories.js";
 import { createApp } from "./app.js";
+import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 
@@ -36,6 +37,8 @@ function buildApp() {
     cronSecret: process.env.CRON_SECRET,
     webhookSecret: process.env.WEBHOOK_SECRET,
     slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
+    abacatepay: createAbacatePayGateway(process.env.ABACATEPAY_API_KEY),
+    abacatepayWebhookSecret: process.env.ABACATEPAY_WEBHOOK_SECRET,
   });
 }
 

@@ -39,21 +39,23 @@ the portal. To run only the API, use `npm run dev -w @offboard/api`. The
 public health endpoint at `http://127.0.0.1:3001/api/health` returns
 `{"status":"ok"}`.
 
-| Variable               | Value                                                                                                                                                                                               |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `API_HOST`             | Local listener address. Defaults to `127.0.0.1`.                                                                                                                                                    |
-| `API_PORT`             | Local listener port. Defaults to `3001`.                                                                                                                                                            |
-| `API_URL`              | API origin for the web server and Vite proxy. Locally defaults to `http://localhost:3001`.                                                                                                          |
-| `POSTGRES_URL`         | API database connection string.                                                                                                                                                                     |
-| `DATABASE_URL`         | Database connection string for Drizzle migrations and seed.                                                                                                                                         |
-| `BETTER_AUTH_URL`      | Browser-facing portal origin. Locally defaults to `WEB_ORIGIN` or `http://localhost:5173`. Vercel previews can use the default deployment URL. Set the canonical HTTPS portal origin in production. |
-| `BETTER_AUTH_SECRET`   | At least 32 characters. Generate a random secret for each environment.                                                                                                                              |
-| `EMAIL_PROVIDER`       | `resend` by default, or `cloudflare` when deploying to Workers with the `EMAIL` binding.                                                                                                            |
-| `AUTH_EMAIL_FROM`      | Sign-in sender on a domain verified by the selected provider. Use a bare email address for Cloudflare.                                                                                              |
-| `RESEND_API_KEY`       | Resend API key. Required only for the Resend provider.                                                                                                                                              |
-| `CRON_SECRET`          | Bearer secret for `/api/correios/check`. Vercel Cron sends this automatically.                                                                                                                      |
-| `WEBHOOK_SECRET`       | Bearer secret for `/api/webhooks/inbound/:taskId`.                                                                                                                                                  |
-| `SLACK_SIGNING_SECRET` | Slack app signing secret for `/api/integrations/slack/events`.                                                                                                                                      |
+| Variable                    | Value                                                                                                                                                                                               |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `API_HOST`                  | Local listener address. Defaults to `127.0.0.1`.                                                                                                                                                    |
+| `API_PORT`                  | Local listener port. Defaults to `3001`.                                                                                                                                                            |
+| `API_URL`                   | API origin for the web server and Vite proxy. Locally defaults to `http://localhost:3001`.                                                                                                          |
+| `POSTGRES_URL`              | API database connection string.                                                                                                                                                                     |
+| `DATABASE_URL`              | Database connection string for Drizzle migrations and seed.                                                                                                                                         |
+| `BETTER_AUTH_URL`           | Browser-facing portal origin. Locally defaults to `WEB_ORIGIN` or `http://localhost:5173`. Vercel previews can use the default deployment URL. Set the canonical HTTPS portal origin in production. |
+| `BETTER_AUTH_SECRET`        | At least 32 characters. Generate a random secret for each environment.                                                                                                                              |
+| `EMAIL_PROVIDER`            | `resend` by default, or `cloudflare` when deploying to Workers with the `EMAIL` binding.                                                                                                            |
+| `AUTH_EMAIL_FROM`           | Sign-in sender on a domain verified by the selected provider. Use a bare email address for Cloudflare.                                                                                              |
+| `RESEND_API_KEY`            | Resend API key. Required only for the Resend provider.                                                                                                                                              |
+| `CRON_SECRET`               | Bearer secret for `/api/correios/check`. Vercel Cron sends this automatically.                                                                                                                      |
+| `WEBHOOK_SECRET`            | Bearer secret for `/api/webhooks/inbound/:taskId`.                                                                                                                                                  |
+| `SLACK_SIGNING_SECRET`      | Slack app signing secret for `/api/integrations/slack/events`.                                                                                                                                      |
+| `ABACATEPAY_API_KEY`        | AbacatePay API key. Without it `POST /api/billing/checkout` returns 503.                                                                                                                            |
+| `ABACATEPAY_WEBHOOK_SECRET` | Secret for `POST /api/billing/webhook`, sent as `?webhookSecret=` or used to verify Standard Webhooks signatures.                                                                                   |
 
 ## Grant and revoke access
 

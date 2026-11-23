@@ -1,4 +1,6 @@
+import { eq } from "drizzle-orm";
 import { seedActionConfigs } from "./action-config.fixture.ts";
+import { seedPlans, seedSubscription } from "./billing.fixture.ts";
 import { seedEquipment } from "./equipment.fixture.ts";
 import type { Database } from "./client.ts";
 import { seedExitSurveys } from "./exit-survey.fixture.ts";
@@ -9,7 +11,10 @@ import {
   equipment,
   exitSurveys,
   integrations,
+  invoices,
   offboardingCases,
+  plans,
+  subscriptions,
   subtasks,
   tasks,
   teamMembers,
@@ -24,6 +29,9 @@ export async function seedDatabase(
 ) {
   await db.transaction(async (tx) => {
     await tx.delete(actionConfigs);
+    await tx.delete(invoices);
+    await tx.delete(subscriptions);
+    await tx.delete(plans);
     await tx.delete(equipment);
     await tx.delete(exitSurveys);
     await tx.delete(subtasks);
@@ -104,6 +112,36 @@ export async function seedDatabase(
     await tx.insert(teamMembers).values(fixtures.members);
 
     await tx.insert(actionConfigs).values(seedActionConfigs);
+
+    for (const plan of seedPlans) {
+      await tx
+        .insert(plans)
+        .values(plan)
+        .onConflictDoUpdate({
+          target: plans.slug,
+          set: {
+            name: plan.name,
+            monthlyPriceCents: plan.monthlyPriceCents,
+            maxEmployees: plan.maxEmployees,
+            features: plan.features,
+            updatedAt: new Date(),
+          },
+        });
+    }
+
+    const { planSlug, invoices: seedInvoices, ...subscription } = seedSubscription;
+    const [plan] = await tx.select({ id: plans.id }).from(plans).where(eq(plans.slug, planSlug));
+
+    const [createdSubscription] = await tx
+      .insert(subscriptions)
+      .values({ ...subscription, planId: plan.id })
+      .returning({ id: subscriptions.id });
+
+    await tx
+      .insert(invoices)
+      .values(
+        seedInvoices.map((invoice) => ({ ...invoice, subscriptionId: createdSubscription.id })),
+      );
   });
 }
 
