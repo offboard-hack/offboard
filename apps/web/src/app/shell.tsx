@@ -11,6 +11,8 @@ import {
 import { SidebarUser } from "./sidebar-user";
 
 const logo = "/offboard-logo.svg";
+const logoLight = "/offboard-logo-branco.svg";
+const icon = "/offboard-icon.svg";
 
 export function PortalLayout({
   children,
@@ -37,23 +39,14 @@ export function PortalLayout({
         <SidebarHeader>
           <div className="px-2 py-1 group-data-[collapsible=icon]:p-0">
             <div className="group-data-[collapsible=icon]:hidden">
-              <svg
-                role="img"
-                aria-label="Offboard"
-                viewBox="0 0 877 256"
-                className="h-9 w-auto fill-sidebar-foreground text-primary dark:text-sidebar-primary"
-              >
-                <use href={`${logo}#wordmark`} />
-              </svg>
+              <img src={logo} alt="Offboard" className="h-9 w-auto dark:hidden" />
+              <img src={logoLight} alt="Offboard" className="hidden h-9 w-auto dark:block" />
             </div>
-            <svg
-              role="img"
-              aria-label="Offboard"
-              viewBox="0 0 256 256"
-              className="mx-auto hidden size-6 text-primary group-data-[collapsible=icon]:block dark:text-sidebar-primary"
-            >
-              <use href={`${logo}#mark`} />
-            </svg>
+            <img
+              src={icon}
+              alt="Offboard"
+              className="mx-auto hidden size-6 group-data-[collapsible=icon]:block"
+            />
           </div>
         </SidebarHeader>
         <SidebarContent>{navigation}</SidebarContent>
@@ -62,14 +55,7 @@ export function PortalLayout({
       <SidebarInset id="conteudo" ref={mainRef} tabIndex={-1} className="min-w-0">
         <header className="flex min-h-12 items-center gap-2 border-b px-2">
           <SidebarTrigger aria-label="Menu do portal" />
-          <svg
-            role="img"
-            aria-label="Offboard"
-            viewBox="0 0 256 256"
-            className="size-6 shrink-0 text-primary md:hidden dark:text-sidebar-primary"
-          >
-            <use href={`${logo}#mark`} />
-          </svg>
+          <img src={icon} alt="Offboard" className="size-6 shrink-0 md:hidden" />
           <span className="text-sm font-medium">Aurora Tecnologia</span>
         </header>
         <div
