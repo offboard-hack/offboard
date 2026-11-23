@@ -1,7 +1,7 @@
 import { seedActionConfigs } from "./action-config.fixture.ts";
 import type { Database } from "./client.ts";
 import { seedIntegrations } from "./integration.fixture.ts";
-import { seedCases } from "./offboarding.fixture.ts";
+import { baseSeedCases, seedCases } from "./offboarding.fixture.ts";
 import {
   actionConfigs,
   integrations,
@@ -10,9 +10,14 @@ import {
   tasks,
   teamMembers,
 } from "./schema/index.ts";
-import { seedTeamMembers } from "./team-member.fixture.ts";
+import { baseSeedTeamMembers, seedTeamMembers } from "./team-member.fixture.ts";
 
-export async function seedDatabase(db: Database) {
+export const testSeedFixtures = { cases: baseSeedCases, members: baseSeedTeamMembers };
+
+export async function seedDatabase(
+  db: Database,
+  fixtures = { cases: seedCases, members: seedTeamMembers },
+) {
   await db.transaction(async (tx) => {
     await tx.delete(actionConfigs);
     await tx.delete(subtasks);
@@ -21,7 +26,7 @@ export async function seedDatabase(db: Database) {
     await tx.delete(integrations);
     await tx.delete(teamMembers);
 
-    for (const { tasks: caseTasks, ...item } of seedCases) {
+    for (const { tasks: caseTasks, ...item } of fixtures.cases) {
       const [created] = await tx
         .insert(offboardingCases)
         .values(item)
@@ -62,7 +67,7 @@ export async function seedDatabase(db: Database) {
       await tx.insert(integrations).values(seedIntegrations);
     }
 
-    await tx.insert(teamMembers).values(seedTeamMembers);
+    await tx.insert(teamMembers).values(fixtures.members);
 
     await tx.insert(actionConfigs).values(seedActionConfigs);
   });

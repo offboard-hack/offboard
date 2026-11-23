@@ -94,9 +94,12 @@ the portal and routes `/api/*` to Elysia within the same Worker.
 
 To enable login and data access, migrate a disposable PostgreSQL database the
 Worker can reach and add a test administrator to its roster. Set
-`POSTGRES_URL`, `BETTER_AUTH_URL` (the HTTPS preview origin), a generated
+`BETTER_AUTH_URL` (the HTTPS preview origin), a generated
 `BETTER_AUTH_SECRET`, and `AUTH_EMAIL_FROM` in a private secrets file outside
-the repository.
+the repository. To use Hyperdrive, create a configuration pointing to the
+direct PostgreSQL endpoint, disable query caching, and set
+`OFFBOARD_HYPERDRIVE_ID` when building or deploying the Worker. For a direct
+connection, include `POSTGRES_URL` in the secrets file.
 
 For Resend, add `RESEND_API_KEY` to the file and use the default provider:
 

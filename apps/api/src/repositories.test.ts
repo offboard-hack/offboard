@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import { subtasks, tasks } from "@offboard/db/schema";
-import { seedCases, seedDatabase } from "@offboard/db/seed-database";
+import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const uuidPattern = /^[0-9a-f-]{36}$/;
@@ -20,7 +20,7 @@ describe.skipIf(!url)("repositories", () => {
   });
 
   beforeEach(async () => {
-    await seedDatabase(db);
+    await seedDatabase(db, testSeedFixtures);
   });
 
   afterAll(async () => {
@@ -29,13 +29,15 @@ describe.skipIf(!url)("repositories", () => {
 
   it("seeds every fixture task in order", async () => {
     const allTasks = await db.select().from(tasks);
-    expect(allTasks).toHaveLength(seedCases.reduce((sum, item) => sum + item.tasks.length, 0));
+    expect(allTasks).toHaveLength(
+      testSeedFixtures.cases.reduce((sum, item) => sum + item.tasks.length, 0),
+    );
 
     const list = await repos.offboardings.listOffboardings();
     const marina = list.find((c) => c.name === "Marina Lopes");
     const detail = await repos.offboardings.getOffboarding(marina!.id);
     expect(detail?.tasks.map((task) => [task.team, task.title, task.status])).toEqual(
-      seedCases[0].tasks.map((task) => [task.team, task.title, task.status]),
+      testSeedFixtures.cases[0].tasks.map((task) => [task.team, task.title, task.status]),
     );
   });
 
@@ -234,7 +236,7 @@ describe.skipIf(!url)("repositories", () => {
 
     const remaining = await db.select().from(subtasks);
 
-    const rafaelSubCount = seedCases[1].tasks.reduce(
+    const rafaelSubCount = testSeedFixtures.cases[1].tasks.reduce(
       (sum, t) => sum + (t.subtasks?.length ?? 0),
       0,
     );
@@ -347,9 +349,9 @@ describe.skipIf(!url)("repositories", () => {
     const nina = list.find((c) => c.name === "Nina Castro")!;
     await db.$client.query(`DELETE FROM offboarding_cases WHERE id = '${nina.id}'`);
     const allTasks = await db.select().from(tasks);
-    const ninaTasks = seedCases.find((c) => c.name === "Nina Castro")!.tasks.length;
+    const ninaTasks = testSeedFixtures.cases.find((c) => c.name === "Nina Castro")!.tasks.length;
     expect(allTasks).toHaveLength(
-      seedCases.reduce((sum, item) => sum + item.tasks.length, 0) - ninaTasks,
+      testSeedFixtures.cases.reduce((sum, item) => sum + item.tasks.length, 0) - ninaTasks,
     );
   });
 
@@ -430,7 +432,7 @@ describe.skipIf(!url)("team members", () => {
   });
 
   beforeEach(async () => {
-    await seedDatabase(db);
+    await seedDatabase(db, testSeedFixtures);
   });
 
   afterAll(async () => {

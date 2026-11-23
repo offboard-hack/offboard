@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { createActionConfigsRepository } from "./repository.js";
-import { seedDatabase } from "@offboard/db/seed-database";
+import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { ActionContext } from "../../shared/action-dispatch.js";
@@ -101,7 +101,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   beforeEach(async () => {
-    await seedDatabase(db);
+    await seedDatabase(db, testSeedFixtures);
     receivedRequests.length = 0;
     delete process.env.SLACK_BOT_TOKEN;
     process.env.SLACK_API_URL = `${serverUrl}/`;

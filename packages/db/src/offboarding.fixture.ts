@@ -21,7 +21,7 @@ export type SeedCase = {
   tasks: readonly SeedTask[];
 };
 
-export const seedCases: readonly SeedCase[] = [
+export const baseSeedCases: readonly SeedCase[] = [
   {
     name: "Marina Lopes",
     role: "Analista de marketing",
@@ -317,6 +317,10 @@ export const seedCases: readonly SeedCase[] = [
       { team: "Facilities", title: "Devolver chaves do armário", status: "todo" },
     ],
   },
+];
+
+export const seedCases: readonly SeedCase[] = [
+  ...baseSeedCases,
   {
     name: "Gustavo Ribeiro",
     role: "Gerente de vendas",
