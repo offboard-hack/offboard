@@ -1,5 +1,6 @@
 import type { PortalPrincipal } from "@offboard/access";
 import { t } from "elysia";
+import type { EmployeePrincipal } from "./employee-auth.js";
 
 export const memberRole = t.Union([
   t.Literal("admin"),
@@ -23,4 +24,5 @@ export type PortalAccess =
 export type PortalAuth = {
   handler: (request: Request) => Promise<Response>;
   resolvePrincipal: (headers: Headers) => Promise<PortalAccess>;
+  resolveEmployee?: (headers: Headers) => Promise<EmployeePrincipal | null>;
 };

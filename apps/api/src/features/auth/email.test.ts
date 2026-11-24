@@ -1,6 +1,7 @@
 import { Miniflare } from "miniflare";
 import { expect, it } from "vitest";
 import { createEmailSender, type CloudflareEmailBinding } from "./email.js";
+import { signInEmail } from "./sign-in-email.js";
 
 it("requires a native EMAIL binding when Cloudflare is selected", () => {
   expect(() => createEmailSender({ EMAIL_PROVIDER: "cloudflare" })).toThrow(
@@ -39,11 +40,12 @@ it("sends email through the native Cloudflare binding", async () => {
     );
 
     await expect(
-      sender.send({
-        to: "test@offboard.example",
-        subject: "Seu link de acesso ao Offboard",
-        text: "https://offboard.example/api/auth/magic-link/verify",
-      }),
+      sender.send(
+        signInEmail({
+          email: "test@offboard.example",
+          url: "https://offboard.example/api/auth/magic-link/verify",
+        }),
+      ),
     ).resolves.toBeUndefined();
   } finally {
     await runtime.dispose();

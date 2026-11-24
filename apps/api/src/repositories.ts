@@ -1,3 +1,4 @@
+import { createEmployeeRepository } from "./features/employee/repository.js";
 import type { Database } from "@offboard/db/client";
 import { createOffboardingsRepository } from "./features/offboardings/repository.js";
 import { createIntegrationsRepository } from "./features/integrations/repository.js";
@@ -16,6 +17,7 @@ export function createRepositories(db: Database) {
     equipment: createEquipmentRepository(db),
     exitSurveys: createExitSurveysRepository(db),
     billing: createBillingRepository(db),
+    employee: createEmployeeRepository(db),
   };
 }
 

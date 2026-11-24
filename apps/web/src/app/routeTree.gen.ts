@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PortalRouteImport } from './routes/_portal'
+import { Route as ColaboradorRouteImport } from './routes/colaborador'
 import { Route as EntrarRouteImport } from './routes/entrar'
 import { Route as PortalBensEColetaRouteImport } from './routes/_portal.bens-e-coleta'
 import { Route as PortalCandidaturasAssistidasRouteImport } from './routes/_portal.candidaturas-assistidas'
@@ -22,6 +23,7 @@ import { Route as PortalPainelRouteImport } from './routes/_portal.painel'
 import { Route as PortalPlanosEGastosRouteImport } from './routes/_portal.planos-e-gastos'
 import { Route as PortalResultadosEFeedbackRouteImport } from './routes/_portal.resultados-e-feedback'
 import { Route as PortalSemAcessoRouteImport } from './routes/_portal.sem-acesso'
+import { Route as ColaboradorEntrarRouteImport } from './routes/colaborador_.entrar'
 import { Route as PortalDesligamentosCaseIdRouteImport } from './routes/_portal.desligamentos_.$caseId'
 import { Route as PortalDesligamentosImportarRouteImport } from './routes/_portal.desligamentos_.importar'
 
@@ -32,6 +34,11 @@ const IndexRoute = IndexRouteImport.update({
 } as any)
 const PortalRoute = PortalRouteImport.update({
   id: '/_portal',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ColaboradorRoute = ColaboradorRouteImport.update({
+  id: '/colaborador',
+  path: '/colaborador',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EntrarRoute = EntrarRouteImport.update({
@@ -92,6 +99,11 @@ const PortalSemAcessoRoute = PortalSemAcessoRouteImport.update({
   path: '/sem-acesso',
   getParentRoute: () => PortalRoute,
 } as any)
+const ColaboradorEntrarRoute = ColaboradorEntrarRouteImport.update({
+  id: '/colaborador_/entrar',
+  path: '/colaborador/entrar',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PortalDesligamentosCaseIdRoute =
   PortalDesligamentosCaseIdRouteImport.update({
     id: '/desligamentos_/$caseId',
@@ -107,6 +119,7 @@ const PortalDesligamentosImportarRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
   '/bens-e-coleta': typeof PortalBensEColetaRoute
   '/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
@@ -118,11 +131,13 @@ export interface FileRoutesByFullPath {
   '/planos-e-gastos': typeof PortalPlanosEGastosRoute
   '/resultados-e-feedback': typeof PortalResultadosEFeedbackRoute
   '/sem-acesso': typeof PortalSemAcessoRoute
+  '/colaborador/entrar': typeof ColaboradorEntrarRoute
   '/desligamentos/$caseId': typeof PortalDesligamentosCaseIdRoute
   '/desligamentos/importar': typeof PortalDesligamentosImportarRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
   '/bens-e-coleta': typeof PortalBensEColetaRoute
   '/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
@@ -134,6 +149,7 @@ export interface FileRoutesByTo {
   '/planos-e-gastos': typeof PortalPlanosEGastosRoute
   '/resultados-e-feedback': typeof PortalResultadosEFeedbackRoute
   '/sem-acesso': typeof PortalSemAcessoRoute
+  '/colaborador/entrar': typeof ColaboradorEntrarRoute
   '/desligamentos/$caseId': typeof PortalDesligamentosCaseIdRoute
   '/desligamentos/importar': typeof PortalDesligamentosImportarRoute
 }
@@ -141,6 +157,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_portal': typeof PortalRouteWithChildren
+  '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
   '/_portal/bens-e-coleta': typeof PortalBensEColetaRoute
   '/_portal/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
@@ -152,6 +169,7 @@ export interface FileRoutesById {
   '/_portal/planos-e-gastos': typeof PortalPlanosEGastosRoute
   '/_portal/resultados-e-feedback': typeof PortalResultadosEFeedbackRoute
   '/_portal/sem-acesso': typeof PortalSemAcessoRoute
+  '/colaborador_/entrar': typeof ColaboradorEntrarRoute
   '/_portal/desligamentos_/$caseId': typeof PortalDesligamentosCaseIdRoute
   '/_portal/desligamentos_/importar': typeof PortalDesligamentosImportarRoute
 }
@@ -159,6 +177,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/colaborador'
     | '/entrar'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
@@ -170,11 +189,13 @@ export interface FileRouteTypes {
     | '/planos-e-gastos'
     | '/resultados-e-feedback'
     | '/sem-acesso'
+    | '/colaborador/entrar'
     | '/desligamentos/$caseId'
     | '/desligamentos/importar'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/colaborador'
     | '/entrar'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
@@ -186,12 +207,14 @@ export interface FileRouteTypes {
     | '/planos-e-gastos'
     | '/resultados-e-feedback'
     | '/sem-acesso'
+    | '/colaborador/entrar'
     | '/desligamentos/$caseId'
     | '/desligamentos/importar'
   id:
     | '__root__'
     | '/'
     | '/_portal'
+    | '/colaborador'
     | '/entrar'
     | '/_portal/bens-e-coleta'
     | '/_portal/candidaturas-assistidas'
@@ -203,6 +226,7 @@ export interface FileRouteTypes {
     | '/_portal/planos-e-gastos'
     | '/_portal/resultados-e-feedback'
     | '/_portal/sem-acesso'
+    | '/colaborador_/entrar'
     | '/_portal/desligamentos_/$caseId'
     | '/_portal/desligamentos_/importar'
   fileRoutesById: FileRoutesById
@@ -210,7 +234,9 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   PortalRoute: typeof PortalRouteWithChildren
+  ColaboradorRoute: typeof ColaboradorRoute
   EntrarRoute: typeof EntrarRoute
+  ColaboradorEntrarRoute: typeof ColaboradorEntrarRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -227,6 +253,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof PortalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/colaborador': {
+      id: '/colaborador'
+      path: '/colaborador'
+      fullPath: '/colaborador'
+      preLoaderRoute: typeof ColaboradorRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/entrar': {
@@ -306,6 +339,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PortalSemAcessoRouteImport
       parentRoute: typeof PortalRoute
     }
+    '/colaborador_/entrar': {
+      id: '/colaborador_/entrar'
+      path: '/colaborador/entrar'
+      fullPath: '/colaborador/entrar'
+      preLoaderRoute: typeof ColaboradorEntrarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_portal/desligamentos_/$caseId': {
       id: '/_portal/desligamentos_/$caseId'
       path: '/desligamentos/$caseId'
@@ -359,7 +399,9 @@ const PortalRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   PortalRoute: PortalRouteWithChildren,
+  ColaboradorRoute: ColaboradorRoute,
   EntrarRoute: EntrarRoute,
+  ColaboradorEntrarRoute: ColaboradorEntrarRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

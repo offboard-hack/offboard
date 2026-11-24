@@ -11,6 +11,7 @@ import {
   type PersonAsset,
   type Task,
 } from "@/entities/offboarding";
+import { EmployeeAccessSettings } from "@/features/offboarding/employee-access";
 import { CasePage } from "@/features/offboarding/offboarding-pages";
 import {
   Breadcrumb,
@@ -93,6 +94,7 @@ export function Case() {
   return (
     <CasePage
       offboardingCase={offboardingCase}
+      employeeAccess={canUpdateCase ? <EmployeeAccessSettings caseId={caseId} /> : null}
       taskFilter={tasks ?? ""}
       taskWritePending={statusMutation.isPending || subtaskMutation.isPending}
       taskWriteError={statusMutation.isError || subtaskMutation.isError}

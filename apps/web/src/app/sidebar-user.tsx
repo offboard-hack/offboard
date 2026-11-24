@@ -9,7 +9,10 @@ import { createPortalAbility, type PortalPrincipal } from "@offboard/access";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { authClient } from "@/features/sign-in/auth-client";
 import { Link } from "@tanstack/react-router";
+import type { ComponentProps, ReactNode } from "react";
+import { notifySessionChange } from "@/shared/lib/session-change";
 import { Avatar, AvatarFallback } from "@/shared/ui/shadcn/avatar";
+import { Button } from "@/shared/ui/shadcn/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,43 +37,97 @@ const roleLabels = {
   visualizador: "Visualizador",
 };
 
-export function SidebarUser({ principal }: { principal: PortalPrincipal }) {
-  const { isMobile, setOpenMobile } = useSidebar();
+type SignInPath = "/entrar" | "/colaborador/entrar";
+
+const signOutError = "Não foi possível sair. Tente novamente.";
+
+function usePortalSignOut(signInPath: SignInPath) {
   const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const { error } = await authClient.signOut();
+
+      if (error) throw new Error(signOutError);
+    },
+    onSuccess: () => {
+      queryClient.clear();
+      notifySessionChange();
+      window.location.replace(signInPath);
+    },
+  });
+}
+
+export function PortalSignOut({ signInPath }: { signInPath: SignInPath }) {
+  const signOut = usePortalSignOut(signInPath);
+
+  return (
+    <div>
+      <Button variant="ghost" onClick={() => signOut.mutate()} disabled={signOut.isPending}>
+        <HugeiconsIcon icon={LogoutIcon} aria-hidden="true" />
+        {signOut.isPending ? "Saindo…" : "Sair"}
+      </Button>
+      {signOut.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {signOutError}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+export function PortalSidebarUser({ principal }: { principal: PortalPrincipal }) {
   const ability = createPortalAbility(principal.role);
 
-  const initials = principal.name
+  return (
+    <SidebarUser name={principal.name} label={roleLabels[principal.role]} signInPath="/entrar">
+      {ability.can("manage", "Team") ? (
+        <SidebarUserItem link={<Link to="/equipe" />} icon={UserAccountIcon}>
+          Equipe
+        </SidebarUserItem>
+      ) : null}
+      {ability.can("manage", "Integrations") ? (
+        <SidebarUserItem link={<Link to="/planos-e-gastos" />} icon={CreditCardIcon}>
+          Planos e gastos
+        </SidebarUserItem>
+      ) : null}
+    </SidebarUser>
+  );
+}
+
+export function SidebarUser({
+  name,
+  label,
+  signInPath,
+  children,
+}: {
+  name: string;
+  label: string;
+  signInPath: SignInPath;
+  children?: ReactNode;
+}) {
+  const { isMobile } = useSidebar();
+  const signOut = usePortalSignOut(signInPath);
+
+  const initials = name
     .trim()
     .split(/\s+/u)
     .slice(0, 2)
     .map((part) => part[0])
     .join("");
 
-  const signOut = useMutation({
-    mutationFn: async () => {
-      const { error } = await authClient.signOut();
-
-      if (error) throw new Error("Failed to sign out");
-    },
-
-    onSuccess: () => {
-      queryClient.clear();
-      window.location.replace("/entrar");
-    },
-  });
-
   return (
     <SidebarFooter className="border-t border-sidebar-border">
       {signOut.isError && (
         <p role="alert" className="px-2 text-xs text-destructive">
-          Não foi possível sair. Tente novamente.
+          {signOutError}
         </p>
       )}
       <SidebarMenu>
         <SidebarMenuItem>
           <DropdownMenu>
             <DropdownMenuTrigger
-              aria-label={`Menu de usuário de ${principal.name}`}
+              aria-label={`Menu de usuário de ${name}`}
               render={
                 <SidebarMenuButton
                   size="lg"
@@ -84,10 +141,8 @@ export function SidebarUser({ principal }: { principal: PortalPrincipal }) {
                 </AvatarFallback>
               </Avatar>
               <span className="grid min-w-0 flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
-                <span className="truncate font-medium">{principal.name}</span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {roleLabels[principal.role]}
-                </span>
+                <span className="truncate font-medium">{name}</span>
+                <span className="truncate text-xs text-muted-foreground">{label}</span>
               </span>
               <HugeiconsIcon
                 icon={UnfoldMoreIcon}
@@ -103,27 +158,10 @@ export function SidebarUser({ principal }: { principal: PortalPrincipal }) {
             >
               <DropdownMenuGroup>
                 <DropdownMenuLabel className="font-medium text-foreground">
-                  {principal.name}
+                  {name}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                {ability.can("manage", "Team") && (
-                  <DropdownMenuItem
-                    render={<Link to="/equipe" />}
-                    onClick={() => setOpenMobile(false)}
-                  >
-                    <HugeiconsIcon icon={UserAccountIcon} aria-hidden="true" />
-                    Equipe
-                  </DropdownMenuItem>
-                )}
-                {ability.can("manage", "Integrations") && (
-                  <DropdownMenuItem
-                    render={<Link to="/planos-e-gastos" />}
-                    onClick={() => setOpenMobile(false)}
-                  >
-                    <HugeiconsIcon icon={CreditCardIcon} aria-hidden="true" />
-                    Planos e gastos
-                  </DropdownMenuItem>
-                )}
+                {children}
                 <DropdownMenuItem disabled={signOut.isPending} onClick={() => signOut.mutate()}>
                   <HugeiconsIcon icon={LogoutIcon} aria-hidden="true" />
                   {signOut.isPending ? "Saindo…" : "Sair"}
@@ -134,5 +172,24 @@ export function SidebarUser({ principal }: { principal: PortalPrincipal }) {
         </SidebarMenuItem>
       </SidebarMenu>
     </SidebarFooter>
+  );
+}
+
+export function SidebarUserItem({
+  link,
+  icon,
+  children,
+}: {
+  link: ComponentProps<typeof DropdownMenuItem>["render"];
+  icon: ComponentProps<typeof HugeiconsIcon>["icon"];
+  children: ReactNode;
+}) {
+  const { setOpenMobile } = useSidebar();
+
+  return (
+    <DropdownMenuItem render={link} onClick={() => setOpenMobile(false)}>
+      <HugeiconsIcon icon={icon} aria-hidden="true" />
+      {children}
+    </DropdownMenuItem>
   );
 }

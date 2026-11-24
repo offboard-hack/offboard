@@ -30,6 +30,13 @@ From the repository root, run `npm install` and start PostgreSQL with
 `postgresql://offboard:offboard@127.0.0.1:5432/offboard`.
 
 Run `npm run migrate -w @offboard/db` to apply the database migrations.
+
+For the employee rollout, apply `0010_employee_journey` to the production
+database before setting `OFFBOARD_EMPLOYEE_SCHEMA_READY=1` in GitHub Actions
+variables and the Vercel production environment. The migration preserves RH
+sessions and requires collaborators with legacy sessions to sign in again.
+The updated web and mobile clients send the grant identifier with employee
+requests.
 For a disposable development database, `npm run seed -w @offboard/db` loads
 sample cases and replaces the team roster. Add a team row for an email
 address you control before requesting a link.
@@ -73,6 +80,19 @@ request a one-time link. A link expires after ten minutes.
 Remove a member in **Equipe** to revoke access. Elysia checks the current
 roster on every protected request. Adding the same email again creates a
 new invitation and requires a fresh link.
+
+## Employee journey
+
+Open a case as an administrator or HR user and use **Área do colaborador**
+to set the email allowed to sign in and the details shown in the journey.
+The employee enters a six-digit code delivered through the configured email
+provider at `/colaborador/entrar` or in the mobile app. Clearing or changing
+the email revokes the old employee sessions.
+
+After consent, the same Elysia API serves the journey and saves departure and
+career state in PostgreSQL. Each write includes the revision read by the
+client. Conflicting writes return 409 so the client can refresh the current
+record. A session for the employee area cannot access the HR portal.
 
 ## Prepare a Vercel preview
 

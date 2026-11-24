@@ -3,6 +3,7 @@ import { Elysia, t } from "elysia";
 import { actionConfigsRoutes } from "./features/action-configs/routes.js";
 import { fireActions } from "./features/action-configs/actions.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
+import { employeeRoutes } from "./features/employee/routes.js";
 import { authRoutes } from "./features/auth/routes.js";
 import { createAbacatePayGateway, type AbacatePayGateway } from "./features/billing/abacatepay.js";
 import { billingRoutes } from "./features/billing/routes.js";
@@ -34,6 +35,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       response: t.Object({ status: t.Literal("ok") }),
     })
     .use(authRoutes(options.auth))
+    .use(employeeRoutes(repos.employee, access, options.auth.resolveEmployee, webOrigin))
     .use(
       offboardingsRoutes(
         repos.offboardings,

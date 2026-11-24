@@ -23,6 +23,8 @@
     "@offboard/access": "0.1.0",
     "@offboard/api": "^0.1.0",
     "@offboard/api-client": "0.1.0",
+    "@offboard/employee": "0.1.0",
+    "@offboard/ui": "0.1.0",
     "@paper-design/shaders-react": "^0.0.82",
     "@tailwindcss/vite": "^4.3.5",
     "@tanstack/react-form": "^1.33.5",

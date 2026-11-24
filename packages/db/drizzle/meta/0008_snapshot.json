@@ -1,6 +1,6 @@
 {
   "id": "163dc9f3-b126-4cab-a56a-7c64d29bf97a",
-  "prevId": "aa2d4901-7f23-4889-8e06-00296e5765b7",
+  "prevId": "4daac4b7-4ed6-459e-a750-8ecdb258ef76",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -474,104 +474,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.exit_surveys": {
-      "name": "exit_surveys",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "case_id": {
-          "name": "case_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "nps_score": {
-          "name": "nps_score",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "responses": {
-          "name": "responses",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "topics": {
-          "name": "topics",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "submitted_at": {
-          "name": "submitted_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "exit_surveys_case_id_idx": {
-          "name": "exit_surveys_case_id_idx",
-          "columns": [
-            {
-              "expression": "case_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "exit_surveys_case_id_offboarding_cases_id_fk": {
-          "name": "exit_surveys_case_id_offboarding_cases_id_fk",
-          "tableFrom": "exit_surveys",
-          "tableTo": "offboarding_cases",
-          "columnsFrom": ["case_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "exit_surveys_nps_score_range": {
-          "name": "exit_surveys_nps_score_range",
-          "value": "\"exit_surveys\".\"nps_score\" between 0 and 10"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.integrations": {
       "name": "integrations",
       "schema": "",
@@ -953,6 +855,208 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
+    },
+    "public.equipment": {
+      "name": "equipment",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "case_id": {
+          "name": "case_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item": {
+          "name": "item",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tag": {
+          "name": "tag",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "return_method": {
+          "name": "return_method",
+          "type": "equipment_return_method",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scheduled_date": {
+          "name": "scheduled_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "equipment_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "equipment_case_id_idx": {
+          "name": "equipment_case_id_idx",
+          "columns": [
+            {
+              "expression": "case_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "equipment_case_id_offboarding_cases_id_fk": {
+          "name": "equipment_case_id_offboarding_cases_id_fk",
+          "tableFrom": "equipment",
+          "tableTo": "offboarding_cases",
+          "columnsFrom": ["case_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "equipment_tag_unique": {
+          "name": "equipment_tag_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tag"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.exit_surveys": {
+      "name": "exit_surveys",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "case_id": {
+          "name": "case_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nps_score": {
+          "name": "nps_score",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "responses": {
+          "name": "responses",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "topics": {
+          "name": "topics",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "submitted_at": {
+          "name": "submitted_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "exit_surveys_case_id_idx": {
+          "name": "exit_surveys_case_id_idx",
+          "columns": [
+            {
+              "expression": "case_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "exit_surveys_case_id_offboarding_cases_id_fk": {
+          "name": "exit_surveys_case_id_offboarding_cases_id_fk",
+          "tableFrom": "exit_surveys",
+          "tableTo": "offboarding_cases",
+          "columnsFrom": ["case_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "exit_surveys_nps_score_range": {
+          "name": "exit_surveys_nps_score_range",
+          "value": "\"exit_surveys\".\"nps_score\" between 0 and 10"
+        }
+      },
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -970,6 +1074,16 @@
       "name": "task_status",
       "schema": "public",
       "values": ["todo", "in_progress", "done"]
+    },
+    "public.equipment_return_method": {
+      "name": "equipment_return_method",
+      "schema": "public",
+      "values": ["pickup", "in_person"]
+    },
+    "public.equipment_status": {
+      "name": "equipment_status",
+      "schema": "public",
+      "values": ["with_person", "scheduled", "transit", "received", "inventory", "failed"]
     }
   },
   "schemas": {},

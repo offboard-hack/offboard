@@ -1,11 +1,11 @@
-import { QueryClient } from "@tanstack/react-query";
 import { createRouter } from "@tanstack/react-router";
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
 import { RouteError } from "./portal";
+import { createPortalQueryClient } from "./query-client";
 import { routeTree } from "./routeTree.gen";
 
 export function getRouter() {
-  const queryClient = new QueryClient();
+  const queryClient = createPortalQueryClient();
 
   const router = createRouter({
     routeTree,

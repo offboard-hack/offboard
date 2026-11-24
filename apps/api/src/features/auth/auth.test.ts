@@ -223,8 +223,20 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
       try {
         const sent = await runtime.auth.handler(magicLinkRequest(email, runtime.origin));
         expect(sent.status).toBe(200);
-        expect(messages[0]).toContain(email);
-        expect(messages[0]).toContain(`${runtime.origin}/api/auth/magic-link/verify`);
+
+        const message = z
+          .object({ to: z.string(), subject: z.string(), text: z.string(), html: z.string() })
+          .parse(JSON.parse(messages[0]));
+
+        const link = z.url().parse(message.text.split("\n\n")[2]);
+        const { origin: linkOrigin, pathname } = new URL(link);
+        const href = `href="${link.replaceAll("&", "&amp;")}"`;
+
+        expect(message.to).toBe(email);
+        expect(message.subject).toBe("Seu link de acesso ao Offboard");
+        expect(linkOrigin + pathname).toBe(`${runtime.origin}/api/auth/magic-link/verify`);
+        expect(message.html.match(/href="[^"]+"/g)).toEqual([href, href]);
+        expect(message.html).toContain(`src="${runtime.origin}/apple-touch-icon.png"`);
 
         const rejected = await runtime.auth.handler(magicLinkRequest(email, runtime.origin));
         expect(rejected.status).toBe(500);

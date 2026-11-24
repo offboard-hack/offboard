@@ -1,16 +1,24 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
-import { tasks } from "@offboard/db/schema";
+import { authSession, employeeAccess, tasks } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
-import { eq } from "drizzle-orm";
+import {
+  emptyEmployeePlan,
+  employeeGrantHeader,
+  employeeStateSchema,
+  type EmployeeState,
+} from "@offboard/employee";
+import { eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createApp } from "./app.ts";
+import { createAuth, createRuntimeAuth } from "./features/auth/auth.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -1192,5 +1200,753 @@ describe.skipIf(!url)("api", () => {
     );
 
     expect(res.status).toBe(500);
+  });
+});
+
+describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => {
+  const db = createClient(url ?? "");
+  const repos = createRepositories(db);
+  const codes = new Map<string, string>();
+  const links = new Map<string, string>();
+  const grants = new Map<string, string>();
+  let requests = 0;
+
+  const employeeAuth = createAuth({
+    db,
+    origin: webOrigin,
+    secret: randomUUID() + randomUUID(),
+    ipAddressHeaders: ["x-test-employee-ip"],
+    sendLink: async ({ email, url }) => {
+      links.set(email, url);
+    },
+    sendCode: async ({ email, code }) => {
+      codes.set(email, code);
+    },
+  });
+
+  const app = createApp(webOrigin, repos, { auth: employeeAuth });
+
+  type EmployeeSettings = Parameters<typeof repos.employee.saveSettings>[1];
+
+  function request(
+    path: string,
+    method = "GET",
+    cookie?: string,
+    body?:
+      | { email: string; type: "sign-in" }
+      | { email: string; otp: string }
+      | { email: string }
+      | EmployeeState
+      | EmployeeSettings,
+    origin = webOrigin,
+    nativeOrigin?: string,
+    grantId = cookie ? grants.get(cookie) : undefined,
+  ) {
+    requests += 1;
+    const headers = new Headers({ "x-test-employee-ip": `192.0.2.${requests}` });
+
+    if (nativeOrigin) headers.set("expo-origin", nativeOrigin);
+    else headers.set("origin", origin);
+
+    if (cookie) headers.set("cookie", cookie);
+
+    if (grantId) headers.set(employeeGrantHeader, grantId);
+
+    if (body) headers.set("content-type", "application/json");
+
+    return app.handle(
+      new Request(webOrigin + "/api" + path, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+    );
+  }
+
+  async function sendCode(email: string) {
+    return request("/auth/email-otp/send-verification-otp", "POST", undefined, {
+      email,
+      type: "sign-in",
+    });
+  }
+
+  async function signIn(email: string, code: string, nativeOrigin?: string) {
+    return request(
+      "/auth/sign-in/email-otp",
+      "POST",
+      undefined,
+      { email, otp: code },
+      webOrigin,
+      nativeOrigin,
+    );
+  }
+
+  async function rememberGrant(cookie: string) {
+    const session = await request("/employee/session", "GET", cookie);
+    expect(session.status).toBe(200);
+    const grantId = z.object({ grantId: z.uuid() }).parse(await session.json()).grantId;
+    grants.set(cookie, grantId);
+
+    return grantId;
+  }
+
+  async function authenticate(email: string) {
+    expect((await sendCode(email)).status).toBe(200);
+    const code = codes.get(email);
+
+    if (!code) throw new Error("No code delivered");
+
+    const response = await signIn(email, code);
+    expect(response.status).toBe(200);
+
+    const session = response.headers
+      .getSetCookie()
+      .find((value) => value.includes("session_token="));
+
+    expect(session).toContain("HttpOnly");
+
+    const cookie = session?.split(";")[0] ?? "";
+    await rememberGrant(cookie);
+
+    return cookie;
+  }
+
+  beforeAll(() =>
+    migrate(db, {
+      migrationsFolder: fileURLToPath(new URL("../../../packages/db/drizzle", import.meta.url)),
+    }),
+  );
+  afterAll(() => db.$client.end());
+
+  it("does not expose employee access settings through fallback portal authentication", async () => {
+    const fallbackApp = createApp(webOrigin, repos, { auth });
+    const target = webOrigin + "/api/employee-access/" + missingCaseId;
+    expect((await fallbackApp.handle(new Request(target))).status).toBe(503);
+    expect(
+      (
+        await fallbackApp.handle(
+          new Request(target, {
+            method: "PUT",
+            headers: { origin: webOrigin, "content-type": "application/json" },
+            body: JSON.stringify({ email: null, plan: emptyEmployeePlan, revision: 0 }),
+          }),
+        )
+      ).status,
+    ).toBe(503);
+  });
+
+  it("separates employee sessions from HR and shares confirmed, revisioned progress only with the owner", async () => {
+    const email = `employee-${randomUUID()}@offboard.example`;
+    const secondEmail = `employee-${randomUUID()}@offboard.example`;
+
+    const first = await repos.offboardings.createOffboarding({
+      name: "Primeira Pessoa",
+      role: "Analista",
+      department: "RH",
+      deadline: "2027-02-01",
+    });
+
+    const second = await repos.offboardings.createOffboarding({
+      name: "Segunda Pessoa",
+      role: "Analista",
+      department: "TI",
+      deadline: "2027-02-02",
+    });
+
+    const plan = {
+      ...emptyEmployeePlan,
+      bookingDays: ["2027-01-25"],
+      equipment: [{ title: "Notebook", code: "123", model: "" }],
+    };
+
+    await repos.team.createTeamMember({ email, name: "RH com o mesmo e-mail", role: "admin" });
+    await repos.employee.saveSettings(first.id, { email, plan, revision: 0 });
+    await repos.employee.saveSettings(second.id, {
+      email: secondEmail,
+      plan: emptyEmployeePlan,
+      revision: 0,
+    });
+
+    const anonymous = await sendCode(`unknown-${randomUUID()}@offboard.example`);
+    expect(anonymous.status).toBe(200);
+    expect(codes.size).toBe(0);
+    expect((await request("/employee/session")).status).toBe(401);
+    expect(
+      (
+        await request(
+          "/auth/email-otp/send-verification-otp",
+          "POST",
+          undefined,
+          { email, type: "sign-in" },
+          "https://foreign.example",
+        )
+      ).status,
+    ).toBe(403);
+
+    const cookie = await authenticate(email);
+    const secondCookie = await authenticate(secondEmail);
+    expect((await signIn(email, codes.get(email) ?? "")).status).toBe(400);
+    expect((await request("/session", "GET", cookie)).status).toBe(403);
+    expect((await request(`/employee-access/${second.id}`, "GET", cookie)).status).toBe(403);
+    expect((await request("/employee/journey", "GET", cookie)).status).toBe(403);
+
+    const initialConsent = await request("/employee/state/consent", "GET", cookie);
+    expect(await initialConsent.json()).toEqual({
+      key: "consent",
+      revision: 0,
+      value: { accepted: false },
+    });
+    expect((await request("/employee/state/career", "GET", cookie)).status).toBe(403);
+
+    const blockedDeparture: EmployeeState = {
+      key: "departure-v1",
+      revision: 0,
+      value: {
+        booking: null,
+        handoffCompleted: [],
+        examAttended: false,
+        feedback: null,
+      },
+    };
+
+    expect((await request("/employee/state", "PUT", cookie, blockedDeparture)).status).toBe(403);
+
+    const consent = { key: "consent", revision: 0, value: { accepted: true } } as const;
+    expect(
+      (await request("/employee/state", "PUT", cookie, consent, "https://foreign.example")).status,
+    ).toBe(403);
+    expect((await request("/employee/state", "PUT", cookie, consent)).status).toBe(200);
+    expect((await request("/employee/state", "PUT", secondCookie, consent)).status).toBe(200);
+    const firstGrant = grants.get(cookie);
+    expect(
+      (
+        await request(
+          "/employee/journey",
+          "GET",
+          secondCookie,
+          undefined,
+          webOrigin,
+          undefined,
+          firstGrant,
+        )
+      ).status,
+    ).toBe(412);
+    expect(
+      (
+        await request(
+          "/employee/state",
+          "PUT",
+          secondCookie,
+          blockedDeparture,
+          webOrigin,
+          undefined,
+          firstGrant,
+        )
+      ).status,
+    ).toBe(412);
+
+    const firstJourney = await request("/employee/journey", "GET", cookie);
+    expect(firstJourney.headers.get("cache-control")).toBe("private, no-store");
+    expect(await firstJourney.json()).toMatchObject({ deadline: first.deadline, plan });
+    expect(await (await request("/employee/journey", "GET", secondCookie)).json()).toMatchObject({
+      plan: emptyEmployeePlan,
+    });
+
+    expect(await (await request("/employee/state/career", "GET", cookie)).json()).toMatchObject({
+      key: "career",
+      revision: 0,
+      value: { base: { name: first.name }, versions: [], applications: [] },
+    });
+
+    const current = employeeStateSchema.parse(
+      await (await request("/employee/state/departure-v1", "GET", cookie)).json(),
+    );
+
+    if (current.key !== "departure-v1") throw new Error("Unexpected journey state kind");
+
+    const booking = {
+      method: "pickup",
+      day: "2027-01-25",
+      slot: "morning",
+      address: "Rua Brasileira, 123, São Paulo",
+    } as const;
+
+    expect(
+      (
+        await request("/employee/state", "PUT", cookie, {
+          ...current,
+          value: {
+            ...current.value,
+            booking: { method: "office", day: booking.day, slot: booking.slot },
+          },
+        })
+      ).status,
+    ).toBe(422);
+
+    expect(
+      (
+        await request("/employee/state", "PUT", cookie, {
+          ...current,
+          value: { ...current.value, examAttended: true },
+        })
+      ).status,
+    ).toBe(422);
+    expect(
+      (
+        await request("/employee/state", "PUT", cookie, {
+          ...current,
+          value: { ...current.value, handoffCompleted: ["unknown"] },
+        })
+      ).status,
+    ).toBe(422);
+
+    const draft = { ...current, value: { ...current.value, booking } };
+    const saved = await request("/employee/state", "PUT", cookie, draft);
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({ revision: 1, value: { booking } });
+    expect((await request("/employee/state", "PUT", cookie, draft)).status).toBe(200);
+
+    const different = {
+      ...draft,
+      value: { ...draft.value, booking: { ...booking, slot: "afternoon" as const } },
+    };
+
+    expect((await request("/employee/state", "PUT", cookie, different)).status).toBe(409);
+    expect(
+      await (await request("/employee/state/departure-v1", "GET", secondCookie)).json(),
+    ).toMatchObject({ revision: 0, value: { booking: null } });
+
+    const next = { ...draft, revision: 1, value: { ...draft.value, booking: null } };
+    expect(await (await request("/employee/state", "PUT", cookie, next)).json()).toMatchObject({
+      revision: 2,
+      value: { booking: null },
+    });
+    expect((await request("/employee/state", "PUT", cookie, different)).status).toBe(409);
+
+    await repos.employee.saveSettings(first.id, { email: null, plan, revision: 1 });
+    expect((await request("/employee/session", "GET", cookie)).status).toBe(401);
+    await repos.employee.saveSettings(first.id, { email, plan, revision: 2 });
+    expect((await request("/employee/session", "GET", cookie)).status).toBe(401);
+    expect((await request("/employee/session", "GET", secondCookie)).status).toBe(200);
+  });
+
+  it("lets HR provision a case and accepts only the supported native origins", async () => {
+    const email = `native-${randomUUID()}@offboard.example`;
+    const admin = `admin-${randomUUID()}@offboard.example`;
+
+    const first = await repos.offboardings.createOffboarding({
+      name: "Pessoa no app",
+      role: "Analista",
+      department: "Produto",
+      deadline: "2027-02-01",
+    });
+
+    const second = await repos.offboardings.createOffboarding({
+      name: "Outro caso",
+      role: "Analista",
+      department: "TI",
+      deadline: "2027-02-02",
+    });
+
+    await repos.team.createTeamMember({ email: admin, name: "RH", role: "admin" });
+
+    expect(
+      (await request("/auth/sign-in/magic-link", "POST", undefined, { email: admin })).status,
+    ).toBe(200);
+    const link = links.get(admin);
+
+    if (!link) throw new Error("No HR link delivered");
+
+    const verified = await app.handle(new Request(link));
+
+    const hrCookie = verified.headers
+      .getSetCookie()
+      .find((value) => value.includes("session_token="))
+      ?.split(";")[0];
+
+    expect(hrCookie).toBeTruthy();
+    expect((await request("/employee/session", "GET", hrCookie)).status).toBe(401);
+
+    const target = `/employee-access/${first.id}`;
+
+    const plan = {
+      ...emptyEmployeePlan,
+      exam: { day: "2027-01-26", time: "10:00", clinic: "Clínica", address: "Rua da Clínica" },
+    };
+
+    expect(await (await request(target, "GET", hrCookie)).json()).toEqual({
+      email: null,
+      plan: emptyEmployeePlan,
+      revision: 0,
+    });
+    expect((await request(`/employee-access/${missingCaseId}`, "GET", hrCookie)).status).toBe(404);
+    expect(
+      (
+        await request(`/employee-access/${missingCaseId}`, "PUT", hrCookie, {
+          email,
+          plan,
+          revision: 0,
+        })
+      ).status,
+    ).toBe(404);
+    expect((await request(target, "PUT", hrCookie, { email, plan, revision: 0 })).status).toBe(200);
+    expect(await (await request(target, "GET", hrCookie)).json()).toEqual({
+      email,
+      plan,
+      revision: 1,
+    });
+    expect((await request(target, "PUT", hrCookie, { email, plan, revision: 0 })).status).toBe(409);
+    const firstVersion = { email, plan, revision: 1 };
+    expect((await request(target, "PUT", hrCookie, { ...firstVersion, email: null })).status).toBe(
+      200,
+    );
+    const conflict = await request(target, "PUT", hrCookie, firstVersion);
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ code: "settings-changed" });
+    expect(await (await request(target, "GET", hrCookie)).json()).toMatchObject({
+      email: null,
+      revision: 2,
+    });
+    expect((await request(target, "PUT", hrCookie, { ...firstVersion, revision: 2 })).status).toBe(
+      200,
+    );
+    expect(
+      (
+        await request(`/employee-access/${second.id}`, "PUT", hrCookie, {
+          email,
+          plan,
+          revision: 0,
+        })
+      ).status,
+    ).toBe(409);
+    await expect(
+      repos.employee.saveSettings("invalid-case-id", { email, plan, revision: 0 }),
+    ).rejects.toThrow();
+
+    const otpRequest = { email, type: "sign-in" } as const;
+
+    const requestedFrom = (origin: string) =>
+      request(
+        "/auth/email-otp/send-verification-otp",
+        "POST",
+        undefined,
+        otpRequest,
+        webOrigin,
+        origin,
+      );
+
+    expect((await requestedFrom("https://foreign.example")).status).toBe(403);
+    expect(
+      (
+        await employeeAuth.handler(
+          new Request(webOrigin + "/api/auth/email-otp/send-verification-otp", {
+            method: "POST",
+            body: JSON.stringify(otpRequest),
+            headers: { "content-type": "application/json" },
+          }),
+        )
+      ).status,
+    ).toBe(403);
+    expect((await requestedFrom("exp://127.0.0.1:8103/--/")).status).toBe(200);
+    const code = codes.get(email);
+
+    if (!code) throw new Error("No native code delivered");
+
+    const response = await signIn(email, code, "offboard://");
+    expect(response.status).toBe(200);
+
+    const cookie = response.headers
+      .getSetCookie()
+      .find((value) => value.includes("session_token="))
+      ?.split(";")[0];
+
+    expect(cookie).toBeTruthy();
+    await rememberGrant(cookie ?? "");
+    expect(
+      (
+        await request(
+          "/employee/state",
+          "PUT",
+          cookie,
+          { key: "consent", revision: 0, value: { accepted: true } },
+          webOrigin,
+          "offboard:///",
+        )
+      ).status,
+    ).toBe(200);
+
+    const initial: EmployeeState = {
+      key: "departure-v1",
+      revision: 0,
+      value: { handoffCompleted: [], examAttended: true, feedback: null, booking: null },
+    };
+
+    expect((await request("/employee/state", "PUT", cookie, initial)).status).toBe(200);
+    expect(
+      (await request("/employee/state", "PUT", cookie, { ...initial, revision: 1 })).status,
+    ).toBe(200);
+
+    expect((await request(target, "PUT", hrCookie, { email, plan, revision: 3 })).status).toBe(200);
+    expect((await request("/employee/session", "GET", cookie)).status).toBe(200);
+
+    await db.delete(employeeAccess).where(eq(employeeAccess.caseId, first.id));
+    expect((await request("/employee/session", "GET", cookie)).status).toBe(401);
+    expect(await repos.employee.saveSettings(first.id, { email, plan, revision: 1 })).toBe(
+      "changed",
+    );
+    expect(await repos.employee.saveSettings(missingCaseId, { email, plan, revision: 1 })).toBe(
+      "missing-case",
+    );
+  });
+
+  it("rejects a previously delivered code if the case is revoked before verification", async () => {
+    const email = `revoked-new-${randomUUID()}@offboard.example`;
+
+    const first = await repos.offboardings.createOffboarding({
+      name: "Pessoa removida",
+      role: "Analista",
+      department: "Produto",
+      deadline: "2027-02-01",
+    });
+
+    await repos.employee.saveSettings(first.id, { email, plan: emptyEmployeePlan, revision: 0 });
+    expect((await sendCode(email)).status).toBe(200);
+    const code = codes.get(email);
+
+    if (!code) throw new Error("No code delivered");
+
+    await repos.employee.saveSettings(first.id, {
+      email: null,
+      plan: emptyEmployeePlan,
+      revision: 1,
+    });
+    expect((await signIn(email, code)).headers.getSetCookie()).toHaveLength(0);
+
+    await repos.employee.saveSettings(first.id, { email, plan: emptyEmployeePlan, revision: 2 });
+    await authenticate(email);
+    expect((await sendCode(email)).status).toBe(200);
+    const subsequentCode = codes.get(email);
+
+    if (!subsequentCode) throw new Error("No code delivered");
+
+    await repos.employee.saveSettings(first.id, {
+      email: null,
+      plan: emptyEmployeePlan,
+      revision: 3,
+    });
+    expect((await signIn(email, subsequentCode)).headers.getSetCookie()).toHaveLength(0);
+  });
+
+  it("binds a pending code to the grant that issued it", async () => {
+    const email = "reassigned-" + randomUUID() + "@offboard.example";
+
+    const person = {
+      name: "Pessoa realocada",
+      role: "Analista",
+      department: "Produto",
+      deadline: "2027-02-01",
+    };
+
+    const first = await repos.offboardings.createOffboarding(person);
+    const second = await repos.offboardings.createOffboarding(person);
+    const plan = emptyEmployeePlan;
+
+    expect(await repos.employee.saveSettings(first.id, { email, plan, revision: 0 })).toBe("saved");
+    expect((await sendCode(email)).status).toBe(200);
+    const priorCode = codes.get(email);
+
+    if (!priorCode) throw new Error("No code delivered");
+
+    expect(await repos.employee.saveSettings(first.id, { email: null, plan, revision: 1 })).toBe(
+      "saved",
+    );
+    expect(await repos.employee.saveSettings(second.id, { email, plan, revision: 0 })).toBe(
+      "saved",
+    );
+    expect((await signIn(email, priorCode)).status).toBe(400);
+
+    await db
+      .update(employeeAccess)
+      .set({ email: email.toUpperCase() })
+      .where(eq(employeeAccess.caseId, second.id));
+
+    const cookie = await authenticate(email);
+    expect(await (await request("/employee/session", "GET", cookie)).json()).toMatchObject({
+      caseId: second.id,
+    });
+  });
+
+  it("clears a session if the grant is revoked while Better Auth is creating it", async () => {
+    const email = "revoked-at-issue-" + randomUUID() + "@offboard.example";
+
+    const record = await repos.offboardings.createOffboarding({
+      name: "Pessoa com acesso removido no login",
+      role: "Analista",
+      department: "Produto",
+      deadline: "2027-02-01",
+    });
+
+    await repos.employee.saveSettings(record.id, { email, plan: emptyEmployeePlan, revision: 0 });
+    expect((await sendCode(email)).status).toBe(200);
+    const code = codes.get(email);
+
+    if (!code) throw new Error("No code delivered");
+
+    await db.execute(sql`
+      CREATE FUNCTION offboard_test_revoke_grant() RETURNS trigger AS $$
+      BEGIN
+        UPDATE employee_access SET email = NULL, grant_id = gen_random_uuid(), revision = revision + 1
+        WHERE case_id = NEW.employee_case_id;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+    `);
+
+    try {
+      await db.execute(sql`
+        CREATE TRIGGER offboard_test_revoke_grant AFTER INSERT ON auth_session
+        FOR EACH ROW WHEN (NEW.employee_case_id IS NOT NULL)
+        EXECUTE FUNCTION offboard_test_revoke_grant()
+      `);
+      const result = await signIn(email, code);
+      expect(result.status).toBe(400);
+      expect(result.headers.getSetCookie()).toEqual([]);
+      expect(
+        await db.select().from(authSession).where(eq(authSession.employeeCaseId, record.id)),
+      ).toEqual([]);
+    } finally {
+      await db.execute(sql`DROP FUNCTION offboard_test_revoke_grant() CASCADE`);
+    }
+  });
+
+  it("rechecks the grant inside the transaction for reads and writes already authorized by the guard", async () => {
+    const email = "revocation-" + randomUUID() + "@offboard.example";
+
+    const record = await repos.offboardings.createOffboarding({
+      name: "Pessoa com acesso removido",
+      role: "Analista",
+      department: "Produto",
+      deadline: "2027-02-01",
+    });
+
+    const plan = emptyEmployeePlan;
+    await repos.employee.saveSettings(record.id, { email, plan, revision: 0 });
+
+    const cookie = await authenticate(email);
+    const consent: EmployeeState = { key: "consent", revision: 0, value: { accepted: true } };
+    expect((await request("/employee/state", "PUT", cookie, consent)).status).toBe(200);
+
+    const atGuard: (() => void)[] = [];
+    const resumeGuard = new Set<() => void>();
+
+    const started = Array.from(
+      { length: 3 },
+      () => new Promise<void>((resolve) => atGuard.push(resolve)),
+    );
+
+    const delayedApp = createApp(webOrigin, repos, {
+      auth: {
+        ...employeeAuth,
+        async resolveEmployee(headers) {
+          const principal = await employeeAuth.resolveEmployee(headers);
+
+          await new Promise<void>((resume) => {
+            resumeGuard.add(resume);
+            atGuard.shift()?.();
+          });
+
+          return principal;
+        },
+      },
+    });
+
+    const boundHeaders = {
+      cookie,
+      origin: webOrigin,
+      "content-type": "application/json",
+      [employeeGrantHeader]: grants.get(cookie) ?? "",
+    };
+
+    const pending = [
+      delayedApp.handle(
+        new Request(webOrigin + "/api/employee/journey", { headers: boundHeaders }),
+      ),
+      delayedApp.handle(
+        new Request(webOrigin + "/api/employee/state/consent", { headers: boundHeaders }),
+      ),
+      delayedApp.handle(
+        new Request(webOrigin + "/api/employee/state", {
+          method: "PUT",
+          headers: boundHeaders,
+          body: JSON.stringify({ ...consent, revision: 1, value: { accepted: false } }),
+        }),
+      ),
+    ];
+
+    try {
+      await Promise.all(started);
+      expect(await repos.employee.saveSettings(record.id, { email: null, plan, revision: 1 })).toBe(
+        "saved",
+      );
+    } finally {
+      resumeGuard.forEach((resume) => resume());
+    }
+
+    expect((await Promise.all(pending)).map((response) => response.status)).toEqual([
+      401, 401, 401,
+    ]);
+    await repos.employee.saveSettings(record.id, { email, plan, revision: 2 });
+    const freshCookie = await authenticate(email);
+    expect(await (await request("/employee/state/consent", "GET", freshCookie)).json()).toEqual({
+      key: "consent",
+      revision: 1,
+      value: { accepted: true },
+    });
+  });
+
+  it("sends code mail through the configured provider and never trusts Expo Go origins in production", async () => {
+    const email = `runtime-${randomUUID()}@offboard.example`;
+
+    const record = await repos.offboardings.createOffboarding({
+      name: "Pessoa na produção",
+      role: "Analista",
+      department: "Produto",
+      deadline: "2027-02-01",
+    });
+
+    await repos.employee.saveSettings(record.id, { email, plan: emptyEmployeePlan, revision: 0 });
+    const delivered: string[] = [];
+
+    const { auth: production } = createRuntimeAuth(db, undefined, {
+      env: {
+        BETTER_AUTH_URL: "https://offboard.example",
+        BETTER_AUTH_SECRET: randomUUID() + randomUUID(),
+        EMAIL_PROVIDER: "cloudflare",
+        AUTH_EMAIL_FROM: "login@offboard.example",
+      },
+      cloudflareEmail: {
+        async send(message) {
+          expect(message.to).toBe(email);
+          expect(message.subject).toBe("Seu código de acesso ao Offboard");
+          delivered.push(message.text);
+
+          return { messageId: "test-email" };
+        },
+      },
+    });
+
+    function send(origin: Record<string, string>) {
+      return production.handler(
+        new Request("https://offboard.example/api/auth/email-otp/send-verification-otp", {
+          method: "POST",
+          headers: { ...origin, "content-type": "application/json" },
+          body: JSON.stringify({ email, type: "sign-in" }),
+        }),
+      );
+    }
+
+    expect((await send({ "expo-origin": "exp://localhost:8103/--/" })).status).toBe(403);
+    expect((await send({ "expo-origin": "offboard:///" })).status).toBe(200);
+    expect(delivered[0]).toMatch(/\b\d{6}\b/);
   });
 });

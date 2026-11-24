@@ -20,8 +20,8 @@ export function DatePicker({
   labelledBy: string;
   value: string;
   onChange: (value: string) => void;
-  onBlur: () => void;
-  invalid: boolean;
+  onBlur?: () => void;
+  invalid?: boolean;
   describedBy?: string;
 }) {
   const [open, setOpen] = useState(false);

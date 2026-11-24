@@ -373,6 +373,7 @@ export function CasePage({
   onTaskStatusChange,
   onSubtaskToggle,
   breadcrumb,
+  employeeAccess,
 }: {
   offboardingCase: OffboardingCase;
   taskFilter: "pending" | "done" | "";
@@ -382,6 +383,7 @@ export function CasePage({
   onTaskStatusChange?: (taskId: string, status: Task["status"]) => void;
   onSubtaskToggle?: (subtaskId: string) => void;
   breadcrumb: ReactNode;
+  employeeAccess?: ReactNode;
 }) {
   const { name, role, department, deadline, completed, total, tasks, assets } = offboardingCase;
   const [today] = useState(todayAtWorkspace);
@@ -471,6 +473,7 @@ export function CasePage({
               </div>
             </CardContent>
           </Card>
+          {employeeAccess}
           {assets && assets.length > 0 && (
             <Card size="sm">
               <CardContent className="grid gap-3">

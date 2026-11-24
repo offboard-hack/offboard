@@ -1,8 +1,16 @@
 import { ListBreadcrumb, ListPage } from "./list-page";
 
-export function ListPendingPage({ title, children }: { title: string; children: React.ReactNode }) {
+export function ListPendingPage({
+  title,
+  breadcrumb = <ListBreadcrumb title={title} />,
+  children,
+}: {
+  title: string;
+  breadcrumb?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <ListPage pending title={title} breadcrumb={<ListBreadcrumb title={title} />}>
+    <ListPage pending title={title} breadcrumb={breadcrumb}>
       <p role="status" className="sr-only">
         Carregando {title}…
       </p>

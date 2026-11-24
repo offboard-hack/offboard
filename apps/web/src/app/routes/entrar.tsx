@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
 import { SignInPage } from "@/features/sign-in/sign-in-page";
 
@@ -17,5 +17,19 @@ export const Route = createFileRoute("/entrar")({
 function SignInRoute() {
   const { voltar, acesso, error } = Route.useSearch();
 
-  return <SignInPage returnPath={voltar} revoked={acesso === "revogado"} invalidLink={!!error} />;
+  return (
+    <SignInPage
+      returnPath={voltar}
+      revoked={acesso === "revogado"}
+      invalidLink={!!error}
+      employeeLink={
+        <Link
+          to="/colaborador/entrar"
+          className="font-bold text-primary underline-offset-4 hover:underline"
+        >
+          Acessar minha jornada de colaborador
+        </Link>
+      }
+    />
+  );
 }

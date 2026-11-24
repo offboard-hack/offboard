@@ -1,0 +1,27 @@
+{
+  "name": "@offboard/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./theme": "./src/theme.ts",
+    "./web/button": "./src/web/button.tsx",
+    "./web/cn": "./src/web/cn.ts",
+    "./native/button": "./src/native/button.tsx"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.9.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.7.1"
+  },
+  "peerDependencies": {
+    "react": "^19.3.0",
+    "react-native": "^0.88.1"
+  },
+  "peerDependenciesMeta": {
+    "react-native": {
+      "optional": true
+    }
+  }
+}

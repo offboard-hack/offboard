@@ -8,12 +8,14 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+import { authUser } from "./auth.ts";
 
 export { authAccount, authRateLimit, authSession, authUser, authVerification } from "./auth.ts";
 
@@ -36,6 +38,42 @@ export const offboardingCases = pgTable("offboarding_cases", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+export const employeeAccess = pgTable(
+  "employee_access",
+  {
+    caseId: uuid("case_id")
+      .primaryKey()
+      .references(() => offboardingCases.id, { onDelete: "cascade" }),
+    email: varchar("email", { length: 255 }),
+    plan: jsonb("plan").$type<ConfigValue>().notNull(),
+    revision: integer("revision").notNull().default(1),
+    grantId: uuid("grant_id").notNull().defaultRandom(),
+  },
+  (table) => [uniqueIndex("employee_access_email_idx").on(sql`lower(${table.email})`)],
+);
+
+export const employeeStateKind = pgEnum("employee_state_kind", [
+  "consent",
+  "departure-v1",
+  "career",
+]);
+
+export const employeeStates = pgTable(
+  "employee_states",
+  {
+    caseId: uuid("case_id")
+      .notNull()
+      .references(() => offboardingCases.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authUser.id, { onDelete: "cascade" }),
+    key: employeeStateKind("key").notNull(),
+    revision: integer("revision").notNull(),
+    value: jsonb("value").$type<ConfigValue>().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.caseId, table.userId, table.key] })],
+);
 
 export const tasks = pgTable("tasks", {
   id: uuid("id").primaryKey().defaultRandom(),

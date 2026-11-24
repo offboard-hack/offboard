@@ -27,7 +27,11 @@ function prefersStaticServerPreview() {
   return true;
 }
 
-export function SignInVisual() {
+export function SignInVisual({
+  description = "Organize os desligamentos e acompanhe os próximos passos da sua equipe.",
+}: {
+  description?: string;
+}) {
   const hydrated = useHydrated();
 
   const reducedMotion = useSyncExternalStore(
@@ -98,7 +102,7 @@ export function SignInVisual() {
           </span>
         </p>
         <p className="max-w-[34ch] text-sm/relaxed text-white/80 md:text-base/relaxed">
-          Organize os desligamentos e acompanhe os próximos passos da sua equipe.
+          {description}
         </p>
       </div>
     </aside>
