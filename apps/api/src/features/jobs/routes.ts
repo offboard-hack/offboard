@@ -52,6 +52,9 @@ export function jobsRoutes(
         if (parsed === "invalid_url") return status(422, { error: "Invalid job url" });
 
         const sourceKey = normalizeJobUrl(parsed);
+
+        if (sourceKey.length > 2048) return status(422, { error: "Invalid job url" });
+
         const existing = await repos.findBySource("hr-link", sourceKey);
 
         if (existing) return existing;
@@ -66,9 +69,15 @@ export function jobsRoutes(
           return status(502, { error: "Could not read the job page" });
         }
 
-        const draft = await extractJob(deps.generate, page).catch(() => "failed" as const);
+        let draft;
 
-        if (draft === "failed") return status(502, { error: "Could not extract the job" });
+        try {
+          draft = await extractJob(deps.generate, page);
+        } catch (error) {
+          console.error("job extraction failed", error);
+
+          return status(502, { error: "Could not extract the job" });
+        }
 
         if (draft === "not_a_job") return status(422, { error: "Page is not a job posting" });
 
@@ -107,7 +116,7 @@ export function jobsRoutes(
         talent: "active",
         query: t.Object({
           workModel: t.Optional(workModel),
-          page: t.Optional(t.Numeric({ minimum: 1, multipleOf: 1 })),
+          page: t.Optional(t.Numeric({ minimum: 1, maximum: 10_000, multipleOf: 1 })),
         }),
         response: { 200: listResponse },
       },

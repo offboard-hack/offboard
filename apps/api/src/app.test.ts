@@ -10,7 +10,7 @@ import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { z } from "zod";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.ts";
 import { jobDraftSchema } from "./features/jobs/extract.js";
 import type { GenerateStructured } from "./shared/ai.js";
@@ -564,7 +564,22 @@ describe.skipIf(!url)("api", () => {
         expect(noAi.calls.fetch).toBe(0);
       });
 
+      it("rejects urls whose normalized form is too long before fetching", async () => {
+        const { calls, share } = jobsApp();
+        const longUrl = `https://jobs.example.com/${"ã".repeat(600)}`;
+
+        expect(longUrl.length).toBeLessThanOrEqual(2048);
+
+        const response = await share("rh", longUrl);
+
+        expect(response.status).toBe(422);
+        expect(await response.json()).toEqual({ error: "Invalid job url" });
+        expect(calls).toEqual({ generate: 0, fetch: 0 });
+      });
+
       it("reports extraction failures as a bad gateway", async () => {
+        const logged = vi.spyOn(console, "error");
+
         const { share } = jobsApp({
           generate: () => Promise.reject(new Error("gateway down")),
         });
@@ -573,6 +588,8 @@ describe.skipIf(!url)("api", () => {
 
         expect(response.status).toBe(502);
         expect(await response.json()).toEqual({ error: "Could not extract the job" });
+        expect(logged).toHaveBeenCalledTimes(1);
+        logged.mockRestore();
       });
 
       it("guards the job list with active talent access", async () => {
@@ -645,6 +662,10 @@ describe.skipIf(!url)("api", () => {
         expect((await remote.json()).items).toHaveLength(1);
         expect(
           (await asSession("talent", "/me/jobs?page=0", "GET", undefined, talentHeaders)).status,
+        ).toBe(422);
+        expect(
+          (await asSession("talent", "/me/jobs?page=10001", "GET", undefined, talentHeaders))
+            .status,
         ).toBe(422);
         expect(
           (await asSession("talent", "/me/jobs?page=abc", "GET", undefined, talentHeaders)).status,

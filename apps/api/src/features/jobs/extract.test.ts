@@ -48,6 +48,14 @@ describe("extractJob", () => {
     });
   });
 
+  it("limits title, company and city to the column width", async () => {
+    const long = "x".repeat(300);
+
+    expect(
+      await extractJob(fake({ title: long, company: long, city: long }).generate, page),
+    ).toMatchObject({ title: "x".repeat(255), company: "x".repeat(255), city: "x".repeat(255) });
+  });
+
   it("normalizes salary ranges", async () => {
     expect(
       await extractJob(fake({ salaryMinCents: 900000, salaryMaxCents: 750000 }).generate, page),

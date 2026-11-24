@@ -28,6 +28,8 @@ const system = [
 const descriptionLimit = 20_000;
 const maxCents = 2_147_483_647;
 
+const fieldLimit = 255;
+
 function clean(value: string | null) {
   return value?.trim() || null;
 }
@@ -56,8 +58,8 @@ export async function extractJob(generate: GenerateStructured, page: { url: URL;
     prompt: `URL: ${page.url.href}\n\n<page>\n${page.text}\n</page>`,
   });
 
-  const title = raw.title.trim();
-  const company = raw.company.trim();
+  const title = raw.title.trim().slice(0, fieldLimit);
+  const company = raw.company.trim().slice(0, fieldLimit);
 
   if (!raw.isJobPosting || !title || !company) return "not_a_job" as const;
 
@@ -67,7 +69,7 @@ export async function extractJob(generate: GenerateStructured, page: { url: URL;
     title,
     company,
     workModel: raw.workModel,
-    city: clean(raw.city),
+    city: clean(raw.city)?.slice(0, fieldLimit) ?? null,
     state: state !== null && /^[A-Z]{2}$/.test(state) ? state : null,
     ...salaryRange(raw.salaryMinCents, raw.salaryMaxCents),
     description: raw.description.trim().slice(0, descriptionLimit),
