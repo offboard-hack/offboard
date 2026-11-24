@@ -38,6 +38,21 @@ export function createOffboardingsRepository(db: Database) {
     return rows;
   }
 
+  async function getDistinctFilters() {
+    const [departments, teams] = await Promise.all([
+      db
+        .selectDistinct({ value: offboardingCases.department })
+        .from(offboardingCases)
+        .orderBy(asc(offboardingCases.department)),
+      db.selectDistinct({ value: tasks.team }).from(tasks).orderBy(asc(tasks.team)),
+    ]);
+
+    return {
+      departments: departments.map(({ value }) => value),
+      teams: teams.map(({ value }) => value),
+    };
+  }
+
   function fetchOffboarding(id: string) {
     return db.query.offboardingCases.findFirst({
       where: eq(offboardingCases.id, id),
@@ -207,6 +222,7 @@ export function createOffboardingsRepository(db: Database) {
   return {
     listOffboardings,
     listOffboardingsWithTasks,
+    getDistinctFilters,
     getOffboarding,
     createOffboarding,
     bulkCreateOffboardings,

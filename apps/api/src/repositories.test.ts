@@ -41,6 +41,15 @@ describe.skipIf(!url)("repositories", () => {
     );
   });
 
+  it("returns sorted distinct departments and task teams", async () => {
+    const filters = await repos.offboardings.getDistinctFilters();
+    const fixtureTeams = testSeedFixtures.cases.flatMap((item) => item.tasks.map((t) => t.team));
+    const fixtureDepartments = testSeedFixtures.cases.map((item) => item.department);
+
+    expect(filters.departments).toEqual([...new Set(fixtureDepartments)].sort());
+    expect([...filters.teams].sort()).toEqual([...new Set(fixtureTeams)].sort());
+  });
+
   it("lists cases with the CaseSummary shape and counts", async () => {
     const list = await repos.offboardings.listOffboardings();
 

@@ -130,7 +130,16 @@ export function ApplicationsPage() {
 
 export function FeedbackPage() {
   const { data } = useSuspenseQuery(exitSurveyAggregatesQuery);
-  const { totalResponses, averageNps, nps, completionRate, activationsByMonth, topTopics } = data;
+
+  const {
+    totalResponses,
+    averageNps,
+    nps,
+    recommenders,
+    completionRate,
+    activationsByMonth,
+    topTopics,
+  } = data;
 
   const feedbackMetrics: ListMetric[] = [
     { label: "Respostas", value: String(totalResponses), icon: UserGroupIcon, tone: "primary" },
@@ -181,13 +190,15 @@ export function FeedbackPage() {
             ))}
           </ol>
         </section>
-        <section aria-labelledby="reported-placements" {...classProps(styles.placement)}>
-          <h2 id="reported-placements" {...classProps(s.subheading)}>
-            Recolocação informada
+        <section aria-labelledby="would-recommend" {...classProps(styles.placement)}>
+          <h2 id="would-recommend" {...classProps(s.subheading)}>
+            Recomendariam a empresa
           </h2>
-          <p {...classProps(styles.stageValue, styles.outcomeValue)}>12 pessoas</p>
+          <p {...classProps(styles.stageValue, styles.outcomeValue)}>
+            {recommenders} {recommenders === 1 ? "pessoa" : "pessoas"}
+          </p>
           <p {...classProps(styles.placementCopy)}>
-            Total baseado em relatos voluntários com autorização.
+            De {totalResponses} respostas anônimas à pesquisa de saída.
           </p>
         </section>
       </div>

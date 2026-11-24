@@ -48,6 +48,7 @@ export function createExitSurveysRepository(db: Database) {
       db
         .select({
           npsScore: exitSurveys.npsScore,
+          responses: exitSurveys.responses,
           topics: exitSurveys.topics,
           submittedAt: exitSurveys.submittedAt,
         })
@@ -58,6 +59,11 @@ export function createExitSurveysRepository(db: Database) {
     const totalResponses = surveys.length;
     const promoters = surveys.filter(({ npsScore }) => npsScore >= 9).length;
     const detractors = surveys.filter(({ npsScore }) => npsScore <= 6).length;
+
+    const recommenders = surveys.filter(
+      ({ responses }) => responses.wouldRecommend === true,
+    ).length;
+
     const scoreSum = surveys.reduce((sum, { npsScore }) => sum + npsScore, 0);
 
     const topicCounts = new Map<string, number>();
@@ -85,6 +91,7 @@ export function createExitSurveysRepository(db: Database) {
       totalResponses,
       averageNps: totalResponses === 0 ? 0 : Math.round((scoreSum / totalResponses) * 10) / 10,
       nps: percent(promoters, totalResponses) - percent(detractors, totalResponses),
+      recommenders,
       completionRate: percent(totalResponses, cases.length),
       activationsByMonth,
       topTopics,

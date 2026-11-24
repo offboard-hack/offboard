@@ -24,6 +24,7 @@ const aggregates = t.Object({
   totalResponses: t.Integer(),
   averageNps: t.Number(),
   nps: t.Integer(),
+  recommenders: t.Integer(),
   completionRate: t.Integer(),
   activationsByMonth: t.Array(labeledValue),
   topTopics: t.Array(labeledValue),

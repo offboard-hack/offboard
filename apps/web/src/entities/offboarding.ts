@@ -1,5 +1,5 @@
 import type { ApiClient, Treaty } from "@offboard/api-client";
-import { queryOptions, type QueryClient } from "@tanstack/react-query";
+import { queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
 import { getApiClient } from "@/shared/lib/api-client";
 
 export type CaseSummary = Treaty.Data<ApiClient["api"]["offboardings"]["get"]>[number];
@@ -16,13 +16,7 @@ export type PersonAsset = {
 
 export type OffboardingCase = CaseDetail & { assets?: PersonAsset[] };
 
-export const offboardingDepartments = [
-  "Marketing",
-  "Tecnologia",
-  "Operações",
-  "Financeiro",
-  "Produto",
-];
+const offboardingDepartments = ["Marketing", "Tecnologia", "Operações", "Financeiro", "Produto"];
 
 export const offboardingTeams = [
   "RH e DP",
@@ -45,6 +39,31 @@ async function listOffboardings({ signal }: { signal: AbortSignal }) {
 }
 
 const offboardingsStaleTime = 30_000;
+
+async function getOffboardingFilters({ signal }: { signal: AbortSignal }) {
+  const { data, error } = await getApiClient().api.offboardings.filters.get({
+    fetch: { signal },
+  });
+
+  if (error) throw new Error("Failed to fetch offboarding filters");
+
+  return data;
+}
+
+export const offboardingFiltersQuery = queryOptions({
+  queryKey: ["offboardings", "filters"],
+  queryFn: getOffboardingFilters,
+  staleTime: offboardingsStaleTime,
+});
+
+export function useOffboardingFilters() {
+  const { data } = useQuery(offboardingFiltersQuery);
+
+  return {
+    departments: data?.departments.length ? data.departments : offboardingDepartments,
+    teams: data?.teams.length ? data.teams : offboardingTeams,
+  };
+}
 
 export const offboardingsQuery = queryOptions({
   queryKey: ["offboardings"],

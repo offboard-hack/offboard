@@ -100,6 +100,10 @@ export function offboardingsRoutes(
       permit: ["read", "Offboarding"],
       response: t.Array(offboardingCase),
     })
+    .get("/offboardings/filters", () => repos.getDistinctFilters(), {
+      permit: ["read", "Offboarding"],
+      response: t.Object({ departments: t.Array(t.String()), teams: t.Array(t.String()) }),
+    })
     .post(
       "/offboardings",
       async ({ body, set }) => {

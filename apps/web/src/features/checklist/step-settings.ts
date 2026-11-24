@@ -1,18 +1,12 @@
-import { offboardingDepartments, type CaseSummary } from "@/entities/offboarding";
+import type { CaseSummary } from "@/entities/offboarding";
 import { z } from "zod";
 
-const stepRuleSchema = z
-  .object({
-    id: z.string().min(1),
-    field: z.enum(["department", "role"]),
-    operator: z.enum(["equals", "notEquals"]),
-    value: z.string().trim().min(1, "Informe o valor da condição.").max(120),
-  })
-  .superRefine(({ field, value }, ctx) => {
-    if (field === "department" && value && !offboardingDepartments.includes(value)) {
-      ctx.addIssue({ code: "custom", path: ["value"], message: "Escolha uma área." });
-    }
-  });
+const stepRuleSchema = z.object({
+  id: z.string().min(1),
+  field: z.enum(["department", "role"]),
+  operator: z.enum(["equals", "notEquals"]),
+  value: z.string().trim().min(1, "Informe o valor da condição.").max(120),
+});
 
 const emailSchema = z.object({
   subject: z.string().trim().min(1, "Informe o assunto.").max(160),

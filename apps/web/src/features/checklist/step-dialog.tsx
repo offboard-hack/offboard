@@ -13,7 +13,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useForm } from "@tanstack/react-form";
 import { useId, useRef, useState } from "react";
-import { offboardingDepartments } from "@/entities/offboarding";
+import { useOffboardingFilters } from "@/entities/offboarding";
 import { PortalFilter } from "@/shared/ui/select";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
@@ -55,11 +55,6 @@ const ruleOperators = [
   { value: "equals", label: "É igual a", icon: EqualSignIcon },
   { value: "notEquals", label: "É diferente de", icon: NotEqualSignIcon },
 ] as const;
-
-const departmentOptions = [
-  { value: "", label: "Escolha uma área" },
-  ...offboardingDepartments.map((department) => ({ value: department, label: department })),
-];
 
 const emptySettings = "gap-2.5 rounded-xl border border-dashed bg-muted/55 px-4 py-4";
 
@@ -124,6 +119,12 @@ export function StepDialog({
 }) {
   const id = useId();
   const nameInput = useRef<HTMLInputElement>(null);
+  const { departments } = useOffboardingFilters();
+
+  const departmentOptions = [
+    { value: "", label: "Escolha uma área" },
+    ...departments.map((department) => ({ value: department, label: department })),
+  ];
 
   const form = useForm({
     defaultValues: {

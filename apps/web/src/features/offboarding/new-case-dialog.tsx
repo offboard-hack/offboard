@@ -18,12 +18,12 @@ import {
   DialogTrigger,
 } from "@/shared/ui/shadcn/dialog";
 import { PortalFilter } from "@/shared/ui/select";
-import { offboardingDepartments } from "../../entities/offboarding";
+import { useOffboardingFilters } from "../../entities/offboarding";
 
 const newCaseSchema = z.object({
   name: z.string().trim().min(1, "Informe o nome."),
   role: z.string().trim().min(1, "Informe o cargo."),
-  department: z.enum(offboardingDepartments, { error: "Escolha a área." }),
+  department: z.string().trim().min(1, "Escolha a área."),
   deadline: z.iso.date({ error: "Informe uma data válida." }),
 });
 
@@ -36,6 +36,7 @@ const textFields = [
 
 export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => Promise<void> }) {
   const id = useId();
+  const { departments } = useOffboardingFilters();
   const [open, setOpen] = useState(false);
   const [submitError, setSubmitError] = useState(false);
 
@@ -135,7 +136,7 @@ export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => Pro
                       value={field.state.value}
                       items={[
                         { value: "", label: "Escolha a área" },
-                        ...offboardingDepartments.map((area) => ({ value: area, label: area })),
+                        ...departments.map((area) => ({ value: area, label: area })),
                       ]}
                       onChange={field.handleChange}
                       invalid={Boolean(error)}

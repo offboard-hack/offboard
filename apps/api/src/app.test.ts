@@ -306,6 +306,17 @@ describe.skipIf(!url)("api", () => {
     });
   });
 
+  it("lists distinct departments and teams", async () => {
+    const res = await call("/offboardings/filters");
+    const filters = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(filters.departments.length).toBeGreaterThan(0);
+    expect(filters.teams.length).toBeGreaterThan(0);
+    expect(filters.departments).toEqual([...filters.departments].sort());
+    expect(new Set(filters.teams).size).toBe(filters.teams.length);
+  });
+
   it("lists offboardings with their tasks for an authorized session", async () => {
     const res = await call("/offboardings/with-tasks");
     const list = await res.json();
@@ -550,6 +561,7 @@ describe.skipIf(!url)("api", () => {
       totalResponses: 5,
       averageNps: 6.6,
       nps: -20,
+      recommenders: 3,
       completionRate: 100,
       activationsByMonth: [
         { label: "Jun", value: 1 },
@@ -576,6 +588,7 @@ describe.skipIf(!url)("api", () => {
       totalResponses: 0,
       averageNps: 0,
       nps: 0,
+      recommenders: 0,
       completionRate: 0,
       activationsByMonth: [],
       topTopics: [],
