@@ -273,7 +273,8 @@ export async function seedDatabase(
           jobId: insertedJobs[tailored.jobIndex].id,
           content: tailored.content,
           matchScore: tailored.matchScore,
-          updatedAt: scoredAt,
+          createdAt: scoredAt,
+          updatedAt: new Date(Date.now() - tailored.updatedHoursAgo * 3_600_000),
         })
         .returning({ id: resumes.id });
 

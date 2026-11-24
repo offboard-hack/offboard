@@ -125,6 +125,7 @@ export type SeedTailoredResume = {
   jobIndex: number;
   status: "ready" | "draft";
   matchScore: number;
+  updatedHoursAgo: number;
   content: ResumeContent;
 };
 
@@ -162,6 +163,7 @@ export const seedTailoredResumes: SeedTailoredResume[] = [
     jobIndex: 0,
     status: "ready",
     matchScore: 92,
+    updatedHoursAgo: 30,
     content: tailor(marinaBase, {
       headline: "Analista de Marketing Pleno em Mídia Paga e CRM",
       summary:
@@ -190,28 +192,30 @@ export const seedTailoredResumes: SeedTailoredResume[] = [
   },
   {
     caseName: "Marina Lopes",
-    jobIndex: 3,
+    jobIndex: 4,
     status: "draft",
     matchScore: 85,
+    updatedHoursAgo: 36,
     content: tailor(marinaBase, {
-      headline: "Analista de Marketing com foco em Conteúdo e Produto",
+      headline: "Analista de Marketing com foco em CRM e E-mail Marketing",
       summary:
-        "Analista de marketing com 6 anos de experiência em conteúdo, CRM e mídia paga, acostumada a transformar dados de campanhas em decisões.",
+        "Analista de marketing com 6 anos de experiência em CRM, e-mail marketing e mídia paga, acostumada a transformar dados de campanhas em decisões.",
       bullets: {
-        "5b1f0a10-0000-4000-8000-000000000021":
-          "Planejou o calendário editorial e dobrou o tráfego orgânico do blog em 18 meses.",
-        "5b1f0a10-0000-4000-8000-000000000013":
-          "Coordenou um time de 3 pessoas e a agência de conteúdo parceira em entregas de campanha.",
+        "5b1f0a10-0000-4000-8000-000000000012":
+          "Estruturou a régua de e-mail marketing e elevou a taxa de abertura de 18% para 31%.",
+        "5b1f0a10-0000-4000-8000-000000000022":
+          "Montou relatórios mensais de desempenho das campanhas para a diretoria.",
       },
-      dropBullets: ["5b1f0a10-0000-4000-8000-000000000012"],
+      dropBullets: ["5b1f0a10-0000-4000-8000-000000000021"],
       experienceOrder: [
-        "5b1f0a10-0000-4000-8000-000000000020",
         "5b1f0a10-0000-4000-8000-000000000010",
+        "5b1f0a10-0000-4000-8000-000000000020",
       ],
       skillOrder: [
-        "5b1f0a10-0000-4000-8000-000000000042",
-        "5b1f0a10-0000-4000-8000-000000000040",
+        "5b1f0a10-0000-4000-8000-000000000041",
         "5b1f0a10-0000-4000-8000-000000000043",
+        "5b1f0a10-0000-4000-8000-000000000044",
+        "5b1f0a10-0000-4000-8000-000000000040",
       ],
     }),
   },

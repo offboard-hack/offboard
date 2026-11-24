@@ -42,4 +42,13 @@ export const seedJobMatches: SeedJobMatch[] = [
       "A vaga pede posicionamento de produto, algo que seu currículo mostra pouco.",
     ],
   },
+  {
+    caseName: "Marina Lopes",
+    jobIndex: 4,
+    score: 83,
+    reasons: [
+      "Sua régua de e-mail marketing e o uso de HubSpot cobrem o dia a dia da vaga.",
+      "A vaga pede foco em recompra, que seu currículo ainda não mostra.",
+    ],
+  },
 ];

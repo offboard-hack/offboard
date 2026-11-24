@@ -1,6 +1,7 @@
 import { Elysia, t } from "elysia";
 import { errorResponse } from "../../shared/http.js";
 import type { GenerateStructured } from "../../shared/ai.js";
+import { logFailure } from "../../shared/error-summary.js";
 import type { UsageRepository } from "../../shared/llm-usage.js";
 import type { ObjectStorage } from "../../shared/object-storage.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
@@ -78,7 +79,9 @@ export function resumesRoutes(
 
         await storage.put(key, file.data, file.kind === "pdf" ? "application/pdf" : docxType);
 
-        const content = await extractResume(generate, file).catch(() => undefined);
+        const content = await extractResume(generate, file).catch(
+          logFailure("résumé extraction failed"),
+        );
 
         if (content === undefined) {
           await discard(storage, [key]);
@@ -162,6 +165,10 @@ export function resumesRoutes(
 
         if (!job) return status(404, { error: "Job not found" });
 
+        if (await deps.versions.hasApplied(me.id, job.id)) {
+          return status(409, { error: "Already applied" });
+        }
+
         const { generate, fitScore } = deps;
 
         if (!generate || !fitScore) return status(503, { error: "AI not configured" });
@@ -171,13 +178,17 @@ export function resumesRoutes(
 
         if (await capped(me.id)) return status(429, limited);
 
-        const tailored = await tailorResume(generate, base.content, job).catch(() => undefined);
+        const tailored = await tailorResume(generate, base.content, job).catch(
+          logFailure("résumé tailoring failed"),
+        );
 
         if (!tailored) return status(502, failed);
 
         if (await capped(me.id)) return status(429, limited);
 
-        const matchScore = await fitScore(tailored.content, job).catch(() => undefined);
+        const matchScore = await fitScore(tailored.content, job).catch(
+          logFailure("résumé fit scoring failed"),
+        );
 
         if (matchScore === undefined) return status(502, failed);
 

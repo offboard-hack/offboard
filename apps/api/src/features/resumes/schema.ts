@@ -67,7 +67,17 @@ export const versionResponse = t.Object({
   matchScore: t.Union([t.Number(), t.Null()]),
   content: resumeContent,
   application: t.Union([
-    t.Object({ id: t.String(), status: t.String(), appliedAt: t.String() }),
+    t.Object({
+      id: t.String(),
+      status: t.Union([
+        t.Literal("sent"),
+        t.Literal("in_review"),
+        t.Literal("interview"),
+        t.Literal("offer"),
+        t.Literal("closed"),
+      ]),
+      appliedAt: t.String(),
+    }),
     t.Null(),
   ]),
   updatedAt: t.String(),

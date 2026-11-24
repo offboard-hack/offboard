@@ -76,4 +76,18 @@ export const seedJobs: SeedJob[] = [
       "Posicione lançamentos de produto, produza materiais de venda e alinhe mensagens com times comerciais.",
     postedAt: daysAgo(10),
   }),
+  seedJob({
+    origin: "recruiter",
+    title: "Analista de CRM",
+    company: "Casa Viva",
+    workModel: "hybrid",
+    city: "Campinas",
+    state: "SP",
+    salaryMinCents: 650000,
+    salaryMaxCents: 800000,
+    url: "https://vagas.example.com/casa-viva/analista-de-crm",
+    description:
+      "Cuide da régua de relacionamento por e-mail, segmente a base de clientes no HubSpot e acompanhe a recompra.",
+    postedAt: daysAgo(2),
+  }),
 ];

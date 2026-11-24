@@ -141,8 +141,6 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     });
   }
 
-  const generate = options.generateStructured;
-
   const fitScore = (model: GenerateStructured) => async (content: ResumeContent, job: MatchJob) =>
     (await scoreMatches(model, content, [job])).find((result) => result.jobId === job.id)?.score ??
     null;
@@ -197,7 +195,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         rescore,
         versions: repos.resumeVersions,
         takeLlmCall: repos.llmUsage.takeLlmCall,
-        fitScore: generate && fitScore(generate),
+        fitScore: options.generateStructured && fitScore(options.generateStructured),
       }),
     )
     .use(backgroundRoutes(repos.background, handlers, options.cronSecret))

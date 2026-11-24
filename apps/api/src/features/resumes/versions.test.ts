@@ -262,6 +262,22 @@ describe.skipIf(!url)("résumé versions repository", () => {
     ]);
   });
 
+  it("tells whether the profile already applied to a job with any résumé", async () => {
+    const tailoredJob = await job("com-versao");
+    const baseJob = await job("com-base");
+    const freeJob = await job("livre");
+    const id = await draft(profileId, tailoredJob, "Usada", at("2026-11-20T10:00:00Z"));
+
+    await repository.markReady(profileId, id, at("2026-11-20T11:00:00Z"));
+    created.parse(await repos.applications.apply(profileId, tailoredJob, id));
+    created.parse(await repos.applications.apply(profileId, baseJob, await base(profileId)));
+
+    expect(await repository.hasApplied(profileId, tailoredJob)).toBe(true);
+    expect(await repository.hasApplied(profileId, baseJob)).toBe(true);
+    expect(await repository.hasApplied(profileId, freeJob)).toBe(false);
+    expect(await repository.hasApplied(otherProfileId, tailoredJob)).toBe(false);
+  });
+
   it("lists the profile's tailored versions newest first with job and application", async () => {
     const olderJob = await job("antiga");
     const newerJob = await job("nova", { title: "Designer", company: "Globex" });

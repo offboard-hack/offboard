@@ -1,6 +1,7 @@
 import { Elysia, t } from "elysia";
 import type { PortalAccessPlugin } from "../../shared/access.js";
 import type { GenerateStructured } from "../../shared/ai.js";
+import { errorSummary } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import { parsePublicUrl, type FetchPageResult } from "../../shared/page-text.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
@@ -83,7 +84,7 @@ export function jobsRoutes(
         try {
           draft = await extractJob(deps.generate, page);
         } catch (error) {
-          console.error("job extraction failed", error);
+          console.error("job extraction failed", errorSummary(error));
 
           return status(502, { error: "Could not extract the job" });
         }

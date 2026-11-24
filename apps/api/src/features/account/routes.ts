@@ -24,6 +24,11 @@ const exportResponse = t.Object({
       score: t.Union([t.Number(), t.Null()]),
       scoredAt: nullable,
       updatedAt: t.String(),
+      job: t.Union([
+        t.Object({ title: t.String(), company: t.String(), url: t.String() }),
+        t.Null(),
+      ]),
+      matchScore: t.Union([t.Number(), t.Null()]),
       suggestions: t.Array(
         t.Object({
           originalText: t.String(),
@@ -42,6 +47,13 @@ const exportResponse = t.Object({
       closedReason: nullable,
       appliedAt: t.String(),
       job: t.Object({ title: t.String(), company: t.String(), url: t.String() }),
+      resume: t.Union([
+        t.Object({
+          kind: t.Union([t.Literal("base"), t.Literal("tailored")]),
+          job: t.Union([t.Object({ title: t.String(), company: t.String() }), t.Null()]),
+        }),
+        t.Null(),
+      ]),
       events: t.Array(
         t.Object({ status: t.String(), closedReason: nullable, createdAt: t.String() }),
       ),

@@ -98,6 +98,10 @@ const appOptions = {
   runInBackground: () => undefined,
 };
 
+function leakyError(prompt: string) {
+  return Object.assign(new Error("gateway down"), { requestBodyValues: { prompt } });
+}
+
 const missingTaskId = "00000000-0000-4000-8000-000000000000";
 const missingCaseId = "00000000-0000-4000-8000-000000000001";
 
@@ -603,14 +607,16 @@ describe.skipIf(!url)("api", () => {
         const logged = vi.spyOn(console, "error");
 
         const { share } = jobsApp({
-          generate: () => Promise.reject(new Error("gateway down")),
+          generate: ({ prompt }) => Promise.reject(leakyError(prompt)),
         });
 
         const response = await share("rh", "https://jobs.example.com/llm-down");
 
         expect(response.status).toBe(502);
         expect(await response.json()).toEqual({ error: "Could not extract the job" });
-        expect(logged).toHaveBeenCalledTimes(1);
+        expect(logged.mock.calls).toEqual([
+          ["job extraction failed", { name: "Error", message: "gateway down" }],
+        ]);
         logged.mockRestore();
       });
 
@@ -1175,7 +1181,7 @@ describe.skipIf(!url)("api", () => {
           if (system.startsWith("You tailor")) {
             calls.push({ kind: "tailor", prompt });
 
-            if (tailoring.fail) throw new Error("gateway down");
+            if (tailoring.fail) throw leakyError(prompt);
 
             return schema.parse(tailoring.output);
           }
@@ -1187,7 +1193,7 @@ describe.skipIf(!url)("api", () => {
           if (system.startsWith("You rate how well")) {
             calls.push({ kind: "match", prompt });
 
-            if (matching.fail) throw new Error("gateway down");
+            if (matching.fail) throw leakyError(prompt);
 
             const batch = jobsInPrompt.parse(
               JSON.parse(prompt.slice(prompt.indexOf("<jobs>") + 6, prompt.indexOf("</jobs>"))),
@@ -1398,9 +1404,11 @@ describe.skipIf(!url)("api", () => {
       });
 
       it("cleans up the stored file when extraction fails", async () => {
+        const logged = vi.spyOn(console, "error");
+
         const failing = resumesApp({
-          generate: async () => {
-            throw new Error("gateway down");
+          generate: async ({ prompt }) => {
+            throw leakyError(prompt);
           },
         });
 
@@ -1410,6 +1418,10 @@ describe.skipIf(!url)("api", () => {
         expect(res.status).toBe(502);
         expect(await res.json()).toEqual({ error: "Could not read the résumé" });
         expect(failing.store.removed).toEqual([failing.store.puts[0].key]);
+        expect(logged.mock.calls).toEqual([
+          ["résumé extraction failed", { name: "Error", message: "gateway down" }],
+        ]);
+        logged.mockRestore();
 
         const notResume = resumesApp({ draft: { ...draft, isResume: false } });
         const refused = await upload(notResume.instance, id);
@@ -2628,27 +2640,62 @@ describe.skipIf(!url)("api", () => {
           expect(await locked.json()).toEqual({ error: "Already applied with this version" });
         });
 
-        it("refuses to replace a version used by an application", async () => {
+        it("refuses to tailor for a job already applied to without spending AI calls", async () => {
           const jobId = await openJob("usada");
+          const baseJobId = await openJob("usada-base");
           const { app, id, base, tailor, ready, apply } = await tailoringApp();
           const { version } = await (await tailor(jobId)).json();
 
           await ready(version.id);
           expect((await apply(jobId, version.id)).status).toBe(201);
+          expect((await apply(baseJobId, base.id)).status).toBe(201);
 
           const [stored] = await tailoredRows(id);
+          const [before] = await usage(id);
 
           app.tailoring.output = {
             ...emptyTailoring,
             rewrites: [{ nodeId: base.content.headline.id, text: "Outra versão" }],
           };
+          app.calls.length = 0;
 
-          const again = await tailor(jobId);
+          for (const appliedJobId of [jobId, baseJobId]) {
+            const again = await tailor(appliedJobId);
 
-          expect(again.status).toBe(409);
-          expect(await again.json()).toEqual({ error: "Already applied with this version" });
+            expect(again.status).toBe(409);
+            expect(await again.json()).toEqual({ error: "Already applied" });
+          }
+
+          expect(app.calls).toEqual([]);
+          expect(await usage(id)).toEqual([before]);
           expect(await tailoredRows(id)).toEqual([stored]);
           expect(stored).toMatchObject({ status: "ready", matchScore: 88 });
+        });
+
+        it("refuses to replace a version used by an application sent while tailoring", async () => {
+          const jobId = await openJob("corrida");
+          const { app, id, base, tailor, ready, apply } = await tailoringApp();
+          const { version } = await (await tailor(jobId)).json();
+
+          await ready(version.id);
+
+          const [stored] = await tailoredRows(id);
+          const sent: number[] = [];
+
+          app.tailoring.output = {
+            ...emptyTailoring,
+            rewrites: [{ nodeId: base.content.headline.id, text: "Outra versão" }],
+          };
+          app.matching.before = async () => {
+            sent.push((await apply(jobId, version.id)).status);
+          };
+
+          const raced = await tailor(jobId);
+
+          expect(sent).toEqual([201]);
+          expect(raced.status).toBe(409);
+          expect(await raced.json()).toEqual({ error: "Already applied with this version" });
+          expect(await tailoredRows(id)).toEqual([stored]);
         });
 
         it("requires a ready résumé for this job", async () => {
@@ -2780,6 +2827,7 @@ describe.skipIf(!url)("api", () => {
           const jobId = await openJob("falha");
           const { app, id, tailor } = await tailoringApp();
           const [before] = await usage(id);
+          const logged = vi.spyOn(console, "error");
 
           app.tailoring.fail = true;
 
@@ -2803,6 +2851,11 @@ describe.skipIf(!url)("api", () => {
             "match",
           ]);
           expect(await tailoredRows(id)).toEqual([]);
+          expect(logged.mock.calls).toEqual([
+            ["résumé tailoring failed", { name: "Error", message: "gateway down" }],
+            ["résumé fit scoring failed", { name: "Error", message: "gateway down" }],
+          ]);
+          logged.mockRestore();
 
           app.matching.fail = false;
           app.matching.omit = true;
@@ -2956,6 +3009,39 @@ describe.skipIf(!url)("api", () => {
           .returning({ id: jobs.id });
 
         await repos.applications.apply(id, job.id, created.id);
+
+        const [tailoredJob] = await db
+          .insert(jobs)
+          .values({
+            origin: "external",
+            source: "seed",
+            sourceKey: "export-tailored",
+            title: "Frontend",
+            company: "Globex",
+            url: "https://jobs.example.com/export-tailored",
+          })
+          .returning({ id: jobs.id });
+
+        const version = await repos.resumeVersions.saveDraft(
+          id,
+          tailoredJob.id,
+          created.content,
+          77,
+          new Date(),
+        );
+
+        if (version === "used") throw new Error(version);
+
+        await repos.resumeVersions.markReady(id, version.id, new Date());
+        await repos.applications.apply(id, tailoredJob.id, version.id);
+        await db
+          .update(applications)
+          .set({ appliedAt: new Date("2026-01-01T00:00:00Z") })
+          .where(eq(applications.jobId, job.id));
+        await db
+          .update(resumes)
+          .set({ createdAt: new Date("2026-01-01T00:00:00Z") })
+          .where(eq(resumes.id, created.id));
         await db.insert(jobMatches).values({
           profileId: id,
           jobId: job.id,
@@ -2992,6 +3078,8 @@ describe.skipIf(!url)("api", () => {
             score: 64,
             scoredAt: expect.any(String),
             updatedAt: expect.any(String),
+            job: null,
+            matchScore: null,
             suggestions: [
               {
                 originalText: "Fez X",
@@ -3003,9 +3091,33 @@ describe.skipIf(!url)("api", () => {
               },
             ],
           },
+          {
+            kind: "tailored",
+            status: "ready",
+            content: created.content,
+            score: null,
+            scoredAt: null,
+            updatedAt: expect.any(String),
+            job: {
+              title: "Frontend",
+              company: "Globex",
+              url: "https://jobs.example.com/export-tailored",
+            },
+            matchScore: 77,
+            suggestions: [],
+          },
         ]);
-        expect(body.applications).toHaveLength(1);
-        expect(body.applications[0].job.title).toBe("Backend");
+        expect(body.applications).toEqual([
+          expect.objectContaining({
+            job: expect.objectContaining({ title: "Frontend" }),
+            resume: { kind: "tailored", job: { title: "Frontend", company: "Globex" } },
+          }),
+          expect.objectContaining({
+            job: expect.objectContaining({ title: "Backend" }),
+            resume: { kind: "base", job: null },
+          }),
+        ]);
+        expect(JSON.stringify(body)).not.toContain(version.id);
         expect(body.matches).toEqual([
           {
             job: { title: "Backend", company: "Acme", url: "https://jobs.example.com/export-job" },

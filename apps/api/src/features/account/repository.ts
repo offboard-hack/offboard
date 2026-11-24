@@ -12,6 +12,9 @@ import {
   teamMembers,
 } from "@offboard/db/schema";
 import { and, asc, desc, eq, inArray, isNotNull, notExists, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+
+const resumeJobs = alias(jobs, "resume_jobs");
 
 export function createAccountRepository(db: Database) {
   async function exportData(profileId: string) {
@@ -38,11 +41,14 @@ export function createAccountRepository(db: Database) {
         content: resumes.content,
         score: resumes.score,
         scoredAt: resumes.scoredAt,
+        matchScore: resumes.matchScore,
         updatedAt: sql<Date>`coalesce(${resumes.updatedAt}, ${resumes.createdAt})`.mapWith(
           resumes.updatedAt,
         ),
+        job: { title: jobs.title, company: jobs.company, url: jobs.url },
       })
       .from(resumes)
+      .leftJoin(jobs, eq(jobs.id, resumes.jobId))
       .where(eq(resumes.profileId, profileId))
       .orderBy(asc(resumes.createdAt), asc(resumes.id));
 
@@ -72,9 +78,13 @@ export function createAccountRepository(db: Database) {
         closedReason: applications.closedReason,
         appliedAt: applications.appliedAt,
         job: { title: jobs.title, company: jobs.company, url: jobs.url },
+        resume: { kind: resumes.kind },
+        resumeJob: { title: resumeJobs.title, company: resumeJobs.company },
       })
       .from(applications)
       .innerJoin(jobs, eq(jobs.id, applications.jobId))
+      .leftJoin(resumes, eq(resumes.id, applications.resumeId))
+      .leftJoin(resumeJobs, eq(resumeJobs.id, resumes.jobId))
       .where(eq(applications.profileId, profileId))
       .orderBy(desc(applications.appliedAt), desc(applications.id));
 
@@ -132,6 +142,8 @@ export function createAccountRepository(db: Database) {
         score: resume.score,
         scoredAt: resume.scoredAt?.toISOString() ?? null,
         updatedAt: resume.updatedAt.toISOString(),
+        job: resume.job,
+        matchScore: resume.matchScore,
         suggestions: suggestions
           .filter((suggestion) => suggestion.resumeId === resume.id)
           .map((suggestion) => ({
@@ -143,8 +155,9 @@ export function createAccountRepository(db: Database) {
             createdAt: suggestion.createdAt?.toISOString() ?? null,
           })),
       })),
-      applications: ownApplications.map(({ id, appliedAt, ...application }) => ({
+      applications: ownApplications.map(({ id, appliedAt, resume, resumeJob, ...application }) => ({
         ...application,
+        resume: resume && { kind: resume.kind, job: resumeJob },
         appliedAt: appliedAt.toISOString(),
         events: events
           .filter((event) => event.applicationId === id)

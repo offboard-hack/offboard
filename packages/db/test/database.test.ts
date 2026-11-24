@@ -316,6 +316,19 @@ it.skipIf(!url)("links applications to the résumé they used", async () => {
     expect(used[0].jobId).toBe(ready[0].jobId);
     expect(drafts[0].jobId).not.toBe(ready[0].jobId);
 
+    const draftJobId = drafts[0].jobId ?? "";
+    const [draftJob] = await db.select().from(jobs).where(eq(jobs.id, draftJobId));
+    expect(draftJob.closedAt).toBeNull();
+    expect(await db.select().from(applications).where(eq(applications.jobId, draftJobId))).toEqual(
+      [],
+    );
+    expect(ready[0].updatedAt?.getTime()).toBeGreaterThan(drafts[0].updatedAt?.getTime() ?? 0);
+    expect(
+      tailored.every(
+        (item) => (item.updatedAt?.getTime() ?? 0) >= (item.createdAt?.getTime() ?? Infinity),
+      ),
+    ).toBe(true);
+
     const [job] = await db
       .insert(jobs)
       .values({ origin: "hr", source: "m", sourceKey: "m1", title: "t", company: "t", url: "t" })
@@ -441,12 +454,12 @@ it.skipIf(!url)("stores one match per profile and job", async () => {
       .innerJoin(jobs, eq(jobs.id, jobMatches.jobId))
       .orderBy(sql`${jobMatches.score} desc`);
 
-    expect(seeded.map((item) => item.score)).toEqual([94, 89, 86, 85]);
+    expect(seeded.map((item) => item.score)).toEqual([94, 89, 86, 85, 83]);
     expect(seeded.map((item) => item.title)).toEqual(seedJobs.map((item) => item.title));
     expect(seeded.every((item) => item.reasons.length === 2)).toBe(true);
 
     const matches = await db.select().from(jobMatches);
-    expect(matches).toHaveLength(4);
+    expect(matches).toHaveLength(5);
     expect(matches.every((item) => item.profileId === base.profileId)).toBe(true);
     expect(
       matches.every((item) => item.resumeUpdatedAt.getTime() === base.updatedAt?.getTime()),
@@ -481,12 +494,12 @@ it.skipIf(!url)("stores one match per profile and job", async () => {
     expect(stored.reasons).toEqual([]);
 
     await db.delete(jobs).where(eq(jobs.id, spare.id));
-    expect(await db.select().from(jobMatches)).toHaveLength(4);
+    expect(await db.select().from(jobMatches)).toHaveLength(5);
 
     await db.delete(applications);
     await db.delete(resumes).where(eq(resumes.kind, "tailored"));
     await db.delete(jobs).where(eq(jobs.id, first.jobId));
-    expect(await db.select().from(jobMatches)).toHaveLength(3);
+    expect(await db.select().from(jobMatches)).toHaveLength(4);
 
     await db.delete(talentProfiles).where(eq(talentProfiles.id, base.profileId));
     expect(await db.select().from(jobMatches)).toHaveLength(0);

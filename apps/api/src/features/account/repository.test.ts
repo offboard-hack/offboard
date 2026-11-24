@@ -182,6 +182,8 @@ describe.skipIf(!url)("account repository", () => {
         scoredAt: null,
         updatedAt: expect.any(String),
         suggestions: [],
+        job: null,
+        matchScore: null,
       },
     ]);
     expect(exported?.applications.map((application) => application.job.title)).toEqual([
@@ -191,6 +193,7 @@ describe.skipIf(!url)("account repository", () => {
     ]);
     expect(exported?.applications[1]).toEqual({
       job: { title: "Vaga mine", company: "Acme", url: "https://jobs.example.com/mine" },
+      resume: { kind: "base", job: null },
       status: "closed",
       closedReason: "rejected",
       appliedAt: expect.any(String),
@@ -271,6 +274,8 @@ describe.skipIf(!url)("account repository", () => {
         score: 77,
         scoredAt: "2026-11-20T10:00:00.000Z",
         updatedAt: expect.any(String),
+        job: null,
+        matchScore: null,
         suggestions: [
           {
             ...exportedSuggestion,
@@ -289,6 +294,81 @@ describe.skipIf(!url)("account repository", () => {
       },
     ]);
     expect(JSON.stringify(exported)).not.toContain(resume.id);
+  });
+
+  it("exports tailored versions with their job and the résumé each application used", async () => {
+    const { resume } = await repos.resumes.replaceBase(profileId, content, "resumes/mine.pdf");
+
+    await db
+      .update(resumes)
+      .set({ createdAt: new Date("2026-01-01T00:00:00Z") })
+      .where(eq(resumes.id, resume.id));
+
+    const tailoredJob = await job("tailored");
+    const bareJob = await job("bare");
+
+    const tailoredContent = {
+      ...content,
+      headline: { id: "headline", text: "Engenheira Backend" },
+    };
+
+    const version = identified.parse(
+      await repos.resumeVersions.saveDraft(profileId, tailoredJob, tailoredContent, 91, new Date()),
+    );
+
+    await repos.resumeVersions.markReady(profileId, version.id, new Date());
+
+    const withVersion = created.parse(
+      await repos.applications.apply(profileId, tailoredJob, version.id),
+    ).applicationId;
+
+    const withBase = await applied(profileId, "base");
+
+    const [withoutResume] = await db
+      .insert(applications)
+      .values({ profileId, jobId: bareJob })
+      .returning({ id: applications.id });
+
+    for (const [id, appliedAt] of [
+      [withVersion, "2026-11-03T00:00:00Z"],
+      [withBase, "2026-11-02T00:00:00Z"],
+      [withoutResume.id, "2026-11-01T00:00:00Z"],
+    ]) {
+      await db
+        .update(applications)
+        .set({ appliedAt: new Date(appliedAt) })
+        .where(eq(applications.id, id));
+    }
+
+    const exported = await repository.exportData(profileId);
+
+    expect(exported?.resumes).toEqual([
+      expect.objectContaining({ kind: "base", job: null, matchScore: null }),
+      {
+        kind: "tailored",
+        status: "ready",
+        content: tailoredContent,
+        score: null,
+        scoredAt: null,
+        updatedAt: expect.any(String),
+        job: { title: "Vaga tailored", company: "Acme", url: "https://jobs.example.com/tailored" },
+        matchScore: 91,
+        suggestions: [],
+      },
+    ]);
+    expect(
+      exported?.applications.map((application) => [application.job.title, application.resume]),
+    ).toEqual([
+      ["Vaga tailored", { kind: "tailored", job: { title: "Vaga tailored", company: "Acme" } }],
+      ["Vaga base", { kind: "base", job: null }],
+      ["Vaga bare", null],
+    ]);
+
+    const serialized = JSON.stringify(exported);
+
+    for (const id of [version.id, tailoredJob, bareJob, withVersion, withBase, withoutResume.id]) {
+      expect(serialized).not.toContain(id);
+    }
   });
 
   it("exports only the profile's job matches, best score first and without ids", async () => {

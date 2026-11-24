@@ -1,5 +1,5 @@
 import type { Database } from "@offboard/db/client";
-import { applications, jobs, resumes } from "@offboard/db/schema";
+import { applicationStatusEnum, applications, jobs, resumes } from "@offboard/db/schema";
 import { and, asc, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import type { ResumeContent } from "./content.js";
 import { resumeColumns } from "./repository.js";
@@ -10,7 +10,11 @@ export type VersionView = {
   status: "draft" | "ready";
   matchScore: number | null;
   content: ResumeContent;
-  application: { id: string; status: string; appliedAt: string } | null;
+  application: {
+    id: string;
+    status: (typeof applicationStatusEnum.enumValues)[number];
+    appliedAt: string;
+  } | null;
   updatedAt: string;
 };
 
@@ -103,6 +107,15 @@ export function createVersionsRepository(db: Database) {
     return row;
   }
 
+  async function hasApplied(profileId: string, jobId: string) {
+    const [application] = await db
+      .select({ id: applications.id })
+      .from(applications)
+      .where(and(eq(applications.profileId, profileId), eq(applications.jobId, jobId)));
+
+    return application !== undefined;
+  }
+
   async function saveDraft(
     profileId: string,
     jobId: string,
@@ -184,7 +197,7 @@ export function createVersionsRepository(db: Database) {
     });
   }
 
-  return { jobForTailoring, saveDraft, list, get, update, markReady };
+  return { jobForTailoring, hasApplied, saveDraft, list, get, update, markReady };
 }
 
 export type VersionsRepository = ReturnType<typeof createVersionsRepository>;
