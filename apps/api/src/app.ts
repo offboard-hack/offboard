@@ -10,6 +10,9 @@ import { equipmentRoutes } from "./features/equipment/routes.js";
 import { exitSurveysRoutes } from "./features/exit-surveys/routes.js";
 import { integrationsRoutes } from "./features/integrations/routes.js";
 import { offboardingsRoutes } from "./features/offboardings/routes.js";
+import { talentRoutes } from "./features/talent/routes.js";
+import { talentAccess } from "./features/talent/access.js";
+import { companySponsors } from "./features/talent/entitlement.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
 import { portalAccess } from "./shared/access.js";
@@ -27,6 +30,13 @@ type AppOptions = {
 
 export function createApp(webOrigin: string, repos: Repositories, options: AppOptions) {
   const access = portalAccess(options.auth, webOrigin);
+
+  const talent = talentAccess({
+    auth: options.auth,
+    webOrigin,
+    talent: repos.talent,
+    companyActive: async () => companySponsors((await repos.billing.getSubscription())?.status),
+  });
 
   return new Elysia({ adapter: options.adapter, prefix: "/api" })
     .use(cors({ origin: webOrigin, credentials: false }))
@@ -48,6 +58,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     )
     .use(actionConfigsRoutes(repos.actionConfigs, access))
     .use(teamRoutes(repos.team, access))
+    .use(talentRoutes(repos.talent, access, talent, (email) => options.auth.inviteTalent(email)))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
     .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret))

@@ -9,6 +9,7 @@ import { tasks } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.ts";
 import type { PortalAuth } from "./shared/portal-auth.js";
@@ -19,8 +20,14 @@ const cronSecret = "test-cron-secret";
 const webhookSecret = "test-webhook-secret";
 const slackSigningSecret = "test-slack-secret";
 
+const invitedEmails: string[] = [];
+
 const auth: PortalAuth = {
-  inviteTalent: () => Promise.resolve(),
+  inviteTalent: (email) => {
+    invitedEmails.push(email);
+
+    return Promise.resolve();
+  },
   async handler(request) {
     const payload = request.method === "POST" ? await request.text() : null;
 
@@ -36,7 +43,11 @@ const auth: PortalAuth = {
     if (session === "talent") {
       return Promise.resolve({
         kind: "talent",
-        profile: { id: "test-talent", name: "Test Talent", email: "talent@example.com" },
+        profile: {
+          id: headers.get("x-test-talent-id") ?? "test-talent",
+          name: "Test Talent",
+          email: "talent@example.com",
+        },
       });
     }
 
@@ -99,6 +110,8 @@ describe.skipIf(!url)("api", () => {
     api_app_id?: string;
     event_id?: string;
     event_time?: number;
+    personalEmail?: string;
+    sponsoredUntil?: string;
   };
 
   function call(path: string, method = "GET", body?: Payload) {
@@ -156,7 +169,223 @@ describe.skipIf(!url)("api", () => {
   });
 
   beforeEach(async () => {
+    invitedEmails.length = 0;
     await seedDatabase(db, testSeedFixtures);
+  });
+
+  describe("talent access", () => {
+    const personalEmail = "ana.pessoal@example.com";
+    const sponsoredUntil = "2099-12-31";
+
+    async function firstCaseId() {
+      const [first] = await (await call("/offboardings")).json();
+
+      return z.string().parse(first.id);
+    }
+
+    function asSession(session: string, path: string, method = "GET", body?: Payload, extra = {}) {
+      return app.handle(
+        new Request(`http://localhost/api${path}`, {
+          method,
+          headers: {
+            "x-test-session": session,
+            origin: webOrigin,
+            "content-type": "application/json",
+            ...extra,
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        }),
+      );
+    }
+
+    it("enables talent access from a case and invites the person", async () => {
+      const caseId = await firstCaseId();
+      const path = `/offboardings/${caseId}/talent-access`;
+      const body = { personalEmail, sponsoredUntil };
+
+      expect((await asSession("visualizador", path, "POST", body)).status).toBe(403);
+      expect(invitedEmails).toEqual([]);
+
+      const created = await asSession("rh", path, "POST", body);
+
+      expect(created.status).toBe(201);
+      expect(await created.json()).toEqual({ personalEmail, sponsoredUntil, signedIn: false });
+      expect(invitedEmails).toEqual([personalEmail]);
+
+      expect((await asSession("rh", path, "POST", body)).status).toBe(409);
+      expect(
+        (await asSession("rh", `/offboardings/${missingCaseId}/talent-access`, "POST", body))
+          .status,
+      ).toBe(404);
+      expect(invitedEmails).toEqual([personalEmail]);
+
+      const read = await asSession("visualizador", path);
+
+      expect(read.status).toBe(200);
+      expect(await read.json()).toEqual({ personalEmail, sponsoredUntil, signedIn: false });
+    });
+
+    it("rejects a duplicate personal email and invalid input without inviting", async () => {
+      const cases: { id: string }[] = await (await call("/offboardings")).json();
+      const [first, second] = cases;
+
+      await repos.talent.enable({ caseId: first.id, personalEmail, sponsoredUntil });
+
+      const taken = await asSession("rh", `/offboardings/${second.id}/talent-access`, "POST", {
+        personalEmail,
+        sponsoredUntil,
+      });
+
+      const invalid = await asSession("rh", `/offboardings/${second.id}/talent-access`, "POST", {
+        personalEmail: "nope",
+        sponsoredUntil: "tomorrow",
+      });
+
+      expect(taken.status).toBe(409);
+      expect(invalid.status).toBe(422);
+      expect(invitedEmails).toEqual([]);
+    });
+
+    it("returns 404 when reading or updating a case without talent access", async () => {
+      const path = `/offboardings/${await firstCaseId()}/talent-access`;
+
+      expect((await asSession("rh", path)).status).toBe(404);
+      expect((await asSession("rh", path, "PATCH", { sponsoredUntil })).status).toBe(404);
+      expect((await asSession("visualizador", path, "PATCH", { sponsoredUntil })).status).toBe(403);
+    });
+
+    it("fixes the email only before first sign-in", async () => {
+      const caseId = await firstCaseId();
+      const path = `/offboardings/${caseId}/talent-access`;
+      const created = await repos.talent.enable({ caseId, personalEmail, sponsoredUntil });
+
+      if (
+        created === "case_not_found" ||
+        created === "already_enabled" ||
+        created === "email_taken"
+      ) {
+        throw new Error(created);
+      }
+
+      const changed = await asSession("rh", path, "PATCH", { personalEmail: "novo@example.com" });
+
+      expect(changed.status).toBe(200);
+      expect(await changed.json()).toEqual({
+        personalEmail: "novo@example.com",
+        sponsoredUntil,
+        signedIn: false,
+      });
+      expect(invitedEmails).toEqual(["novo@example.com"]);
+
+      const sameEmail = await asSession("rh", path, "PATCH", { personalEmail: "NOVO@example.com" });
+
+      expect(sameEmail.status).toBe(200);
+      expect(invitedEmails).toEqual(["novo@example.com"]);
+
+      await repos.talent.markSignedIn(created.id);
+
+      const locked = await asSession("rh", path, "PATCH", { personalEmail: "outro@example.com" });
+
+      expect(locked.status).toBe(409);
+      expect(invitedEmails).toEqual(["novo@example.com"]);
+
+      const extended = await asSession("rh", path, "PATCH", { sponsoredUntil: "2100-01-31" });
+
+      expect(extended.status).toBe(200);
+      expect(await extended.json()).toEqual({
+        personalEmail: "novo@example.com",
+        sponsoredUntil: "2100-01-31",
+        signedIn: true,
+      });
+    });
+
+    it("rejects a taken email on update without inviting", async () => {
+      const [first, second]: { id: string }[] = await (await call("/offboardings")).json();
+
+      await repos.talent.enable({ caseId: first.id, personalEmail, sponsoredUntil });
+      await repos.talent.enable({
+        caseId: second.id,
+        personalEmail: "outra@example.com",
+        sponsoredUntil,
+      });
+
+      const taken = await asSession("rh", `/offboardings/${second.id}/talent-access`, "PATCH", {
+        personalEmail,
+      });
+
+      expect(taken.status).toBe(409);
+      expect(invitedEmails).toEqual([]);
+    });
+
+    it("isolates talent and portal sessions", async () => {
+      for (const [path, method] of [
+        ["/team", "GET"],
+        ["/offboardings", "GET"],
+        ["/session", "GET"],
+        ["/team", "POST"],
+      ]) {
+        const denied = await asSession(
+          "talent",
+          path,
+          method,
+          method === "POST" ? { name: "Test", email: "test@example.com", role: "rh" } : undefined,
+        );
+
+        expect(denied.status).toBe(403);
+      }
+
+      expect((await asSession("admin", "/me")).status).toBe(403);
+      expect((await asSession("admin", "/me/terms", "POST")).status).toBe(403);
+      expect((await asSession("anonymous", "/me")).status).toBe(401);
+    });
+
+    it("serves the profile and records terms", async () => {
+      const caseId = await firstCaseId();
+      const created = await repos.talent.enable({ caseId, personalEmail, sponsoredUntil });
+
+      if (
+        created === "case_not_found" ||
+        created === "already_enabled" ||
+        created === "email_taken"
+      ) {
+        throw new Error(created);
+      }
+
+      const talentHeaders = { "x-test-talent-id": created.id };
+      const me = await asSession("talent", "/me", "GET", undefined, talentHeaders);
+
+      expect(me.status).toBe(200);
+      expect(await me.json()).toEqual({
+        id: created.id,
+        name: created.name,
+        email: personalEmail,
+        termsAccepted: false,
+        entitlement: { kind: "sponsored", until: sponsoredUntil },
+      });
+
+      const accepted = await asSession("talent", "/me/terms", "POST", undefined, talentHeaders);
+
+      expect(accepted.status).toBe(200);
+      expect(await accepted.json()).toMatchObject({ termsAccepted: true });
+
+      const subscription = await repos.billing.getSubscription();
+
+      if (!subscription) throw new Error("missing subscription");
+
+      await repos.billing.updateSubscription(subscription.id, { status: "canceled" });
+
+      const lapsed = await asSession("talent", "/me", "GET", undefined, talentHeaders);
+
+      expect(await lapsed.json()).toMatchObject({ entitlement: { kind: "lapsed", until: null } });
+    });
+
+    it("denies a talent session whose profile no longer exists", async () => {
+      const gone = await asSession("talent", "/me", "GET", undefined, {
+        "x-test-talent-id": missingCaseId,
+      });
+
+      expect(gone.status).toBe(403);
+    });
   });
 
   afterAll(async () => {
