@@ -39,6 +39,34 @@ describe("createGenerateStructured", () => {
     ]);
   });
 
+  it("sends the file as a document part next to the prompt", async () => {
+    const model = jsonModel('{"title":"x"}');
+    const data = new Uint8Array([37, 80, 68, 70]);
+
+    await createGenerateStructured(model)({
+      schema: z.object({ title: z.string() }),
+      system: "s",
+      prompt: "p",
+      file: { data, mediaType: "application/pdf" },
+    });
+
+    const [call] = model.doGenerateCalls;
+    expect(call?.prompt).toEqual([
+      { role: "system", content: "s" },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "p" },
+          {
+            type: "file",
+            data: { type: "data", data },
+            mediaType: "application/pdf",
+          },
+        ],
+      },
+    ]);
+  });
+
   it("bounds the call to 60 seconds", async () => {
     const timeout = vi.spyOn(AbortSignal, "timeout");
 
