@@ -17,6 +17,34 @@ import {
 
 export { authAccount, authRateLimit, authSession, authUser, authVerification } from "./auth.ts";
 
+export type ResumeContent = {
+  headline: { id: string; text: string };
+  summary: { id: string; text: string };
+  experiences: {
+    id: string;
+    company: string;
+    role: string;
+    start: string;
+    end: string | null;
+    bullets: { id: string; text: string }[];
+  }[];
+  education: {
+    id: string;
+    institution: string;
+    degree: string;
+    start: string | null;
+    end: string | null;
+  }[];
+  skills: { id: string; name: string }[];
+  languages: { id: string; name: string; level: string | null }[];
+  contact: {
+    email: string | null;
+    phone: string | null;
+    city: string | null;
+    links: string[];
+  };
+};
+
 export type ConfigValue =
   | boolean
   | number
@@ -416,3 +444,37 @@ export const invoicesRelations = relations(invoices, ({ one }) => ({
     references: [subscriptions.id],
   }),
 }));
+
+export const resumeKindEnum = pgEnum("resume_kind", ["base", "tailored"]);
+
+export const resumeStatusEnum = pgEnum("resume_status", ["draft", "ready"]);
+
+export const resumes = pgTable(
+  "resumes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    kind: resumeKindEnum("kind").notNull(),
+    status: resumeStatusEnum("status").notNull().default("ready"),
+    jobId: uuid("job_id").references(() => jobs.id, { onDelete: "restrict" }),
+    content: jsonb("content").$type<ResumeContent>().notNull(),
+    score: integer("score"),
+    scoredAt: timestamp("scored_at"),
+    sourceFileKey: varchar("source_file_key", { length: 512 }),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("resumes_one_base_idx")
+      .on(table.profileId)
+      .where(sql`${table.kind} = 'base'`),
+    uniqueIndex("resumes_profile_job_idx")
+      .on(table.profileId, table.jobId)
+      .where(sql`${table.kind} = 'tailored'`),
+    check("resumes_kind_job", sql`(${table.kind} = 'base') = (${table.jobId} is null)`),
+    check("resumes_base_ready", sql`${table.kind} <> 'base' or ${table.status} = 'ready'`),
+    check("resumes_score_range", sql`${table.score} is null or ${table.score} between 0 and 100`),
+  ],
+);

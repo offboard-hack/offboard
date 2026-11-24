@@ -14,6 +14,7 @@ import {
   interviews,
   jobs,
   offboardingCases,
+  resumes,
   talentProfiles,
   tasks,
 } from "../src/schema/index.ts";
@@ -216,6 +217,70 @@ it.skipIf(!url)("stores applications with one per job and a consistent closed re
     expect(await db.select().from(applications)).toHaveLength(0);
     expect(await db.select().from(applicationEvents)).toHaveLength(0);
     expect(await db.select().from(interviews)).toHaveLength(0);
+  } finally {
+    await db.$client.end();
+  }
+});
+
+it.skipIf(!url)("stores one base résumé per profile", async () => {
+  const db = createClient(url ?? "");
+
+  try {
+    await migrate(db, {
+      migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
+    });
+    await seedDatabase(db);
+
+    const [base] = await db.select().from(resumes);
+    expect(base.kind).toBe("base");
+    expect(base.status).toBe("ready");
+    expect(base.jobId).toBeNull();
+    expect(base.score).toBeNull();
+    expect(base.content.headline.text).toBe("Analista de Marketing");
+
+    const profileId = base.profileId;
+    const content = base.content;
+
+    await expect(
+      db.insert(resumes).values({ profileId, kind: "base", content }),
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
+
+    const [job] = await db
+      .insert(jobs)
+      .values({ origin: "hr", source: "r", sourceKey: "r1", title: "t", company: "t", url: "t" })
+      .returning();
+
+    await expect(
+      db.insert(resumes).values({ profileId, kind: "base", jobId: job.id, content }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+    await expect(
+      db.insert(resumes).values({ profileId, kind: "tailored", content }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+
+    await db.delete(resumes);
+
+    await expect(
+      db.insert(resumes).values({ profileId, kind: "base", status: "draft", content }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+    await expect(
+      db.insert(resumes).values({ profileId, kind: "base", score: 101, content }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+
+    await db.insert(resumes).values({ profileId, kind: "base", score: 100, content });
+    await db
+      .insert(resumes)
+      .values({ profileId, kind: "tailored", status: "draft", jobId: job.id, content });
+    await expect(
+      db.insert(resumes).values({ profileId, kind: "tailored", jobId: job.id, content }),
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
+
+    await expect(db.delete(jobs).where(eq(jobs.id, job.id))).rejects.toMatchObject({
+      cause: { code: "23503" },
+    });
+
+    await db.delete(talentProfiles).where(eq(talentProfiles.id, profileId));
+
+    expect(await db.select().from(resumes)).toHaveLength(0);
   } finally {
     await db.$client.end();
   }

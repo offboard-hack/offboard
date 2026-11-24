@@ -27,12 +27,14 @@ import {
   jobs,
   offboardingCases,
   plans,
+  resumes,
   subscriptions,
   subtasks,
   talentProfiles,
   tasks,
   teamMembers,
 } from "./schema/index.ts";
+import { seedResumes, type SeedResume } from "./resume.fixture.ts";
 import { seedTalentProfiles, type SeedTalentProfile } from "./talent-profile.fixture.ts";
 import { baseSeedTeamMembers, seedTeamMembers } from "./team-member.fixture.ts";
 
@@ -40,6 +42,7 @@ const noTalentProfiles: SeedTalentProfile[] = [];
 const noJobs: SeedJob[] = [];
 const noApplications: SeedApplication[] = [];
 const noInterviews: SeedInterview[] = [];
+const noResumes: SeedResume[] = [];
 
 export const testSeedFixtures = {
   cases: baseSeedCases,
@@ -48,6 +51,7 @@ export const testSeedFixtures = {
   jobs: noJobs,
   applications: noApplications,
   interviews: noInterviews,
+  resumes: noResumes,
 };
 
 export async function seedDatabase(
@@ -59,9 +63,11 @@ export async function seedDatabase(
     jobs: seedJobs,
     applications: seedApplications,
     interviews: seedInterviews,
+    resumes: seedResumes,
   },
 ) {
   await db.transaction(async (tx) => {
+    await tx.delete(resumes);
     await tx.delete(interviews);
     await tx.delete(applicationEvents);
     await tx.delete(applications);
@@ -161,6 +167,12 @@ export async function seedDatabase(
         .returning({ id: talentProfiles.id });
 
       seededProfileId ??= inserted.id;
+
+      for (const resume of fixtures.resumes.filter((item) => item.caseName === caseName)) {
+        await tx
+          .insert(resumes)
+          .values({ profileId: inserted.id, kind: "base", content: resume.content });
+      }
     }
 
     const insertedJobs =
