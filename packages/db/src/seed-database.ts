@@ -19,6 +19,7 @@ import {
   actionConfigs,
   applicationEvents,
   applications,
+  backgroundJobs,
   equipment,
   exitSurveys,
   integrations,
@@ -27,6 +28,7 @@ import {
   jobs,
   offboardingCases,
   plans,
+  resumeSuggestions,
   resumes,
   subscriptions,
   subtasks,
@@ -67,6 +69,7 @@ export async function seedDatabase(
   },
 ) {
   await db.transaction(async (tx) => {
+    await tx.delete(backgroundJobs);
     await tx.delete(resumes);
     await tx.delete(interviews);
     await tx.delete(applicationEvents);
@@ -169,9 +172,36 @@ export async function seedDatabase(
       seededProfileId ??= inserted.id;
 
       for (const resume of fixtures.resumes.filter((item) => item.caseName === caseName)) {
-        await tx
+        const [insertedResume] = await tx
           .insert(resumes)
-          .values({ profileId: inserted.id, kind: "base", content: resume.content });
+          .values({
+            profileId: inserted.id,
+            kind: "base",
+            content: resume.content,
+            score: resume.score,
+            scoredAt: new Date(Date.now() - resume.scoredDaysAgo * 86_400_000),
+          })
+          .returning({ id: resumes.id, content: resumes.content });
+
+        const nodes = [
+          resume.content.headline,
+          resume.content.summary,
+          ...resume.content.experiences.flatMap((experience) => experience.bullets),
+        ];
+
+        for (const suggestion of resume.suggestions) {
+          const originalText = nodes.find((node) => node.id === suggestion.targetNodeId)?.text;
+
+          if (originalText === undefined) {
+            throw new Error(`Seed suggestion targets unknown node ${suggestion.targetNodeId}`);
+          }
+
+          await tx.insert(resumeSuggestions).values({
+            resumeId: insertedResume.id,
+            originalText,
+            ...suggestion,
+          });
+        }
       }
     }
 

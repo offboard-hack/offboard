@@ -11,9 +11,12 @@ import {
   applicationEvents,
   applications,
   authSession,
+  backgroundJobs,
   interviews,
   jobs,
+  llmUsage,
   offboardingCases,
+  resumeSuggestions,
   resumes,
   talentProfiles,
   tasks,
@@ -235,7 +238,8 @@ it.skipIf(!url)("stores one base résumé per profile", async () => {
     expect(base.kind).toBe("base");
     expect(base.status).toBe("ready");
     expect(base.jobId).toBeNull();
-    expect(base.score).toBeNull();
+    expect(base.score).toBe(82);
+    expect(base.scoredAt).toBeInstanceOf(Date);
     expect(base.content.headline.text).toBe("Analista de Marketing");
 
     const profileId = base.profileId;
@@ -281,6 +285,80 @@ it.skipIf(!url)("stores one base résumé per profile", async () => {
     await db.delete(talentProfiles).where(eq(talentProfiles.id, profileId));
 
     expect(await db.select().from(resumes)).toHaveLength(0);
+  } finally {
+    await db.$client.end();
+  }
+});
+
+it.skipIf(!url)("stores jobs, suggestions and usage", async () => {
+  const db = createClient(url ?? "");
+
+  try {
+    await migrate(db, {
+      migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
+    });
+    await seedDatabase(db);
+
+    const [base] = await db.select().from(resumes);
+    const suggestions = await db.select().from(resumeSuggestions);
+    expect(suggestions).toHaveLength(3);
+    expect(suggestions.map((item) => item.estimatedGain).sort()).toEqual([3, 4, 4]);
+    expect(suggestions.every((item) => item.status === "open")).toBe(true);
+    expect(await db.select().from(backgroundJobs)).toHaveLength(0);
+    expect(await db.select().from(llmUsage)).toHaveLength(0);
+
+    const nodes = [
+      base.content.headline,
+      base.content.summary,
+      ...base.content.experiences.flatMap((experience) => experience.bullets),
+    ];
+
+    for (const item of suggestions) {
+      expect(item.resumeId).toBe(base.id);
+      expect(item.originalText).toBe(nodes.find((node) => node.id === item.targetNodeId)?.text);
+    }
+
+    const runAfter = new Date();
+    await db.insert(backgroundJobs).values({ kind: "score", subject: "a", runAfter });
+    await expect(
+      db.insert(backgroundJobs).values({ kind: "score", subject: "a", runAfter }),
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
+    await db
+      .insert(backgroundJobs)
+      .values({ kind: "score", subject: "a", status: "running", runAfter });
+    await db.insert(backgroundJobs).values({ kind: "score", subject: "b", runAfter });
+    const [stored] = await db.select().from(backgroundJobs).where(eq(backgroundJobs.subject, "b"));
+    expect(stored.payload).toEqual({});
+    expect(stored.attempts).toBe(0);
+    expect(stored.lockedUntil).toBeNull();
+
+    const row = {
+      resumeId: base.id,
+      targetNodeId: base.content.summary.id,
+      originalText: "a",
+      suggestedText: "b",
+      rationale: "c",
+    };
+
+    await expect(
+      db.insert(resumeSuggestions).values({ ...row, estimatedGain: 0 }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+    await expect(
+      db.insert(resumeSuggestions).values({ ...row, estimatedGain: 21 }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+
+    await db.insert(llmUsage).values({ profileId: base.profileId, day: "2026-11-24" });
+    await expect(
+      db.insert(llmUsage).values({ profileId: base.profileId, day: "2026-11-24" }),
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
+    const [usage] = await db.select().from(llmUsage);
+    expect(usage.calls).toBe(0);
+
+    await db.delete(resumes).where(eq(resumes.id, base.id));
+    expect(await db.select().from(resumeSuggestions)).toHaveLength(0);
+
+    await db.delete(talentProfiles).where(eq(talentProfiles.id, base.profileId));
+    expect(await db.select().from(llmUsage)).toHaveLength(0);
   } finally {
     await db.$client.end();
   }

@@ -8,6 +8,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -477,4 +478,74 @@ export const resumes = pgTable(
     check("resumes_base_ready", sql`${table.kind} <> 'base' or ${table.status} = 'ready'`),
     check("resumes_score_range", sql`${table.score} is null or ${table.score} between 0 and 100`),
   ],
+);
+
+export const backgroundJobStatusEnum = pgEnum("background_job_status", [
+  "pending",
+  "running",
+  "done",
+  "failed",
+]);
+
+export const backgroundJobs = pgTable(
+  "background_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: varchar("kind", { length: 50 }).notNull(),
+    subject: varchar("subject", { length: 255 }).notNull(),
+    payload: jsonb("payload").$type<Record<string, ConfigValue>>().notNull().default({}),
+    status: backgroundJobStatusEnum("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    runAfter: timestamp("run_after").notNull(),
+    lockedUntil: timestamp("locked_until"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("background_jobs_pending_idx")
+      .on(table.kind, table.subject)
+      .where(sql`${table.status} = 'pending'`),
+    index("background_jobs_claim_idx").on(table.status, table.runAfter),
+  ],
+);
+
+export const resumeSuggestionStatusEnum = pgEnum("resume_suggestion_status", [
+  "open",
+  "applied",
+  "dismissed",
+]);
+
+export const resumeSuggestions = pgTable(
+  "resume_suggestions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    resumeId: uuid("resume_id")
+      .notNull()
+      .references(() => resumes.id, { onDelete: "cascade" }),
+    targetNodeId: varchar("target_node_id", { length: 64 }).notNull(),
+    originalText: text("original_text").notNull(),
+    suggestedText: text("suggested_text").notNull(),
+    rationale: text("rationale").notNull(),
+    estimatedGain: integer("estimated_gain").notNull(),
+    status: resumeSuggestionStatusEnum("status").notNull().default("open"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("resume_suggestions_resume_idx").on(table.resumeId),
+    check("resume_suggestions_gain", sql`${table.estimatedGain} between 1 and 20`),
+  ],
+);
+
+export const llmUsage = pgTable(
+  "llm_usage",
+  {
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    calls: integer("calls").notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.profileId, table.day] })],
 );
