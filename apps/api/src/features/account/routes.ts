@@ -50,6 +50,14 @@ const exportResponse = t.Object({
       ),
     }),
   ),
+  matches: t.Array(
+    t.Object({
+      job: t.Object({ title: t.String(), company: t.String(), url: t.String() }),
+      score: t.Number(),
+      reasons: t.Array(t.String()),
+      computedAt: t.String(),
+    }),
+  ),
 });
 
 export function accountRoutes(

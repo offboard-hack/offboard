@@ -1,7 +1,7 @@
 const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
 export const sanitizeText = (value: string) =>
-  value.replaceAll("\u0000", "").replace(loneSurrogate, "�");
+  value.replaceAll("\u0000", "").replace(loneSurrogate, "\uFFFD");
 
 export const clipText = (value: string, limit: number) =>
   value.slice(0, limit).replace(/[\uD800-\uDBFF]$/, "");

@@ -2296,6 +2296,26 @@ describe.skipIf(!url)("api", () => {
         expect(kicked.count).toBe(0);
       });
 
+      it("fans out nothing when the company subscription is not active", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        await upload(app.instance, id);
+        await app.settle();
+        await db.delete(backgroundJobs);
+
+        const subscription = await repos.billing.getSubscription();
+
+        if (!subscription) throw new Error("missing subscription");
+
+        await repos.billing.updateSubscription(subscription.id, { status: "canceled" });
+
+        const { share } = shareApp();
+
+        expect((await share("https://jobs.example.com/inativa")).status).toBe(201);
+        expect(await matchJobs()).toEqual([]);
+      });
+
       it("fans out nothing when a concurrent share created the job first", async () => {
         const app = resumesApp();
         const id = await profile();
@@ -2381,6 +2401,14 @@ describe.skipIf(!url)("api", () => {
           .returning({ id: jobs.id });
 
         await repos.applications.apply(id, job.id);
+        await db.insert(jobMatches).values({
+          profileId: id,
+          jobId: job.id,
+          score: 81,
+          reasons: ["Stack em comum"],
+          resumeUpdatedAt: new Date("2026-01-01T00:00:00Z"),
+          computedAt: new Date("2026-02-01T00:00:00Z"),
+        });
 
         const res = await request(instance, id, "/me/export");
 
@@ -2423,6 +2451,14 @@ describe.skipIf(!url)("api", () => {
         ]);
         expect(body.applications).toHaveLength(1);
         expect(body.applications[0].job.title).toBe("Backend");
+        expect(body.matches).toEqual([
+          {
+            job: { title: "Backend", company: "Acme", url: "https://jobs.example.com/export-job" },
+            score: 81,
+            reasons: ["Stack em comum"],
+            computedAt: "2026-02-01T00:00:00.000Z",
+          },
+        ]);
         expect((await request(instance, id, "/me/export", { session: "admin" })).status).toBe(403);
       });
 

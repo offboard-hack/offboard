@@ -111,6 +111,7 @@ describe("scoreMatches", () => {
     expect(request.system).toContain("Brazilian");
     expect(request.system).toContain("Brazilian Portuguese");
     expect(request.system).toContain("untrusted");
+    expect(request.system).not.toMatch(/location/i);
 
     const { prompt } = request;
 

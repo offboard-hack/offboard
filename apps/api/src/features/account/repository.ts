@@ -4,6 +4,7 @@ import {
   applications,
   authUser,
   interviews,
+  jobMatches,
   jobs,
   resumes,
   resumeSuggestions,
@@ -102,6 +103,18 @@ export function createAccountRepository(db: Database) {
       .where(inArray(interviews.applicationId, applicationIds))
       .orderBy(asc(interviews.startsAt), asc(interviews.id));
 
+    const ownMatches = await db
+      .select({
+        job: { title: jobs.title, company: jobs.company, url: jobs.url },
+        score: jobMatches.score,
+        reasons: jobMatches.reasons,
+        computedAt: jobMatches.computedAt,
+      })
+      .from(jobMatches)
+      .innerJoin(jobs, eq(jobs.id, jobMatches.jobId))
+      .where(eq(jobMatches.profileId, profileId))
+      .orderBy(desc(jobMatches.score), desc(jobMatches.computedAt), asc(jobMatches.jobId));
+
     return {
       profile: {
         name: profile.name,
@@ -148,6 +161,10 @@ export function createAccountRepository(db: Database) {
             with: meeting.with,
             notes: meeting.notes,
           })),
+      })),
+      matches: ownMatches.map((match) => ({
+        ...match,
+        computedAt: match.computedAt.toISOString(),
       })),
     };
   }

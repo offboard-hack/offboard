@@ -7,6 +7,7 @@ import {
   authSession,
   authUser,
   interviews,
+  jobMatches,
   jobs,
   offboardingCases,
   resumes,
@@ -287,6 +288,67 @@ describe.skipIf(!url)("account repository", () => {
       },
     ]);
     expect(JSON.stringify(exported)).not.toContain(resume.id);
+  });
+
+  it("exports only the profile's job matches, best score first and without ids", async () => {
+    const [low, high, tie, tieOlder, foreign] = await Promise.all(
+      ["low", "high", "tie", "tie-older", "foreign"].map(job),
+    );
+
+    const row = (owner: string, jobId: string, score: number, computedAt: string) => ({
+      profileId: owner,
+      jobId,
+      score,
+      reasons: [`motivo ${score}`],
+      resumeUpdatedAt: new Date("2026-01-01T00:00:00Z"),
+      computedAt: new Date(computedAt),
+    });
+
+    await db
+      .insert(jobMatches)
+      .values([
+        row(profileId, low, 40, "2026-03-01T00:00:00Z"),
+        row(profileId, high, 90, "2026-01-01T00:00:00Z"),
+        row(profileId, tieOlder, 70, "2026-01-01T00:00:00Z"),
+        row(profileId, tie, 70, "2026-02-01T00:00:00Z"),
+        row(otherProfileId, foreign, 99, "2026-04-01T00:00:00Z"),
+      ]);
+
+    const exported = await repository.exportData(profileId);
+
+    expect(exported?.matches).toEqual([
+      {
+        job: { title: "Vaga high", company: "Acme", url: "https://jobs.example.com/high" },
+        score: 90,
+        reasons: ["motivo 90"],
+        computedAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        job: { title: "Vaga tie", company: "Acme", url: "https://jobs.example.com/tie" },
+        score: 70,
+        reasons: ["motivo 70"],
+        computedAt: "2026-02-01T00:00:00.000Z",
+      },
+      {
+        job: {
+          title: "Vaga tie-older",
+          company: "Acme",
+          url: "https://jobs.example.com/tie-older",
+        },
+        score: 70,
+        reasons: ["motivo 70"],
+        computedAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        job: { title: "Vaga low", company: "Acme", url: "https://jobs.example.com/low" },
+        score: 40,
+        reasons: ["motivo 40"],
+        computedAt: "2026-03-01T00:00:00.000Z",
+      },
+    ]);
+    expect(JSON.stringify(exported)).not.toContain("Vaga foreign");
+    expect(JSON.stringify(exported)).not.toContain(high);
+    expect((await repository.exportData(otherProfileId))?.matches).toHaveLength(1);
   });
 
   it("exports the consent, sign-in and creation timestamps", async () => {

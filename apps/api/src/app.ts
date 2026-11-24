@@ -52,11 +52,14 @@ type AppOptions = {
 export function createApp(webOrigin: string, repos: Repositories, options: AppOptions) {
   const access = portalAccess(options.auth, webOrigin);
 
+  const companyActive = async () =>
+    companySponsors((await repos.billing.getSubscription())?.status);
+
   const talent = talentAccess({
     auth: options.auth,
     webOrigin,
     talent: repos.talent,
-    companyActive: async () => companySponsors((await repos.billing.getSubscription())?.status),
+    companyActive,
   });
 
   const runInBackground =
@@ -138,6 +141,8 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
   }
 
   async function matchNewJob() {
+    if (!(await companyActive())) return;
+
     await repos.background.enqueueMany(
       "compute_matches",
       await repos.matches.profilesForMatching(new Date()),

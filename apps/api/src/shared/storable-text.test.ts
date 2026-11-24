@@ -3,7 +3,7 @@ import { clipText, sanitizeText, storableClip, storableText } from "./storable-t
 
 describe("storable text", () => {
   it("removes NUL and replaces lone surrogates", () => {
-    expect(sanitizeText("a\u0000b\ud800x\udc00😀")).toBe("ab�x�😀");
+    expect(sanitizeText("a\u0000b\ud800x\udc00😀")).toBe("ab\uFFFDx\uFFFD😀");
   });
 
   it("clips without splitting a surrogate pair", () => {
