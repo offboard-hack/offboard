@@ -75,6 +75,8 @@ export function createJobsRepository(db: Database) {
       .from(jobs)
       .where(and(eq(jobs.source, "hr-link"), eq(jobs.sourceKey, input.sourceKey)));
 
+    if (!existing) throw new Error("Shared job vanished after a source conflict");
+
     return { job: toJob(existing), created: false };
   }
 

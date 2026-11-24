@@ -63,6 +63,18 @@ describe("extractJob", () => {
     ).toMatchObject({ salaryMinCents: null, salaryMaxCents: null });
   });
 
+  it("bounds and rounds salaries to database integers", async () => {
+    expect(
+      await extractJob(fake({ salaryMinCents: 750000.4, salaryMaxCents: 1.5e10 }).generate, page),
+    ).toMatchObject({ salaryMinCents: 750000, salaryMaxCents: null });
+    expect(
+      await extractJob(fake({ salaryMinCents: 0, salaryMaxCents: 0 }).generate, page),
+    ).toMatchObject({ salaryMinCents: null, salaryMaxCents: null });
+    expect(
+      await extractJob(fake({ salaryMinCents: 900000, salaryMaxCents: 750000.6 }).generate, page),
+    ).toMatchObject({ salaryMinCents: 750001, salaryMaxCents: 900000 });
+  });
+
   it("drops invalid states and blank optional strings", async () => {
     expect(
       await extractJob(fake({ state: "São Paulo", city: "  ", workModel: null }).generate, page),
@@ -89,7 +101,8 @@ describe("extractJob", () => {
     await extractJob(generate, page);
 
     expect(requests[0].prompt).toContain("https://jobs.example.com/vaga");
-    expect(requests[0].prompt).toContain("Engenheira de Software na Acme");
+    expect(requests[0].prompt).toContain("<page>\nEngenheira de Software na Acme\n</page>");
+    expect(requests[0].system).toContain("<page>");
     expect(requests[0].system).toContain("cents");
     expect(requests[0].system).toContain("isJobPosting");
   });
@@ -100,6 +113,12 @@ describe("normalizeJobUrl", () => {
     expect(
       normalizeJobUrl(new URL("https://Jobs.Example.com/vaga/?utm_source=a&b=2&a=1#apply")),
     ).toBe("https://jobs.example.com/vaga?a=1&b=2");
+  });
+
+  it("matches tracking params case-insensitively", () => {
+    expect(
+      normalizeJobUrl(new URL("https://jobs.example.com/vaga?UTM_Source=a&GCLID=1&FbClid=2&id=3")),
+    ).toBe("https://jobs.example.com/vaga?id=3");
   });
 
   it("drops click ids and keeps the root path", () => {

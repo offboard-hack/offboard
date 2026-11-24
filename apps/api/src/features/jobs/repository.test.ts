@@ -92,6 +92,23 @@ describe.skipIf(!url)("jobs repository", () => {
     expect(await db.select().from(jobs)).toHaveLength(1);
   });
 
+  it("fails clearly when a conflicting row cannot be read back", async () => {
+    const stub = Object.assign(Object.create(db), {
+      insert: () => ({
+        values: () => ({ onConflictDoNothing: () => ({ returning: async () => [] }) }),
+      }),
+      select: () => ({ from: () => ({ where: async () => [] }) }),
+    });
+
+    await expect(
+      createJobsRepository(stub).createShared({
+        ...draft,
+        url: "https://x.example.com",
+        sourceKey: "k",
+      }),
+    ).rejects.toThrow("vanished");
+  });
+
   it("returns nothing for an unknown source key", async () => {
     expect(await repository.findBySource("hr-link", "missing")).toBeUndefined();
   });
