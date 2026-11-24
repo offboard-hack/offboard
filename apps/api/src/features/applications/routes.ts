@@ -61,7 +61,7 @@ export function applicationsRoutes(
 
         if (result === "already_applied") return status(409, { error: "Already applied" });
 
-        return status(201, result);
+        return status(201, { applicationId: result.applicationId, jobUrl: result.jobUrl });
       },
       {
         talent: "active",

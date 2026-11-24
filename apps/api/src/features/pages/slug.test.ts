@@ -67,6 +67,28 @@ describe("slugs", () => {
     expect(await suggestSlug("", takenFrom(["curriculo"]))).toBe("curriculo-2");
   });
 
+  it("falls back to a random suffix after 100 taken attempts", async () => {
+    let calls = 0;
+
+    const alwaysTaken = () => {
+      calls += 1;
+
+      return true;
+    };
+
+    const short = await suggestSlug("Marina Lopes", alwaysTaken);
+
+    expect(calls).toBe(100);
+    expect(short).toMatch(/^marina-lopes-[0-9a-f]{6}$/);
+
+    const long = await suggestSlug("b".repeat(60), alwaysTaken);
+
+    expect(long).toMatch(new RegExp(`^${"b".repeat(33)}-[0-9a-f]{6}$`));
+    expect(isValidSlug(long)).toBe(true);
+    expect(await suggestSlug("Admin", alwaysTaken)).toMatch(/^admin-[0-9a-f]{6}$/);
+    expect(calls).toBe(299);
+  });
+
   it("keeps long suggestions within 40 characters", async () => {
     const name = `${"a".repeat(37)} bcdef`;
 

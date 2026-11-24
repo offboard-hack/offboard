@@ -26,7 +26,11 @@ const missingId = "00000000-0000-4000-8000-000000000001";
 
 const identified = z.object({ id: z.uuid() });
 
-const created = z.object({ applicationId: z.uuid(), jobUrl: z.string() });
+const created = z.object({
+  applicationId: z.uuid(),
+  jobUrl: z.string(),
+  publicToken: z.string(),
+});
 
 const content = {
   headline: { id: "headline", text: "Engenheira" },
@@ -162,8 +166,16 @@ describe.skipIf(!url)("applications repository", () => {
     expect(result).toEqual({
       applicationId: expect.any(String),
       jobUrl: "https://jobs.example.com/aberta",
+      publicToken: expect.stringMatching(/^[A-Za-z0-9_-]{32}$/),
     });
-    const { applicationId } = created.parse(result);
+    const { applicationId, publicToken } = created.parse(result);
+
+    expect(
+      await db
+        .select({ publicToken: applications.publicToken })
+        .from(applications)
+        .where(eq(applications.id, applicationId)),
+    ).toEqual([{ publicToken }]);
 
     expect(await row(applicationId)).toEqual([
       {
@@ -174,6 +186,28 @@ describe.skipIf(!url)("applications repository", () => {
       },
     ]);
     expect(await events(applicationId)).toEqual([{ status: "sent", closedReason: null }]);
+  });
+
+  it("gives each application its own public token", async () => {
+    const tokens = [];
+
+    for (const sourceKey of ["um", "dois", "tres"]) {
+      const result = created.parse(await repository.apply(profileId, await job(sourceKey), baseId));
+
+      tokens.push(result.publicToken);
+    }
+
+    tokens.push(
+      created.parse(await repository.apply(otherProfileId, await job("quatro"), otherBaseId))
+        .publicToken,
+    );
+
+    expect(new Set(tokens).size).toBe(4);
+    expect(
+      (await db.select({ publicToken: applications.publicToken }).from(applications))
+        .map((row) => row.publicToken)
+        .sort(),
+    ).toEqual([...tokens].sort());
   });
 
   it("stores application and event times from the application clock", async () => {

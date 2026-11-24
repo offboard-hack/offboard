@@ -144,6 +144,10 @@ async function advance(
   });
 }
 
+function newPublicToken() {
+  return Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("base64url");
+}
+
 export function createApplicationsRepository(db: Database) {
   async function apply(profileId: string, jobId: string, resumeId: string) {
     return db.transaction(async (tx) => {
@@ -171,10 +175,11 @@ export function createApplicationsRepository(db: Database) {
       if (!resume) return "resume_not_ready" as const;
 
       const now = new Date();
+      const publicToken = newPublicToken();
 
       const [created] = await tx
         .insert(applications)
-        .values({ profileId, jobId, resumeId, appliedAt: now, statusChangedAt: now })
+        .values({ profileId, jobId, resumeId, publicToken, appliedAt: now, statusChangedAt: now })
         .onConflictDoNothing({ target: [applications.profileId, applications.jobId] })
         .returning({ id: applications.id });
 
@@ -184,7 +189,7 @@ export function createApplicationsRepository(db: Database) {
         .insert(applicationEvents)
         .values({ applicationId: created.id, status: "sent", createdAt: now });
 
-      return { applicationId: created.id, jobUrl: job.url };
+      return { applicationId: created.id, jobUrl: job.url, publicToken };
     });
   }
 

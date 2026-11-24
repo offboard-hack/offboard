@@ -1,4 +1,5 @@
 const maxLength = 40;
+const maxAttempts = 100;
 const minLength = 3;
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -47,18 +48,27 @@ function baseSlug(name: string) {
   return slug.length < minLength ? "curriculo" : slug;
 }
 
+function randomHex() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(3)), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+function withSuffix(base: string, suffix: string) {
+  return `${truncate(base, maxLength - suffix.length)}${suffix}`;
+}
+
 export async function suggestSlug(
   name: string,
   taken: (slug: string) => boolean | Promise<boolean>,
 ) {
   const base = baseSlug(name);
-  let candidate = base;
 
-  for (let attempt = 2; !isValidSlug(candidate) || (await taken(candidate)); attempt += 1) {
-    const suffix = `-${attempt}`;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const candidate = attempt === 1 ? base : withSuffix(base, `-${attempt}`);
 
-    candidate = `${truncate(base, maxLength - suffix.length)}${suffix}`;
+    if (isValidSlug(candidate) && !(await taken(candidate))) return candidate;
   }
 
-  return candidate;
+  return withSuffix(base, `-${randomHex()}`);
 }
