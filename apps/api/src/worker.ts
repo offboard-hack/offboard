@@ -49,7 +49,7 @@ export function createWorkerApi(bindings: WorkerBindings) {
   const { db, run } = createRequestScopedClient(getDatabaseUrl);
   const repos = createRepositories(db);
 
-  const { auth, origin } = createRuntimeAuth(db, repos.talent, undefined, {
+  const { auth, origin, sender } = createRuntimeAuth(db, repos.talent, undefined, {
     env: config.data,
     ipAddressHeaders: ["cf-connecting-ip"],
     cloudflareEmail: bindings.EMAIL,
@@ -58,6 +58,7 @@ export function createWorkerApi(bindings: WorkerBindings) {
   const app = createApp(origin, repos, {
     adapter: CloudflareAdapter,
     auth,
+    sendEmail: (message) => sender.send(message),
     cronSecret: config.data.CRON_SECRET,
     webhookSecret: config.data.WEBHOOK_SECRET,
     slackSigningSecret: config.data.SLACK_SIGNING_SECRET,

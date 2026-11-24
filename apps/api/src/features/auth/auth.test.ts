@@ -316,30 +316,6 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     expect(await auth.resolvePrincipal(headers)).toEqual({ kind: "anonymous" });
   });
 
-  it("invites a talent profile", async () => {
-    const email = `invited-talent-${randomUUID()}@offboard.example`;
-    const profile = await enableTalent(email);
-
-    for (let attempt = 0; attempt < 5; attempt++) await auth.inviteTalent(email);
-
-    delivered.clear();
-    await auth.inviteTalent(email);
-    await auth.inviteTalent(`unknown-${randomUUID()}@offboard.example`);
-    expect([...delivered.keys()]).toEqual([email]);
-
-    const invite = new URL(delivered.get(email) ?? origin);
-    expect(invite.searchParams.get("callbackURL")).toBe("/app");
-    expect(invite.searchParams.get("errorCallbackURL")).toBe("/app/entrar");
-
-    const accepted = await verify(email);
-    expect(accepted.headers.get("location")).toBe(`${origin}/app`);
-
-    expect(await auth.resolvePrincipal(sessionHeaders(accepted))).toEqual({
-      kind: "talent",
-      profile: { id: profile.id, name: profile.name, email },
-    });
-  });
-
   it("uses the configured public origin and sends email through Resend", async () => {
     const server = createServer();
     const messages: string[] = [];

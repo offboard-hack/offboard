@@ -26,5 +26,4 @@ export type PortalAccess =
 export type PortalAuth = {
   handler: (request: Request) => Promise<Response>;
   resolvePrincipal: (headers: Headers) => Promise<PortalAccess>;
-  inviteTalent: (email: string) => Promise<void>;
 };

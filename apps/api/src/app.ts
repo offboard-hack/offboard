@@ -13,6 +13,7 @@ import { offboardingsRoutes } from "./features/offboardings/routes.js";
 import { talentRoutes } from "./features/talent/routes.js";
 import { talentAccess } from "./features/talent/access.js";
 import { companySponsors } from "./features/talent/entitlement.js";
+import { welcomeEmail, type WelcomeMessage } from "./features/talent/welcome.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
 import { portalAccess } from "./shared/access.js";
@@ -20,6 +21,7 @@ import { portalAccess } from "./shared/access.js";
 type AppOptions = {
   adapter?: NonNullable<ConstructorParameters<typeof Elysia>[0]>["adapter"];
   auth: PortalAuth;
+  sendEmail: (message: WelcomeMessage) => Promise<void>;
   correiosBaseUrl?: string;
   cronSecret?: string;
   webhookSecret?: string;
@@ -58,7 +60,11 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     )
     .use(actionConfigsRoutes(repos.actionConfigs, access))
     .use(teamRoutes(repos.team, access))
-    .use(talentRoutes(repos.talent, access, talent, (email) => options.auth.inviteTalent(email)))
+    .use(
+      talentRoutes(repos.talent, access, talent, (profile) =>
+        options.sendEmail(welcomeEmail(profile, webOrigin)),
+      ),
+    )
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
     .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret))

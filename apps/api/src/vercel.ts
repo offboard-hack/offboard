@@ -12,7 +12,6 @@ const repos = createRepositories(db);
 
 const noopAuth: PortalAuth = {
   handler: () => Promise.resolve(new Response("Auth not configured", { status: 501 })),
-  inviteTalent: () => Promise.reject(new Error("Auth not configured")),
   resolvePrincipal: () =>
     Promise.resolve({
       kind: "authenticated",
@@ -23,19 +22,23 @@ const noopAuth: PortalAuth = {
 function buildApp() {
   let auth: PortalAuth;
   let origin: string;
+  let sendEmail: (message: { to: string; subject: string; text: string }) => Promise<void>;
 
   try {
     const runtime = createRuntimeAuth(db, repos.talent, process.env.WEB_ORIGIN);
     auth = runtime.auth;
     origin = runtime.origin;
+    sendEmail = (message) => runtime.sender.send(message);
   } catch {
     auth = noopAuth;
     origin = process.env.WEB_ORIGIN ?? "*";
+    sendEmail = () => Promise.reject(new Error("Email not configured"));
   }
 
   return createApp(origin, repos, {
     adapter: node(),
     auth,
+    sendEmail,
     cronSecret: process.env.CRON_SECRET,
     webhookSecret: process.env.WEBHOOK_SECRET,
     slackSigningSecret: process.env.SLACK_SIGNING_SECRET,

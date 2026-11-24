@@ -20,7 +20,6 @@ const missingId = "00000000-0000-4000-8000-000000000000";
 
 const auth: PortalAuth = {
   handler: () => Promise.resolve(new Response("ok")),
-  inviteTalent: () => Promise.resolve(),
   resolvePrincipal(headers) {
     const role = headers.get("x-test-session") === "rh" ? "rh" : "admin";
 
@@ -151,9 +150,9 @@ describe.skipIf(!url)("billing", () => {
     );
   });
 
-  let app = createApp(webOrigin, repos, { auth });
+  let app = createApp(webOrigin, repos, { auth, sendEmail: () => Promise.resolve() });
 
-  const unconfigured = createApp(webOrigin, repos, { auth });
+  const unconfigured = createApp(webOrigin, repos, { auth, sendEmail: () => Promise.resolve() });
 
   function call(path: string, init: { method?: string; session?: string; body?: string } = {}) {
     const headers = new Headers({ origin: webOrigin });
@@ -213,6 +212,7 @@ describe.skipIf(!url)("billing", () => {
 
     app = createApp(webOrigin, repos, {
       auth,
+      sendEmail: () => Promise.resolve(),
       abacatepay: createAbacatePayGateway("secret-key", base),
       abacatepayWebhookSecret: webhookSecret,
     });

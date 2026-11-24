@@ -278,14 +278,6 @@ export function createAuth({
 
       return member ? { kind: "authenticated", principal: member } : { kind: "forbidden" };
     },
-    async inviteTalent(email) {
-      await audienceScope.run("talent", () =>
-        auth.api.signInMagicLink({
-          body: { email, callbackURL: "/app", errorCallbackURL: "/app/entrar" },
-          headers: new Headers({ origin }),
-        }),
-      );
-    },
   } satisfies PortalAuth;
 }
 
@@ -327,5 +319,5 @@ export function createRuntimeAuth(
     },
   });
 
-  return { auth, origin };
+  return { auth, origin, sender };
 }

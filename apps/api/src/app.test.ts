@@ -21,20 +21,23 @@ const webhookSecret = "test-webhook-secret";
 const slackSigningSecret = "test-slack-secret";
 
 const invitedEmails: string[] = [];
+const sentTexts: string[] = [];
 const inviteFailures = { remaining: 0 };
 
+function sendEmail(message: { to: string; text: string }) {
+  if (inviteFailures.remaining > 0) {
+    inviteFailures.remaining -= 1;
+
+    return Promise.reject(new Error("invite failed"));
+  }
+
+  invitedEmails.push(message.to);
+  sentTexts.push(message.text);
+
+  return Promise.resolve();
+}
+
 const auth: PortalAuth = {
-  inviteTalent: (email) => {
-    if (inviteFailures.remaining > 0) {
-      inviteFailures.remaining -= 1;
-
-      return Promise.reject(new Error("invite failed"));
-    }
-
-    invitedEmails.push(email);
-
-    return Promise.resolve();
-  },
   async handler(request) {
     const payload = request.method === "POST" ? await request.text() : null;
 
@@ -68,7 +71,7 @@ const auth: PortalAuth = {
   },
 };
 
-const appOptions = { auth, cronSecret, webhookSecret, slackSigningSecret };
+const appOptions = { auth, sendEmail, cronSecret, webhookSecret, slackSigningSecret };
 
 const missingTaskId = "00000000-0000-4000-8000-000000000000";
 const missingCaseId = "00000000-0000-4000-8000-000000000001";
@@ -177,6 +180,7 @@ describe.skipIf(!url)("api", () => {
 
   beforeEach(async () => {
     invitedEmails.length = 0;
+    sentTexts.length = 0;
     inviteFailures.remaining = 0;
     await seedDatabase(db, testSeedFixtures);
   });
@@ -219,6 +223,7 @@ describe.skipIf(!url)("api", () => {
       expect(created.status).toBe(201);
       expect(await created.json()).toEqual({ personalEmail, sponsoredUntil, signedIn: false });
       expect(invitedEmails).toEqual([personalEmail]);
+      expect(sentTexts.at(-1)).toContain(`${webOrigin}/app/entrar`);
 
       expect((await asSession("rh", path, "POST", body)).status).toBe(409);
       expect(
@@ -522,7 +527,7 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("rejects missing and incorrect machine credentials", async () => {
-    const noSecret = createApp(webOrigin, repos, { auth });
+    const noSecret = createApp(webOrigin, repos, { auth, sendEmail });
     const cronWithoutConfig = await noSecret.handle(cronRequest());
 
     const webhookWithoutCredential = await app.handle(
@@ -551,7 +556,7 @@ describe.skipIf(!url)("api", () => {
     expect((await app.handle(request)).status).toBe(401);
     expect((await app.handle(slackRequest('{"type":"event_callback"}', "1"))).status).toBe(401);
 
-    const noSecret = createApp(webOrigin, repos, { auth });
+    const noSecret = createApp(webOrigin, repos, { auth, sendEmail });
     expect((await noSecret.handle(slackRequest('{"type":"event_callback"}'))).status).toBe(401);
   });
 

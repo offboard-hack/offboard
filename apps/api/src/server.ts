@@ -20,11 +20,12 @@ const config = z
 
 const db = createClient(config.POSTGRES_URL);
 const repos = createRepositories(db);
-const { auth, origin } = createRuntimeAuth(db, repos.talent, config.WEB_ORIGIN);
+const { auth, origin, sender } = createRuntimeAuth(db, repos.talent, config.WEB_ORIGIN);
 
 createApp(origin, repos, {
   adapter: node(),
   auth,
+  sendEmail: (message) => sender.send(message),
   cronSecret: process.env.CRON_SECRET,
   webhookSecret: process.env.WEBHOOK_SECRET,
   slackSigningSecret: process.env.SLACK_SIGNING_SECRET,

@@ -28,7 +28,6 @@ function build(options: {
     handler: async () => new Response(),
     resolvePrincipal: async () =>
       options.access ?? { kind: "talent", profile: { id: "t1", name: "Ana", email: "a@b.c" } },
-    inviteTalent: async () => {},
   };
 
   const handler = options.handler ?? (() => {});

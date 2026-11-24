@@ -54,7 +54,7 @@ export function talentRoutes(
   repos: TalentRepository,
   access: PortalAccessPlugin,
   talentAccess: TalentAccessPlugin,
-  inviteTalent: (email: string) => Promise<void>,
+  sendWelcome: (profile: TalentProfile) => Promise<void>,
 ) {
   return new Elysia()
     .use(access)
@@ -70,7 +70,7 @@ export function talentRoutes(
           return status(409, { error: conflicts[created] });
         }
 
-        await inviteTalent(created.email);
+        await sendWelcome(created);
         set.status = 201;
 
         return toTalentAccess(created);
@@ -107,7 +107,7 @@ export function talentRoutes(
         }
 
         if (updated.firstSignedInAt === null) {
-          await inviteTalent(updated.email);
+          await sendWelcome(updated);
         }
 
         return toTalentAccess(updated);
