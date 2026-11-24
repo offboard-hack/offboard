@@ -12,6 +12,9 @@ const exportResponse = t.Object({
     email: t.String(),
     sponsoredUntil: nullable,
     termsAcceptedAt: nullable,
+    shareOutcomeWithHr: t.Boolean(),
+    firstSignedInAt: nullable,
+    createdAt: nullable,
   }),
   resumes: t.Array(
     t.Object({
@@ -63,16 +66,14 @@ export function accountRoutes(
     .delete(
       "/me",
       async ({ me, status }) => {
-        const keys = await repos.fileKeys(me.id);
-
-        if (keys.length > 0) {
-          if (!storage) return status(503, { error: "File storage not configured" });
-
+        if (storage) {
           try {
-            await storage.remove(keys);
+            await storage.removePrefix(`resumes/${me.id}/`);
           } catch {
             return status(502, { error: "Could not delete stored files" });
           }
+        } else if ((await repos.fileKeys(me.id)).length > 0) {
+          return status(503, { error: "File storage not configured" });
         }
 
         await repos.deleteProfile(me.id);

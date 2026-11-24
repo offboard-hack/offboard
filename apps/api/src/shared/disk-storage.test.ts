@@ -34,6 +34,7 @@ describe("diskStorage", () => {
 
     await expect(storage.put(key, new Uint8Array(), "text/plain")).rejects.toThrow("Invalid key");
     await expect(storage.remove([key])).rejects.toThrow("Invalid key");
+    await expect(storage.removePrefix(key)).rejects.toThrow("Invalid key");
   });
 
   it("removes existing files and ignores missing ones", async () => {
@@ -43,5 +44,18 @@ describe("diskStorage", () => {
     await storage.remove(["a/b.pdf", "a/missing.pdf"]);
 
     expect(await exists(path.join(root, "a/b.pdf"))).toBe(false);
+  });
+
+  it("removes a prefix directory with every file in it", async () => {
+    const storage = diskStorage(root);
+    await storage.put("resumes/p/recorded.pdf", new Uint8Array([1]), "application/pdf");
+    await storage.put("resumes/p/nested/orphan.docx", new Uint8Array([2]), "application/pdf");
+    await storage.put("resumes/q/kept.pdf", new Uint8Array([3]), "application/pdf");
+
+    await storage.removePrefix("resumes/p/");
+    await storage.removePrefix("resumes/missing/");
+
+    expect(await exists(path.join(root, "resumes/p"))).toBe(false);
+    expect(await exists(path.join(root, "resumes/q/kept.pdf"))).toBe(true);
   });
 });

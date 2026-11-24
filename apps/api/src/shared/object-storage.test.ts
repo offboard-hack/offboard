@@ -1,20 +1,41 @@
 import { describe, expect, it } from "vitest";
 import { r2Storage, type R2BucketLike } from "./object-storage.ts";
 
-const fakeBucket = () => {
+const fakeBucket = (stored: string[] = []) => {
   const puts: { key: string; value: Uint8Array; contentType: string }[] = [];
   const deletes: string[][] = [];
+  const lists: { prefix: string; cursor?: string; limit?: number }[] = [];
+  const objects = new Set(stored);
 
   const bucket: R2BucketLike = {
     put: async (key, value, options) => {
       puts.push({ key, value, contentType: options.httpMetadata.contentType });
     },
     delete: async (keys) => {
-      deletes.push(Array.isArray(keys) ? keys : [keys]);
+      const batch = Array.isArray(keys) ? keys : [keys];
+
+      deletes.push(batch);
+
+      for (const key of batch) objects.delete(key);
+    },
+    list: async (options) => {
+      lists.push(options);
+
+      const limit = Math.min(options.limit ?? 1000, 1000);
+
+      const matching = [...objects]
+        .filter((key) => key.startsWith(options.prefix) && key > (options.cursor ?? ""))
+        .sort();
+
+      const page = matching.slice(0, limit);
+
+      return matching.length > limit
+        ? { objects: page.map((key) => ({ key })), truncated: true, cursor: page.at(-1) }
+        : { objects: page.map((key) => ({ key })), truncated: false };
     },
   };
 
-  return { bucket, puts, deletes };
+  return { bucket, puts, deletes, lists, objects };
 };
 
 describe("r2Storage", () => {
@@ -35,6 +56,33 @@ describe("r2Storage", () => {
 
     expect(deletes.map((batch) => batch.length)).toEqual([1000, 1000, 500]);
     expect(deletes.flat()).toEqual(keys);
+  });
+
+  it("removes every object under a prefix across pages in batches of 1000", async () => {
+    const owned = Array.from(
+      { length: 2500 },
+      (_, index) => `resumes/a/${String(index).padStart(4, "0")}.pdf`,
+    );
+
+    const others = ["resumes/b/1.pdf", "resumes/ab/1.pdf", "resumes/a"];
+    const { bucket, deletes, lists, objects } = fakeBucket([...owned, ...others]);
+
+    await r2Storage(bucket).removePrefix("resumes/a/");
+
+    expect(lists).toHaveLength(3);
+    expect(lists.every((options) => options.prefix === "resumes/a/")).toBe(true);
+    expect(deletes.map((batch) => batch.length)).toEqual([1000, 1000, 500]);
+    expect(deletes.flat()).toEqual(owned);
+    expect([...objects]).toEqual(others);
+  });
+
+  it("does not delete when nothing is under the prefix", async () => {
+    const { bucket, deletes, lists } = fakeBucket(["resumes/b/1.pdf"]);
+
+    await r2Storage(bucket).removePrefix("resumes/a/");
+
+    expect(lists).toHaveLength(1);
+    expect(deletes).toEqual([]);
   });
 
   it("does nothing when there are no keys", async () => {

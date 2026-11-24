@@ -3,6 +3,7 @@ import { createClient } from "@offboard/db/client";
 import {
   applicationEvents,
   applications,
+  authAccount,
   authSession,
   authUser,
   interviews,
@@ -10,9 +11,10 @@ import {
   offboardingCases,
   resumes,
   talentProfiles,
+  teamMembers,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
-import { eq } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -52,7 +54,7 @@ describe.skipIf(!url)("account repository", () => {
   });
 
   beforeEach(async () => {
-    await db.delete(authUser);
+    await db.delete(authUser).where(like(authUser.id, "account-%"));
     await seedDatabase(db, testSeedFixtures);
 
     const [first, second] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
@@ -101,11 +103,11 @@ describe.skipIf(!url)("account repository", () => {
   async function session(owner: string, id: string) {
     await db
       .insert(authUser)
-      .values({ id: `user-${id}`, name: "Pessoa", email: `${id}@exemplo.com` });
+      .values({ id: `account-user-${id}`, name: "Pessoa", email: `${id}@exemplo.com` });
     await db.insert(authSession).values({
       id,
       token: `token-${id}`,
-      userId: `user-${id}`,
+      userId: `account-user-${id}`,
       talentProfileId: owner,
       expiresAt: new Date(Date.now() + 3_600_000),
     });
@@ -164,6 +166,9 @@ describe.skipIf(!url)("account repository", () => {
       email: "pessoa@exemplo.com",
       sponsoredUntil: "2026-12-31",
       termsAcceptedAt: null,
+      shareOutcomeWithHr: false,
+      firstSignedInAt: null,
+      createdAt: expect.any(String),
     });
     expect(exported?.resumes).toEqual([
       { kind: "base", status: "ready", content, updatedAt: expect.any(String) },
@@ -204,15 +209,34 @@ describe.skipIf(!url)("account repository", () => {
     expect(serialized).not.toContain("token-");
   });
 
-  it("exports the accepted terms timestamp", async () => {
+  it("exports the consent, sign-in and creation timestamps", async () => {
     await db
       .update(talentProfiles)
-      .set({ termsAcceptedAt: new Date("2026-11-01T12:00:00Z") })
+      .set({
+        termsAcceptedAt: new Date("2026-11-01T12:00:00Z"),
+        firstSignedInAt: new Date("2026-11-02T08:30:00Z"),
+        shareOutcomeWithHr: true,
+        createdAt: new Date("2026-10-31T09:00:00Z"),
+      })
       .where(eq(talentProfiles.id, profileId));
 
     const exported = await repository.exportData(profileId);
 
-    expect(exported?.profile.termsAcceptedAt).toBe("2026-11-01T12:00:00.000Z");
+    expect(exported?.profile).toMatchObject({
+      termsAcceptedAt: "2026-11-01T12:00:00.000Z",
+      firstSignedInAt: "2026-11-02T08:30:00.000Z",
+      shareOutcomeWithHr: true,
+      createdAt: "2026-10-31T09:00:00.000Z",
+    });
+  });
+
+  it("exports a missing creation timestamp as null", async () => {
+    await db
+      .update(talentProfiles)
+      .set({ createdAt: null })
+      .where(eq(talentProfiles.id, profileId));
+
+    expect((await repository.exportData(profileId))?.profile.createdAt).toBeNull();
   });
 
   it("exports an empty profile", async () => {
@@ -283,6 +307,47 @@ describe.skipIf(!url)("account repository", () => {
     });
 
     expect(identified.parse(again).id).not.toBe(profileId);
+  });
+
+  async function identity(id: string, email: string) {
+    await db.insert(authUser).values({ id, name: "Pessoa", email });
+    await db.insert(authAccount).values({
+      id: `${id}-account`,
+      accountId: id,
+      providerId: "magic-link",
+      userId: id,
+    });
+  }
+
+  function identities(id: string) {
+    return db.select({ id: authUser.id }).from(authUser).where(eq(authUser.id, id));
+  }
+
+  it("deletes the sign-in identity of a talent-only email", async () => {
+    await identity("account-mine", "PESSOA@exemplo.com");
+    await identity("account-other", "outra@exemplo.com");
+
+    expect(await repository.deleteProfile(profileId)).toBe(true);
+
+    expect(await identities("account-mine")).toEqual([]);
+    expect(
+      await db.select().from(authAccount).where(eq(authAccount.userId, "account-mine")),
+    ).toEqual([]);
+    expect(await identities("account-other")).toHaveLength(1);
+  });
+
+  it("keeps the sign-in identity shared with a team member", async () => {
+    await identity("account-mine", "pessoa@exemplo.com");
+    await db
+      .insert(teamMembers)
+      .values({ name: "Pessoa", email: "Pessoa@Exemplo.com", role: "rh" });
+
+    expect(await repository.deleteProfile(profileId)).toBe(true);
+
+    expect(await identities("account-mine")).toHaveLength(1);
+    expect(
+      await db.select().from(authAccount).where(eq(authAccount.userId, "account-mine")),
+    ).toHaveLength(1);
   });
 
   it("reports when there was no profile to delete", async () => {

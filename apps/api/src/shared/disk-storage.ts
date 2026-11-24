@@ -1,6 +1,6 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { ObjectStorage } from "./object-storage.ts";
+import type { ObjectStorage } from "./object-storage.js";
 
 export const diskStorage = (root: string) => {
   const base = path.resolve(root);
@@ -30,6 +30,9 @@ export const diskStorage = (root: string) => {
     remove: async (keys) => {
       const targets = keys.map(resolveKey);
       await Promise.all(targets.map((target) => rm(target, { force: true })));
+    },
+    removePrefix: async (prefix) => {
+      await rm(resolveKey(prefix), { recursive: true, force: true });
     },
   };
 

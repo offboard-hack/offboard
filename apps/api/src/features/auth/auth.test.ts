@@ -14,7 +14,7 @@ const origin = "https://offboard.example";
 describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
   if (!databaseUrl) return;
   const db = createClient(databaseUrl);
-  const { team: repos, talent } = createRepositories(db);
+  const { team: repos, talent, account } = createRepositories(db);
   const delivered = new Map<string, string>();
 
   const auth = createAuth({
@@ -79,7 +79,10 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
       sponsoredUntil: "2026-12-31",
     });
 
-    return z.object({ id: z.uuid(), name: z.string() }).parse(profile);
+    return {
+      ...z.object({ id: z.uuid(), name: z.string() }).parse(profile),
+      caseId: offboarding.id,
+    };
   }
 
   async function verify(email: string, useDefaultCallback = false) {
@@ -314,6 +317,63 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
 
     await db.delete(talentProfiles).where(eq(talentProfiles.id, profile.id));
     expect(await auth.resolvePrincipal(headers)).toEqual({ kind: "anonymous" });
+  });
+
+  it("removes the talent identity on account deletion and signs in again after re-enabling", async () => {
+    const email = `deleted-talent-${randomUUID()}@offboard.example`;
+    const profile = await enableTalent(email);
+
+    expect((await requestLink(email, "/app")).status).toBe(200);
+    const headers = sessionHeaders(await verify(email));
+    expect((await auth.resolvePrincipal(headers)).kind).toBe("talent");
+
+    expect(await account.deleteProfile(profile.id)).toBe(true);
+    expect(await db.select().from(authUser).where(eq(authUser.email, email))).toEqual([]);
+    expect(await auth.resolvePrincipal(headers)).toEqual({ kind: "anonymous" });
+
+    const again = z.object({ id: z.uuid(), name: z.string() }).parse(
+      await talent.enable({
+        caseId: profile.caseId,
+        personalEmail: email,
+        sponsoredUntil: "2026-12-31",
+      }),
+    );
+
+    delivered.clear();
+    expect((await requestLink(email, "/app")).status).toBe(200);
+
+    expect(await auth.resolvePrincipal(sessionHeaders(await verify(email)))).toEqual({
+      kind: "talent",
+      profile: { id: again.id, name: again.name, email },
+    });
+  });
+
+  it("keeps the portal identity when a team member's talent account is deleted", async () => {
+    const email = `member-talent-${randomUUID()}@offboard.example`;
+    const member = await repos.createTeamMember({ name: "Pessoa dupla", email, role: "rh" });
+    const profile = await enableTalent(email);
+
+    expect((await requestLink(email)).status).toBe(200);
+    const portal = sessionHeaders(await verify(email));
+
+    expect((await requestLink(email, "/app")).status).toBe(200);
+    const app = sessionHeaders(await verify(email));
+
+    expect(await account.deleteProfile(profile.id)).toBe(true);
+
+    expect(await auth.resolvePrincipal(portal)).toEqual({
+      kind: "authenticated",
+      principal: member,
+    });
+    expect(await auth.resolvePrincipal(app)).toEqual({ kind: "anonymous" });
+
+    expect((await requestLink(email)).status).toBe(200);
+    expect(await auth.resolvePrincipal(sessionHeaders(await verify(email)))).toEqual({
+      kind: "authenticated",
+      principal: member,
+    });
+
+    expect(await repos.deleteTeamMember(member.id)).toBe(true);
   });
 
   it("uses the configured public origin and sends email through Resend", async () => {

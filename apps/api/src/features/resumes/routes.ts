@@ -7,52 +7,11 @@ import { resumeContentInputSchema, withNodeIds } from "./content.js";
 import { readResumeFile } from "./document.js";
 import { extractResume } from "./extract.js";
 import type { ResumesRepository } from "./repository.js";
+import { resumeContentBody, resumeResponse } from "./schema.js";
 
 const maxBytes = 5_242_880;
 
 const docxType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-
-const node = { id: t.String(), text: t.String() };
-const nullable = t.Union([t.String(), t.Null()]);
-
-const resumeResponse = t.Object({
-  id: t.String(),
-  kind: t.Literal("base"),
-  content: t.Object({
-    headline: t.Object(node),
-    summary: t.Object(node),
-    experiences: t.Array(
-      t.Object({
-        id: t.String(),
-        company: t.String(),
-        role: t.String(),
-        start: t.String(),
-        end: nullable,
-        bullets: t.Array(t.Object(node)),
-      }),
-    ),
-    education: t.Array(
-      t.Object({
-        id: t.String(),
-        institution: t.String(),
-        degree: t.String(),
-        start: nullable,
-        end: nullable,
-      }),
-    ),
-    skills: t.Array(t.Object({ id: t.String(), name: t.String() })),
-    languages: t.Array(t.Object({ id: t.String(), name: t.String(), level: nullable })),
-    contact: t.Object({
-      email: nullable,
-      phone: nullable,
-      city: nullable,
-      links: t.Array(t.String()),
-    }),
-  }),
-  score: t.Union([t.Number(), t.Null()]),
-  scoredAt: nullable,
-  updatedAt: t.String(),
-});
 
 function discard(storage: ObjectStorage, keys: string[]) {
   return storage.remove(keys).catch(() => undefined);
@@ -146,8 +105,10 @@ export function resumesRoutes(
       },
       {
         talent: "active",
-        body: t.Object({ content: t.Unknown() }),
+        body: t.Object({ content: resumeContentBody }),
         response: { 200: resumeResponse, 404: errorResponse, 422: errorResponse },
+        error: ({ code, status }) =>
+          code === "VALIDATION" ? status(422, { error: "Invalid résumé content" }) : undefined,
       },
     );
 }

@@ -1,6 +1,7 @@
 export type ObjectStorage = {
   put(key: string, data: Uint8Array, contentType: string): Promise<void>;
   remove(keys: string[]): Promise<void>;
+  removePrefix(prefix: string): Promise<void>;
 };
 
 export type R2BucketLike = {
@@ -10,6 +11,11 @@ export type R2BucketLike = {
     options: { httpMetadata: { contentType: string } },
   ): Promise<object | null | void>;
   delete(keys: string | string[]): Promise<void>;
+  list(options: { prefix: string; cursor?: string; limit?: number }): Promise<{
+    objects: { key: string }[];
+    truncated: boolean;
+    cursor?: string;
+  }>;
 };
 
 const BATCH_SIZE = 1000;
@@ -23,6 +29,18 @@ export const r2Storage = (bucket: R2BucketLike) => {
       for (let start = 0; start < keys.length; start += BATCH_SIZE) {
         await bucket.delete(keys.slice(start, start + BATCH_SIZE));
       }
+    },
+    removePrefix: async (prefix) => {
+      let cursor: string | undefined;
+
+      do {
+        const page = await bucket.list({ prefix, cursor, limit: BATCH_SIZE });
+        const keys = page.objects.map((object) => object.key);
+
+        if (keys.length > 0) await bucket.delete(keys);
+
+        cursor = page.truncated ? page.cursor : undefined;
+      } while (cursor);
     },
   };
 

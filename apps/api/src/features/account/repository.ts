@@ -2,12 +2,14 @@ import type { Database } from "@offboard/db/client";
 import {
   applicationEvents,
   applications,
+  authUser,
   interviews,
   jobs,
   resumes,
   talentProfiles,
+  teamMembers,
 } from "@offboard/db/schema";
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, notExists, sql } from "drizzle-orm";
 
 export function createAccountRepository(db: Database) {
   async function exportData(profileId: string) {
@@ -17,6 +19,9 @@ export function createAccountRepository(db: Database) {
         email: talentProfiles.personalEmail,
         sponsoredUntil: talentProfiles.sponsoredUntil,
         termsAcceptedAt: talentProfiles.termsAcceptedAt,
+        shareOutcomeWithHr: talentProfiles.shareOutcomeWithHr,
+        firstSignedInAt: talentProfiles.firstSignedInAt,
+        createdAt: talentProfiles.createdAt,
       })
       .from(talentProfiles)
       .where(eq(talentProfiles.id, profileId));
@@ -80,6 +85,9 @@ export function createAccountRepository(db: Database) {
         email: profile.email,
         sponsoredUntil: profile.sponsoredUntil,
         termsAcceptedAt: profile.termsAcceptedAt?.toISOString() ?? null,
+        shareOutcomeWithHr: profile.shareOutcomeWithHr,
+        firstSignedInAt: profile.firstSignedInAt?.toISOString() ?? null,
+        createdAt: profile.createdAt?.toISOString() ?? null,
       },
       resumes: ownResumes.map((resume) => ({
         kind: resume.kind,
@@ -119,12 +127,28 @@ export function createAccountRepository(db: Database) {
   }
 
   async function deleteProfile(profileId: string) {
-    const deleted = await db
-      .delete(talentProfiles)
-      .where(eq(talentProfiles.id, profileId))
-      .returning({ id: talentProfiles.id });
+    return db.transaction(async (tx) => {
+      const [deleted] = await tx
+        .delete(talentProfiles)
+        .where(eq(talentProfiles.id, profileId))
+        .returning({ email: sql<string>`lower(${talentProfiles.personalEmail})` });
 
-    return deleted.length > 0;
+      if (!deleted) return false;
+
+      await tx.delete(authUser).where(
+        and(
+          eq(sql`lower(${authUser.email})`, deleted.email),
+          notExists(
+            tx
+              .select({ id: teamMembers.id })
+              .from(teamMembers)
+              .where(eq(sql`lower(${teamMembers.email})`, deleted.email)),
+          ),
+        ),
+      );
+
+      return true;
+    });
   }
 
   return { exportData, fileKeys, deleteProfile };

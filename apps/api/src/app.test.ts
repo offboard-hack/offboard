@@ -1,6 +1,9 @@
 import { createHmac } from "node:crypto";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
@@ -14,6 +17,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { createApp } from "./app.ts";
 import { jobDraftSchema } from "./features/jobs/extract.js";
 import type { GenerateStructured } from "./shared/ai.js";
+import { diskStorage } from "./shared/disk-storage.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
 import { zipSync } from "fflate";
 import type { FetchPageResult } from "./shared/page-text.js";
@@ -1059,13 +1063,14 @@ describe.skipIf(!url)("api", () => {
       type Store = {
         puts: { key: string; contentType: string }[];
         removed: string[];
+        prefixes: string[];
         failRemove: boolean;
       };
 
       function resumesApp(
         options: { generate?: GenerateStructured | null; storage?: boolean; draft?: object } = {},
       ) {
-        const store: Store = { puts: [], removed: [], failRemove: false };
+        const store: Store = { puts: [], removed: [], prefixes: [], failRemove: false };
 
         const storage: ObjectStorage = {
           put: async (key, _data, contentType) => {
@@ -1075,6 +1080,11 @@ describe.skipIf(!url)("api", () => {
             if (store.failRemove) throw new Error("storage down");
 
             store.removed.push(...keys);
+          },
+          removePrefix: async (prefix) => {
+            if (store.failRemove) throw new Error("storage down");
+
+            store.prefixes.push(prefix);
           },
         };
 
@@ -1091,11 +1101,11 @@ describe.skipIf(!url)("api", () => {
         return { instance, store };
       }
 
-      async function profile(email = personalEmail) {
+      async function profile(email = personalEmail, caseIndex = 0) {
         const cases: { id: string }[] = await (await call("/offboardings")).json();
 
         const created = await repos.talent.enable({
-          caseId: cases[0].id,
+          caseId: cases[caseIndex].id,
           personalEmail: email,
           sponsoredUntil,
         });
@@ -1283,6 +1293,7 @@ describe.skipIf(!url)("api", () => {
               remove: async (keys) => {
                 store.push(...keys);
               },
+              removePrefix: async () => undefined,
             },
           },
         );
@@ -1391,6 +1402,53 @@ describe.skipIf(!url)("api", () => {
         expect(await invalid.json()).toEqual({ error: "Invalid résumé content" });
       });
 
+      it("validates edits structurally and against the content limits", async () => {
+        const { instance } = resumesApp();
+        const id = await profile();
+
+        const created = await (await upload(instance, id)).json();
+
+        const structural = await request(instance, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: { ...created.content, skills: [{ name: 1 }] } },
+        });
+
+        expect(structural.status).toBe(422);
+        expect(await structural.json()).toEqual({ error: "Invalid résumé content" });
+
+        const tooMany = await request(instance, id, "/me/resume", {
+          method: "PATCH",
+          json: {
+            content: {
+              ...created.content,
+              skills: Array.from({ length: 51 }, (_, index) => ({ name: `Skill ${index}` })),
+            },
+          },
+        });
+
+        expect(tooMany.status).toBe(422);
+        expect(await tooMany.json()).toEqual({ error: "Invalid résumé content" });
+
+        const failing = createApp(
+          webOrigin,
+          {
+            ...repos,
+            resumes: {
+              ...repos.resumes,
+              updateBaseContent: () => Promise.reject(new Error("db down")),
+            },
+          },
+          appOptions,
+        );
+
+        const crashed = await request(failing, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: created.content },
+        });
+
+        expect(crashed.status).toBe(500);
+      });
+
       it("guards the résumé routes", async () => {
         const { instance } = resumesApp();
         const id = await profile();
@@ -1440,7 +1498,15 @@ describe.skipIf(!url)("api", () => {
 
         const body = await res.json();
 
-        expect(body.profile.email).toBe(personalEmail);
+        expect(body.profile).toEqual({
+          name: expect.any(String),
+          email: personalEmail,
+          sponsoredUntil,
+          termsAcceptedAt: expect.any(String),
+          shareOutcomeWithHr: false,
+          firstSignedInAt: null,
+          createdAt: expect.any(String),
+        });
         expect(body.resumes).toHaveLength(1);
         expect(body.applications).toHaveLength(1);
         expect(body.applications[0].job.title).toBe("Backend");
@@ -1479,8 +1545,35 @@ describe.skipIf(!url)("api", () => {
         const deleted = await request(instance, id, "/me", { method: "DELETE" });
 
         expect(deleted.status).toBe(204);
-        expect(store.removed).toEqual([store.puts[0].key]);
+        expect(store.prefixes).toEqual([`resumes/${id}/`]);
         expect((await request(instance, id, "/me")).status).toBe(403);
+      });
+
+      it("deletes every stored file of the profile, including unrecorded ones", async () => {
+        const root = await mkdtemp(path.join(tmpdir(), "account-delete-"));
+        const storage = diskStorage(root);
+
+        try {
+          const instance = createApp(webOrigin, repos, {
+            ...appOptions,
+            generateStructured: async ({ schema }) => schema.parse(draft),
+            storage,
+          });
+
+          const id = await profile();
+          const other = await profile("outra.pessoal@example.com", 1);
+
+          expect((await upload(instance, id)).status).toBe(200);
+          expect((await upload(instance, other)).status).toBe(200);
+
+          await storage.put(`resumes/${id}/orphan.pdf`, pdf, "application/pdf");
+
+          expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+          expect(await readdir(path.join(root, "resumes"))).toEqual([other]);
+          expect(await readdir(path.join(root, "resumes", other))).toHaveLength(1);
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
       });
 
       it("deletes an account without files even when storage is missing", async () => {
