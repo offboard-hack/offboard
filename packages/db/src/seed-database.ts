@@ -1,4 +1,12 @@
 import { eq } from "drizzle-orm";
+import {
+  applicationStages,
+  interviewStart,
+  seedApplications,
+  seedInterviews,
+  type SeedApplication,
+  type SeedInterview,
+} from "./application.fixture.ts";
 import { seedActionConfigs } from "./action-config.fixture.ts";
 import { seedPlans, seedSubscription } from "./billing.fixture.ts";
 import { seedEquipment } from "./equipment.fixture.ts";
@@ -9,9 +17,12 @@ import { seedIntegrations } from "./integration.fixture.ts";
 import { baseSeedCases, seedCases } from "./offboarding.fixture.ts";
 import {
   actionConfigs,
+  applicationEvents,
+  applications,
   equipment,
   exitSurveys,
   integrations,
+  interviews,
   invoices,
   jobs,
   offboardingCases,
@@ -27,12 +38,16 @@ import { baseSeedTeamMembers, seedTeamMembers } from "./team-member.fixture.ts";
 
 const noTalentProfiles: SeedTalentProfile[] = [];
 const noJobs: SeedJob[] = [];
+const noApplications: SeedApplication[] = [];
+const noInterviews: SeedInterview[] = [];
 
 export const testSeedFixtures = {
   cases: baseSeedCases,
   members: baseSeedTeamMembers,
   talentProfiles: noTalentProfiles,
   jobs: noJobs,
+  applications: noApplications,
+  interviews: noInterviews,
 };
 
 export async function seedDatabase(
@@ -42,9 +57,14 @@ export async function seedDatabase(
     members: seedTeamMembers,
     talentProfiles: seedTalentProfiles,
     jobs: seedJobs,
+    applications: seedApplications,
+    interviews: seedInterviews,
   },
 ) {
   await db.transaction(async (tx) => {
+    await tx.delete(interviews);
+    await tx.delete(applicationEvents);
+    await tx.delete(applications);
     await tx.delete(jobs);
     await tx.delete(actionConfigs);
     await tx.delete(invoices);
@@ -136,8 +156,49 @@ export async function seedDatabase(
       await tx.insert(talentProfiles).values({ caseId, sponsoredUntil, ...profile });
     }
 
-    if (fixtures.jobs.length > 0) {
-      await tx.insert(jobs).values(fixtures.jobs);
+    const insertedJobs =
+      fixtures.jobs.length > 0
+        ? await tx.insert(jobs).values(fixtures.jobs).returning({ id: jobs.id })
+        : [];
+
+    const [seededProfile] = await tx.select({ id: talentProfiles.id }).from(talentProfiles);
+    const applicationIds: string[] = [];
+
+    for (const item of fixtures.applications) {
+      const appliedAt = new Date(Date.now() - item.appliedDaysAgo * 86_400_000);
+      const stages = applicationStages.slice(0, applicationStages.indexOf(item.status) + 1);
+      const at = (stage: number) => new Date(appliedAt.getTime() + stage * 2 * 3_600_000);
+
+      const [created] = await tx
+        .insert(applications)
+        .values({
+          profileId: seededProfile.id,
+          jobId: insertedJobs[item.jobIndex].id,
+          status: item.status,
+          furthestStage: item.status,
+          appliedAt,
+          statusChangedAt: at(stages.length - 1),
+        })
+        .returning({ id: applications.id });
+
+      applicationIds.push(created.id);
+
+      await tx.insert(applicationEvents).values(
+        stages.map((status, stage) => ({
+          applicationId: created.id,
+          status,
+          createdAt: at(stage),
+        })),
+      );
+    }
+
+    for (const item of fixtures.interviews) {
+      await tx.insert(interviews).values({
+        applicationId: applicationIds[item.applicationIndex],
+        startsAt: interviewStart(item.startsInDays),
+        mode: item.mode,
+        withWhom: item.withWhom,
+      });
     }
 
     if (seedIntegrations.length > 0) {

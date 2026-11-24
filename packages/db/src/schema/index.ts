@@ -145,6 +145,85 @@ export const jobs = pgTable(
   ],
 );
 
+export const applicationStatusEnum = pgEnum("application_status", [
+  "sent",
+  "in_review",
+  "interview",
+  "offer",
+  "closed",
+]);
+
+export const applicationClosedReasonEnum = pgEnum("application_closed_reason", [
+  "rejected",
+  "withdrawn",
+  "hired",
+]);
+
+export const interviewModeEnum = pgEnum("interview_mode", ["video", "in_person", "phone"]);
+
+export const applications = pgTable(
+  "applications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "restrict" }),
+    status: applicationStatusEnum("status").notNull().default("sent"),
+    furthestStage: applicationStatusEnum("furthest_stage").notNull().default("sent"),
+    closedReason: applicationClosedReasonEnum("closed_reason"),
+    appliedAt: timestamp("applied_at").notNull().defaultNow(),
+    statusChangedAt: timestamp("status_changed_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("applications_profile_job_idx").on(table.profileId, table.jobId),
+    index("applications_profile_id_idx").on(table.profileId),
+    check(
+      "applications_closed_reason",
+      sql`(${table.status} = 'closed') = (${table.closedReason} is not null)`,
+    ),
+    check("applications_furthest_stage", sql`${table.furthestStage} <> 'closed'`),
+  ],
+);
+
+export const applicationEvents = pgTable(
+  "application_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    status: applicationStatusEnum("status").notNull(),
+    closedReason: applicationClosedReasonEnum("closed_reason"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("application_events_application_id_idx").on(table.applicationId)],
+);
+
+export const interviews = pgTable(
+  "interviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    mode: interviewModeEnum("mode").notNull(),
+    withWhom: varchar("with_whom", { length: 255 }).notNull(),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("interviews_application_id_idx").on(table.applicationId),
+    index("interviews_starts_at_idx").on(table.startsAt),
+  ],
+);
+
 export const offboardingCasesRelations = relations(offboardingCases, ({ many, one }) => ({
   tasks: many(tasks),
   equipment: many(equipment),
