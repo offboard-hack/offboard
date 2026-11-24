@@ -1,13 +1,13 @@
-export type Entitlement = { kind: "sponsored"; until: string } | { kind: "lapsed"; until: null };
+import { saoPauloDate } from "./sao-paulo-date.js";
 
-const saoPauloDay = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" });
+export type Entitlement = { kind: "sponsored"; until: string } | { kind: "lapsed"; until: null };
 
 export function entitlementOf(input: {
   sponsoredUntil: string;
   companyActive: boolean;
   now: Date;
 }) {
-  if (input.companyActive && saoPauloDay.format(input.now) <= input.sponsoredUntil) {
+  if (input.companyActive && saoPauloDate(input.now) <= input.sponsoredUntil) {
     return { kind: "sponsored", until: input.sponsoredUntil } satisfies Entitlement;
   }
 

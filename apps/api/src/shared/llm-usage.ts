@@ -1,18 +1,15 @@
 import type { Database } from "@offboard/db/client";
 import { llmUsage } from "@offboard/db/schema";
 import { lt, sql } from "drizzle-orm";
+import { saoPauloDate } from "./sao-paulo-date.js";
 
 const dailyCalls = 30;
 const dayMs = 24 * 60 * 60_000;
 const saoPauloOffsetMs = 3 * 60 * 60_000;
 
-function saoPauloDay(now: Date) {
-  return new Date(now.getTime() - saoPauloOffsetMs).toISOString().slice(0, 10);
-}
-
 export function createUsageRepository(db: Database) {
   async function takeLlmCall(profileId: string, now: Date) {
-    const day = saoPauloDay(now);
+    const day = saoPauloDate(now);
 
     const [taken] = await db
       .insert(llmUsage)
