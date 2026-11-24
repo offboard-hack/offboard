@@ -246,12 +246,26 @@ describe.skipIf(!url)("matches repository", () => {
     expect(await repository.freshJobIds(otherProfileId, old)).toEqual(new Set());
   });
 
-  it("lists profiles that have a base résumé", async () => {
-    expect(await repository.profilesWithBaseResume()).toEqual([]);
+  it("lists profiles to match: a base résumé, terms accepted and still sponsored", async () => {
+    const lastDay = new Date("2027-01-01T02:59:59.999Z");
+    const lapsed = new Date("2027-01-01T03:00:00.000Z");
 
+    expect(await repository.profilesForMatching(lastDay)).toEqual([]);
+
+    await base(profileId);
     await base(otherProfileId);
 
-    expect(await repository.profilesWithBaseResume()).toEqual([otherProfileId]);
+    expect(await repository.profilesForMatching(lastDay)).toEqual([]);
+
+    await repos.talent.acceptTerms(otherProfileId);
+
+    expect(await repository.profilesForMatching(lastDay)).toEqual([otherProfileId]);
+    expect(await repository.profilesForMatching(lapsed)).toEqual([]);
+
+    await repos.talent.acceptTerms(profileId);
+    await db.delete(resumes).where(eq(resumes.profileId, otherProfileId));
+
+    expect(await repository.profilesForMatching(lastDay)).toEqual([profileId]);
   });
 
   describe("candidates", () => {

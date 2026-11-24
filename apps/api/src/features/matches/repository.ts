@@ -1,6 +1,6 @@
 import type { Database } from "@offboard/db/client";
-import { jobMatches, jobs, resumes } from "@offboard/db/schema";
-import { and, asc, desc, eq, isNull, notInArray, sql } from "drizzle-orm";
+import { jobMatches, jobs, resumes, talentProfiles } from "@offboard/db/schema";
+import { and, asc, desc, eq, gte, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import type { MatchJob, MatchResult } from "./score.js";
 
 const version = sql<Date>`coalesce(${resumes.updatedAt}, ${resumes.createdAt})`.mapWith(
@@ -25,6 +25,8 @@ const vector = sql`to_tsvector('portuguese', ${jobs.title} || ' ' || ${jobs.desc
 const newest = [sql`${jobs.postedAt} desc nulls last`, desc(jobs.createdAt), asc(jobs.id)];
 
 const open = isNull(jobs.closedAt);
+
+const saoPauloOffsetMs = 3 * 60 * 60_000;
 
 export function createMatchesRepository(db: Database) {
   async function baseResume(profileId: string) {
@@ -129,17 +131,26 @@ export function createMatchesRepository(db: Database) {
     });
   }
 
-  async function profilesWithBaseResume() {
+  async function profilesForMatching(now: Date) {
+    const today = new Date(now.getTime() - saoPauloOffsetMs).toISOString().slice(0, 10);
+
     const rows = await db
       .select({ profileId: resumes.profileId })
       .from(resumes)
-      .where(eq(resumes.kind, "base"))
+      .innerJoin(talentProfiles, eq(talentProfiles.id, resumes.profileId))
+      .where(
+        and(
+          eq(resumes.kind, "base"),
+          isNotNull(talentProfiles.termsAcceptedAt),
+          gte(talentProfiles.sponsoredUntil, today),
+        ),
+      )
       .orderBy(asc(resumes.profileId));
 
     return rows.map((row) => row.profileId);
   }
 
-  return { baseResume, candidates, freshJobIds, saveMatches, profilesWithBaseResume };
+  return { baseResume, candidates, freshJobIds, saveMatches, profilesForMatching };
 }
 
 export type MatchesRepository = ReturnType<typeof createMatchesRepository>;

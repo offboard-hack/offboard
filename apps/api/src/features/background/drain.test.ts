@@ -200,6 +200,30 @@ describe.skipIf(!url)("background drain", () => {
     ]);
   });
 
+  it("drains only the target job when given one", async () => {
+    await repository.enqueue("compute_matches", "a-older", {}, minutesAfter(start, -10));
+    await repository.enqueue("score_resume", "b-mine");
+
+    const seen: string[] = [];
+
+    const record: JobHandler = async (job) => {
+      seen.push(`${job.kind}:${job.subject}`);
+    };
+
+    const result = await drain(
+      repository,
+      { score_resume: record, compute_matches: record },
+      { limit: 1, target: { kind: "score_resume", subject: "b-mine" } },
+    );
+
+    expect(result).toEqual({ processed: 1, failed: 0 });
+    expect(seen).toEqual(["score_resume:b-mine"]);
+    expect((await rows()).map((job) => [job.subject, job.status])).toEqual([
+      ["a-older", "pending"],
+      ["b-mine", "done"],
+    ]);
+  });
+
   it("processes at most five jobs by default", async () => {
     for (let index = 0; index < 6; index += 1) {
       await repository.enqueue("score_resume", `resume-${index}`, {}, minutesAfter(start, index));

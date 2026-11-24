@@ -124,19 +124,24 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
   async function rescore(resumeId: string, profileId: string) {
     const scoring = await enqueued("score_resume", resumeId);
-    const matching = await enqueued("compute_matches", profileId);
 
-    if (!scoring && !matching) return;
+    await enqueued("compute_matches", profileId);
+
+    if (!scoring) return;
 
     runInBackground(async () => {
-      await drain(repos.background, handlers, { limit: 1 });
+      await drain(repos.background, handlers, {
+        limit: 1,
+        target: { kind: "score_resume", subject: resumeId },
+      });
     });
   }
 
   async function matchNewJob() {
-    for (const profileId of await repos.matches.profilesWithBaseResume()) {
-      await enqueued("compute_matches", profileId);
-    }
+    await repos.background.enqueueMany(
+      "compute_matches",
+      await repos.matches.profilesForMatching(new Date()),
+    );
   }
 
   return new Elysia({ adapter: options.adapter, prefix: "/api" })

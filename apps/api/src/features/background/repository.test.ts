@@ -152,6 +152,27 @@ describe.skipIf(!url)("background repository", () => {
     expect(upload?.runAfter.getTime()).toBeLessThanOrEqual(Date.now());
   });
 
+  it("enqueues many subjects at once, keeping existing pending jobs", async () => {
+    await repository.enqueue("compute_matches", "profile-0", { reason: "edit" }, start);
+
+    const subjects = Array.from({ length: 2_001 }, (_, index) => `profile-${index}`);
+
+    await repository.enqueueMany("compute_matches", [...subjects, "profile-1"]);
+    await repository.enqueueMany("compute_matches", []);
+
+    const stored = await rows();
+
+    expect(stored).toHaveLength(2_001);
+    expect(new Set(stored.map((job) => job.subject))).toEqual(new Set(subjects));
+    expect(stored.every((job) => job.kind === "compute_matches" && job.status === "pending")).toBe(
+      true,
+    );
+    expect(stored.find((job) => job.subject === "profile-0")).toMatchObject({
+      payload: { reason: "edit" },
+      runAfter: start,
+    });
+  });
+
   it("allows a new pending job while the same subject is running", async () => {
     const job = await running("resume-1");
 
@@ -265,6 +286,54 @@ describe.skipIf(!url)("background repository", () => {
       lockedUntil: null,
       lastError: "Stopped while running",
     });
+  });
+
+  it("claims only the target kind and subject when given one", async () => {
+    const target = { kind: "score_resume", subject: "mine" };
+
+    await repository.enqueue("compute_matches", "older", {}, minutesAfter(start, -10));
+    await repository.enqueue("compute_matches", "mine", {}, minutesAfter(start, -5));
+    await repository.enqueue("score_resume", "other", {}, minutesAfter(start, -4));
+
+    expect(await repository.claim(5, start, target)).toEqual([]);
+
+    await repository.enqueue("score_resume", "mine", { n: 1 }, start);
+
+    expect(await repository.claim(5, start, target)).toEqual([
+      {
+        id: expect.any(String),
+        kind: "score_resume",
+        subject: "mine",
+        payload: { n: 1 },
+        attempts: 1,
+      },
+    ]);
+    expect(await repository.claim(5, start, target)).toEqual([]);
+    expect((await rows()).map((job) => [job.kind, job.subject, job.status])).toEqual([
+      ["compute_matches", "older", "pending"],
+      ["compute_matches", "mine", "pending"],
+      ["score_resume", "other", "pending"],
+      ["score_resume", "mine", "running"],
+    ]);
+  });
+
+  it("reclaims or fails a stale target and leaves other stale jobs alone", async () => {
+    const target = { kind: "score_resume", subject: "stuck" };
+    const job = await running("stuck");
+    const other = await running("other");
+
+    const [reclaimed] = await repository.claim(1, minutesAfter(start, 6), target);
+
+    expect(reclaimed).toMatchObject({ id: job.id, attempts: 2 });
+    expect(await repository.claim(1, minutesAfter(start, 12), target)).toEqual([
+      expect.objectContaining({ id: job.id, attempts: 3 }),
+    ]);
+    expect(await repository.claim(1, minutesAfter(start, 18), target)).toEqual([]);
+    expect(await row(job.id)).toMatchObject({
+      status: "failed",
+      lastError: "Stopped while running",
+    });
+    expect(await row(other.id)).toMatchObject({ status: "running", attempts: 1 });
   });
 
   it("never claims finished jobs", async () => {

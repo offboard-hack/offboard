@@ -14,9 +14,12 @@ export type BackgroundJob = {
 
 type Claimed = Pick<BackgroundJob, "id" | "attempts">;
 
+export type ClaimTarget = { kind: string; subject: string };
+
 const lockMs = 5 * 60_000;
 const maxAttempts = 3;
 const maxErrorLength = 2_000;
+const enqueueChunk = 1_000;
 
 const twin = alias(backgroundJobs, "pending_twin");
 
@@ -86,7 +89,36 @@ export function createBackgroundRepository(db: Database) {
       });
   }
 
-  async function claim(limit: number, now = new Date()) {
+  async function enqueueMany(kind: string, subjects: string[]) {
+    const unique = [...new Set(subjects)];
+
+    for (let start = 0; start < unique.length; start += enqueueChunk) {
+      const now = new Date();
+
+      await db
+        .insert(backgroundJobs)
+        .values(
+          unique.slice(start, start + enqueueChunk).map((subject) => ({
+            kind,
+            subject,
+            payload: {},
+            runAfter: now,
+            createdAt: now,
+            updatedAt: now,
+          })),
+        )
+        .onConflictDoNothing({
+          target: [backgroundJobs.kind, backgroundJobs.subject],
+          where: sql`status = 'pending'`,
+        });
+    }
+  }
+
+  async function claim(limit: number, now = new Date(), target?: ClaimTarget) {
+    const targeted =
+      target &&
+      and(eq(backgroundJobs.kind, target.kind), eq(backgroundJobs.subject, target.subject));
+
     return db.transaction(async (tx) => {
       await tx
         .update(backgroundJobs)
@@ -102,7 +134,7 @@ export function createBackgroundRepository(db: Database) {
             tx
               .select({ id: backgroundJobs.id })
               .from(backgroundJobs)
-              .where(and(expired(now), gte(backgroundJobs.attempts, maxAttempts)))
+              .where(and(targeted, expired(now), gte(backgroundJobs.attempts, maxAttempts)))
               .for("update", { skipLocked: true }),
           ),
         );
@@ -111,9 +143,12 @@ export function createBackgroundRepository(db: Database) {
         .select({ id: backgroundJobs.id })
         .from(backgroundJobs)
         .where(
-          or(
-            and(eq(backgroundJobs.status, "pending"), lte(backgroundJobs.runAfter, now)),
-            and(expired(now), lt(backgroundJobs.attempts, maxAttempts)),
+          and(
+            targeted,
+            or(
+              and(eq(backgroundJobs.status, "pending"), lte(backgroundJobs.runAfter, now)),
+              and(expired(now), lt(backgroundJobs.attempts, maxAttempts)),
+            ),
           ),
         )
         .orderBy(asc(backgroundJobs.runAfter), asc(backgroundJobs.id))
@@ -190,7 +225,7 @@ export function createBackgroundRepository(db: Database) {
       .where(held(job));
   }
 
-  return { enqueue, claim, complete, retry, postpone };
+  return { enqueue, enqueueMany, claim, complete, retry, postpone };
 }
 
 export type BackgroundRepository = ReturnType<typeof createBackgroundRepository>;

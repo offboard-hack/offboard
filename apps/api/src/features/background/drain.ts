@@ -1,4 +1,4 @@
-import type { BackgroundJob, BackgroundRepository } from "./repository.js";
+import type { BackgroundJob, BackgroundRepository, ClaimTarget } from "./repository.js";
 
 export type JobHandler = (job: BackgroundJob) => Promise<void | { postponeUntil: Date }>;
 
@@ -16,15 +16,15 @@ async function run(handlers: Record<string, JobHandler>, job: BackgroundJob) {
 export async function drain(
   repo: BackgroundRepository,
   handlers: Record<string, JobHandler>,
-  options: { limit?: number; budgetMs?: number; now?: () => number } = {},
+  options: { limit?: number; budgetMs?: number; now?: () => number; target?: ClaimTarget } = {},
 ) {
-  const { limit = 5, budgetMs = 20_000, now = Date.now } = options;
+  const { limit = 5, budgetMs = 20_000, now = Date.now, target } = options;
   const startedAt = now();
   let processed = 0;
   let failed = 0;
 
   while (processed + failed < limit && now() - startedAt < budgetMs) {
-    const [job] = await repo.claim(1);
+    const [job] = await repo.claim(1, undefined, target);
 
     if (!job) break;
 

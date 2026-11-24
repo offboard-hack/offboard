@@ -1855,19 +1855,49 @@ describe.skipIf(!url)("api", () => {
         expect(await scoreJobs()).toMatchObject([{ status: "done" }, { status: "done" }]);
       });
 
-      it("drains at most one job per kick", async () => {
+      it("kicks only the score of the edited résumé, leaving older jobs to the cron", async () => {
         const app = resumesApp();
         const id = await profile();
+        const other = await profile("outra.pessoal@example.com", 1);
+        const created = await (await upload(app.instance, id)).json();
 
-        await repos.background.enqueue("score_resume", crypto.randomUUID());
-        await upload(app.instance, id);
+        await app.settle();
+
+        const past = new Date(Date.now() - 60_000);
+        const backlog = crypto.randomUUID();
+
+        await repos.background.enqueue("compute_matches", id, {}, past);
+        await repos.background.enqueue("compute_matches", other, {}, past);
+        await repos.background.enqueue("score_resume", backlog, {}, past);
+
+        await request(app.instance, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: created.content },
+        });
 
         expect(await app.kicks()).toBe(1);
+        expect(app.scoring.calls).toBe(2);
         expect(
-          (await db.select({ status: backgroundJobs.status }).from(backgroundJobs))
-            .map((job) => job.status)
+          (
+            await db
+              .select({
+                kind: backgroundJobs.kind,
+                subject: backgroundJobs.subject,
+                status: backgroundJobs.status,
+              })
+              .from(backgroundJobs)
+              .where(eq(backgroundJobs.status, "pending"))
+          )
+            .map((job) => `${job.kind}:${job.subject}`)
             .sort(),
-        ).toEqual(["done", "pending", "pending"]);
+        ).toEqual(
+          [`compute_matches:${id}`, `compute_matches:${other}`, `score_resume:${backlog}`].sort(),
+        );
+        expect(await scoreJobs()).toMatchObject([
+          { subject: created.id, status: "done" },
+          { subject: backlog, status: "pending" },
+          { subject: created.id, status: "done" },
+        ]);
       });
 
       it("keeps a saved résumé when enqueueing its score fails", async () => {
@@ -2193,7 +2223,7 @@ describe.skipIf(!url)("api", () => {
         const id = await profile();
 
         expect((await upload(instance, id)).status).toBe(200);
-        expect(kicks).toBe(1);
+        expect(kicks).toBe(0);
         expect(await scoreJobs()).toEqual([]);
         expect(await matchJobs()).toMatchObject([{ subject: id, status: "pending" }]);
       });
@@ -2214,6 +2244,8 @@ describe.skipIf(!url)("api", () => {
         overrides: Partial<typeof repos> = {},
         generate: GenerateStructured = async ({ schema }) => schema.parse(sharedJob),
       ) {
+        const kicked = { count: 0 };
+
         const instance = createApp(
           webOrigin,
           { ...repos, ...overrides },
@@ -2222,12 +2254,12 @@ describe.skipIf(!url)("api", () => {
             generateStructured: generate,
             fetchPage: async (pageUrl) => ({ url: pageUrl, text: "Vaga de engenharia" }),
             runInBackground: () => {
-              throw new Error("should not kick a drain");
+              kicked.count += 1;
             },
           },
         );
 
-        return (shareUrl: string) =>
+        const share = (shareUrl: string) =>
           instance.handle(
             new Request("http://localhost/api/jobs/share", {
               method: "POST",
@@ -2239,6 +2271,8 @@ describe.skipIf(!url)("api", () => {
               body: JSON.stringify({ url: shareUrl }),
             }),
           );
+
+        return { share, kicked };
       }
 
       it("fans out matching to profiles with a base résumé when HR shares a new job", async () => {
@@ -2250,7 +2284,7 @@ describe.skipIf(!url)("api", () => {
         await app.settle();
         await db.delete(backgroundJobs);
 
-        const share = shareApp();
+        const { share, kicked } = shareApp();
 
         expect((await share("https://jobs.example.com/nova")).status).toBe(201);
         expect(await matchJobs()).toMatchObject([{ subject: withResume, status: "pending" }]);
@@ -2259,6 +2293,7 @@ describe.skipIf(!url)("api", () => {
 
         expect((await share("https://jobs.example.com/nova")).status).toBe(200);
         expect(await matchJobs()).toEqual([]);
+        expect(kicked.count).toBe(0);
       });
 
       it("fans out nothing when a concurrent share created the job first", async () => {
@@ -2269,7 +2304,7 @@ describe.skipIf(!url)("api", () => {
         await app.settle();
         await db.delete(backgroundJobs);
 
-        const share = shareApp({}, async ({ schema }) => {
+        const { share } = shareApp({}, async ({ schema }) => {
           const { isJobPosting: _ignored, ...job } = jobDraftSchema.parse(sharedJob);
 
           await repos.jobs.createShared({
@@ -2295,20 +2330,20 @@ describe.skipIf(!url)("api", () => {
         const failingEnqueue = shareApp({
           background: {
             ...repos.background,
-            enqueue: () => Promise.reject(new Error("queue down")),
+            enqueueMany: () => Promise.reject(new Error("queue down")),
           },
         });
 
-        expect((await failingEnqueue("https://jobs.example.com/fila")).status).toBe(201);
+        expect((await failingEnqueue.share("https://jobs.example.com/fila")).status).toBe(201);
 
         const failingProfiles = shareApp({
           matches: {
             ...repos.matches,
-            profilesWithBaseResume: () => Promise.reject(new Error("db down")),
+            profilesForMatching: () => Promise.reject(new Error("db down")),
           },
         });
 
-        expect((await failingProfiles("https://jobs.example.com/perfis")).status).toBe(201);
+        expect((await failingProfiles.share("https://jobs.example.com/perfis")).status).toBe(201);
         expect(
           await repos.jobs.findBySource("hr-link", "https://jobs.example.com/perfis"),
         ).toBeDefined();
