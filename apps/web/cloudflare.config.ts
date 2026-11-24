@@ -1,6 +1,7 @@
 import { bindings, defineConfig, triggers, type WorkerConfig } from "cf/config";
 import { z } from "zod";
 import * as entrypoint from "./cloudflare.worker.ts" with { type: "cf-worker" };
+import { cronSchedules } from "./src/cron-schedules.ts";
 
 const apiConfigured = process.env.OFFBOARD_API_CONFIGURED === "1";
 const cronEnabled = apiConfigured && process.env.OFFBOARD_ENABLE_CRON === "1";
@@ -47,10 +48,7 @@ export default defineConfig({
     domains: ["app.off-board.xyz"],
     env,
     triggers: cronEnabled
-      ? [
-          triggers.scheduled({ schedule: "0 8 * * *" }),
-          triggers.scheduled({ schedule: "*/15 * * * *" }),
-        ]
+      ? Object.values(cronSchedules).map((schedule) => triggers.scheduled({ schedule }))
       : [],
   },
 });
