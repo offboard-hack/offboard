@@ -1,16 +1,48 @@
 import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { listPagination } from "@/shared/lib/list-pagination";
-import { Alert02Icon, Calendar03Icon, Tick02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
+import {
+  Alert02Icon,
+  Calendar03Icon,
+  Delete02Icon,
+  MoreHorizontalIcon,
+  Search01Icon,
+  Tick02Icon,
+  UserGroupIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { classProps } from "../../shared/lib/class-props";
-import { getTrackingStatus, equipmentStatus, trackingStatus } from "./status";
+import {
+  equipmentReturnMethod,
+  equipmentStatus,
+  equipmentStatusValues,
+  getTrackingStatus,
+  trackingStatus,
+} from "./status";
+import { AddEquipmentDialog } from "./add-equipment-dialog";
+import type { NewEquipmentInput } from "./add-equipment-dialog";
 import { formatShortDeadline, offboardingsQuery, taskTrackingQuery } from "@/entities/offboarding";
 import { useQueries, useSuspenseQuery } from "@tanstack/react-query";
+import { Button } from "@/shared/ui/shadcn/button";
+import { Input } from "@/shared/ui/shadcn/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/shared/ui/shadcn/dropdown-menu";
 import { getRouteApi } from "@tanstack/react-router";
-import { equipmentQuery } from "@/entities/equipment";
-import type { EquipmentReturnMethod, EquipmentStatus } from "@/entities/equipment";
-import { useMemo } from "react";
+import {
+  equipmentQuery,
+  useCreateEquipment,
+  useDeleteEquipment,
+  useUpdateEquipment,
+} from "@/entities/equipment";
+import type { EquipmentRow, EquipmentStatus } from "@/entities/equipment";
+import { createPortalAbility } from "@offboard/access";
+import { useMemo, useState } from "react";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
 import { portalStyles } from "../../shared/ui/surface.styles";
@@ -18,11 +50,13 @@ import { portalStyles } from "../../shared/ui/surface.styles";
 const styles = {
   section: "rounded-2xl border bg-card p-4 sm:p-5",
   inventory: "min-w-2xl",
-  badge: "text-xs font-medium text-primary",
-  badgeNeutral: "text-muted-foreground",
-  badgeReady: "text-foreground",
-  badgeTransit: "text-foreground",
-  badgeWarning: "text-destructive",
+  badge: "text-xs font-medium",
+  statusInUse: "bg-blue-100 text-blue-900 dark:bg-blue-900/30 dark:text-blue-200",
+  statusPendingReturn: "bg-yellow-100 text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-200",
+  statusInTransit: "bg-orange-100 text-orange-900 dark:bg-orange-900/30 dark:text-orange-200",
+  statusReceived: "bg-green-100 text-green-900 dark:bg-green-900/30 dark:text-green-200",
+  statusInInventory: "bg-muted text-muted-foreground",
+  statusDecommissioned: "bg-red-100 text-red-900 dark:bg-red-900/30 dark:text-red-200",
   trackingNone: "bg-muted text-muted-foreground",
   trackingWaiting: "bg-muted text-muted-foreground",
   trackingTransit: "bg-yellow-100 text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-200",
@@ -31,37 +65,16 @@ const styles = {
   steps: "mt-3 list-decimal space-y-1 pl-5 text-sm",
 };
 
-type Equipment = {
-  item: string;
-  tag: string;
-  person: string;
-  method: string;
-  date: { iso: string; label: string } | null;
-  status: keyof typeof equipmentStatus;
+const statusBadges: Record<EquipmentStatus, string> = {
+  in_use: styles.statusInUse,
+  pending_return: styles.statusPendingReturn,
+  in_transit: styles.statusInTransit,
+  received: styles.statusReceived,
+  in_inventory: styles.statusInInventory,
+  decommissioned: styles.statusDecommissioned,
 };
 
-const returnMethodLabels: Record<EquipmentReturnMethod, string> = {
-  pickup: "Coleta em casa",
-  in_person: "Entrega no escritório",
-};
-
-const statusKeys: Record<EquipmentStatus, keyof typeof equipmentStatus> = {
-  with_person: "withPerson",
-  scheduled: "scheduled",
-  transit: "transit",
-  received: "received",
-  inventory: "inventory",
-  failed: "failed",
-};
-
-const assetBadges = {
-  scheduled: null,
-  received: styles.badgeReady,
-  failed: styles.badgeWarning,
-  inventory: styles.badgeReady,
-  transit: styles.badgeTransit,
-  withPerson: styles.badgeNeutral,
-};
+const removableStatuses: EquipmentStatus[] = ["in_inventory", "decommissioned"];
 
 type Shipment = {
   id: string;
@@ -139,49 +152,8 @@ const shipmentColumns: TableColumn<Shipment>[] = [
   },
 ];
 
-const equipmentColumns: TableColumn<Equipment>[] = [
-  {
-    id: "item",
-    accessorFn: ({ item }) => item,
-    header: "Item",
-    enableSorting: true,
-    sortFn: "portugueseText",
-    meta: { cellStyle: portalStyles.tableHeading },
-  },
-  { id: "tag", accessorFn: ({ tag }) => tag, header: "Patrimônio" },
-  {
-    id: "person",
-    accessorFn: ({ person }) => person,
-    header: "Pessoa",
-    enableSorting: true,
-    sortFn: "portugueseText",
-  },
-  { id: "method", accessorFn: ({ method }) => method, header: "Como volta" },
-  {
-    id: "date",
-    header: "Data",
-    cell: ({ row }) => {
-      const { date } = row.original;
-
-      return date ? <time dateTime={date.iso}>{date.label}</time> : "Sem data";
-    },
-  },
-  {
-    id: "status",
-    header: "Situação",
-    cell: ({ row }) => {
-      const { status } = row.original;
-
-      return (
-        <Badge variant="secondary" {...classProps(styles.badge, assetBadges[status])}>
-          {equipmentStatus[status]}
-        </Badge>
-      );
-    },
-  },
-];
-
 const route = getRouteApi("/_portal/bens-e-coleta");
+const portalRoute = getRouteApi("/_portal");
 
 export function EquipmentPage() {
   const navigate = route.useNavigate();
@@ -199,10 +171,19 @@ export function EquipmentPage() {
 
   const status = requestedStatus ?? "";
 
+  const [search, setSearch] = useState("");
+
+  const { principal } = portalRoute.useRouteContext();
+  const ability = createPortalAbility(principal.role);
+  const canUpdate = ability.can("update", "Offboarding");
+  const canManage = ability.can("manage", "all");
+
   function setStatus(next: string) {
     if (next !== status) {
+      const nextStatus = equipmentStatusValues.find((value) => value === next);
+
       void navigate({
-        search: (previous) => ({ ...previous, status: next || undefined, page: undefined }),
+        search: (previous) => ({ ...previous, status: nextStatus, page: undefined }),
         resetScroll: false,
       });
     }
@@ -210,22 +191,110 @@ export function EquipmentPage() {
 
   const { data: cases } = useSuspenseQuery(offboardingsQuery);
 
-  const { data: equipmentRows } = useSuspenseQuery(equipmentQuery);
+  const { data: equipment } = useSuspenseQuery(equipmentQuery());
 
-  const equipment: Equipment[] = useMemo(
-    () =>
-      equipmentRows.map((row) => ({
-        item: row.item,
-        tag: row.tag,
-        person: row.person,
-        method: returnMethodLabels[row.returnMethod],
-        date: row.scheduledDate
-          ? { iso: row.scheduledDate, label: formatShortDeadline(row.scheduledDate) }
-          : null,
-        status: statusKeys[row.status],
-      })),
-    [equipmentRows],
-  );
+  const create = useCreateEquipment();
+  const update = useUpdateEquipment();
+  const remove = useDeleteEquipment();
+
+  async function addEquipment({ item, tag, serialNumber }: NewEquipmentInput) {
+    await create.mutateAsync({ item, tag, ...(serialNumber && { serialNumber }) });
+  }
+
+  function changeStatus(id: string, next: EquipmentStatus) {
+    update.mutate({
+      id,
+      changes:
+        next === "in_inventory"
+          ? { status: next, assignedTo: null, assignedEmail: null, caseId: null, taskId: null }
+          : { status: next },
+    });
+  }
+
+  const equipmentColumns: TableColumn<EquipmentRow>[] = [
+    {
+      id: "item",
+      accessorFn: ({ item }) => item,
+      header: "Item",
+      enableSorting: true,
+      sortFn: "portugueseText",
+      meta: { cellStyle: portalStyles.tableHeading },
+    },
+    { id: "tag", accessorFn: ({ tag }) => tag, header: "Patrimônio" },
+    {
+      id: "assignedTo",
+      accessorFn: ({ assignedTo }) => assignedTo ?? "—",
+      header: "Responsável",
+      enableSorting: true,
+      sortFn: "portugueseText",
+    },
+    {
+      id: "status",
+      header: "Situação",
+      cell: ({ row }) => {
+        const { status: rowStatus } = row.original;
+
+        return (
+          <Badge variant="secondary" {...classProps(styles.badge, statusBadges[rowStatus])}>
+            {equipmentStatus[rowStatus]}
+          </Badge>
+        );
+      },
+    },
+    {
+      id: "method",
+      accessorFn: ({ returnMethod }) => (returnMethod ? equipmentReturnMethod[returnMethod] : "—"),
+      header: "Como volta",
+    },
+    {
+      id: "tracking",
+      header: "Rastreio",
+      cell: ({ row }) => {
+        const { trackingCode } = row.original;
+
+        return trackingCode ? <span {...classProps(styles.code)}>{trackingCode}</span> : "—";
+      },
+    },
+    {
+      id: "actions",
+      header: "Ações",
+      cell: ({ row: { original } }) => (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Ações para ${original.item} ${original.tag}`}
+                disabled={update.isPending || remove.isPending}
+              />
+            }
+          >
+            <HugeiconsIcon icon={MoreHorizontalIcon} aria-hidden="true" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {equipmentStatusValues
+              .filter((value) => value !== original.status)
+              .map((value) => (
+                <DropdownMenuItem key={value} onClick={() => changeStatus(original.id, value)}>
+                  Marcar como {equipmentStatus[value].toLowerCase()}
+                </DropdownMenuItem>
+              ))}
+            {canManage && removableStatuses.includes(original.status) && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={() => remove.mutate(original.id)}>
+                  <HugeiconsIcon icon={Delete02Icon} aria-hidden="true" />
+                  Excluir do inventário
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ),
+    },
+  ];
 
   const tasks = useMemo(
     () =>
@@ -258,10 +327,17 @@ export function EquipmentPage() {
     };
   });
 
-  const visibleEquipment = useMemo(
-    () => (status ? equipment.filter((entry) => entry.status === status) : equipment),
-    [equipment, status],
-  );
+  const visibleEquipment = useMemo(() => {
+    const term = search.trim().toLowerCase();
+
+    return equipment.filter(
+      (entry) =>
+        (!status || entry.status === status) &&
+        (!term ||
+          entry.item.toLowerCase().includes(term) ||
+          entry.tag.toLowerCase().includes(term)),
+    );
+  }, [equipment, status, search]);
 
   return (
     <ListPage
@@ -275,21 +351,22 @@ export function EquipmentPage() {
           tone: "primary",
         },
         {
-          label: "Recebidos",
-          value: equipment.filter(({ status }) => status === "received" || status === "inventory")
-            .length,
+          label: "No estoque",
+          value: equipment.filter(({ status: value }) => value === "in_inventory").length,
           icon: Tick02Icon,
           tone: "success",
         },
         {
-          label: "Coletas agendadas",
-          value: equipment.filter(({ status }) => status === "scheduled").length,
+          label: "Devoluções em andamento",
+          value: equipment.filter(
+            ({ status: value }) => value === "pending_return" || value === "in_transit",
+          ).length,
           icon: Calendar03Icon,
           tone: "warning",
         },
         {
-          label: "Com problema",
-          value: equipment.filter(({ status }) => status === "failed").length,
+          label: "Baixados",
+          value: equipment.filter(({ status: value }) => value === "decommissioned").length,
           icon: Alert02Icon,
           tone: "danger",
         },
@@ -297,28 +374,56 @@ export function EquipmentPage() {
     >
       <section className="min-w-0" aria-labelledby="equipment-title">
         <h2 className="sr-only" id="equipment-title">
-          Amostra do inventário
+          Inventário de equipamentos
         </h2>
+        {(create.isError || update.isError || remove.isError) && (
+          <p role="alert" className="mb-3 text-sm text-destructive">
+            Não foi possível salvar a alteração. Atualize a página e tente novamente.
+          </p>
+        )}
         <DataTable
           urlPagination={urlPagination}
           data={visibleEquipment}
+          toolbar={
+            <div className="relative w-full sm:w-72">
+              <HugeiconsIcon
+                icon={Search01Icon}
+                aria-hidden="true"
+                className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                type="search"
+                aria-label="Buscar por item ou patrimônio"
+                placeholder="Buscar por item ou patrimônio"
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.currentTarget.value);
+                  urlPagination.onChange({ ...urlPagination, pageIndex: 0 });
+                }}
+                className="h-9 pl-9"
+              />
+            </div>
+          }
+          toolbarEnd={canManage && <AddEquipmentDialog onAdd={addEquipment} />}
           filters={[
             {
-              caption: "Status da devolução",
-              label: "Status da devolução",
+              caption: "Situação",
+              label: "Situação do equipamento",
               value: status,
               onChange: setStatus,
               items: [
-                { value: "", label: "Todos os status" },
-                ...Object.entries(equipmentStatus).map(([value, label]) => ({ value, label })),
+                { value: "", label: "Todas as situações" },
+                ...equipmentStatusValues.map((value) => ({ value, label: equipmentStatus[value] })),
               ],
             },
           ]}
-          emptyText="Nenhum item neste status."
+          emptyText="Nenhum item corresponde aos filtros."
           scrollLabel="Tabela do inventário"
-          columns={equipmentColumns}
+          columns={
+            canUpdate ? equipmentColumns : equipmentColumns.filter(({ id }) => id !== "actions")
+          }
           labelledBy="equipment-title"
-          getRowId={(entry) => entry.tag}
+          getRowId={(entry) => entry.id}
           tableStyle={styles.inventory}
         />
       </section>

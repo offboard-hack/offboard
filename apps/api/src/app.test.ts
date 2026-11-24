@@ -91,6 +91,17 @@ describe.skipIf(!url)("api", () => {
     api_app_id?: string;
     event_id?: string;
     event_time?: number;
+    item?: string;
+    tag?: string;
+    serialNumber?: string;
+    assignedTo?: string;
+    assignedEmail?: string;
+    returnMethod?: string;
+    trackingCode?: string;
+    scheduledDate?: string;
+    notes?: string;
+    caseId?: string | null;
+    taskId?: string | null;
   };
 
   function call(path: string, method = "GET", body?: Payload) {
@@ -479,29 +490,145 @@ describe.skipIf(!url)("api", () => {
     expect(await res.json()).toEqual({ name: "Test Toggle", status: "disconnected" });
   });
 
-  it("lists equipment with the person name", async () => {
+  const emptyEquipment = {
+    id: expect.any(String),
+    item: expect.any(String),
+    tag: expect.any(String),
+    serialNumber: null,
+    assignedTo: null,
+    assignedEmail: null,
+    status: "in_inventory",
+    returnMethod: null,
+    trackingCode: null,
+    scheduledDate: null,
+    caseId: null,
+    taskId: null,
+    notes: null,
+  };
+
+  async function marinaCase() {
+    const list = await (await call("/offboardings")).json();
+
+    return list.find((entry: { name: string }) => entry.name === "Marina Lopes");
+  }
+
+  it("lists the full equipment inventory ordered by tag", async () => {
     const res = await call("/equipment");
     const list = await res.json();
+    const tags = list.map((row: { tag: string }) => row.tag);
 
     expect(res.status).toBe(200);
-    expect(list.length).toBeGreaterThan(0);
-    expect(list[0]).toEqual({
-      id: expect.any(String),
-      item: expect.any(String),
-      tag: expect.any(String),
-      person: expect.any(String),
-      returnMethod: expect.stringMatching(/^(pickup|in_person)$/),
-      scheduledDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
-      status: expect.any(String),
+    expect(list.length).toBeGreaterThanOrEqual(10);
+    expect(tags).toEqual([...tags].sort());
+    expect(list.find((row: { tag: string }) => row.tag === "PAT-0412")).toMatchObject({
+      item: "Notebook Dell Latitude 5440",
+      assignedTo: "Marina Lopes",
+      status: "pending_return",
+      returnMethod: "pickup",
+      scheduledDate: "2026-11-10",
     });
   });
 
-  it("updates an equipment status", async () => {
-    const [{ person: _person, ...first }] = await (await call("/equipment")).json();
-    const res = await call(`/equipment/${first.id}`, "PUT", { status: "received" });
+  it("filters equipment by status and assignee", async () => {
+    const byStatus = await (await call("/equipment?status=in_inventory")).json();
+    const byPerson = await (await call("/equipment?assignedTo=Marina%20Lopes")).json();
+
+    expect(byStatus.length).toBeGreaterThan(0);
+    expect(byStatus.every((row: { status: string }) => row.status === "in_inventory")).toBe(true);
+    expect(byPerson.length).toBeGreaterThan(0);
+    expect(byPerson.every((row: { assignedTo: string }) => row.assignedTo === "Marina Lopes")).toBe(
+      true,
+    );
+  });
+
+  it("filters equipment by case and lists it per case", async () => {
+    const marina = await marinaCase();
+
+    const filtered = await (await call(`/equipment?caseId=${marina.id}`)).json();
+    const byCase = await (await call(`/equipment/by-case/${marina.id}`)).json();
+
+    expect(filtered.length).toBeGreaterThan(0);
+    expect(byCase).toEqual(filtered);
+    expect(await (await call(`/equipment/by-case/${missingCaseId}`)).json()).toEqual([]);
+  });
+
+  it("rejects invalid equipment filters", async () => {
+    expect((await call("/equipment?status=nope")).status).toBe(422);
+    expect((await call("/equipment?caseId=nope")).status).toBe(422);
+    expect((await call("/equipment/by-case/nope")).status).toBe(422);
+  });
+
+  it("gets one equipment item and returns 404 for unknown ids", async () => {
+    const [first] = await (await call("/equipment")).json();
+    const found = await call(`/equipment/${first.id}`);
+    const missing = await call(`/equipment/${missingTaskId}`);
+
+    expect(found.status).toBe(200);
+    expect(await found.json()).toEqual(first);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: "Equipment not found" });
+  });
+
+  it("creates equipment and rejects a duplicate tag", async () => {
+    const created = await call("/equipment", "POST", {
+      item: "Mouse Logitech MX",
+      tag: "PAT-9001",
+    });
+
+    expect(created.status).toBe(201);
+    expect(await created.json()).toEqual({
+      ...emptyEquipment,
+      item: "Mouse Logitech MX",
+      tag: "PAT-9001",
+    });
+
+    const duplicate = await call("/equipment", "POST", { item: "Outro", tag: "PAT-9001" });
+
+    expect(duplicate.status).toBe(409);
+    expect(await duplicate.json()).toEqual({ error: "Equipment tag already exists" });
+  });
+
+  it("rejects equipment creation with an invalid body", async () => {
+    expect((await call("/equipment", "POST", { item: "", tag: "PAT-9002" })).status).toBe(422);
+    expect(
+      (await call("/equipment", "POST", { item: "X", tag: "PAT-9002", status: "invalid" })).status,
+    ).toBe(422);
+  });
+
+  it("updates equipment fields", async () => {
+    const created = await (
+      await call("/equipment", "POST", { item: "Webcam", tag: "PAT-9003" })
+    ).json();
+
+    const res = await call(`/equipment/${created.id}`, "PUT", {
+      status: "in_use",
+      assignedTo: "Camila Rocha",
+      assignedEmail: "camila.rocha@offboard.com",
+      returnMethod: "correios",
+      trackingCode: "BR111222333BR",
+      scheduledDate: "2026-12-01",
+      notes: "Entregue",
+    });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ...first, status: "received" });
+    expect(await res.json()).toMatchObject({
+      id: created.id,
+      status: "in_use",
+      assignedTo: "Camila Rocha",
+      returnMethod: "correios",
+      trackingCode: "BR111222333BR",
+      scheduledDate: "2026-12-01",
+    });
+  });
+
+  it("unlinks a case and task through an update", async () => {
+    const linked = (await (await call("/equipment?status=pending_return")).json()).find(
+      (row: { caseId: string | null }) => row.caseId,
+    );
+
+    const res = await call(`/equipment/${linked.id}`, "PUT", { caseId: null, taskId: null });
+
+    expect(await res.json()).toMatchObject({ caseId: null, taskId: null });
   });
 
   it("returns 404 when updating unknown equipment", async () => {
@@ -511,26 +638,117 @@ describe.skipIf(!url)("api", () => {
     expect(await res.json()).toEqual({ error: "Equipment not found" });
   });
 
-  it("lets visualizador read but not update equipment", async () => {
-    const headers = { "x-test-session": "visualizador", origin: webOrigin };
-    const list = await app.handle(new Request("http://localhost/api/equipment", { headers }));
+  it("rejects renaming equipment to an existing tag", async () => {
+    const [first, second] = await (await call("/equipment")).json();
+    const res = await call(`/equipment/${first.id}`, "PUT", { tag: second.tag });
 
-    const update = await app.handle(
-      new Request(`http://localhost/api/equipment/${missingTaskId}`, {
-        method: "PUT",
-        headers: { ...headers, "content-type": "application/json" },
-        body: JSON.stringify({ status: "received" }),
-      }),
-    );
-
-    expect(list.status).toBe(200);
-    expect(update.status).toBe(403);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "Equipment tag already exists" });
   });
 
   it("rejects an invalid equipment status", async () => {
     const res = await call(`/equipment/${missingTaskId}`, "PUT", { status: "invalid" });
 
     expect(res.status).toBe(422);
+  });
+
+  it("deletes only inventory or decommissioned equipment", async () => {
+    const [inUse] = await (await call("/equipment?status=in_use")).json();
+    const [stocked] = await (await call("/equipment?status=in_inventory")).json();
+
+    const blocked = await call(`/equipment/${inUse.id}`, "DELETE");
+    const removed = await call(`/equipment/${stocked.id}`, "DELETE");
+    const missing = await call(`/equipment/${missingTaskId}`, "DELETE");
+
+    expect(blocked.status).toBe(409);
+    expect(await blocked.json()).toEqual({
+      error: "Only decommissioned or in-inventory equipment can be deleted",
+    });
+    expect(removed.status).toBe(204);
+    expect((await call(`/equipment/${stocked.id}`)).status).toBe(404);
+    expect(missing.status).toBe(404);
+  });
+
+  it("assigns equipment to a case and task", async () => {
+    const marina = await marinaCase();
+    const detail = await (await call(`/offboardings/${marina.id}`)).json();
+    const [stocked] = await (await call("/equipment?status=in_inventory")).json();
+    const [inUse] = await (await call("/equipment?status=in_use")).json();
+
+    const withTask = await call(`/equipment/${stocked.id}/assign-case`, "POST", {
+      caseId: marina.id,
+      taskId: detail.tasks[0].id,
+    });
+
+    const fromUse = await call(`/equipment/${inUse.id}/assign-case`, "POST", {
+      caseId: marina.id,
+    });
+
+    expect(withTask.status).toBe(200);
+    expect(await withTask.json()).toMatchObject({
+      caseId: marina.id,
+      taskId: detail.tasks[0].id,
+      status: "in_inventory",
+    });
+    expect(await fromUse.json()).toMatchObject({
+      caseId: marina.id,
+      taskId: null,
+      status: "pending_return",
+    });
+  });
+
+  it("returns 404 when assigning unknown equipment, case or task", async () => {
+    const marina = await marinaCase();
+    const [item] = await (await call("/equipment")).json();
+
+    const noEquipment = await call(`/equipment/${missingTaskId}/assign-case`, "POST", {
+      caseId: marina.id,
+    });
+
+    const noCase = await call(`/equipment/${item.id}/assign-case`, "POST", {
+      caseId: missingCaseId,
+    });
+
+    const noTask = await call(`/equipment/${item.id}/assign-case`, "POST", {
+      caseId: marina.id,
+      taskId: missingTaskId,
+    });
+
+    expect(noEquipment.status).toBe(404);
+    expect(await noEquipment.json()).toEqual({ error: "Equipment not found" });
+    expect(await noCase.json()).toEqual({ error: "Offboarding not found" });
+    expect(await noTask.json()).toEqual({ error: "Task not found" });
+  });
+
+  it("limits equipment writes by role", async () => {
+    const send = (path: string, method: string, session: string, body = "{}") =>
+      app.handle(
+        new Request(`http://localhost/api${path}`, {
+          method,
+          headers: {
+            "x-test-session": session,
+            origin: webOrigin,
+            "content-type": "application/json",
+          },
+          body: method === "GET" || method === "DELETE" ? undefined : body,
+        }),
+      );
+
+    expect((await send("/equipment", "GET", "visualizador")).status).toBe(200);
+    expect((await send(`/equipment/${missingTaskId}`, "PUT", "visualizador")).status).toBe(403);
+    expect((await send(`/equipment/${missingTaskId}`, "PUT", "rh")).status).toBe(404);
+    expect((await send("/equipment", "POST", "rh", '{"item":"x","tag":"y"}')).status).toBe(403);
+    expect((await send(`/equipment/${missingTaskId}`, "DELETE", "rh")).status).toBe(403);
+    expect(
+      (
+        await send(
+          `/equipment/${missingTaskId}/assign-case`,
+          "POST",
+          "visualizador",
+          JSON.stringify({ caseId: missingCaseId }),
+        )
+      ).status,
+    ).toBe(403);
   });
 
   it("lists exit surveys with case names, newest first", async () => {
@@ -803,6 +1021,33 @@ describe.skipIf(!url)("api", () => {
 
     expect(noAction.status).toBe(422);
     expect(noPhase.status).toBe(422);
+  });
+
+  it("rethrows unexpected equipment write errors", async () => {
+    const failing = createApp(
+      webOrigin,
+      {
+        ...repos,
+        equipment: {
+          ...repos.equipment,
+          createEquipment: () => Promise.reject(new Error("boom")),
+          updateEquipment: () => Promise.reject(new Error("boom")),
+        },
+      },
+      appOptions,
+    );
+
+    const send = (path: string, method: string, body: Payload) =>
+      failing.handle(
+        new Request(`http://localhost/api${path}`, {
+          method,
+          headers: { "content-type": "application/json", origin: webOrigin },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    expect((await send("/equipment", "POST", { item: "x", tag: "y" })).status).toBe(500);
+    expect((await send(`/equipment/${missingTaskId}`, "PUT", {})).status).toBe(500);
   });
 
   it("rethrows unexpected create errors", async () => {
@@ -1123,6 +1368,151 @@ describe.skipIf(!url)("api", () => {
     expect(body.delivered).toContain(taskWithPhase.id);
   });
 
+  const deliveredBody = JSON.stringify({
+    objetos: [
+      {
+        eventos: [
+          {
+            codigo: "BDE",
+            tipo: "01",
+            descricao: "Objeto entregue ao destinatário",
+            dtHrCriado: "2026-11-20T10:30:00",
+          },
+        ],
+      },
+    ],
+  });
+
+  async function equipmentByTag(tag: string) {
+    const list = await (await call("/equipment")).json();
+
+    return list.find((row: { tag: string }) => row.tag === tag);
+  }
+
+  it("marks in-transit equipment as received and completes its linked task once", async () => {
+    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
+    const before = await equipmentByTag("PAT-0398");
+
+    correiosStatus = 200;
+    correiosBody = deliveredBody;
+
+    const res = await correiosApp.handle(cronRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.deliveredEquipment).toContain(before.id);
+    expect(body.delivered.filter((id: string) => id === before.taskId)).toHaveLength(1);
+    expect(await equipmentByTag("PAT-0398")).toMatchObject({ status: "received" });
+    expect((await db.select().from(tasks).where(eq(tasks.id, before.taskId)))[0].status).toBe(
+      "done",
+    );
+  });
+
+  it("completes the linked task when only the equipment carries the tracking code", async () => {
+    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
+    const before = await equipmentByTag("PAT-0377");
+
+    await db.update(tasks).set({ trackingCode: null }).where(eq(tasks.id, before.taskId));
+
+    correiosStatus = 200;
+    correiosBody = deliveredBody;
+
+    const body = await (await correiosApp.handle(cronRequest("POST"))).json();
+
+    expect(body.deliveredEquipment).toContain(before.id);
+    expect(body.delivered).toContain(before.taskId);
+    expect((await db.select().from(tasks).where(eq(tasks.id, before.taskId)))[0].status).toBe(
+      "done",
+    );
+  });
+
+  it("does not re-complete a linked task that is already done", async () => {
+    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
+    const before = await equipmentByTag("PAT-0398");
+
+    await db.update(tasks).set({ status: "done" }).where(eq(tasks.id, before.taskId));
+
+    correiosStatus = 200;
+    correiosBody = deliveredBody;
+
+    const body = await (await correiosApp.handle(cronRequest())).json();
+
+    expect(body.deliveredEquipment).toContain(before.id);
+    expect(body.delivered).not.toContain(before.taskId);
+  });
+
+  it("receives tracked equipment that has no linked task", async () => {
+    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
+
+    const created = await (
+      await call("/equipment", "POST", {
+        item: "Monitor",
+        tag: "PAT-9100",
+        status: "in_transit",
+        returnMethod: "correios",
+        trackingCode: "BR000111222BR",
+      })
+    ).json();
+
+    correiosStatus = 200;
+    correiosBody = deliveredBody;
+
+    const body = await (await correiosApp.handle(cronRequest())).json();
+
+    expect(body.deliveredEquipment).toContain(created.id);
+    expect(await equipmentByTag("PAT-9100")).toMatchObject({ status: "received" });
+  });
+
+  it("keeps equipment in transit until Correios reports delivery", async () => {
+    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
+
+    correiosStatus = 200;
+    correiosBody = JSON.stringify({
+      objetos: [
+        {
+          eventos: [
+            {
+              codigo: "RO",
+              tipo: "01",
+              descricao: "Objeto em trânsito",
+              dtHrCriado: "2026-11-18T16:00:00",
+            },
+          ],
+        },
+      ],
+    });
+
+    const body = await (await correiosApp.handle(cronRequest())).json();
+
+    expect(body.deliveredEquipment).toEqual([]);
+    expect(await equipmentByTag("PAT-0398")).toMatchObject({ status: "in_transit" });
+  });
+
+  it("ignores a deleted task linked to delivered equipment", async () => {
+    const stubbedApp = createApp(
+      webOrigin,
+      {
+        ...repos,
+        offboardings: { ...repos.offboardings, getTrackedTasks: () => Promise.resolve([]) },
+        equipment: {
+          ...repos.equipment,
+          getEquipmentWithTracking: () =>
+            Promise.resolve([
+              { id: missingTaskId, trackingCode: "ZZ999999999BR", taskId: missingCaseId },
+            ]),
+        },
+      },
+      { ...appOptions, correiosBaseUrl },
+    );
+
+    correiosStatus = 200;
+    correiosBody = deliveredBody;
+
+    const body = await (await stubbedApp.handle(cronRequest())).json();
+
+    expect(body).toEqual({ checked: 1, delivered: [], deliveredEquipment: [missingTaskId] });
+  });
+
   it("includes trackingCode in task details", async () => {
     const list = await (await call("/offboardings")).json();
     const detail = await (await call(`/offboardings/${list[0].id}`)).json();
@@ -1143,6 +1533,7 @@ describe.skipIf(!url)("api", () => {
               { id: missingTaskId, title: "Gone", phase: "d0", trackingCode: "ZZ999999999BR" },
             ]),
         },
+        equipment: { ...repos.equipment, getEquipmentWithTracking: () => Promise.resolve([]) },
       },
       { ...appOptions, correiosBaseUrl },
     );
@@ -1168,6 +1559,33 @@ describe.skipIf(!url)("api", () => {
     const body = await res.json();
     expect(body.checked).toBe(1);
     expect(body.delivered).toEqual([]);
+  });
+
+  it("rethrows unexpected equipment write errors", async () => {
+    const failing = createApp(
+      webOrigin,
+      {
+        ...repos,
+        equipment: {
+          ...repos.equipment,
+          createEquipment: () => Promise.reject(new Error("boom")),
+          updateEquipment: () => Promise.reject(new Error("boom")),
+        },
+      },
+      appOptions,
+    );
+
+    const send = (path: string, method: string, body: Payload) =>
+      failing.handle(
+        new Request(`http://localhost/api${path}`, {
+          method,
+          headers: { "content-type": "application/json", origin: webOrigin },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    expect((await send("/equipment", "POST", { item: "x", tag: "y" })).status).toBe(500);
+    expect((await send(`/equipment/${missingTaskId}`, "PUT", {})).status).toBe(500);
   });
 
   it("rethrows unexpected create errors", async () => {

@@ -118,39 +118,55 @@ export const subtasksRelations = relations(subtasks, ({ one }) => ({
   }),
 }));
 
-export const equipmentReturnMethodEnum = pgEnum("equipment_return_method", ["pickup", "in_person"]);
+export const equipmentReturnMethodEnum = pgEnum("equipment_return_method", [
+  "pickup",
+  "in_person",
+  "correios",
+]);
 
 export const equipmentStatusEnum = pgEnum("equipment_status", [
-  "with_person",
-  "scheduled",
-  "transit",
+  "in_use",
+  "pending_return",
+  "in_transit",
   "received",
-  "inventory",
-  "failed",
+  "in_inventory",
+  "decommissioned",
 ]);
 
 export const equipment = pgTable(
   "equipment",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    caseId: uuid("case_id")
-      .notNull()
-      .references(() => offboardingCases.id, { onDelete: "cascade" }),
     item: varchar("item", { length: 255 }).notNull(),
     tag: varchar("tag", { length: 50 }).notNull().unique(),
-    returnMethod: equipmentReturnMethodEnum("return_method").notNull(),
+    serialNumber: varchar("serial_number", { length: 100 }),
+    assignedTo: varchar("assigned_to", { length: 255 }),
+    assignedEmail: varchar("assigned_email", { length: 255 }),
+    status: equipmentStatusEnum("status").notNull().default("in_inventory"),
+    returnMethod: equipmentReturnMethodEnum("return_method"),
+    trackingCode: varchar("tracking_code", { length: 100 }),
     scheduledDate: date("scheduled_date"),
-    status: equipmentStatusEnum("status").notNull(),
+    caseId: uuid("case_id").references(() => offboardingCases.id, { onDelete: "set null" }),
+    taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
+    notes: text("notes"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
-  (table) => [index("equipment_case_id_idx").on(table.caseId)],
+  (table) => [
+    index("equipment_case_id_idx").on(table.caseId),
+    index("equipment_task_id_idx").on(table.taskId),
+    index("equipment_status_idx").on(table.status),
+  ],
 );
 
 export const equipmentRelations = relations(equipment, ({ one }) => ({
   case: one(offboardingCases, {
     fields: [equipment.caseId],
     references: [offboardingCases.id],
+  }),
+  task: one(tasks, {
+    fields: [equipment.taskId],
+    references: [tasks.id],
   }),
 }));
 

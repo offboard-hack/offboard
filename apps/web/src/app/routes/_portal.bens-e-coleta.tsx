@@ -4,16 +4,16 @@ import { z } from "zod";
 import { createFileRoute, lazyRouteComponent } from "@tanstack/react-router";
 import { equipmentQuery } from "@/entities/equipment";
 import { offboardingsQuery } from "@/entities/offboarding";
-import { equipmentStatus } from "@/features/asset-returns/status";
+import { equipmentStatusValues } from "@/features/asset-returns/status";
 
 export const Route = createFileRoute("/_portal/bens-e-coleta")({
   validateSearch: listSearchSchema.extend({
-    status: z.enum(Object.keys(equipmentStatus)).optional().catch(undefined),
+    status: z.enum(equipmentStatusValues).optional().catch(undefined),
   }),
   loader: async ({ context }) => {
     await Promise.all([
       context.queryClient.ensureQueryData(offboardingsQuery),
-      context.queryClient.ensureQueryData(equipmentQuery),
+      context.queryClient.ensureQueryData(equipmentQuery()),
     ]);
   },
   component: lazyRouteComponent(

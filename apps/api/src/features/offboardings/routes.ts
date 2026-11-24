@@ -42,43 +42,83 @@ const text = t.String({ minLength: 1 });
 
 const CORREIOS_DEFAULT_URL = "https://proxyapp.correios.com.br";
 
+export type TrackedEquipment = {
+  getEquipmentWithTracking(): Promise<
+    { id: string; trackingCode: string; taskId: string | null }[]
+  >;
+  markReceived(id: string): Promise<void>;
+};
+
+const correiosCheckResponse = t.Object({
+  checked: t.Number(),
+  delivered: t.Array(t.String()),
+  deliveredEquipment: t.Array(t.String()),
+});
+
 export function offboardingsRoutes(
   repos: OffboardingsRepository,
+  trackedEquipment: TrackedEquipment,
   access: PortalAccessPlugin,
   dispatchAction: DispatchAction,
   cronSecret: string | undefined,
   webhookSecret: string | undefined,
   correiosBaseUrl = CORREIOS_DEFAULT_URL,
 ) {
-  async function checkTrackedShipments() {
-    const tracked = await repos.getTrackedTasks();
-    const delivered: string[] = [];
+  async function completeTask(taskId: string) {
+    const updated = await repos.updateTaskStatus(taskId, "done");
 
-    const results = await Promise.allSettled(
+    if (!updated) return false;
+
+    const phase = await repos.getTaskPhase(taskId);
+
+    if (phase) {
+      await dispatchAction({ taskId, taskTitle: updated.title, status: "done", phase });
+    }
+
+    return true;
+  }
+
+  async function checkTrackedShipments() {
+    const [tracked, equipmentTracked] = await Promise.all([
+      repos.getTrackedTasks(),
+      trackedEquipment.getEquipmentWithTracking(),
+    ]);
+
+    const delivered: string[] = [];
+    const deliveredEquipment: string[] = [];
+
+    const taskResults = await Promise.allSettled(
       tracked.map(async (task) => {
         // WARNING: getTrackedTasks guarantees non-null trackingCode
         const result = await trackPackage(task.trackingCode as string, correiosBaseUrl);
 
         if (!result.delivered) return;
 
-        const updated = await repos.updateTaskStatus(task.id, "done");
-
-        if (!updated) return;
-
-        delivered.push(task.id);
-
-        if (task.phase) {
-          await dispatchAction({
-            taskId: task.id,
-            taskTitle: task.title,
-            status: "done",
-            phase: task.phase,
-          });
-        }
+        if (await completeTask(task.id)) delivered.push(task.id);
       }),
     );
 
-    return { checked: results.length, delivered };
+    const equipmentResults = await Promise.allSettled(
+      equipmentTracked.map(async (item) => {
+        const result = await trackPackage(item.trackingCode, correiosBaseUrl);
+
+        if (!result.delivered) return;
+
+        await trackedEquipment.markReceived(item.id);
+
+        deliveredEquipment.push(item.id);
+
+        if (!item.taskId || delivered.includes(item.taskId)) return;
+
+        if (await completeTask(item.taskId)) delivered.push(item.taskId);
+      }),
+    );
+
+    return {
+      checked: taskResults.length + equipmentResults.length,
+      delivered,
+      deliveredEquipment,
+    };
   }
 
   return new Elysia()
@@ -227,17 +267,11 @@ export function offboardingsRoutes(
     )
     .get("/correios/check", () => checkTrackedShipments(), {
       machine: "cron",
-      response: t.Object({
-        checked: t.Number(),
-        delivered: t.Array(t.String()),
-      }),
+      response: correiosCheckResponse,
     })
     .post("/correios/check", () => checkTrackedShipments(), {
       machine: "cron",
-      response: t.Object({
-        checked: t.Number(),
-        delivered: t.Array(t.String()),
-      }),
+      response: correiosCheckResponse,
     })
     .get(
       "/tasks/:id/tracking",

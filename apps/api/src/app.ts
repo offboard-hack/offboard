@@ -37,6 +37,12 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     .use(
       offboardingsRoutes(
         repos.offboardings,
+        {
+          getEquipmentWithTracking: repos.equipment.getEquipmentWithTracking,
+          markReceived: async (id) => {
+            await repos.equipment.updateEquipment(id, { status: "received" });
+          },
+        },
         access,
         async (context) => {
           await fireActions(repos.actionConfigs, context);

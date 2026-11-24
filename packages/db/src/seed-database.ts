@@ -41,6 +41,7 @@ export async function seedDatabase(
     await tx.delete(teamMembers);
 
     const caseIds = new Map<string, string>();
+    const taskIds = new Map<string, string>();
 
     for (const { tasks: caseTasks, ...item } of fixtures.cases) {
       const [created] = await tx
@@ -68,6 +69,8 @@ export async function seedDatabase(
           })
           .returning({ id: tasks.id });
 
+        taskIds.set(`${created.id}:${seedTask.title}`, inserted.id);
+
         if (seedTask.subtasks && seedTask.subtasks.length > 0) {
           await tx.insert(subtasks).values(
             seedTask.subtasks.map((sub, j) => ({
@@ -81,17 +84,11 @@ export async function seedDatabase(
       }
     }
 
-    for (const { person, scheduledDate, ...item } of seedEquipment) {
-      const caseId = caseIds.get(person);
+    for (const { caseName, taskTitle, ...item } of seedEquipment) {
+      const caseId = caseName ? (caseIds.get(caseName) ?? null) : null;
+      const taskId = caseId && taskTitle ? (taskIds.get(`${caseId}:${taskTitle}`) ?? null) : null;
 
-      if (!caseId) continue;
-
-      const values = { ...item, caseId, scheduledDate: scheduledDate ?? null };
-
-      await tx
-        .insert(equipment)
-        .values(values)
-        .onConflictDoUpdate({ target: equipment.tag, set: { ...values, updatedAt: new Date() } });
+      await tx.insert(equipment).values({ ...item, caseId, taskId });
     }
 
     for (const { caseName, ...survey } of seedExitSurveys) {

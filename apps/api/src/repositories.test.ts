@@ -250,30 +250,92 @@ describe.skipIf(!url)("repositories", () => {
     expect(list[0]).toEqual({ name: expect.any(String), status: expect.any(String) });
   });
 
-  it("lists equipment joined with the case name", async () => {
+  it("lists, filters and fetches equipment", async () => {
     const list = await repos.equipment.listEquipment();
-
     const tags = list.map((row) => row.tag);
 
     expect(tags).toEqual([...tags].sort());
-    expect(list.find((row) => row.tag === "AUR-0412")).toMatchObject({
-      person: "Marina Lopes",
+    expect(list.find((row) => row.tag === "PAT-0412")).toMatchObject({
+      assignedTo: "Marina Lopes",
       returnMethod: "pickup",
       scheduledDate: "2026-11-10",
-      status: "scheduled",
+      status: "pending_return",
     });
+
+    const inventory = await repos.equipment.listEquipment({ status: "in_inventory" });
+    const assigned = await repos.equipment.listEquipment({ assignedTo: "Marina Lopes" });
+
+    expect(inventory.length).toBeGreaterThan(0);
+    expect(inventory.every((row) => row.status === "in_inventory")).toBe(true);
+    expect(assigned.every((row) => row.assignedTo === "Marina Lopes")).toBe(true);
+    expect(await repos.equipment.getEquipment(list[0].id)).toEqual(list[0]);
+    expect(await repos.equipment.getEquipment("00000000-0000-4000-8000-000000000000")).toBeNull();
   });
 
-  it("updates equipment status and returns null for unknown ids", async () => {
-    const [first] = await repos.equipment.listEquipment();
+  it("creates, updates and deletes equipment", async () => {
+    const created = await repos.equipment.createEquipment({ item: "Mouse", tag: "PAT-8000" });
 
-    expect(await repos.equipment.updateEquipmentStatus(first.id, "failed")).toMatchObject({
-      id: first.id,
-      status: "failed",
-    });
+    expect(created).toMatchObject({ status: "in_inventory", assignedTo: null, caseId: null });
+
+    const updated = await repos.equipment.updateEquipment(created.id, { status: "in_use" });
+
+    expect(updated).toMatchObject({ id: created.id, status: "in_use" });
     expect(
-      await repos.equipment.updateEquipmentStatus("00000000-0000-4000-8000-000000000000", "failed"),
+      await repos.equipment.updateEquipment("00000000-0000-4000-8000-000000000000", {
+        status: "received",
+      }),
     ).toBeNull();
+    expect(await repos.equipment.deleteEquipment(created.id)).toBe("blocked");
+
+    await repos.equipment.updateEquipment(created.id, { status: "decommissioned" });
+
+    expect(await repos.equipment.deleteEquipment(created.id)).toBe("deleted");
+    expect(await repos.equipment.deleteEquipment(created.id)).toBe("not_found");
+  });
+
+  it("assigns equipment to a case and reads it back by case", async () => {
+    const [marina] = (await repos.offboardings.listOffboardings()).filter(
+      (entry) => entry.name === "Marina Lopes",
+    );
+
+    const detail = await repos.offboardings.getOffboarding(marina.id);
+    const [stocked] = await repos.equipment.listEquipment({ status: "in_inventory" });
+
+    const result = await repos.equipment.assignToCase(stocked.id, marina.id, detail!.tasks[0].id);
+
+    expect(result).toMatchObject({
+      error: null,
+      equipment: { id: stocked.id, caseId: marina.id, taskId: detail!.tasks[0].id },
+    });
+    expect((await repos.equipment.getEquipmentByCase(marina.id)).map((row) => row.id)).toContain(
+      stocked.id,
+    );
+    expect(
+      await repos.equipment.assignToCase("00000000-0000-4000-8000-000000000000", marina.id),
+    ).toEqual({ equipment: null, error: "equipment_not_found" });
+    expect(
+      await repos.equipment.assignToCase(stocked.id, "00000000-0000-4000-8000-000000000001"),
+    ).toEqual({ equipment: null, error: "case_not_found" });
+    expect(
+      await repos.equipment.assignToCase(
+        stocked.id,
+        marina.id,
+        "00000000-0000-4000-8000-000000000000",
+      ),
+    ).toEqual({ equipment: null, error: "task_not_found" });
+  });
+
+  it("lists only in-transit equipment with a tracking code", async () => {
+    const tracked = await repos.equipment.getEquipmentWithTracking();
+    const all = await repos.equipment.listEquipment();
+
+    expect(tracked.length).toBeGreaterThan(0);
+    expect(tracked.map((row) => row.id).sort()).toEqual(
+      all
+        .filter((row) => row.status === "in_transit" && row.trackingCode)
+        .map((row) => row.id)
+        .sort(),
+    );
   });
 
   it("upserts an integration", async () => {
