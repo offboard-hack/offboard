@@ -4,7 +4,9 @@ import type { PortalAccessPlugin } from "../../shared/access.js";
 import { errorResponse } from "../../shared/http.js";
 import { hasBearer } from "../../shared/machine-auth.js";
 import type { DispatchAction } from "../../shared/action-dispatch.js";
+import type { FireRules } from "../../shared/rule-dispatch.js";
 import { trackPackage } from "./correios.js";
+import { CORREIOS_DEFAULT_URL } from "./correios-check.js";
 import type { OffboardingsRepository } from "./repository.js";
 
 const caseSummary = t.Object({
@@ -40,47 +42,16 @@ const offboardingCase = t.Composite([caseSummary, t.Object({ tasks: t.Array(task
 
 const text = t.String({ minLength: 1 });
 
-const CORREIOS_DEFAULT_URL = "https://proxyapp.correios.com.br";
-
 export function offboardingsRoutes(
   repos: OffboardingsRepository,
   access: PortalAccessPlugin,
   dispatchAction: DispatchAction,
+  fireRules: FireRules,
+  checkTrackedShipments: () => Promise<{ checked: number; delivered: string[] }>,
   cronSecret: string | undefined,
   webhookSecret: string | undefined,
   correiosBaseUrl = CORREIOS_DEFAULT_URL,
 ) {
-  async function checkTrackedShipments() {
-    const tracked = await repos.getTrackedTasks();
-    const delivered: string[] = [];
-
-    const results = await Promise.allSettled(
-      tracked.map(async (task) => {
-        // WARNING: getTrackedTasks guarantees non-null trackingCode
-        const result = await trackPackage(task.trackingCode as string, correiosBaseUrl);
-
-        if (!result.delivered) return;
-
-        const updated = await repos.updateTaskStatus(task.id, "done");
-
-        if (!updated) return;
-
-        delivered.push(task.id);
-
-        if (task.phase) {
-          await dispatchAction({
-            taskId: task.id,
-            taskTitle: task.title,
-            status: "done",
-            phase: task.phase,
-          });
-        }
-      }),
-    );
-
-    return { checked: results.length, delivered };
-  }
-
   return new Elysia()
     .use(access)
     .macro({
@@ -151,11 +122,26 @@ export function offboardingsRoutes(
     .patch(
       "/tasks/:id/status",
       async ({ params, body, status }) => {
-        const updated = await repos.updateTaskStatus(params.id, body.status);
+        const before = await repos.getTaskContext(params.id);
 
-        if (!updated) return status(404, { error: "Task not found" });
+        const updated = before ? await repos.updateTaskStatus(params.id, body.status) : null;
+
+        if (!before || !updated) return status(404, { error: "Task not found" });
 
         const phase = await repos.getTaskPhase(params.id);
+
+        if (before.status !== body.status) {
+          await fireRules("task.status_changed", {
+            task: {
+              id: before.id,
+              title: before.title,
+              status: body.status,
+              previousStatus: before.status,
+              caseId: before.caseId,
+            },
+            case: { id: before.caseId, name: before.caseName },
+          });
+        }
 
         if (phase) {
           dispatchAction({

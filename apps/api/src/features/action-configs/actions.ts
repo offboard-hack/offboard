@@ -1,9 +1,13 @@
-import { WebClient } from "@slack/web-api";
 import type { ConfigValue } from "@offboard/db/schema";
-import { Resend } from "resend";
 import type { ActionConfigsRepository } from "./repository.js";
 
 import type { ActionContext } from "../../shared/action-dispatch.js";
+import {
+  sendEmail,
+  sendSlackBot,
+  sendSlackWebhook,
+  sendWebhook,
+} from "../../shared/notifications.js";
 
 export type ActionResult = {
   actionId: string;
@@ -22,77 +26,20 @@ function templateMessage(message: string, context: ActionContext) {
     .replaceAll("{{phase}}", context.phase);
 }
 
-async function executeWebhook(url: string, method: string, context: ActionContext) {
-  const response = await fetch(url, {
-    method,
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(context),
-    signal: AbortSignal.timeout(10_000),
-  });
-
-  return { ok: response.ok, status: response.status };
+function executeWebhook(url: string, method: string, context: ActionContext) {
+  return sendWebhook(url, method, context);
 }
 
-async function executeSlack(webhookUrl: string, message: string, context: ActionContext) {
-  const text = templateMessage(message, context);
-
-  const response = await fetch(webhookUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text }),
-    signal: AbortSignal.timeout(10_000),
-  });
-
-  return { ok: response.ok, status: response.status };
+function executeSlack(webhookUrl: string, message: string, context: ActionContext) {
+  return sendSlackWebhook(webhookUrl, templateMessage(message, context));
 }
 
-async function executeEmail(to: string, subject: string, body: string, context: ActionContext) {
-  const apiKey = process.env.RESEND_API_KEY;
-
-  if (!apiKey) {
-    return { ok: false, error: "RESEND_API_KEY not configured" };
-  }
-
-  const replaceVars = (text: string) =>
-    text
-      .replaceAll("{{task}}", context.taskTitle)
-      .replaceAll("{{status}}", context.status)
-      .replaceAll("{{phase}}", context.phase);
-
-  const finalSubject = replaceVars(subject);
-  const finalBody = replaceVars(body);
-
-  const resend = new Resend(apiKey);
-
-  const { error } = await resend.emails.send({
-    from: "Offboard <onboarding@resend.dev>",
-    to,
-    subject: finalSubject,
-    html: finalBody,
-  });
-
-  if (error) {
-    return { ok: false, error: error.message };
-  }
-
-  return { ok: true };
+function executeEmail(to: string, subject: string, body: string, context: ActionContext) {
+  return sendEmail(to, templateMessage(subject, context), templateMessage(body, context));
 }
 
-async function executeSlackBot(
-  token: string,
-  channel: string,
-  message: string,
-  context: ActionContext,
-) {
-  const text = templateMessage(message, context);
-
-  const client = new WebClient(token, {
-    retryConfig: { retries: 0 },
-    timeout: 10_000,
-    slackApiUrl: process.env.SLACK_API_URL,
-  });
-
-  await client.chat.postMessage({ channel, text });
+function executeSlackBot(token: string, channel: string, message: string, context: ActionContext) {
+  return sendSlackBot(token, channel, templateMessage(message, context));
 }
 
 export async function fireActions(

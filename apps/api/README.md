@@ -51,7 +51,7 @@ public health endpoint at `http://127.0.0.1:3001/api/health` returns
 | `EMAIL_PROVIDER`            | `resend` by default, or `cloudflare` when deploying to Workers with the `EMAIL` binding.                                                                                                            |
 | `AUTH_EMAIL_FROM`           | Sign-in sender on a domain verified by the selected provider. Use a bare email address for Cloudflare.                                                                                              |
 | `RESEND_API_KEY`            | Resend API key. Required only for the Resend provider.                                                                                                                                              |
-| `CRON_SECRET`               | Bearer secret for `/api/correios/check`. Vercel Cron sends this automatically.                                                                                                                      |
+| `CRON_SECRET`               | Bearer secret for `/api/correios/check` and `/api/automation-rules/run-scheduled`. Vercel Cron sends this automatically.                                                                            |
 | `WEBHOOK_SECRET`            | Bearer secret for `/api/webhooks/inbound/:taskId`.                                                                                                                                                  |
 | `SLACK_SIGNING_SECRET`      | Slack app signing secret for `/api/integrations/slack/events`.                                                                                                                                      |
 | `ABACATEPAY_API_KEY`        | AbacatePay API key. Without it `POST /api/billing/checkout` returns 503.                                                                                                                            |
@@ -121,7 +121,7 @@ EMAIL_PROVIDER=cloudflare OFFBOARD_API_CONFIGURED=1 npm run deploy:cloudflare -w
 Include `WEBHOOK_SECRET` and `SLACK_SIGNING_SECRET` in that file if you plan to
 test the corresponding integrations. To enable the Correios schedule, include
 `CRON_SECRET` and set `OFFBOARD_ENABLE_CRON=1` for the build and deploy. The
-trigger runs daily at 08:00 UTC. Use one scheduler per database.
+trigger runs every 4 hours (`0 */4 * * *`, UTC) and executes every enabled `schedule.cron` automation rule; the rule's `cronSchedule` is informational, the Worker trigger sets the real cadence. Use one scheduler per database.
 
 For a local Worker preview, put the test bindings in
 `apps/web/.dev.vars.cloudflare` and set `BETTER_AUTH_URL` to

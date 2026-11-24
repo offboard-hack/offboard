@@ -1,6 +1,6 @@
 import type { Database } from "@offboard/db/client";
-import { and, asc, eq, isNotNull, ne, sql } from "drizzle-orm";
-import { offboardingCases, subtasks, tasks } from "@offboard/db/schema";
+import { and, asc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { equipment, offboardingCases, subtasks, tasks } from "@offboard/db/schema";
 
 type TaskStatus = (typeof tasks.$inferSelect)["status"];
 
@@ -179,10 +179,49 @@ export function createOffboardingsRepository(db: Database) {
         id: tasks.id,
         title: tasks.title,
         phase: tasks.phase,
+        status: tasks.status,
         trackingCode: tasks.trackingCode,
+        caseId: tasks.caseId,
+        caseName: offboardingCases.name,
       })
       .from(tasks)
+      .innerJoin(offboardingCases, eq(offboardingCases.id, tasks.caseId))
       .where(and(isNotNull(tasks.trackingCode), ne(tasks.status, "done")));
+  }
+
+  async function getTaskContext(taskId: string) {
+    const [row] = await db
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        status: tasks.status,
+        caseId: tasks.caseId,
+        caseName: offboardingCases.name,
+      })
+      .from(tasks)
+      .innerJoin(offboardingCases, eq(offboardingCases.id, tasks.caseId))
+      .where(eq(tasks.id, taskId));
+
+    return row ?? null;
+  }
+
+  async function getPendingPickupEquipment(caseId: string) {
+    return db
+      .select({
+        id: equipment.id,
+        tag: equipment.tag,
+        item: equipment.item,
+        status: equipment.status,
+        caseId: equipment.caseId,
+      })
+      .from(equipment)
+      .where(
+        and(
+          eq(equipment.caseId, caseId),
+          eq(equipment.returnMethod, "pickup"),
+          inArray(equipment.status, ["scheduled", "transit"]),
+        ),
+      );
   }
 
   async function setTrackingCode(taskId: string, code: string) {
@@ -214,6 +253,8 @@ export function createOffboardingsRepository(db: Database) {
     updateTaskStatus,
     toggleSubtask,
     getTrackedTasks,
+    getTaskContext,
+    getPendingPickupEquipment,
     setTrackingCode,
     getTaskTrackingCode,
   };

@@ -360,6 +360,56 @@ describe.skipIf(!url)("repositories", () => {
     ).toBeNull();
   });
 
+  it("manages automation rules", async () => {
+    const rules = repos.automationRules;
+
+    const created = await rules.createRule({
+      name: "Regra",
+      trigger: "schedule.cron",
+      conditions: {},
+      actions: [{ type: "correios_check" }],
+      enabled: true,
+      cronSchedule: "0 * * * *",
+    });
+
+    expect(await rules.getRule(created.id)).toEqual(created);
+    expect((await rules.listRules()).map((rule) => rule.id)).toContain(created.id);
+    expect((await rules.getCronRules()).map((rule) => rule.id)).toContain(created.id);
+
+    const disabled = await rules.updateRule(created.id, { enabled: false });
+
+    expect(disabled?.enabled).toBe(false);
+    expect((await rules.getCronRules()).map((rule) => rule.id)).not.toContain(created.id);
+    expect(
+      (await rules.getEnabledRulesByTrigger("schedule.cron")).map((rule) => rule.id),
+    ).not.toContain(created.id);
+    expect(
+      (await rules.getEnabledRulesByTrigger("correios.delivered")).map((rule) => rule.trigger),
+    ).toEqual(["correios.delivered", "correios.delivered"]);
+
+    expect(await rules.deleteRule(created.id)).toBe(true);
+    expect(await rules.deleteRule(created.id)).toBe(false);
+    expect(await rules.getRule(created.id)).toBeNull();
+    expect(
+      await rules.updateRule("00000000-0000-0000-0000-000000000000", { enabled: false }),
+    ).toBeNull();
+  });
+
+  it("excludes cron rules without a schedule", async () => {
+    const created = await repos.automationRules.createRule({
+      name: "Sem agenda",
+      trigger: "schedule.cron",
+      conditions: {},
+      actions: [],
+      enabled: true,
+      cronSchedule: null,
+    });
+
+    expect((await repos.automationRules.getCronRules()).map((rule) => rule.id)).not.toContain(
+      created.id,
+    );
+  });
+
   it("deletes an action config", async () => {
     const created = await repos.actionConfigs.createActionConfig({
       actionId: "webhook:test-delete",

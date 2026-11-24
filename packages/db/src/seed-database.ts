@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { seedActionConfigs } from "./action-config.fixture.ts";
+import { seedAutomationRules } from "./automation-rules.fixture.ts";
 import { seedPlans, seedSubscription } from "./billing.fixture.ts";
 import { seedEquipment } from "./equipment.fixture.ts";
 import type { Database } from "./client.ts";
@@ -8,6 +9,7 @@ import { seedIntegrations } from "./integration.fixture.ts";
 import { baseSeedCases, seedCases } from "./offboarding.fixture.ts";
 import {
   actionConfigs,
+  automationRules,
   equipment,
   exitSurveys,
   integrations,
@@ -29,6 +31,7 @@ export async function seedDatabase(
 ) {
   await db.transaction(async (tx) => {
     await tx.delete(actionConfigs);
+    await tx.delete(automationRules);
     await tx.delete(invoices);
     await tx.delete(subscriptions);
     await tx.delete(plans);
@@ -112,6 +115,8 @@ export async function seedDatabase(
     await tx.insert(teamMembers).values(fixtures.members);
 
     await tx.insert(actionConfigs).values(seedActionConfigs);
+
+    await tx.insert(automationRules).values(seedAutomationRules);
 
     for (const plan of seedPlans) {
       await tx

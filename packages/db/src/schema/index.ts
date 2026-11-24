@@ -201,6 +201,43 @@ export const actionConfigs = pgTable(
   (table) => [uniqueIndex("action_configs_action_id_idx").on(table.actionId)],
 );
 
+export const ruleTriggers = [
+  "equipment.status_changed",
+  "task.status_changed",
+  "correios.delivered",
+  "correios.in_transit",
+  "schedule.cron",
+] as const;
+
+export const ruleActionTypes = [
+  "update_task",
+  "update_equipment",
+  "slack",
+  "email",
+  "webhook",
+  "correios_check",
+] as const;
+
+export type RuleTrigger = (typeof ruleTriggers)[number];
+
+export type RuleAction = { type: (typeof ruleActionTypes)[number] } & Record<string, ConfigValue>;
+
+export const automationRules = pgTable(
+  "automation_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 255 }).notNull(),
+    trigger: varchar("trigger", { length: 100 }).$type<RuleTrigger>().notNull(),
+    conditions: jsonb("conditions").$type<Record<string, ConfigValue>>().notNull().default({}),
+    actions: jsonb("actions").$type<RuleAction[]>().notNull().default([]),
+    enabled: boolean("enabled").notNull().default(true),
+    cronSchedule: varchar("cron_schedule", { length: 50 }),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [index("automation_rules_trigger_idx").on(table.trigger)],
+);
+
 export const subscriptionStatusEnum = pgEnum("subscription_status", [
   "active",
   "past_due",

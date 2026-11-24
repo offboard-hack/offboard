@@ -1,6 +1,7 @@
 import { Elysia, t } from "elysia";
 import type { PortalAccessPlugin } from "../../shared/access.js";
 import { errorResponse } from "../../shared/http.js";
+import type { FireRules } from "../../shared/rule-dispatch.js";
 import type { EquipmentRepository } from "./repository.js";
 
 const equipmentStatus = t.Union([
@@ -23,7 +24,11 @@ const equipmentRow = t.Object({
 
 const equipmentListRow = t.Composite([equipmentRow, t.Object({ person: t.String() })]);
 
-export function equipmentRoutes(repos: EquipmentRepository, access: PortalAccessPlugin) {
+export function equipmentRoutes(
+  repos: EquipmentRepository,
+  access: PortalAccessPlugin,
+  fireRules: FireRules,
+) {
   return new Elysia()
     .use(access)
     .get("/equipment", () => repos.listEquipment(), {
@@ -33,9 +38,25 @@ export function equipmentRoutes(repos: EquipmentRepository, access: PortalAccess
     .put(
       "/equipment/:id",
       async ({ params, body, status }) => {
-        const updated = await repos.updateEquipmentStatus(params.id, body.status);
+        const before = await repos.getEquipmentContext(params.id);
 
-        if (!updated) return status(404, { error: "Equipment not found" });
+        const updated = before ? await repos.updateEquipmentStatus(params.id, body.status) : null;
+
+        if (!before || !updated) return status(404, { error: "Equipment not found" });
+
+        if (before.status !== body.status) {
+          await fireRules("equipment.status_changed", {
+            equipment: {
+              id: before.id,
+              tag: before.tag,
+              item: before.item,
+              status: body.status,
+              previousStatus: before.status,
+              caseId: before.caseId,
+            },
+            case: { id: before.caseId, name: before.caseName },
+          });
+        }
 
         return updated;
       },

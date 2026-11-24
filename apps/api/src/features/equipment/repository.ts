@@ -1,5 +1,5 @@
 import type { Database } from "@offboard/db/client";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, notInArray } from "drizzle-orm";
 import { equipment, offboardingCases } from "@offboard/db/schema";
 
 type EquipmentStatus = (typeof equipment.$inferSelect)["status"];
@@ -34,9 +34,40 @@ export function createEquipmentRepository(db: Database) {
     return updated ?? null;
   }
 
+  async function getEquipmentContext(id: string) {
+    const [row] = await db
+      .select({
+        id: equipment.id,
+        tag: equipment.tag,
+        item: equipment.item,
+        status: equipment.status,
+        caseId: equipment.caseId,
+        caseName: offboardingCases.name,
+      })
+      .from(equipment)
+      .innerJoin(offboardingCases, eq(offboardingCases.id, equipment.caseId))
+      .where(eq(equipment.id, id));
+
+    return row ?? null;
+  }
+
+  async function areAllCaseEquipmentReceived(caseId: string) {
+    const [pending] = await db
+      .select({ id: equipment.id })
+      .from(equipment)
+      .where(
+        and(eq(equipment.caseId, caseId), notInArray(equipment.status, ["received", "inventory"])),
+      )
+      .limit(1);
+
+    return !pending;
+  }
+
   return {
     listEquipment,
     updateEquipmentStatus,
+    getEquipmentContext,
+    areAllCaseEquipmentReceived,
   };
 }
 

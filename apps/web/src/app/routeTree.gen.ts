@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PortalRouteImport } from './routes/_portal'
 import { Route as EntrarRouteImport } from './routes/entrar'
+import { Route as PortalAutomacoesRouteImport } from './routes/_portal.automacoes'
 import { Route as PortalBensEColetaRouteImport } from './routes/_portal.bens-e-coleta'
 import { Route as PortalCandidaturasAssistidasRouteImport } from './routes/_portal.candidaturas-assistidas'
 import { Route as PortalChecklistAutomaticoRouteImport } from './routes/_portal.checklist-automatico'
@@ -38,6 +39,11 @@ const EntrarRoute = EntrarRouteImport.update({
   id: '/entrar',
   path: '/entrar',
   getParentRoute: () => rootRouteImport,
+} as any)
+const PortalAutomacoesRoute = PortalAutomacoesRouteImport.update({
+  id: '/automacoes',
+  path: '/automacoes',
+  getParentRoute: () => PortalRoute,
 } as any)
 const PortalBensEColetaRoute = PortalBensEColetaRouteImport.update({
   id: '/bens-e-coleta',
@@ -108,6 +114,7 @@ const PortalDesligamentosImportarRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/entrar': typeof EntrarRoute
+  '/automacoes': typeof PortalAutomacoesRoute
   '/bens-e-coleta': typeof PortalBensEColetaRoute
   '/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
   '/checklist-automatico': typeof PortalChecklistAutomaticoRoute
@@ -124,6 +131,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/entrar': typeof EntrarRoute
+  '/automacoes': typeof PortalAutomacoesRoute
   '/bens-e-coleta': typeof PortalBensEColetaRoute
   '/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
   '/checklist-automatico': typeof PortalChecklistAutomaticoRoute
@@ -142,6 +150,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_portal': typeof PortalRouteWithChildren
   '/entrar': typeof EntrarRoute
+  '/_portal/automacoes': typeof PortalAutomacoesRoute
   '/_portal/bens-e-coleta': typeof PortalBensEColetaRoute
   '/_portal/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
   '/_portal/checklist-automatico': typeof PortalChecklistAutomaticoRoute
@@ -160,6 +169,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/entrar'
+    | '/automacoes'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
     | '/checklist-automatico'
@@ -176,6 +186,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/entrar'
+    | '/automacoes'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
     | '/checklist-automatico'
@@ -193,6 +204,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_portal'
     | '/entrar'
+    | '/_portal/automacoes'
     | '/_portal/bens-e-coleta'
     | '/_portal/candidaturas-assistidas'
     | '/_portal/checklist-automatico'
@@ -235,6 +247,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/entrar'
       preLoaderRoute: typeof EntrarRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_portal/automacoes': {
+      id: '/_portal/automacoes'
+      path: '/automacoes'
+      fullPath: '/automacoes'
+      preLoaderRoute: typeof PortalAutomacoesRouteImport
+      parentRoute: typeof PortalRoute
     }
     '/_portal/bens-e-coleta': {
       id: '/_portal/bens-e-coleta'
@@ -324,6 +343,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface PortalRouteChildren {
+  PortalAutomacoesRoute: typeof PortalAutomacoesRoute
   PortalBensEColetaRoute: typeof PortalBensEColetaRoute
   PortalCandidaturasAssistidasRoute: typeof PortalCandidaturasAssistidasRoute
   PortalChecklistAutomaticoRoute: typeof PortalChecklistAutomaticoRoute
@@ -339,6 +359,7 @@ interface PortalRouteChildren {
 }
 
 const PortalRouteChildren: PortalRouteChildren = {
+  PortalAutomacoesRoute: PortalAutomacoesRoute,
   PortalBensEColetaRoute: PortalBensEColetaRoute,
   PortalCandidaturasAssistidasRoute: PortalCandidaturasAssistidasRoute,
   PortalChecklistAutomaticoRoute: PortalChecklistAutomaticoRoute,

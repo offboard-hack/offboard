@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
-import { tasks } from "@offboard/db/schema";
+import { equipment, tasks } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -61,7 +61,10 @@ describe.skipIf(!url)("api", () => {
   let correiosBody = "";
   let correiosStatus = 200;
 
-  const correiosServer = createServer((_req, res) => {
+  const correiosRequests: string[] = [];
+
+  const correiosServer = createServer((req, res) => {
+    correiosRequests.push(req.url ?? "");
     res.writeHead(correiosStatus, { "content-type": "application/json" });
     res.end(correiosBody);
   });
@@ -79,6 +82,10 @@ describe.skipIf(!url)("api", () => {
     status?: string;
     rows?: { name: string; department?: string }[];
     actionId?: string;
+    trigger?: string;
+    conditions?: Record<string, ConfigValue>;
+    actions?: { type: string; [key: string]: ConfigValue }[];
+    cronSchedule?: string | null;
     enabled?: boolean;
     config?: Record<string, ConfigValue>;
     phase?: string;
@@ -735,6 +742,286 @@ describe.skipIf(!url)("api", () => {
     expect(res.status).toBe(404);
   });
 
+  it("lists seeded automation rules", async () => {
+    const res = await call("/automation-rules");
+    const list = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(list).toHaveLength(4);
+    expect(list[0]).toEqual({
+      id: expect.any(String),
+      name: expect.any(String),
+      trigger: expect.any(String),
+      conditions: expect.any(Object),
+      actions: expect.any(Array),
+      enabled: true,
+      cronSchedule: null,
+    });
+  });
+
+  it("gets, creates, updates and deletes an automation rule", async () => {
+    const created = await call("/automation-rules", "POST", {
+      name: "Nova regra",
+      trigger: "schedule.cron",
+      cronSchedule: "0 */2 * * *",
+      actions: [{ type: "correios_check" }],
+    });
+
+    expect(created.status).toBe(201);
+
+    const rule = await created.json();
+
+    expect(rule).toMatchObject({
+      name: "Nova regra",
+      trigger: "schedule.cron",
+      conditions: {},
+      actions: [{ type: "correios_check" }],
+      enabled: true,
+      cronSchedule: "0 */2 * * *",
+    });
+
+    expect(await (await call(`/automation-rules/${rule.id}`)).json()).toEqual(rule);
+
+    const updated = await call(`/automation-rules/${rule.id}`, "PUT", {
+      enabled: false,
+      conditions: { "equipment.status": "received" },
+    });
+
+    expect(updated.status).toBe(200);
+    expect(await updated.json()).toMatchObject({ id: rule.id, enabled: false });
+    expect((await call(`/automation-rules/${rule.id}`, "DELETE")).status).toBe(204);
+    expect((await call(`/automation-rules/${rule.id}`)).status).toBe(404);
+  });
+
+  it("returns 404 for unknown automation rules", async () => {
+    expect((await call(`/automation-rules/${missingCaseId}`)).status).toBe(404);
+    expect(
+      (await call(`/automation-rules/${missingCaseId}`, "PUT", { enabled: false })).status,
+    ).toBe(404);
+    expect((await call(`/automation-rules/${missingCaseId}`, "DELETE")).status).toBe(404);
+  });
+
+  it("rejects invalid automation rule payloads", async () => {
+    const badTrigger = await call("/automation-rules", "POST", {
+      name: "x",
+      trigger: "nope",
+      actions: [],
+    });
+
+    const badAction = await call("/automation-rules", "POST", {
+      name: "x",
+      trigger: "correios.delivered",
+      actions: [{ type: "nope" }],
+    });
+
+    expect(badTrigger.status).toBe(422);
+    expect(badAction.status).toBe(422);
+  });
+
+  it("restricts automation rules to admins", async () => {
+    for (const role of ["rh", "gestor", "visualizador"]) {
+      const res = await app.handle(
+        new Request("http://localhost/api/automation-rules", {
+          headers: { "x-test-session": role },
+        }),
+      );
+
+      expect(res.status).toBe(403);
+    }
+  });
+
+  it("fires equipment rules when equipment status changes", async () => {
+    correiosRequests.length = 0;
+
+    await call("/automation-rules", "POST", {
+      name: "Falha de equipamento",
+      trigger: "equipment.status_changed",
+      conditions: { "equipment.status": "failed", "equipment.previousStatus": "with_person" },
+      actions: [{ type: "webhook", url: correiosBaseUrl }],
+    });
+
+    const [target] = await db.select({ id: equipment.id }).from(equipment).limit(1);
+
+    await db.update(equipment).set({ status: "with_person" }).where(eq(equipment.id, target.id));
+    await call(`/equipment/${target.id}`, "PUT", { status: "failed" });
+
+    expect(correiosRequests).toHaveLength(1);
+  });
+
+  it("fires task rules when a task status changes", async () => {
+    correiosRequests.length = 0;
+
+    await call("/automation-rules", "POST", {
+      name: "Tarefa em andamento",
+      trigger: "task.status_changed",
+      conditions: { "task.status": "in_progress", "task.previousStatus": "todo" },
+      actions: [{ type: "webhook", url: correiosBaseUrl }],
+    });
+
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const todo = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    await call(`/tasks/${todo.id}/status`, "PATCH", { status: "in_progress" });
+
+    expect(correiosRequests).toHaveLength(1);
+  });
+
+  function runScheduledRequest(token?: string) {
+    return new Request("http://localhost/api/automation-rules/run-scheduled", {
+      method: "POST",
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    });
+  }
+
+  it("runs scheduled rules only with the cron secret", async () => {
+    expect((await app.handle(runScheduledRequest())).status).toBe(401);
+    expect((await app.handle(runScheduledRequest("wrong"))).status).toBe(401);
+  });
+
+  it("runs the correios check from a scheduled rule", async () => {
+    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
+
+    correiosStatus = 200;
+    correiosBody = JSON.stringify({
+      objetos: [
+        {
+          eventos: [
+            {
+              codigo: "BDE",
+              tipo: "01",
+              descricao: "Objeto entregue",
+              dtHrCriado: "2026-11-21T09:00:00",
+            },
+          ],
+        },
+      ],
+    });
+
+    const [pickup] = await db
+      .select({ id: equipment.id, caseId: equipment.caseId })
+      .from(equipment)
+      .where(eq(equipment.returnMethod, "pickup"))
+      .limit(1);
+
+    await db.update(equipment).set({ status: "transit" }).where(eq(equipment.id, pickup.id));
+
+    const [task] = await db
+      .insert(tasks)
+      .values({
+        caseId: pickup.caseId,
+        title: "Receber equipamento",
+        team: "TI",
+        position: 98,
+        trackingCode: "ZX999888777BR",
+      })
+      .returning({ id: tasks.id });
+
+    await call("/automation-rules", "POST", {
+      name: "Regra agendada inválida",
+      trigger: "schedule.cron",
+      cronSchedule: "0 * * * *",
+      actions: [{ type: "webhook" }],
+    });
+
+    const res = await correiosApp.handle(runScheduledRequest(cronSecret));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ran: 2, failed: 1 });
+
+    const [after] = await db
+      .select({ status: equipment.status })
+      .from(equipment)
+      .where(eq(equipment.id, pickup.id));
+
+    const [doneTask] = await db
+      .select({ status: tasks.status })
+      .from(tasks)
+      .where(eq(tasks.id, task.id));
+
+    expect(after.status).toBe("received");
+    expect(doneTask.status).toBe("done");
+  });
+
+  it("does not fire status rules when the status is unchanged", async () => {
+    correiosRequests.length = 0;
+
+    await call("/automation-rules", "POST", {
+      name: "Qualquer equipamento",
+      trigger: "equipment.status_changed",
+      actions: [{ type: "webhook", url: correiosBaseUrl }],
+    });
+
+    await call("/automation-rules", "POST", {
+      name: "Qualquer tarefa",
+      trigger: "task.status_changed",
+      actions: [{ type: "webhook", url: correiosBaseUrl }],
+    });
+
+    const [item] = await db
+      .select({ id: equipment.id, status: equipment.status })
+      .from(equipment)
+      .limit(1);
+
+    await call(`/equipment/${item.id}`, "PUT", { status: item.status });
+
+    const [row] = await db.select({ id: tasks.id, status: tasks.status }).from(tasks).limit(1);
+
+    await call(`/tasks/${row.id}/status`, "PATCH", { status: row.status });
+
+    expect(correiosRequests).toHaveLength(0);
+  });
+
+  it("marks pickup equipment as received when correios reports a delivery", async () => {
+    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
+
+    correiosStatus = 200;
+    correiosBody = JSON.stringify({
+      objetos: [
+        {
+          eventos: [
+            {
+              codigo: "BDE",
+              tipo: "01",
+              descricao: "Objeto entregue",
+              dtHrCriado: "2026-11-21T09:00:00",
+            },
+          ],
+        },
+      ],
+    });
+
+    const [pickup] = await db
+      .select({ id: equipment.id, caseId: equipment.caseId })
+      .from(equipment)
+      .where(eq(equipment.returnMethod, "pickup"))
+      .limit(1);
+
+    await db.update(equipment).set({ status: "transit" }).where(eq(equipment.id, pickup.id));
+
+    const [task] = await db
+      .insert(tasks)
+      .values({
+        caseId: pickup.caseId,
+        title: "Receber equipamento",
+        team: "TI",
+        position: 99,
+        trackingCode: "ZX111222333BR",
+      })
+      .returning({ id: tasks.id });
+
+    const res = await correiosApp.handle(cronRequest());
+
+    expect((await res.json()).delivered).toContain(task.id);
+
+    const [after] = await db
+      .select({ status: equipment.status })
+      .from(equipment)
+      .where(eq(equipment.id, pickup.id));
+
+    expect(after.status).toBe("received");
+  });
+
   it("lists seeded team members ordered by name", async () => {
     const res = await call("/team");
 
@@ -1140,7 +1427,15 @@ describe.skipIf(!url)("api", () => {
           ...repos.offboardings,
           getTrackedTasks: () =>
             Promise.resolve([
-              { id: missingTaskId, title: "Gone", phase: "d0", trackingCode: "ZZ999999999BR" },
+              {
+                id: missingTaskId,
+                title: "Gone",
+                phase: "d0",
+                status: "todo" as const,
+                trackingCode: "ZZ999999999BR",
+                caseId: missingCaseId,
+                caseName: "Gone",
+              },
             ]),
         },
       },

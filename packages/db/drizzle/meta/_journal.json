@@ -71,6 +71,13 @@
       "when": 1795740000004,
       "tag": "0009_add_billing",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795740000005,
+      "tag": "0010_add_automation_rules",
+      "breakpoints": true
     }
   ]
 }

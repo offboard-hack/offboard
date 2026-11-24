@@ -194,6 +194,12 @@ const navigationGroups: {
         icon: "M9 4v4m6-4v4M6 8h12v2a6 6 0 0 1-6 6v4M6 8v2a6 6 0 0 0 6 6",
       },
       {
+        to: "/automacoes",
+        label: "Automações",
+        subject: "Integrations",
+        icon: "M13 2 4 14h7l-1 8 9-12h-7z",
+      },
+      {
         to: "/planos-e-gastos",
         label: "Planos e gastos",
         subject: "Integrations",

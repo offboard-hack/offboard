@@ -46,11 +46,12 @@ export default {
     const config = cronConfig.parse(env);
 
     const response = await handleApi(
-      new Request(new URL("/api/correios/check", config.BETTER_AUTH_URL), {
+      new Request(new URL("/api/automation-rules/run-scheduled", config.BETTER_AUTH_URL), {
+        method: "POST",
         headers: { Authorization: `Bearer ${config.CRON_SECRET}` },
       }),
     );
 
-    if (!response.ok) throw new Error(`Correios check failed with status ${response.status}`);
+    if (!response.ok) throw new Error(`Scheduled rules failed with status ${response.status}`);
   },
 };

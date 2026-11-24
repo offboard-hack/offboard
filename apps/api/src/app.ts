@@ -3,6 +3,11 @@ import { Elysia, t } from "elysia";
 import { actionConfigsRoutes } from "./features/action-configs/routes.js";
 import { fireActions } from "./features/action-configs/actions.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
+import { automationRulesRoutes } from "./features/automation-rules/routes.js";
+import { fireRulesForTrigger, runScheduledRules } from "./features/automation-rules/engine.js";
+import { createCorreiosCheck } from "./features/offboardings/correios-check.js";
+import type { DispatchAction } from "./shared/action-dispatch.js";
+import type { FireRules } from "./shared/rule-dispatch.js";
 import { authRoutes } from "./features/auth/routes.js";
 import { createAbacatePayGateway, type AbacatePayGateway } from "./features/billing/abacatepay.js";
 import { billingRoutes } from "./features/billing/routes.js";
@@ -28,6 +33,34 @@ type AppOptions = {
 export function createApp(webOrigin: string, repos: Repositories, options: AppOptions) {
   const access = portalAccess(options.auth, webOrigin);
 
+  const engine = {
+    automationRules: repos.automationRules,
+    offboardings: repos.offboardings,
+    equipment: repos.equipment,
+    runCorreiosCheck: async () => {
+      await checkTrackedShipments();
+    },
+  };
+
+  const fireRules: FireRules = (trigger, context) => fireRulesForTrigger(trigger, context, engine);
+
+  const dispatchAction: DispatchAction = async (context) => {
+    await fireActions(repos.actionConfigs, context);
+  };
+
+  const checkTrackedShipments = createCorreiosCheck(
+    repos.offboardings,
+    dispatchAction,
+    fireRules,
+    options.correiosBaseUrl,
+  );
+
+  async function runScheduled() {
+    const results = await runScheduledRules(engine);
+
+    return { ran: results.length, failed: results.filter((r) => r.errors.length > 0).length };
+  }
+
   return new Elysia({ adapter: options.adapter, prefix: "/api" })
     .use(cors({ origin: webOrigin, credentials: false }))
     .get("/health", () => ({ status: "ok" }) satisfies { status: "ok" }, {
@@ -38,17 +71,18 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       offboardingsRoutes(
         repos.offboardings,
         access,
-        async (context) => {
-          await fireActions(repos.actionConfigs, context);
-        },
+        dispatchAction,
+        fireRules,
+        checkTrackedShipments,
         options.cronSecret,
         options.webhookSecret,
         options.correiosBaseUrl,
       ),
     )
     .use(actionConfigsRoutes(repos.actionConfigs, access))
+    .use(automationRulesRoutes(repos.automationRules, access, runScheduled, options.cronSecret))
     .use(teamRoutes(repos.team, access))
-    .use(equipmentRoutes(repos.equipment, access))
+    .use(equipmentRoutes(repos.equipment, access, fireRules))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
     .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret))
     .use(
