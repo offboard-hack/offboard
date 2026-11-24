@@ -9,14 +9,17 @@ import { billingRoutes } from "./features/billing/routes.js";
 import { equipmentRoutes } from "./features/equipment/routes.js";
 import { exitSurveysRoutes } from "./features/exit-surveys/routes.js";
 import { integrationsRoutes } from "./features/integrations/routes.js";
+import { jobsRoutes } from "./features/jobs/routes.js";
 import { offboardingsRoutes } from "./features/offboardings/routes.js";
 import { talentRoutes } from "./features/talent/routes.js";
-import { talentAccess } from "./features/talent/access.js";
-import { companySponsors } from "./features/talent/entitlement.js";
+import { talentAccess } from "./shared/talent-access.js";
+import { companySponsors } from "./shared/entitlement.js";
 import { welcomeEmail, type WelcomeMessage } from "./features/talent/welcome.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
 import { portalAccess } from "./shared/access.js";
+import type { GenerateStructured } from "./shared/ai.js";
+import { fetchPageText, type FetchPageResult } from "./shared/page-text.js";
 
 type AppOptions = {
   adapter?: NonNullable<ConstructorParameters<typeof Elysia>[0]>["adapter"];
@@ -28,6 +31,8 @@ type AppOptions = {
   slackSigningSecret?: string;
   abacatepay?: AbacatePayGateway;
   abacatepayWebhookSecret?: string;
+  generateStructured?: GenerateStructured;
+  fetchPage?: (url: URL) => Promise<FetchPageResult>;
 };
 
 export function createApp(webOrigin: string, repos: Repositories, options: AppOptions) {
@@ -64,6 +69,12 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       talentRoutes(repos.talent, access, talent, (profile) =>
         options.sendEmail(welcomeEmail(profile, webOrigin)),
       ),
+    )
+    .use(
+      jobsRoutes(repos.jobs, access, talent, {
+        generate: options.generateStructured,
+        fetchPage: options.fetchPage ?? fetchPageText,
+      }),
     )
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))

@@ -5,13 +5,16 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
-import { tasks } from "@offboard/db/schema";
+import { jobs, tasks } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.ts";
+import { jobDraftSchema } from "./features/jobs/extract.js";
+import type { GenerateStructured } from "./shared/ai.js";
+import type { FetchPageResult } from "./shared/page-text.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -421,6 +424,247 @@ describe.skipIf(!url)("api", () => {
       });
 
       expect(gone.status).toBe(403);
+    });
+
+    describe("jobs catalog", () => {
+      const extracted = {
+        isJobPosting: true,
+        title: "Engenheira de Software",
+        company: "Acme",
+        workModel: "remote",
+        city: "São Paulo",
+        state: "SP",
+        salaryMinCents: 800000,
+        salaryMaxCents: 1200000,
+        description: "Descrição da vaga",
+      };
+
+      function jobsApp(
+        overrides: { generate?: GenerateStructured | null; page?: FetchPageResult } = {},
+      ) {
+        const calls = { generate: 0, fetch: 0 };
+
+        const generate: GenerateStructured = async ({ schema }) => {
+          calls.generate += 1;
+
+          return schema.parse(extracted);
+        };
+
+        const fetchPage = async (pageUrl: URL) => {
+          calls.fetch += 1;
+
+          return overrides.page ?? { url: pageUrl, text: "Vaga de engenharia" };
+        };
+
+        const instance = createApp(webOrigin, repos, {
+          ...appOptions,
+          generateStructured:
+            overrides.generate === null ? undefined : (overrides.generate ?? generate),
+          fetchPage,
+        });
+
+        function share(session: string, shareUrl: string) {
+          return instance.handle(
+            new Request("http://localhost/api/jobs/share", {
+              method: "POST",
+              headers: {
+                "x-test-session": session,
+                origin: webOrigin,
+                "content-type": "application/json",
+              },
+              body: JSON.stringify({ url: shareUrl }),
+            }),
+          );
+        }
+
+        return { calls, share };
+      }
+
+      it("shares a job by link", async () => {
+        const { calls, share } = jobsApp();
+        const created = await share("rh", "https://jobs.example.com/vaga-1");
+
+        expect(created.status).toBe(201);
+        expect(await created.json()).toMatchObject({
+          origin: "hr",
+          title: "Engenheira de Software",
+          company: "Acme",
+          workModel: "remote",
+          url: "https://jobs.example.com/vaga-1",
+        });
+        expect(calls).toEqual({ generate: 1, fetch: 1 });
+
+        const again = await share("rh", "https://jobs.example.com/vaga-1?utm_source=x");
+
+        expect(again.status).toBe(200);
+        expect(calls).toEqual({ generate: 1, fetch: 1 });
+        expect((await again.json()).id).toBe(
+          (await (await share("admin", "https://jobs.example.com/vaga-1")).json()).id,
+        );
+        expect((await share("visualizador", "https://jobs.example.com/vaga-2")).status).toBe(403);
+      });
+
+      it("returns the existing job when a concurrent share wins the race", async () => {
+        const { share } = jobsApp({
+          generate: async ({ schema }) => {
+            const { isJobPosting: _ignored, ...draft } = jobDraftSchema.parse(extracted);
+
+            await repos.jobs.createShared({
+              ...draft,
+              url: "https://jobs.example.com/race",
+              sourceKey: "https://jobs.example.com/race",
+            });
+
+            return schema.parse(extracted);
+          },
+        });
+
+        expect((await share("rh", "https://jobs.example.com/race")).status).toBe(200);
+      });
+
+      it("rejects pages that are not job postings", async () => {
+        const { share } = jobsApp({
+          generate: async ({ schema }) => schema.parse({ ...extracted, isJobPosting: false }),
+        });
+
+        const response = await share("rh", "https://blog.example.com/post");
+
+        expect(response.status).toBe(422);
+        expect(await response.json()).toEqual({ error: "Page is not a job posting" });
+        expect(
+          await repos.jobs.findBySource("hr-link", "https://blog.example.com/post"),
+        ).toBeUndefined();
+      });
+
+      it("reports unreadable pages, invalid urls and missing AI", async () => {
+        const unreachable = jobsApp({ page: "unreachable" });
+        const failed = await unreachable.share("rh", "https://jobs.example.com/down");
+
+        expect(failed.status).toBe(502);
+        expect(await failed.json()).toEqual({ error: "Could not read the job page" });
+
+        const invalidPage = jobsApp({ page: "invalid_url" });
+
+        expect((await invalidPage.share("rh", "https://jobs.example.com/redirect")).status).toBe(
+          422,
+        );
+
+        const insecure = jobsApp();
+        const rejected = await insecure.share("rh", "http://jobs.example.com/vaga");
+
+        expect(rejected.status).toBe(422);
+        expect(await rejected.json()).toEqual({ error: "Invalid job url" });
+        expect(insecure.calls.fetch).toBe(0);
+
+        const noAi = jobsApp({ generate: null });
+        const unavailable = await noAi.share("rh", "https://jobs.example.com/no-ai");
+
+        expect(unavailable.status).toBe(503);
+        expect(await unavailable.json()).toEqual({ error: "AI not configured" });
+        expect(noAi.calls.fetch).toBe(0);
+      });
+
+      it("reports extraction failures as a bad gateway", async () => {
+        const { share } = jobsApp({
+          generate: () => Promise.reject(new Error("gateway down")),
+        });
+
+        const response = await share("rh", "https://jobs.example.com/llm-down");
+
+        expect(response.status).toBe(502);
+        expect(await response.json()).toEqual({ error: "Could not extract the job" });
+      });
+
+      it("guards the job list with active talent access", async () => {
+        const caseId = await firstCaseId();
+        const created = await repos.talent.enable({ caseId, personalEmail, sponsoredUntil });
+
+        if (
+          created === "case_not_found" ||
+          created === "already_enabled" ||
+          created === "email_taken"
+        ) {
+          throw new Error(created);
+        }
+
+        const talentHeaders = { "x-test-talent-id": created.id };
+
+        await db.insert(jobs).values([
+          {
+            origin: "external",
+            source: "seed",
+            sourceKey: "a",
+            title: "A",
+            company: "Acme",
+            workModel: "remote",
+            url: "https://jobs.example.com/a",
+            postedAt: new Date("2026-01-02"),
+          },
+          {
+            origin: "external",
+            source: "seed",
+            sourceKey: "b",
+            title: "B",
+            company: "Acme",
+            workModel: "onsite",
+            url: "https://jobs.example.com/b",
+            postedAt: new Date("2026-01-01"),
+          },
+          {
+            origin: "external",
+            source: "seed",
+            sourceKey: "c",
+            title: "C",
+            company: "Acme",
+            url: "https://jobs.example.com/c",
+            closedAt: new Date(),
+          },
+        ]);
+
+        expect(
+          (await asSession("talent", "/me/jobs", "GET", undefined, talentHeaders)).status,
+        ).toBe(403);
+
+        await repos.talent.acceptTerms(created.id);
+
+        const listed = await asSession("talent", "/me/jobs", "GET", undefined, talentHeaders);
+        const body = await listed.json();
+
+        expect(listed.status).toBe(200);
+        expect(body).toMatchObject({ page: 1, pageSize: 20, total: 2 });
+        expect(body.items.map((item: { title: string }) => item.title)).toEqual(["A", "B"]);
+
+        const remote = await asSession(
+          "talent",
+          "/me/jobs?workModel=remote",
+          "GET",
+          undefined,
+          talentHeaders,
+        );
+
+        expect((await remote.json()).items).toHaveLength(1);
+        expect(
+          (await asSession("talent", "/me/jobs?page=0", "GET", undefined, talentHeaders)).status,
+        ).toBe(422);
+        expect(
+          (await asSession("talent", "/me/jobs?page=abc", "GET", undefined, talentHeaders)).status,
+        ).toBe(422);
+        expect(
+          (await asSession("talent", "/me/jobs?workModel=moon", "GET", undefined, talentHeaders))
+            .status,
+        ).toBe(422);
+        expect((await asSession("admin", "/me/jobs")).status).toBe(403);
+
+        const subscription = await repos.billing.getSubscription();
+
+        if (!subscription) throw new Error("missing subscription");
+
+        await repos.billing.updateSubscription(subscription.id, { status: "canceled" });
+
+        expect(
+          (await asSession("talent", "/me/jobs", "GET", undefined, talentHeaders)).status,
+        ).toBe(402);
+      });
     });
   });
 

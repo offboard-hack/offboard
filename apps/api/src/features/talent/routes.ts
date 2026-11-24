@@ -1,9 +1,10 @@
 import { Elysia, t } from "elysia";
 import type { PortalAccessPlugin } from "../../shared/access.js";
 import { errorResponse } from "../../shared/http.js";
-import type { Entitlement } from "./entitlement.js";
-import type { TalentAccessPlugin } from "./access.js";
-import type { TalentProfile, TalentRepository } from "./repository.js";
+import type { Entitlement } from "../../shared/entitlement.js";
+import type { TalentAccessPlugin } from "../../shared/talent-access.js";
+import type { TalentProfile } from "../../shared/talent-profile.js";
+import type { TalentRepository } from "./repository.js";
 
 const talentAccessResponse = t.Object({
   personalEmail: t.String(),

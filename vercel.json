@@ -28,6 +28,7 @@
     { "source": "/api/action-configs/:path*", "destination": "/api/offboard" },
     { "source": "/api/me", "destination": "/api/offboard" },
     { "source": "/api/me/:path*", "destination": "/api/offboard" },
+    { "source": "/api/jobs/:path*", "destination": "/api/offboard" },
     { "source": "/api/team", "destination": "/api/offboard" },
     { "source": "/api/team/:path*", "destination": "/api/offboard" },
     { "source": "/api/webhooks/:path*", "destination": "/api/offboard" },

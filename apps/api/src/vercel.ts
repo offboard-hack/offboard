@@ -1,3 +1,4 @@
+import { lookup } from "node:dns/promises";
 import { createClient } from "@offboard/db/client";
 import { node } from "@elysia/node";
 import { sql } from "drizzle-orm";
@@ -5,11 +6,18 @@ import { createRepositories } from "./repositories.js";
 import { createApp } from "./app.js";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
+import { createGenerateStructured, gatewayModel } from "./shared/ai.js";
+import { createDnsGuardedFetch } from "./shared/dns-guard.js";
+import { fetchPageText } from "./shared/page-text.js";
 import type { WelcomeMessage } from "./features/talent/welcome.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 
 const db = createClient(process.env.POSTGRES_URL ?? "");
 const repos = createRepositories(db);
+
+const guardedFetch = createDnsGuardedFetch((host) =>
+  lookup(host, { all: true }).then((rows) => rows.map((row) => row.address)),
+);
 
 const noopAuth: PortalAuth = {
   handler: () => Promise.resolve(new Response("Auth not configured", { status: 501 })),
@@ -45,6 +53,10 @@ function buildApp() {
     slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
     abacatepay: createAbacatePayGateway(process.env.ABACATEPAY_API_KEY),
     abacatepayWebhookSecret: process.env.ABACATEPAY_WEBHOOK_SECRET,
+    generateStructured: process.env.AI_GATEWAY_API_KEY
+      ? createGenerateStructured(gatewayModel(process.env.AI_GATEWAY_API_KEY))
+      : undefined,
+    fetchPage: (url) => fetchPageText(url, guardedFetch),
   });
 }
 

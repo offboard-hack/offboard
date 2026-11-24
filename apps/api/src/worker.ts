@@ -5,6 +5,7 @@ import { createApp } from "./app.js";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
 import { emailProvider, type CloudflareEmailBinding } from "./features/auth/email.js";
+import { createGenerateStructured, gatewayModel } from "./shared/ai.js";
 import { createRepositories } from "./repositories.js";
 
 const runtimeConfig = z.object({
@@ -19,6 +20,7 @@ const runtimeConfig = z.object({
   SLACK_SIGNING_SECRET: z.string().min(1).optional(),
   ABACATEPAY_API_KEY: z.string().min(1).optional(),
   ABACATEPAY_WEBHOOK_SECRET: z.string().min(1).optional(),
+  AI_GATEWAY_API_KEY: z.string().min(1).optional(),
 });
 
 export type WorkerBindings = Partial<z.input<typeof runtimeConfig>> & {
@@ -55,6 +57,8 @@ export function createWorkerApi(bindings: WorkerBindings) {
     cloudflareEmail: bindings.EMAIL,
   });
 
+  const aiKey = config.data.AI_GATEWAY_API_KEY;
+
   const app = createApp(origin, repos, {
     adapter: CloudflareAdapter,
     auth,
@@ -64,6 +68,7 @@ export function createWorkerApi(bindings: WorkerBindings) {
     slackSigningSecret: config.data.SLACK_SIGNING_SECRET,
     abacatepay: createAbacatePayGateway(config.data.ABACATEPAY_API_KEY),
     abacatepayWebhookSecret: config.data.ABACATEPAY_WEBHOOK_SECRET,
+    generateStructured: aiKey ? createGenerateStructured(gatewayModel(aiKey)) : undefined,
   }).compile();
 
   return (request: Request) => run(() => Promise.resolve(app.handle(request)));

@@ -1,12 +1,12 @@
 import { Elysia } from "elysia";
-import type { PortalAuth } from "../../shared/portal-auth.js";
+import type { PortalAuth } from "./portal-auth.js";
 import { entitlementOf } from "./entitlement.js";
-import type { TalentRepository } from "./repository.js";
+import type { TalentProfile } from "./talent-profile.js";
 
 export function talentAccess(deps: {
   auth: PortalAuth;
   webOrigin: string;
-  talent: Pick<TalentRepository, "findById">;
+  talent: { findById(id: string): Promise<TalentProfile | undefined> };
   companyActive: () => Promise<boolean>;
   now?: () => Date;
 }) {

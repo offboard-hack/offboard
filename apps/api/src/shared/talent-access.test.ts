@@ -1,8 +1,8 @@
 import { Elysia } from "elysia";
 import { describe, expect, it, vi } from "vitest";
-import type { PortalAccess, PortalAuth } from "../../shared/portal-auth.js";
-import { talentAccess } from "./access.js";
-import type { TalentProfile } from "./repository.js";
+import type { PortalAccess, PortalAuth } from "./portal-auth.js";
+import { talentAccess } from "./talent-access.js";
+import type { TalentProfile } from "./talent-profile.js";
 
 const webOrigin = "https://app.test";
 const now = new Date("2026-06-15T12:00:00Z");

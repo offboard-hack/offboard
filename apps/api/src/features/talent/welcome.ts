@@ -1,4 +1,4 @@
-import type { TalentProfile } from "./repository.js";
+import type { TalentProfile } from "../../shared/talent-profile.js";
 
 export type WelcomeMessage = { to: string; subject: string; text: string };
 

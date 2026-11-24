@@ -2,6 +2,7 @@ import type { Database } from "@offboard/db/client";
 import { offboardingCases, talentProfiles } from "@offboard/db/schema";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
+import type { TalentProfile } from "../../shared/talent-profile.js";
 
 const caseViolation = z.object({
   cause: z.object({
@@ -20,16 +21,6 @@ const emailViolation = z.object({
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
-
-export type TalentProfile = {
-  id: string;
-  caseId: string | null;
-  name: string;
-  email: string;
-  sponsoredUntil: string;
-  termsAcceptedAt: string | null;
-  firstSignedInAt: string | null;
-};
 
 type Row = typeof talentProfiles.$inferSelect;
 

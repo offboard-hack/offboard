@@ -59,12 +59,18 @@ const readCapped = async (body: ReadableStream<Uint8Array>) => {
   const parts: string[] = [];
   let size = 0;
 
-  for await (const chunk of body) {
-    size += chunk.byteLength;
+  const reader = body.getReader();
 
-    if (size > maxBytes) return null;
+  for (let next = await reader.read(); !next.done; next = await reader.read()) {
+    size += next.value.byteLength;
 
-    parts.push(decoder.decode(chunk, { stream: true }));
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+
+      return null;
+    }
+
+    parts.push(decoder.decode(next.value, { stream: true }));
   }
 
   parts.push(decoder.decode());
