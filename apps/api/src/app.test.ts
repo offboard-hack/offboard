@@ -14,6 +14,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { createApp } from "./app.ts";
 import { jobDraftSchema } from "./features/jobs/extract.js";
 import type { GenerateStructured } from "./shared/ai.js";
+import type { ObjectStorage } from "./shared/object-storage.js";
+import { zipSync } from "fflate";
 import type { FetchPageResult } from "./shared/page-text.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 
@@ -1035,6 +1037,471 @@ describe.skipIf(!url)("api", () => {
         await repos.billing.updateSubscription(subscription.id, { status: "canceled" });
 
         expect((await send(headers, "/me/applications")).status).toBe(402);
+      });
+    });
+
+    describe("résumés", () => {
+      const pdf = new TextEncoder().encode("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n");
+
+      const draft = {
+        isResume: true,
+        headline: { text: "Engenheira de Software" },
+        summary: { text: "Dez anos de experiência" },
+        experiences: [
+          { company: "Acme", role: "Dev", start: "2019", end: null, bullets: [{ text: "Fez X" }] },
+        ],
+        education: [],
+        skills: [{ name: "TypeScript" }],
+        languages: [],
+        contact: { email: null, phone: null, city: null, links: [] },
+      };
+
+      type Store = {
+        puts: { key: string; contentType: string }[];
+        removed: string[];
+        failRemove: boolean;
+      };
+
+      function resumesApp(
+        options: { generate?: GenerateStructured | null; storage?: boolean; draft?: object } = {},
+      ) {
+        const store: Store = { puts: [], removed: [], failRemove: false };
+
+        const storage: ObjectStorage = {
+          put: async (key, _data, contentType) => {
+            store.puts.push({ key, contentType });
+          },
+          remove: async (keys) => {
+            if (store.failRemove) throw new Error("storage down");
+
+            store.removed.push(...keys);
+          },
+        };
+
+        const generate: GenerateStructured = async ({ schema }) =>
+          schema.parse(options.draft ?? draft);
+
+        const instance = createApp(webOrigin, repos, {
+          ...appOptions,
+          generateStructured:
+            options.generate === null ? undefined : (options.generate ?? generate),
+          storage: options.storage === false ? undefined : storage,
+        });
+
+        return { instance, store };
+      }
+
+      async function profile(email = personalEmail) {
+        const cases: { id: string }[] = await (await call("/offboardings")).json();
+
+        const created = await repos.talent.enable({
+          caseId: cases[0].id,
+          personalEmail: email,
+          sponsoredUntil,
+        });
+
+        if (
+          created === "case_not_found" ||
+          created === "already_enabled" ||
+          created === "email_taken"
+        ) {
+          throw new Error(created);
+        }
+
+        await repos.talent.acceptTerms(created.id);
+
+        return created.id;
+      }
+
+      function request(
+        instance: ReturnType<typeof resumesApp>["instance"],
+        talentId: string,
+        path: string,
+        init: { method?: string; body?: BodyInit; json?: unknown; session?: string } = {},
+      ) {
+        const headers = new Headers({
+          "x-test-session": init.session ?? "talent",
+          "x-test-talent-id": talentId,
+          origin: webOrigin,
+        });
+
+        if (init.json !== undefined) headers.set("content-type", "application/json");
+
+        return instance.handle(
+          new Request(`http://localhost/api${path}`, {
+            method: init.method ?? "GET",
+            headers,
+            body: init.json === undefined ? init.body : JSON.stringify(init.json),
+          }),
+        );
+      }
+
+      function upload(
+        instance: ReturnType<typeof resumesApp>["instance"],
+        talentId: string,
+        bytes: Uint8Array = pdf,
+        name = "cv.pdf",
+      ) {
+        const form = new FormData();
+
+        form.set("file", new File([new Uint8Array(bytes)], name, { type: "application/pdf" }));
+
+        return request(instance, talentId, "/me/resume/upload", { method: "POST", body: form });
+      }
+
+      function docx() {
+        return zipSync({
+          "word/document.xml": new TextEncoder().encode(
+            '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Maria CV</w:t></w:r></w:p></w:body></w:document>',
+          ),
+          "[Content_Types].xml": new TextEncoder().encode("<Types/>"),
+        });
+      }
+
+      it("uploads a résumé and replaces it on the next upload", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        const first = await upload(instance, id);
+
+        expect(first.status).toBe(200);
+
+        const created = await first.json();
+
+        expect(created).toMatchObject({ kind: "base", score: null });
+        expect(created.content.headline.text).toBe("Engenheira de Software");
+        expect(store.puts).toHaveLength(1);
+        expect(store.puts[0].key).toMatch(new RegExp(`^resumes/${id}/[0-9a-f-]+\\.pdf$`));
+        expect(store.puts[0].contentType).toBe("application/pdf");
+
+        const second = await upload(instance, id, docx(), "cv.docx");
+
+        expect(second.status).toBe(200);
+        expect((await second.json()).id).toBe(created.id);
+        expect(store.puts[1].key).toMatch(/\.docx$/);
+        expect(store.puts[1].contentType).toBe(
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        );
+        expect(store.removed).toEqual([store.puts[0].key]);
+      });
+
+      it("keeps the new résumé when removing the previous file fails", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        expect((await upload(instance, id)).status).toBe(200);
+
+        store.failRemove = true;
+
+        expect((await upload(instance, id)).status).toBe(200);
+        expect(store.puts).toHaveLength(2);
+      });
+
+      it("rejects files whose bytes are not a PDF or DOCX", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        const html = await upload(instance, id, new TextEncoder().encode("<html></html>"));
+
+        expect(html.status).toBe(422);
+        expect(await html.json()).toEqual({ error: "Unsupported file" });
+        expect(store.puts).toEqual([]);
+      });
+
+      it("rejects an oversized docx expansion", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        const bomb = zipSync({
+          "word/document.xml": new Uint8Array(3_000_000).fill(0x61),
+        });
+
+        const res = await upload(instance, id, bomb, "cv.docx");
+
+        expect(res.status).toBe(422);
+        expect(await res.json()).toEqual({ error: "File too large" });
+        expect(store.puts).toEqual([]);
+      });
+
+      it("rejects files above the size limit", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+        const big = new Uint8Array(5_242_881);
+
+        big.set(pdf);
+
+        expect((await upload(instance, id, big)).status).toBe(422);
+        expect(store.puts).toEqual([]);
+      });
+
+      it("cleans up the stored file when extraction fails", async () => {
+        const failing = resumesApp({
+          generate: async () => {
+            throw new Error("gateway down");
+          },
+        });
+
+        const id = await profile();
+        const res = await upload(failing.instance, id);
+
+        expect(res.status).toBe(502);
+        expect(await res.json()).toEqual({ error: "Could not read the résumé" });
+        expect(failing.store.removed).toEqual([failing.store.puts[0].key]);
+
+        const notResume = resumesApp({ draft: { ...draft, isResume: false } });
+        const refused = await upload(notResume.instance, id);
+
+        expect(refused.status).toBe(422);
+        expect(await refused.json()).toEqual({ error: "File is not a résumé" });
+        expect(notResume.store.removed).toEqual([notResume.store.puts[0].key]);
+        expect((await request(notResume.instance, id, "/me/resume")).status).toBe(404);
+
+        const stuck = resumesApp({ draft: { ...draft, isResume: false } });
+
+        stuck.store.failRemove = true;
+
+        expect((await upload(stuck.instance, id)).status).toBe(422);
+      });
+
+      it("cleans up the stored file when saving fails", async () => {
+        const store: string[] = [];
+
+        const instance = createApp(
+          webOrigin,
+          {
+            ...repos,
+            resumes: {
+              ...repos.resumes,
+              replaceBase: () => Promise.reject(new Error("db down")),
+            },
+          },
+          {
+            ...appOptions,
+            generateStructured: async ({ schema }) => schema.parse(draft),
+            storage: {
+              put: async () => undefined,
+              remove: async (keys) => {
+                store.push(...keys);
+              },
+            },
+          },
+        );
+
+        const res = await upload(instance, await profile());
+
+        expect(res.status).toBe(500);
+        expect(store).toHaveLength(1);
+      });
+
+      it("answers 503 when upload is not configured", async () => {
+        const id = await profile();
+
+        for (const options of [{ storage: false }, { generate: null }]) {
+          const { instance, store } = resumesApp(options);
+          const res = await upload(instance, id);
+
+          expect(res.status).toBe(503);
+          expect(await res.json()).toEqual({ error: "Résumé upload not configured" });
+          expect(store.puts).toEqual([]);
+        }
+      });
+
+      it("reads and edits the résumé", async () => {
+        const { instance } = resumesApp();
+        const id = await profile();
+
+        expect(await (await request(instance, id, "/me/resume")).json()).toEqual({
+          error: "Résumé not found",
+        });
+        expect(
+          (await request(instance, id, "/me/resume", { method: "PATCH", json: { content: {} } }))
+            .status,
+        ).toBe(422);
+
+        const emptyContent = {
+          headline: { text: "" },
+          summary: { text: "" },
+          experiences: [],
+          education: [],
+          skills: [],
+          languages: [],
+          contact: { email: null, phone: null, city: null, links: [] },
+        };
+
+        const missing = await request(instance, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: emptyContent },
+        });
+
+        expect(missing.status).toBe(404);
+
+        const created = await (await upload(instance, id)).json();
+        const read = await request(instance, id, "/me/resume");
+
+        expect(read.status).toBe(200);
+        expect(await read.json()).toEqual(created);
+      });
+
+      it("assigns and validates node ids on edit", async () => {
+        const { instance } = resumesApp();
+        const id = await profile();
+
+        const created = await (await upload(instance, id)).json();
+        const { id: _headlineId, ...headline } = created.content.headline;
+
+        const edited = {
+          ...created.content,
+          headline: { ...headline, text: "Nova" },
+          skills: [{ name: "Go" }, { name: "Rust" }],
+        };
+
+        const ok = await request(instance, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: edited },
+        });
+
+        expect(ok.status).toBe(200);
+
+        const saved = await ok.json();
+
+        expect(saved.content.headline.text).toBe("Nova");
+        expect(saved.content.headline.id).toEqual(expect.any(String));
+        expect(saved.content.skills.map((skill: { id: string }) => skill.id)).toHaveLength(2);
+
+        const duplicate = await request(instance, id, "/me/resume", {
+          method: "PATCH",
+          json: {
+            content: {
+              ...edited,
+              headline: { id: "same", text: "a" },
+              summary: { id: "same", text: "b" },
+            },
+          },
+        });
+
+        expect(duplicate.status).toBe(422);
+        expect(await duplicate.json()).toEqual({ error: "Duplicate node ids" });
+
+        const invalid = await request(instance, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: { headline: 1 } },
+        });
+
+        expect(invalid.status).toBe(422);
+        expect(await invalid.json()).toEqual({ error: "Invalid résumé content" });
+      });
+
+      it("guards the résumé routes", async () => {
+        const { instance } = resumesApp();
+        const id = await profile();
+
+        expect((await request(instance, id, "/me/resume", { session: "admin" })).status).toBe(403);
+        expect((await request(instance, id, "/me/resume", { session: "anonymous" })).status).toBe(
+          401,
+        );
+
+        const subscription = await repos.billing.getSubscription();
+
+        if (!subscription) throw new Error("missing subscription");
+
+        await repos.billing.updateSubscription(subscription.id, { status: "canceled" });
+
+        expect((await upload(instance, id)).status).toBe(402);
+        expect((await request(instance, id, "/me/export")).status).toBe(200);
+      });
+
+      it("exports the person's data", async () => {
+        const { instance } = resumesApp();
+        const id = await profile();
+
+        await upload(instance, id);
+
+        const [job] = await db
+          .insert(jobs)
+          .values({
+            origin: "external",
+            source: "seed",
+            sourceKey: "export-job",
+            title: "Backend",
+            company: "Acme",
+            url: "https://jobs.example.com/export-job",
+          })
+          .returning({ id: jobs.id });
+
+        await repos.applications.apply(id, job.id);
+
+        const res = await request(instance, id, "/me/export");
+
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-disposition")).toBe(
+          'attachment; filename="offboard-dados.json"',
+        );
+        expect(res.headers.get("cache-control")).toBe("no-store");
+
+        const body = await res.json();
+
+        expect(body.profile.email).toBe(personalEmail);
+        expect(body.resumes).toHaveLength(1);
+        expect(body.applications).toHaveLength(1);
+        expect(body.applications[0].job.title).toBe("Backend");
+        expect((await request(instance, id, "/me/export", { session: "admin" })).status).toBe(403);
+      });
+
+      it("answers 404 when the profile disappears during export", async () => {
+        const instance = createApp(
+          webOrigin,
+          { ...repos, account: { ...repos.account, exportData: async () => undefined } },
+          appOptions,
+        );
+
+        const res = await request(instance, await profile(), "/me/export");
+
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual({ error: "Profile not found" });
+      });
+
+      it("deletes the account", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        await upload(instance, id);
+
+        store.failRemove = true;
+
+        const failed = await request(instance, id, "/me", { method: "DELETE" });
+
+        expect(failed.status).toBe(502);
+        expect(await failed.json()).toEqual({ error: "Could not delete stored files" });
+        expect((await request(instance, id, "/me")).status).toBe(200);
+
+        store.failRemove = false;
+
+        const deleted = await request(instance, id, "/me", { method: "DELETE" });
+
+        expect(deleted.status).toBe(204);
+        expect(store.removed).toEqual([store.puts[0].key]);
+        expect((await request(instance, id, "/me")).status).toBe(403);
+      });
+
+      it("deletes an account without files even when storage is missing", async () => {
+        const { instance } = resumesApp({ storage: false });
+        const id = await profile();
+
+        expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+      });
+
+      it("refuses to delete files when storage is missing", async () => {
+        const withStorage = resumesApp();
+        const id = await profile();
+
+        await upload(withStorage.instance, id);
+
+        const { instance } = resumesApp({ storage: false });
+        const res = await request(instance, id, "/me", { method: "DELETE" });
+
+        expect(res.status).toBe(503);
+        expect(await res.json()).toEqual({ error: "File storage not configured" });
+        expect((await request(instance, id, "/me")).status).toBe(200);
       });
     });
   });

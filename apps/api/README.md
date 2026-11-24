@@ -55,6 +55,8 @@ public health endpoint at `http://127.0.0.1:3001/api/health` returns
 | `WEBHOOK_SECRET`            | Bearer secret for `/api/webhooks/inbound/:taskId`.                                                                                                                                                  |
 | `SLACK_SIGNING_SECRET`      | Slack app signing secret for `/api/integrations/slack/events`.                                                                                                                                      |
 | `AI_GATEWAY_API_KEY`        | Optional Vercel AI Gateway key. Enables `POST /api/jobs/share`; without it the route returns 503.                                                                                                   |
+| `RESUME_STORAGE_DIR`        | Optional directory for uploaded résumé files in local and Node runs. Without storage, `POST /api/me/resume/upload` returns 503.                                                                     |
+| `OFFBOARD_RESUMES_BUCKET`   | Build-time R2 bucket name. Binds `RESUMES` on the Worker; without it, résumé uploads return 503.                                                                                                    |
 | `ABACATEPAY_API_KEY`        | AbacatePay API key. Without it `POST /api/billing/checkout` returns 503.                                                                                                                            |
 | `ABACATEPAY_WEBHOOK_SECRET` | Secret for `POST /api/billing/webhook`, sent as `?webhookSecret=` or used to verify Standard Webhooks signatures.                                                                                   |
 

@@ -16,6 +16,9 @@ import { talentRoutes } from "./features/talent/routes.js";
 import { talentAccess } from "./shared/talent-access.js";
 import { companySponsors } from "./shared/entitlement.js";
 import { welcomeEmail, type WelcomeMessage } from "./features/talent/welcome.js";
+import { resumesRoutes } from "./features/resumes/routes.js";
+import { accountRoutes } from "./features/account/routes.js";
+import type { ObjectStorage } from "./shared/object-storage.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
 import { portalAccess } from "./shared/access.js";
@@ -34,6 +37,7 @@ type AppOptions = {
   abacatepayWebhookSecret?: string;
   generateStructured?: GenerateStructured;
   fetchPage?: (url: URL) => Promise<FetchPageResult>;
+  storage?: ObjectStorage;
 };
 
 export function createApp(webOrigin: string, repos: Repositories, options: AppOptions) {
@@ -78,6 +82,13 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       }),
     )
     .use(applicationsRoutes(repos.applications, talent))
+    .use(
+      resumesRoutes(repos.resumes, talent, {
+        generate: options.generateStructured,
+        storage: options.storage,
+      }),
+    )
+    .use(accountRoutes(repos.account, talent, options.storage))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
     .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret))

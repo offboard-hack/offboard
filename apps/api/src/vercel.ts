@@ -8,6 +8,7 @@ import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
 import { createGenerateStructured, gatewayModel } from "./shared/ai.js";
 import { createDnsGuardedFetch } from "./shared/dns-guard.js";
+import { diskStorage } from "./shared/disk-storage.js";
 import { fetchPageText } from "./shared/page-text.js";
 import type { WelcomeMessage } from "./features/talent/welcome.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
@@ -57,6 +58,9 @@ function buildApp() {
       ? createGenerateStructured(gatewayModel(process.env.AI_GATEWAY_API_KEY))
       : undefined,
     fetchPage: (url) => fetchPageText(url, guardedFetch),
+    storage: process.env.RESUME_STORAGE_DIR
+      ? diskStorage(process.env.RESUME_STORAGE_DIR)
+      : undefined,
   });
 }
 
