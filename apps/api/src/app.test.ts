@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
-import { interviews, jobs, tasks } from "@offboard/db/schema";
+import { backgroundJobs, interviews, jobs, tasks } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -80,7 +80,14 @@ const auth: PortalAuth = {
   },
 };
 
-const appOptions = { auth, sendEmail, cronSecret, webhookSecret, slackSigningSecret };
+const appOptions = {
+  auth,
+  sendEmail,
+  cronSecret,
+  webhookSecret,
+  slackSigningSecret,
+  runInBackground: () => undefined,
+};
 
 const missingTaskId = "00000000-0000-4000-8000-000000000000";
 const missingCaseId = "00000000-0000-4000-8000-000000000001";
@@ -1067,10 +1074,16 @@ describe.skipIf(!url)("api", () => {
         failRemove: boolean;
       };
 
+      type Scoring = { output: object; calls: number };
+
       function resumesApp(
         options: { generate?: GenerateStructured | null; storage?: boolean; draft?: object } = {},
       ) {
         const store: Store = { puts: [], removed: [], prefixes: [], failRemove: false };
+
+        const scoring: Scoring = { output: { score: 0, suggestions: [] }, calls: 0 };
+
+        const background: (() => Promise<void>)[] = [];
 
         const storage: ObjectStorage = {
           put: async (key, _data, contentType) => {
@@ -1088,17 +1101,31 @@ describe.skipIf(!url)("api", () => {
           },
         };
 
-        const generate: GenerateStructured = async ({ schema }) =>
-          schema.parse(options.draft ?? draft);
+        const generate: GenerateStructured = async ({ schema }) => {
+          const extracted = schema.safeParse(options.draft ?? draft);
+
+          if (extracted.success) return extracted.data;
+
+          scoring.calls += 1;
+
+          return schema.parse(scoring.output);
+        };
 
         const instance = createApp(webOrigin, repos, {
           ...appOptions,
           generateStructured:
             options.generate === null ? undefined : (options.generate ?? generate),
           storage: options.storage === false ? undefined : storage,
+          runInBackground: (task) => {
+            background.push(task);
+          },
         });
 
-        return { instance, store };
+        async function settle() {
+          await Promise.all(background.splice(0).map((task) => task()));
+        }
+
+        return { instance, store, scoring, settle };
       }
 
       async function profile(email = personalEmail, caseIndex = 0) {
@@ -1466,6 +1493,346 @@ describe.skipIf(!url)("api", () => {
 
         expect((await upload(instance, id)).status).toBe(402);
         expect((await request(instance, id, "/me/export")).status).toBe(200);
+      });
+
+      function scoreJobs() {
+        return db
+          .select({
+            subject: backgroundJobs.subject,
+            status: backgroundJobs.status,
+            attempts: backgroundJobs.attempts,
+            runAfter: backgroundJobs.runAfter,
+            lastError: backgroundJobs.lastError,
+          })
+          .from(backgroundJobs)
+          .where(eq(backgroundJobs.kind, "score_resume"))
+          .orderBy(backgroundJobs.createdAt);
+      }
+
+      async function scoredResume() {
+        const app = resumesApp();
+        const id = await profile();
+        const created = await (await upload(app.instance, id)).json();
+        const bullet = created.content.experiences[0].bullets[0];
+
+        app.scoring.output = {
+          score: 72,
+          suggestions: [
+            {
+              targetNodeId: bullet.id,
+              suggestedText: "Reduziu o tempo de deploy com X",
+              rationale: "Mostra o impacto",
+              estimatedGain: 6,
+            },
+            {
+              targetNodeId: created.content.headline.id,
+              suggestedText: "Engenheira de Software Sênior",
+              rationale: "Destaca a senioridade",
+              estimatedGain: 4,
+            },
+          ],
+        };
+
+        await app.settle();
+
+        const suggestions = await (
+          await request(app.instance, id, "/me/resume/suggestions")
+        ).json();
+
+        return { ...app, id, created, bullet, suggestions };
+      }
+
+      it("scores an uploaded résumé in the background and lists its suggestions", async () => {
+        const { instance, id, created, bullet, suggestions, scoring } = await scoredResume();
+
+        expect(scoring.calls).toBe(1);
+        expect(await scoreJobs()).toMatchObject([{ subject: created.id, status: "done" }]);
+        expect(await (await request(instance, id, "/me/resume")).json()).toMatchObject({
+          id: created.id,
+          score: 72,
+          scoredAt: expect.any(String),
+        });
+        expect(suggestions).toEqual([
+          {
+            id: expect.any(String),
+            targetNodeId: bullet.id,
+            originalText: "Fez X",
+            suggestedText: "Reduziu o tempo de deploy com X",
+            rationale: "Mostra o impacto",
+            estimatedGain: 6,
+          },
+          {
+            id: expect.any(String),
+            targetNodeId: created.content.headline.id,
+            originalText: "Engenheira de Software",
+            suggestedText: "Engenheira de Software Sênior",
+            rationale: "Destaca a senioridade",
+            estimatedGain: 4,
+          },
+        ]);
+      });
+
+      it("enqueues one score job per change and kicks a drain after each", async () => {
+        const app = resumesApp();
+        const id = await profile();
+        const created = await (await upload(app.instance, id)).json();
+
+        expect(await scoreJobs()).toMatchObject([{ subject: created.id, status: "pending" }]);
+
+        const patched = await request(app.instance, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: created.content },
+        });
+
+        expect(patched.status).toBe(200);
+        expect(await scoreJobs()).toHaveLength(1);
+
+        await app.settle();
+
+        expect(app.scoring.calls).toBe(1);
+        expect(await scoreJobs()).toMatchObject([{ status: "done" }]);
+      });
+
+      it("applies a suggestion and scores the new text", async () => {
+        const { instance, id, bullet, suggestions, settle } = await scoredResume();
+
+        expect(
+          (
+            await request(instance, id, "/me/resume/suggestions/not-a-uuid/apply", {
+              method: "POST",
+            })
+          ).status,
+        ).toBe(422);
+
+        const missing = await request(
+          instance,
+          id,
+          `/me/resume/suggestions/${crypto.randomUUID()}/apply`,
+          { method: "POST" },
+        );
+
+        expect(missing.status).toBe(404);
+        expect(await missing.json()).toEqual({ error: "Suggestion not found" });
+
+        const applied = await request(
+          instance,
+          id,
+          `/me/resume/suggestions/${suggestions[0].id}/apply`,
+          { method: "POST" },
+        );
+
+        expect(applied.status).toBe(200);
+
+        const resume = await applied.json();
+
+        expect(resume.score).toBeNull();
+        expect(resume.content.experiences[0].bullets[0]).toEqual({
+          id: bullet.id,
+          text: "Reduziu o tempo de deploy com X",
+        });
+        expect(await scoreJobs()).toMatchObject([
+          { status: "done" },
+          { subject: resume.id, status: "pending" },
+        ]);
+        expect(
+          (await (await request(instance, id, "/me/resume/suggestions")).json()).map(
+            (suggestion: { id: string }) => suggestion.id,
+          ),
+        ).toEqual([suggestions[1].id]);
+
+        await settle();
+
+        expect(await (await request(instance, id, "/me/resume")).json()).toMatchObject({
+          score: 72,
+        });
+      });
+
+      it("refuses to apply a suggestion whose text was edited", async () => {
+        const { instance, id, created, suggestions } = await scoredResume();
+
+        const edited = await request(instance, id, "/me/resume", {
+          method: "PATCH",
+          json: {
+            content: {
+              ...created.content,
+              experiences: [
+                {
+                  ...created.content.experiences[0],
+                  bullets: [{ ...created.content.experiences[0].bullets[0], text: "Fez Y" }],
+                },
+              ],
+            },
+          },
+        });
+
+        expect(edited.status).toBe(200);
+
+        const pending = await scoreJobs();
+
+        const stale = await request(
+          instance,
+          id,
+          `/me/resume/suggestions/${suggestions[0].id}/apply`,
+          { method: "POST" },
+        );
+
+        expect(stale.status).toBe(409);
+        expect(await stale.json()).toEqual({ error: "Résumé changed since this suggestion" });
+        expect(await (await request(instance, id, "/me/resume")).json()).toEqual(
+          await edited.json(),
+        );
+        expect(await scoreJobs()).toEqual(pending);
+      });
+
+      it("dismisses a suggestion", async () => {
+        const { instance, id, suggestions } = await scoredResume();
+        const path = `/me/resume/suggestions/${suggestions[0].id}/dismiss`;
+
+        expect(
+          (
+            await request(instance, id, "/me/resume/suggestions/not-a-uuid/dismiss", {
+              method: "POST",
+            })
+          ).status,
+        ).toBe(422);
+
+        const dismissed = await request(instance, id, path, { method: "POST" });
+
+        expect(dismissed.status).toBe(204);
+        expect(
+          (await (await request(instance, id, "/me/resume/suggestions")).json()).map(
+            (suggestion: { id: string }) => suggestion.id,
+          ),
+        ).toEqual([suggestions[1].id]);
+
+        const again = await request(instance, id, path, { method: "POST" });
+
+        expect(again.status).toBe(404);
+        expect(await again.json()).toEqual({ error: "Suggestion not found" });
+      });
+
+      it("hides suggestions from another profile", async () => {
+        const { instance, suggestions } = await scoredResume();
+        const other = await profile("outra.pessoal@example.com", 1);
+
+        expect(await (await request(instance, other, "/me/resume/suggestions")).json()).toEqual([]);
+
+        for (const action of ["apply", "dismiss"]) {
+          const res = await request(
+            instance,
+            other,
+            `/me/resume/suggestions/${suggestions[0].id}/${action}`,
+            { method: "POST" },
+          );
+
+          expect(res.status).toBe(404);
+        }
+
+        expect(
+          (await request(instance, other, "/me/resume/suggestions", { session: "admin" })).status,
+        ).toBe(403);
+      });
+
+      it("postpones scoring over the daily cap without calling the model", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        for (let call = 0; call < 30; call += 1) {
+          await repos.llmUsage.takeLlmCall(id, new Date());
+        }
+
+        await upload(app.instance, id);
+        await app.settle();
+
+        const [job] = await scoreJobs();
+
+        expect(app.scoring.calls).toBe(0);
+        expect(job).toMatchObject({ status: "pending", attempts: 0, lastError: null });
+        expect(job.runAfter.getTime()).toBeGreaterThan(Date.now());
+        expect((await (await request(app.instance, id, "/me/resume")).json()).score).toBeNull();
+      });
+
+      it("retries scoring when the AI is not configured", async () => {
+        const id = await profile();
+        const created = await (await upload(resumesApp().instance, id)).json();
+        const unconfigured = resumesApp({ generate: null });
+
+        await request(unconfigured.instance, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: created.content },
+        });
+        await unconfigured.settle();
+
+        expect(await scoreJobs()).toMatchObject([
+          { status: "pending", attempts: 1, lastError: "Error: AI not configured" },
+        ]);
+      });
+
+      it("drains due jobs from the cron route", async () => {
+        const { instance } = resumesApp();
+
+        await repos.background.enqueue("score_resume", crypto.randomUUID());
+
+        const drainRequest = (method: string, authorization?: string) =>
+          new Request("http://localhost/api/background/drain", {
+            method,
+            headers: authorization ? { authorization } : {},
+          });
+
+        expect((await instance.handle(drainRequest("GET"))).status).toBe(401);
+        expect(
+          (await instance.handle(drainRequest("POST", "Bearer test-cron-wrong!"))).status,
+        ).toBe(401);
+        expect(
+          (
+            await createApp(webOrigin, repos, { auth, sendEmail }).handle(
+              drainRequest("GET", `Bearer ${cronSecret}`),
+            )
+          ).status,
+        ).toBe(401);
+
+        const drained = await instance.handle(drainRequest("POST", `Bearer ${cronSecret}`));
+
+        expect(drained.status).toBe(200);
+        expect(await drained.json()).toEqual({ processed: 1, failed: 0 });
+        expect(await scoreJobs()).toMatchObject([{ status: "done" }]);
+
+        const idle = await instance.handle(drainRequest("GET", `Bearer ${cronSecret}`));
+
+        expect(idle.status).toBe(200);
+        expect(await idle.json()).toEqual({ processed: 0, failed: 0 });
+      });
+
+      it("swallows a background drain that fails", async () => {
+        let claims = 0;
+
+        const instance = createApp(
+          webOrigin,
+          {
+            ...repos,
+            background: {
+              ...repos.background,
+              claim: () => {
+                claims += 1;
+
+                return Promise.reject(new Error("queue down"));
+              },
+            },
+          },
+          {
+            auth,
+            sendEmail,
+            generateStructured: async ({ schema }) => schema.parse(draft),
+            storage: {
+              put: async () => undefined,
+              remove: async () => undefined,
+              removePrefix: async () => undefined,
+            },
+          },
+        );
+
+        expect((await upload(instance, await profile())).status).toBe(200);
+        await vi.waitFor(() => expect(claims).toBe(1));
       });
 
       it("exports the person's data", async () => {

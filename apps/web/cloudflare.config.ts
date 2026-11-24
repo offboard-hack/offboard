@@ -46,6 +46,11 @@ export default defineConfig({
     workersDev: true,
     domains: ["app.off-board.xyz"],
     env,
-    triggers: cronEnabled ? [triggers.scheduled({ schedule: "0 8 * * *" })] : [],
+    triggers: cronEnabled
+      ? [
+          triggers.scheduled({ schedule: "0 8 * * *" }),
+          triggers.scheduled({ schedule: "*/15 * * * *" }),
+        ]
+      : [],
   },
 });

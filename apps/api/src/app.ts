@@ -17,6 +17,9 @@ import { talentAccess } from "./shared/talent-access.js";
 import { companySponsors } from "./shared/entitlement.js";
 import { welcomeEmail, type WelcomeMessage } from "./features/talent/welcome.js";
 import { resumesRoutes } from "./features/resumes/routes.js";
+import { scoreResume } from "./features/resumes/score.js";
+import { backgroundRoutes } from "./features/background/routes.js";
+import { drain, type JobHandler } from "./features/background/drain.js";
 import { accountRoutes } from "./features/account/routes.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
 import { teamRoutes } from "./features/team/routes.js";
@@ -38,6 +41,7 @@ type AppOptions = {
   generateStructured?: GenerateStructured;
   fetchPage?: (url: URL) => Promise<FetchPageResult>;
   storage?: ObjectStorage;
+  runInBackground?: (task: () => Promise<void>) => void;
 };
 
 export function createApp(webOrigin: string, repos: Repositories, options: AppOptions) {
@@ -49,6 +53,38 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     talent: repos.talent,
     companyActive: async () => companySponsors((await repos.billing.getSubscription())?.status),
   });
+
+  const runInBackground =
+    options.runInBackground ??
+    ((task) => {
+      void task().catch(() => undefined);
+    });
+
+  const handlers = {
+    score_resume: async (job) => {
+      const resume = await repos.resumes.forScoring(job.subject);
+
+      if (!resume) return;
+
+      const taken = await repos.llmUsage.takeLlmCall(resume.profileId, new Date());
+
+      if (taken !== true) return { postponeUntil: taken.retryAt };
+
+      if (!options.generateStructured) throw new Error("AI not configured");
+
+      const result = await scoreResume(options.generateStructured, resume.content);
+
+      await repos.resumeSuggestions.saveScore(job.subject, resume.updatedAt, result, new Date());
+    },
+  } satisfies Record<string, JobHandler>;
+
+  async function rescore(resumeId: string) {
+    await repos.background.enqueue("score_resume", resumeId);
+
+    runInBackground(async () => {
+      await drain(repos.background, handlers);
+    });
+  }
 
   return new Elysia({ adapter: options.adapter, prefix: "/api" })
     .use(cors({ origin: webOrigin, credentials: false }))
@@ -86,8 +122,11 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       resumesRoutes(repos.resumes, talent, {
         generate: options.generateStructured,
         storage: options.storage,
+        suggestions: repos.resumeSuggestions,
+        rescore,
       }),
     )
+    .use(backgroundRoutes(repos.background, handlers, options.cronSecret))
     .use(accountRoutes(repos.account, talent, options.storage))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))

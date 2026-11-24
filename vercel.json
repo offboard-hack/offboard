@@ -33,6 +33,7 @@
     { "source": "/api/team/:path*", "destination": "/api/offboard" },
     { "source": "/api/webhooks/:path*", "destination": "/api/offboard" },
     { "source": "/api/correios/:path*", "destination": "/api/offboard" },
+    { "source": "/api/background/:path*", "destination": "/api/offboard" },
     { "source": "/((?!assets/).*)", "destination": "/api/ssr" }
   ]
 }

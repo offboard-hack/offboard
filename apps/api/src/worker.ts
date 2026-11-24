@@ -30,7 +30,10 @@ export type WorkerBindings = Partial<z.input<typeof runtimeConfig>> & {
   RESUMES?: R2BucketLike;
 };
 
-export function createWorkerApi(bindings: WorkerBindings) {
+export function createWorkerApi(
+  bindings: WorkerBindings,
+  options: { waitUntil?: (task: Promise<unknown>) => void } = {},
+) {
   const config = runtimeConfig.safeParse(bindings);
   const hyperdrive = bindings.HYPERDRIVE;
   const directUrl = config.data?.POSTGRES_URL;
@@ -72,6 +75,11 @@ export function createWorkerApi(bindings: WorkerBindings) {
     abacatepayWebhookSecret: config.data.ABACATEPAY_WEBHOOK_SECRET,
     generateStructured: aiKey ? createGenerateStructured(gatewayModel(aiKey)) : undefined,
     storage: bindings.RESUMES && r2Storage(bindings.RESUMES),
+    runInBackground: (task) => {
+      const background = run(task).catch(() => undefined);
+
+      options.waitUntil?.(background);
+    },
   }).compile();
 
   return (request: Request) => run(() => Promise.resolve(app.handle(request)));

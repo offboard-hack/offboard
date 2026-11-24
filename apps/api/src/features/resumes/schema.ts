@@ -48,3 +48,12 @@ export const resumeResponse = t.Object({
   scoredAt: nullable,
   updatedAt: t.String(),
 });
+
+export const suggestionResponse = t.Object({
+  id: t.String(),
+  targetNodeId: t.String(),
+  originalText: t.String(),
+  suggestedText: t.String(),
+  rationale: t.String(),
+  estimatedGain: t.Number(),
+});

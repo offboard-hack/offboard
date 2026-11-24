@@ -151,6 +151,10 @@ describe.skipIf(!url)("resume suggestions repository", () => {
 
   describe("saveScore", () => {
     it("discards a score computed for stale content", async () => {
+      await db.execute(
+        sql`update resumes set updated_at = '2026-01-01 00:00:00' where id = ${resumeId}`,
+      );
+
       const read = await repos.resumes.forScoring(resumeId);
 
       if (!read) throw new Error("expected a résumé");

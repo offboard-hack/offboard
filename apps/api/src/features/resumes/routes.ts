@@ -7,9 +7,12 @@ import { resumeContentInputSchema, withNodeIds } from "./content.js";
 import { readResumeFile } from "./document.js";
 import { extractResume } from "./extract.js";
 import type { ResumesRepository } from "./repository.js";
-import { resumeContentBody, resumeResponse } from "./schema.js";
+import { resumeContentBody, resumeResponse, suggestionResponse } from "./schema.js";
+import type { SuggestionsRepository } from "./suggestions.js";
 
 const maxBytes = 5_242_880;
+
+const suggestionParams = t.Object({ id: t.String({ format: "uuid" }) });
 
 const docxType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -20,7 +23,12 @@ function discard(storage: ObjectStorage, keys: string[]) {
 export function resumesRoutes(
   repos: ResumesRepository,
   talentAccess: TalentAccessPlugin,
-  deps: { generate: GenerateStructured | undefined; storage: ObjectStorage | undefined },
+  deps: {
+    generate: GenerateStructured | undefined;
+    storage: ObjectStorage | undefined;
+    suggestions: SuggestionsRepository;
+    rescore: (resumeId: string) => Promise<void>;
+  },
 ) {
   return new Elysia()
     .use(talentAccess)
@@ -65,6 +73,8 @@ export function resumesRoutes(
 
         if (saved.previousFileKey) await discard(storage, [saved.previousFileKey]);
 
+        await deps.rescore(saved.resume.id);
+
         return saved.resume;
       },
       {
@@ -98,10 +108,13 @@ export function resumesRoutes(
 
         if (content === "duplicate_ids") return status(422, { error: "Duplicate node ids" });
 
-        return (
-          (await repos.updateBaseContent(me.id, content)) ??
-          status(404, { error: "Résumé not found" })
-        );
+        const saved = await repos.updateBaseContent(me.id, content);
+
+        if (!saved) return status(404, { error: "Résumé not found" });
+
+        await deps.rescore(saved.id);
+
+        return saved;
       },
       {
         talent: "active",
@@ -109,6 +122,43 @@ export function resumesRoutes(
         response: { 200: resumeResponse, 404: errorResponse, 422: errorResponse },
         error: ({ code, status }) =>
           code === "VALIDATION" ? status(422, { error: "Invalid résumé content" }) : undefined,
+      },
+    )
+    .get("/me/resume/suggestions", ({ me }) => deps.suggestions.listOpen(me.id), {
+      talent: "active",
+      response: t.Array(suggestionResponse),
+    })
+    .post(
+      "/me/resume/suggestions/:id/apply",
+      async ({ me, params, status }) => {
+        const applied = await deps.suggestions.apply(me.id, params.id, new Date());
+
+        if (applied === "not_found") return status(404, { error: "Suggestion not found" });
+
+        if (applied === "stale") {
+          return status(409, { error: "Résumé changed since this suggestion" });
+        }
+
+        await deps.rescore(applied.id);
+
+        return applied;
+      },
+      {
+        talent: "active",
+        params: suggestionParams,
+        response: { 200: resumeResponse, 404: errorResponse, 409: errorResponse },
+      },
+    )
+    .post(
+      "/me/resume/suggestions/:id/dismiss",
+      async ({ me, params, status }) =>
+        (await deps.suggestions.dismiss(me.id, params.id))
+          ? new Response(null, { status: 204 })
+          : status(404, { error: "Suggestion not found" }),
+      {
+        talent: "active",
+        params: suggestionParams,
+        response: { 204: t.Void(), 404: errorResponse },
       },
     );
 }

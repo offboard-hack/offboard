@@ -1,6 +1,6 @@
 import { createWorkerApi, type WorkerBindings } from "@offboard/api/worker";
 import start from "@tanstack/react-start/server-entry";
-import { env } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
 import { z } from "zod";
 import { apiTransport } from "./src/shared/lib/api-transport.server";
 
@@ -10,7 +10,7 @@ declare global {
   }
 }
 
-const handleApi = createWorkerApi(env);
+const handleApi = createWorkerApi(env, { waitUntil });
 
 const cronConfig = z.object({
   BETTER_AUTH_URL: z.url(),
@@ -42,15 +42,21 @@ export default {
     return apiTransport.run(fetchApi, () => start.fetch(request));
   },
 
-  async scheduled() {
+  async scheduled(controller: ScheduledController) {
     const config = cronConfig.parse(env);
 
+    const task =
+      controller.cron === "*/15 * * * *"
+        ? { name: "Background drain", path: "/api/background/drain", method: "POST" }
+        : { name: "Correios check", path: "/api/correios/check", method: "GET" };
+
     const response = await handleApi(
-      new Request(new URL("/api/correios/check", config.BETTER_AUTH_URL), {
+      new Request(new URL(task.path, config.BETTER_AUTH_URL), {
+        method: task.method,
         headers: { Authorization: `Bearer ${config.CRON_SECRET}` },
       }),
     );
 
-    if (!response.ok) throw new Error(`Correios check failed with status ${response.status}`);
+    if (!response.ok) throw new Error(`${task.name} failed with status ${response.status}`);
   },
 };
