@@ -255,7 +255,7 @@ describe.skipIf(!url)("repositories", () => {
 
     const tags = list.map((row) => row.tag);
 
-    expect(tags).toEqual(tags.toSorted());
+    expect(tags).toEqual([...tags].sort());
     expect(list.find((row) => row.tag === "AUR-0412")).toMatchObject({
       person: "Marina Lopes",
       returnMethod: "pickup",
