@@ -19,9 +19,10 @@ const config = z
   .parse(process.env);
 
 const db = createClient(config.POSTGRES_URL);
-const { auth, origin } = createRuntimeAuth(db, config.WEB_ORIGIN);
+const repos = createRepositories(db);
+const { auth, origin } = createRuntimeAuth(db, repos.talent, config.WEB_ORIGIN);
 
-createApp(origin, createRepositories(db), {
+createApp(origin, repos, {
   adapter: node(),
   auth,
   cronSecret: process.env.CRON_SECRET,

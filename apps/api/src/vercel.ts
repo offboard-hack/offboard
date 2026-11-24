@@ -8,9 +8,11 @@ import { createRuntimeAuth } from "./features/auth/auth.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 
 const db = createClient(process.env.POSTGRES_URL ?? "");
+const repos = createRepositories(db);
 
 const noopAuth: PortalAuth = {
   handler: () => Promise.resolve(new Response("Auth not configured", { status: 501 })),
+  inviteTalent: () => Promise.reject(new Error("Auth not configured")),
   resolvePrincipal: () =>
     Promise.resolve({
       kind: "authenticated",
@@ -23,7 +25,7 @@ function buildApp() {
   let origin: string;
 
   try {
-    const runtime = createRuntimeAuth(db, process.env.WEB_ORIGIN);
+    const runtime = createRuntimeAuth(db, repos.talent, process.env.WEB_ORIGIN);
     auth = runtime.auth;
     origin = runtime.origin;
   } catch {
@@ -31,7 +33,7 @@ function buildApp() {
     origin = process.env.WEB_ORIGIN ?? "*";
   }
 
-  return createApp(origin, createRepositories(db), {
+  return createApp(origin, repos, {
     adapter: node(),
     auth,
     cronSecret: process.env.CRON_SECRET,

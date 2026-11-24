@@ -11,7 +11,7 @@ export function portalAccess(auth: PortalAuth, webOrigin: string) {
 
         if (access.kind === "anonymous") return status(401, { error: "Unauthorized" });
 
-        if (access.kind === "forbidden") return status(403, { error: "Forbidden" });
+        if (access.kind !== "authenticated") return status(403, { error: "Forbidden" });
 
         const ability = createPortalAbility(access.principal.role);
         const isRead = request.method === "GET" || request.method === "HEAD";

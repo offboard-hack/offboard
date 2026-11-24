@@ -15,12 +15,16 @@ export const portalPrincipalResponse = t.Object({
   role: memberRole,
 });
 
+export type TalentPrincipal = { id: string; name: string; email: string };
+
 export type PortalAccess =
   | { kind: "anonymous" }
   | { kind: "forbidden" }
-  | { kind: "authenticated"; principal: PortalPrincipal };
+  | { kind: "authenticated"; principal: PortalPrincipal }
+  | { kind: "talent"; profile: TalentPrincipal };
 
 export type PortalAuth = {
   handler: (request: Request) => Promise<Response>;
   resolvePrincipal: (headers: Headers) => Promise<PortalAccess>;
+  inviteTalent: (email: string) => Promise<void>;
 };

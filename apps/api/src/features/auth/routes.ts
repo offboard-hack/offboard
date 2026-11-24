@@ -14,7 +14,7 @@ export function authRoutes(auth: PortalAuth) {
 
         if (access.kind === "anonymous") return status(401, { error: "Unauthorized" });
 
-        if (access.kind === "forbidden") return status(403, { error: "Forbidden" });
+        if (access.kind !== "authenticated") return status(403, { error: "Forbidden" });
 
         return access.principal;
       },

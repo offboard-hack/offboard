@@ -20,6 +20,7 @@ const missingId = "00000000-0000-4000-8000-000000000000";
 
 const auth: PortalAuth = {
   handler: () => Promise.resolve(new Response("ok")),
+  inviteTalent: () => Promise.resolve(),
   resolvePrincipal(headers) {
     const role = headers.get("x-test-session") === "rh" ? "rh" : "admin";
 

@@ -20,6 +20,7 @@ const webhookSecret = "test-webhook-secret";
 const slackSigningSecret = "test-slack-secret";
 
 const auth: PortalAuth = {
+  inviteTalent: () => Promise.resolve(),
   async handler(request) {
     const payload = request.method === "POST" ? await request.text() : null;
 
@@ -31,6 +32,13 @@ const auth: PortalAuth = {
     if (session === "anonymous") return Promise.resolve({ kind: "anonymous" });
 
     if (session === "revoked") return Promise.resolve({ kind: "forbidden" });
+
+    if (session === "talent") {
+      return Promise.resolve({
+        kind: "talent",
+        profile: { id: "test-talent", name: "Test Talent", email: "talent@example.com" },
+      });
+    }
 
     const role =
       session === "rh" || session === "gestor" || session === "visualizador" ? session : "admin";
@@ -185,6 +193,7 @@ describe.skipIf(!url)("api", () => {
   it.each([
     ["anonymous", 401],
     ["revoked", 403],
+    ["talent", 403],
   ])("denies a %s session before reading protected records", async (session, expected) => {
     const headers = { "x-test-session": session };
     const principal = await app.handle(new Request("http://localhost/api/session", { headers }));

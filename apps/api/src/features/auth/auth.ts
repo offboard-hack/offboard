@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 import type { Database } from "@offboard/db/client";
 import {
@@ -15,11 +16,18 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import type { PortalAuth } from "../../shared/portal-auth.js";
+import type { PortalAuth, TalentPrincipal } from "../../shared/portal-auth.js";
 import { createEmailSender, type CloudflareEmailBinding } from "./email.js";
 
 const authPath = "/api/auth";
 const verifyPath = "/magic-link/verify";
+const signInPath = `${authPath}/sign-in/magic-link`;
+
+type Audience = "member" | "talent";
+
+const audienceScope = new AsyncLocalStorage<Audience>();
+const audiences = { m: "member", t: "talent" } as const;
+const tokenPrefixes = { member: "m", talent: "t" } as const;
 
 const browserEndpoints = new Set([
   `GET ${authPath}${verifyPath}`,
@@ -48,18 +56,48 @@ const originSchema = z
 
 const authSecret = z.string().min(32);
 
-const memberLinkToken = z
+const linkToken = z
   .string()
-  .transform((token) => token.split(".", 1)[0])
-  .pipe(z.uuid());
+  .transform((token) => token.split("."))
+  .pipe(z.tuple([z.enum(["m", "t"]), z.uuid(), z.string().min(1)]))
+  .transform(([prefix, id]) => ({ audience: audiences[prefix], id }));
 
-const callbackQuery = z.object({ token: memberLinkToken });
+const callbackQuery = z.object({ token: linkToken });
 const callbackContext = z.object({ query: callbackQuery });
+
+const sessionAudience = z.union([
+  z
+    .object({ talentProfileId: z.string() })
+    .transform(({ talentProfileId }) => ({ audience: "talent" as const, id: talentProfileId })),
+  z
+    .object({ memberId: z.string() })
+    .transform(({ memberId }) => ({ audience: "member" as const, id: memberId })),
+]);
+
+const appCallback = z.object({ callbackURL: z.string().startsWith("/app") });
+
+type TalentDirectory = {
+  findForSignIn(email: string, id?: string): Promise<{ id: string; name: string } | undefined>;
+  markSignedIn(id: string): Promise<void>;
+  findById(id: string): Promise<TalentPrincipal | undefined>;
+};
+
+async function requestAudience(request: Request, pathname: string) {
+  if (pathname !== signInPath) return "member";
+
+  const body = await request
+    .clone()
+    .json()
+    .catch(() => undefined);
+
+  return appCallback.safeParse(body).success ? "talent" : "member";
+}
 
 export function createAuth({
   db,
   origin,
   secret,
+  talent,
   sendLink,
   onVercel = false,
   ipAddressHeaders = onVercel ? ["x-vercel-forwarded-for"] : [],
@@ -67,6 +105,7 @@ export function createAuth({
   db: Database;
   origin: string;
   secret: string;
+  talent: TalentDirectory;
   sendLink: (message: { email: string; url: string }) => Promise<void>;
   onVercel?: boolean;
   ipAddressHeaders?: string[];
@@ -95,6 +134,11 @@ export function createAuth({
     return member;
   }
 
+  const invitees = {
+    member: findMember,
+    talent: (email: string, id?: string) => talent.findForSignIn(email, id),
+  };
+
   const auth = betterAuth({
     appName: "Offboard",
     baseURL: origin,
@@ -110,7 +154,10 @@ export function createAuth({
     session: {
       expiresIn: 12 * 60 * 60,
       disableSessionRefresh: true,
-      additionalFields: { memberId: { type: "string", required: true, input: false } },
+      additionalFields: {
+        memberId: { type: "string", required: false, input: false },
+        talentProfileId: { type: "string", required: false, input: false },
+      },
     },
     hooks: {
       before: createAuthMiddleware(async (context) => {
@@ -123,31 +170,32 @@ export function createAuth({
       user: {
         create: {
           async before(user, context) {
-            const { token: memberId } = callbackContext.parse(context).query;
-            const member = await findMember(user.email, memberId);
+            const { audience, id } = callbackContext.parse(context).query.token;
+            const invitee = await invitees[audience](user.email, id);
 
-            return member ? { data: { name: member.name } } : false;
+            return invitee ? { data: { name: invitee.name } } : false;
           },
         },
       },
       session: {
         create: {
           async before(session, context) {
-            const { token: memberId } = callbackContext.parse(context).query;
+            const { audience, id } = callbackContext.parse(context).query.token;
 
-            const [member] = await db
-              .select({ id: teamMembers.id })
+            const [user] = await db
+              .select({ email: authUser.email })
               .from(authUser)
-              .innerJoin(teamMembers, eq(normalizedEmail, authUser.email))
-              .where(
-                and(
-                  eq(authUser.id, session.userId),
-                  eq(teamMembers.id, memberId),
-                  eq(authUser.emailVerified, true),
-                ),
-              );
+              .where(and(eq(authUser.id, session.userId), eq(authUser.emailVerified, true)));
 
-            return member ? { data: { memberId: member.id } } : false;
+            const invitee = await invitees[audience](user.email, id);
+
+            if (!invitee) return false;
+
+            if (audience === "member") return { data: { memberId: invitee.id } };
+
+            await talent.markSignedIn(invitee.id);
+
+            return { data: { talentProfileId: invitee.id } };
           },
         },
       },
@@ -157,14 +205,15 @@ export function createAuth({
         expiresIn: 10 * 60,
         storeToken: "hashed",
         async generateToken(email) {
-          const member = await findMember(email);
+          const audience = audienceScope.getStore() === "talent" ? "talent" : "member";
+          const invitee = await invitees[audience](email);
 
-          return `${member?.id ?? "uninvited"}.${randomBytes(32).toString("base64url")}`;
+          return `${tokenPrefixes[audience]}.${invitee?.id ?? "uninvited"}.${randomBytes(32).toString("base64url")}`;
         },
         async sendMagicLink({ email, token, url }) {
-          const memberId = memberLinkToken.safeParse(token);
+          const link = linkToken.safeParse(token);
 
-          if (memberId.success && (await findMember(email, memberId.data))) {
+          if (link.success && (await invitees[link.data.audience](email, link.data.id))) {
             await sendLink({ email, url });
           }
         },
@@ -191,7 +240,8 @@ export function createAuth({
         authRequest = new Request(url, request);
       }
 
-      const response = await auth.handler(authRequest);
+      const audience = await requestAudience(request, url.pathname);
+      const response = await audienceScope.run(audience, () => auth.handler(authRequest));
       const headers = new Headers(response.headers);
       headers.set("cache-control", "no-store");
       headers.set("referrer-policy", "no-referrer");
@@ -205,15 +255,38 @@ export function createAuth({
 
       if (!session.user.emailVerified) return { kind: "forbidden" };
 
-      const member = await findMember(session.user.email, session.session.memberId);
+      const { audience, id } = sessionAudience.parse(session.session);
+      const email = session.user.email.toLowerCase();
+
+      if (audience === "talent") {
+        const profile = await talent.findById(id);
+
+        return profile?.email.toLowerCase() === email
+          ? {
+              kind: "talent",
+              profile: { id: profile.id, name: profile.name, email: profile.email },
+            }
+          : { kind: "forbidden" };
+      }
+
+      const member = await findMember(email, id);
 
       return member ? { kind: "authenticated", principal: member } : { kind: "forbidden" };
+    },
+    async inviteTalent(email) {
+      await audienceScope.run("talent", () =>
+        auth.api.signInMagicLink({
+          body: { email, callbackURL: "/app", errorCallbackURL: "/app/entrar" },
+          headers: new Headers({ origin }),
+        }),
+      );
     },
   } satisfies PortalAuth;
 }
 
 export function createRuntimeAuth(
   db: Database,
+  talent: TalentDirectory,
   webOrigin?: string,
   {
     env = process.env,
@@ -237,6 +310,7 @@ export function createRuntimeAuth(
     db,
     origin,
     secret,
+    talent,
     onVercel: env.VERCEL === "1",
     ipAddressHeaders,
     sendLink({ email, url }) {
