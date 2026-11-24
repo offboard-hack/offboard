@@ -97,7 +97,8 @@ describe.skipIf(!url)("account repository", () => {
   }
 
   async function applied(owner: string, sourceKey: string) {
-    const result = await repos.applications.apply(owner, await job(sourceKey));
+    const base = identified.parse(await repos.resumes.getBase(owner));
+    const result = await repos.applications.apply(owner, await job(sourceKey), base.id);
 
     return created.parse(result).applicationId;
   }

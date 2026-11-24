@@ -1,6 +1,6 @@
 import type { Database } from "@offboard/db/client";
-import { applicationEvents, applications, interviews, jobs } from "@offboard/db/schema";
-import { and, asc, desc, eq, gte, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
+import { applicationEvents, applications, interviews, jobs, resumes } from "@offboard/db/schema";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL } from "drizzle-orm";
 import {
   summarize,
   transition,
@@ -145,7 +145,7 @@ async function advance(
 }
 
 export function createApplicationsRepository(db: Database) {
-  async function apply(profileId: string, jobId: string) {
+  async function apply(profileId: string, jobId: string, resumeId: string) {
     return db.transaction(async (tx) => {
       const [job] = await tx
         .select({ url: jobs.url })
@@ -155,11 +155,26 @@ export function createApplicationsRepository(db: Database) {
 
       if (!job) return "job_not_found" as const;
 
+      const [resume] = await tx
+        .select({ id: resumes.id })
+        .from(resumes)
+        .where(
+          and(
+            eq(resumes.id, resumeId),
+            eq(resumes.profileId, profileId),
+            eq(resumes.status, "ready"),
+            or(eq(resumes.kind, "base"), eq(resumes.jobId, jobId)),
+          ),
+        )
+        .for("share");
+
+      if (!resume) return "resume_not_ready" as const;
+
       const now = new Date();
 
       const [created] = await tx
         .insert(applications)
-        .values({ profileId, jobId, appliedAt: now, statusChangedAt: now })
+        .values({ profileId, jobId, resumeId, appliedAt: now, statusChangedAt: now })
         .onConflictDoNothing({ target: [applications.profileId, applications.jobId] })
         .returning({ id: applications.id });
 

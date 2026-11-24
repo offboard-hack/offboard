@@ -723,8 +723,27 @@ describe.skipIf(!url)("api", () => {
         }
 
         await repos.talent.acceptTerms(created.id);
+        await repos.resumes.replaceBase(
+          created.id,
+          {
+            headline: { id: "headline", text: "Engenheira" },
+            summary: { id: "summary", text: "Backend." },
+            experiences: [],
+            education: [],
+            skills: [],
+            languages: [],
+            contact: { email: null, phone: null, city: null, links: [] },
+          },
+          `resumes/${created.id}.pdf`,
+        );
 
         return { "x-test-talent-id": created.id };
+      }
+
+      async function baseResume(headers: TalentHeaders) {
+        const base = await repos.resumes.getBase(headers["x-test-talent-id"]);
+
+        return { resumeId: z.object({ id: z.string() }).parse(base).id };
       }
 
       async function seedJob(sourceKey: string, closedAt?: Date) {
@@ -765,7 +784,12 @@ describe.skipIf(!url)("api", () => {
       }
 
       async function applyTo(headers: TalentHeaders, jobId: string) {
-        const response = await send(headers, `/me/jobs/${jobId}/apply`, "POST");
+        const response = await send(
+          headers,
+          `/me/jobs/${jobId}/apply`,
+          "POST",
+          await baseResume(headers),
+        );
 
         expect(response.status).toBe(201);
 
@@ -775,8 +799,17 @@ describe.skipIf(!url)("api", () => {
       it("applies once to open jobs", async () => {
         const headers = await talentProfile(personalEmail, 0);
         const jobId = await seedJob("open");
+        const body = await baseResume(headers);
 
-        const applied = await send(headers, `/me/jobs/${jobId}/apply`, "POST");
+        const notReady = await send(headers, `/me/jobs/${jobId}/apply`, "POST", {
+          resumeId: crypto.randomUUID(),
+        });
+
+        expect(notReady.status).toBe(422);
+        expect(await notReady.json()).toEqual({ error: "Résumé not ready for this job" });
+        expect((await send(headers, `/me/jobs/${jobId}/apply`, "POST")).status).toBe(422);
+
+        const applied = await send(headers, `/me/jobs/${jobId}/apply`, "POST", body);
 
         expect(applied.status).toBe(201);
         expect(await applied.json()).toEqual({
@@ -784,7 +817,7 @@ describe.skipIf(!url)("api", () => {
           jobUrl: "https://jobs.example.com/open",
         });
 
-        const again = await send(headers, `/me/jobs/${jobId}/apply`, "POST");
+        const again = await send(headers, `/me/jobs/${jobId}/apply`, "POST", body);
 
         expect(again.status).toBe(409);
         expect(await again.json()).toEqual({ error: "Already applied" });
@@ -793,15 +826,20 @@ describe.skipIf(!url)("api", () => {
           headers,
           `/me/jobs/${await seedJob("gone", new Date())}/apply`,
           "POST",
+          body,
         );
 
         expect(closed.status).toBe(404);
         expect(await closed.json()).toEqual({ error: "Job not found" });
 
-        const unknown = await send(headers, `/me/jobs/${crypto.randomUUID()}/apply`, "POST");
+        const unknown = await send(headers, `/me/jobs/${crypto.randomUUID()}/apply`, "POST", body);
 
         expect(unknown.status).toBe(404);
-        expect((await send(headers, "/me/jobs/not-a-uuid/apply", "POST")).status).toBe(422);
+        expect((await send(headers, "/me/jobs/not-a-uuid/apply", "POST", body)).status).toBe(422);
+        expect(
+          (await send(headers, `/me/jobs/${jobId}/apply`, "POST", { resumeId: "not-a-uuid" }))
+            .status,
+        ).toBe(422);
 
         const listed = await (await send(headers, "/me/applications")).json();
 
@@ -2400,7 +2438,7 @@ describe.skipIf(!url)("api", () => {
           })
           .returning({ id: jobs.id });
 
-        await repos.applications.apply(id, job.id);
+        await repos.applications.apply(id, job.id, created.id);
         await db.insert(jobMatches).values({
           profileId: id,
           jobId: job.id,

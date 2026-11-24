@@ -6,6 +6,7 @@ import {
   interviews,
   jobs,
   offboardingCases,
+  resumes,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { asc, eq } from "drizzle-orm";
@@ -27,6 +28,16 @@ const identified = z.object({ id: z.uuid() });
 
 const created = z.object({ applicationId: z.uuid(), jobUrl: z.string() });
 
+const content = {
+  headline: { id: "headline", text: "Engenheira" },
+  summary: { id: "summary", text: "Backend." },
+  experiences: [],
+  education: [],
+  skills: [],
+  languages: [],
+  contact: { email: null, phone: null, city: null, links: [] },
+};
+
 const changed = z.looseObject({ id: z.uuid(), status: z.string(), statusChangedAt: z.string() });
 
 describe.skipIf(!url)("applications repository", () => {
@@ -35,6 +46,8 @@ describe.skipIf(!url)("applications repository", () => {
   const repository = repos.applications;
   let profileId: string;
   let otherProfileId: string;
+  let baseId: string;
+  let otherBaseId: string;
 
   beforeAll(async () => {
     await migrate(db, {
@@ -51,6 +64,8 @@ describe.skipIf(!url)("applications repository", () => {
 
     profileId = await enable(first.id, "pessoa@exemplo.com");
     otherProfileId = await enable(second.id, "outra@exemplo.com");
+    baseId = await base(profileId);
+    otherBaseId = await base(otherProfileId);
   });
 
   afterAll(async () => {
@@ -65,6 +80,16 @@ describe.skipIf(!url)("applications repository", () => {
     });
 
     return identified.parse(profile).id;
+  }
+
+  async function base(owner: string) {
+    const { resume } = await repos.resumes.replaceBase(owner, content, `resumes/${owner}.pdf`);
+
+    return resume.id;
+  }
+
+  function baseOf(owner: string) {
+    return owner === profileId ? baseId : otherBaseId;
   }
 
   async function job(sourceKey: string, values: Partial<typeof jobs.$inferInsert> = {}) {
@@ -85,7 +110,7 @@ describe.skipIf(!url)("applications repository", () => {
   }
 
   async function applied(owner: string, sourceKey: string) {
-    const result = await repository.apply(owner, await job(sourceKey));
+    const result = await repository.apply(owner, await job(sourceKey), baseOf(owner));
 
     return created.parse(result).applicationId;
   }
@@ -132,7 +157,7 @@ describe.skipIf(!url)("applications repository", () => {
   it("applies to an open job and records a sent event", async () => {
     const jobId = await job("aberta");
 
-    const result = await repository.apply(profileId, jobId);
+    const result = await repository.apply(profileId, jobId, baseId);
 
     expect(result).toEqual({
       applicationId: expect.any(String),
@@ -189,12 +214,12 @@ describe.skipIf(!url)("applications repository", () => {
   it("applies once per profile and job", async () => {
     const jobId = await job("unica");
 
-    await repository.apply(profileId, jobId);
+    await repository.apply(profileId, jobId, baseId);
 
-    expect(await repository.apply(profileId, jobId)).toBe("already_applied");
+    expect(await repository.apply(profileId, jobId, baseId)).toBe("already_applied");
     expect(await db.select().from(applications)).toHaveLength(1);
     expect(await db.select().from(applicationEvents)).toHaveLength(1);
-    expect(await repository.apply(otherProfileId, jobId)).toMatchObject({
+    expect(await repository.apply(otherProfileId, jobId, otherBaseId)).toMatchObject({
       applicationId: expect.any(String),
     });
   });
@@ -202,10 +227,60 @@ describe.skipIf(!url)("applications repository", () => {
   it("refuses closed and unknown jobs", async () => {
     const closedId = await job("fechada", { closedAt: new Date("2026-11-01T00:00:00Z") });
 
-    expect(await repository.apply(profileId, closedId)).toBe("job_not_found");
-    expect(await repository.apply(profileId, missingId)).toBe("job_not_found");
+    expect(await repository.apply(profileId, closedId, baseId)).toBe("job_not_found");
+    expect(await repository.apply(profileId, missingId, baseId)).toBe("job_not_found");
+    expect(await repository.apply(profileId, closedId, missingId)).toBe("job_not_found");
     expect(await db.select().from(applications)).toHaveLength(0);
     expect(await db.select().from(applicationEvents)).toHaveLength(0);
+  });
+
+  it("stores the résumé used to apply", async () => {
+    const applicationId = await applied(profileId, "com-curriculo");
+
+    const [stored] = await db
+      .select({ resumeId: applications.resumeId })
+      .from(applications)
+      .where(eq(applications.id, applicationId));
+
+    expect(stored).toEqual({ resumeId: baseId });
+  });
+
+  it("requires a ready résumé of the profile for this job", async () => {
+    const jobId = await job("exige");
+    const otherJobId = await job("outra");
+    const now = new Date();
+    const versions = repos.resumeVersions;
+
+    const tailored = async (owner: string, target: string) =>
+      identified.parse(await versions.saveDraft(owner, target, content, 60, now)).id;
+
+    const forOtherJob = await tailored(profileId, otherJobId);
+    const draft = await tailored(profileId, jobId);
+    const foreign = await tailored(otherProfileId, jobId);
+
+    await versions.markReady(profileId, forOtherJob, now);
+    await versions.markReady(otherProfileId, foreign, now);
+
+    for (const resumeId of [forOtherJob, draft, foreign, otherBaseId, missingId]) {
+      expect(await repository.apply(profileId, jobId, resumeId)).toBe("resume_not_ready");
+    }
+
+    expect(await db.select().from(applications)).toHaveLength(0);
+    expect(await db.select().from(applicationEvents)).toHaveLength(0);
+
+    await versions.markReady(profileId, draft, now);
+
+    const { applicationId } = created.parse(await repository.apply(profileId, jobId, draft));
+
+    expect(await repository.apply(profileId, jobId, missingId)).toBe("resume_not_ready");
+    expect(await repository.apply(profileId, jobId, baseId)).toBe("already_applied");
+    expect(
+      await db
+        .select({ resumeId: applications.resumeId })
+        .from(applications)
+        .where(eq(applications.id, applicationId)),
+    ).toEqual([{ resumeId: draft }]);
+    expect(await db.select({ id: resumes.id }).from(resumes)).toHaveLength(5);
   });
 
   it("lists the profile's applications newest first with job fields", async () => {
@@ -220,6 +295,7 @@ describe.skipIf(!url)("applications repository", () => {
           state: "PR",
           title: "Designer",
         }),
+        baseId,
       ),
     );
 

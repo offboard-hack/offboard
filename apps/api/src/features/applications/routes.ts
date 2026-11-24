@@ -50,10 +50,14 @@ export function applicationsRoutes(
     .use(talentAccess)
     .post(
       "/me/jobs/:jobId/apply",
-      async ({ me, params, status }) => {
-        const result = await repos.apply(me.id, params.jobId);
+      async ({ me, params, body, status }) => {
+        const result = await repos.apply(me.id, params.jobId, body.resumeId);
 
         if (result === "job_not_found") return status(404, { error: "Job not found" });
+
+        if (result === "resume_not_ready") {
+          return status(422, { error: "Résumé not ready for this job" });
+        }
 
         if (result === "already_applied") return status(409, { error: "Already applied" });
 
@@ -62,10 +66,12 @@ export function applicationsRoutes(
       {
         talent: "active",
         params: t.Object({ jobId: id }),
+        body: t.Object({ resumeId: id }),
         response: {
           201: t.Object({ applicationId: t.String(), jobUrl: t.String() }),
           404: errorResponse,
           409: errorResponse,
+          422: errorResponse,
         },
       },
     )
