@@ -144,6 +144,8 @@ export async function seedDatabase(
         .onConflictDoUpdate({ target: exitSurveys.caseId, set: survey });
     }
 
+    let seededProfileId: string | undefined;
+
     for (const { caseName, sponsoredForDays, ...profile } of fixtures.talentProfiles) {
       const caseId = caseIds.get(caseName);
 
@@ -153,7 +155,12 @@ export async function seedDatabase(
         .toISOString()
         .slice(0, 10);
 
-      await tx.insert(talentProfiles).values({ caseId, sponsoredUntil, ...profile });
+      const [inserted] = await tx
+        .insert(talentProfiles)
+        .values({ caseId, sponsoredUntil, ...profile })
+        .returning({ id: talentProfiles.id });
+
+      seededProfileId ??= inserted.id;
     }
 
     const insertedJobs =
@@ -161,10 +168,13 @@ export async function seedDatabase(
         ? await tx.insert(jobs).values(fixtures.jobs).returning({ id: jobs.id })
         : [];
 
-    const [seededProfile] = await tx.select({ id: talentProfiles.id }).from(talentProfiles);
     const applicationIds: string[] = [];
 
     for (const item of fixtures.applications) {
+      if (!seededProfileId) {
+        throw new Error("Seeding applications requires at least one talent profile");
+      }
+
       const appliedAt = new Date(Date.now() - item.appliedDaysAgo * 86_400_000);
       const stages = applicationStages.slice(0, applicationStages.indexOf(item.status) + 1);
       const at = (stage: number) => new Date(appliedAt.getTime() + stage * 2 * 3_600_000);
@@ -172,7 +182,7 @@ export async function seedDatabase(
       const [created] = await tx
         .insert(applications)
         .values({
-          profileId: seededProfile.id,
+          profileId: seededProfileId,
           jobId: insertedJobs[item.jobIndex].id,
           status: item.status,
           furthestStage: item.status,

@@ -925,6 +925,17 @@ describe.skipIf(!url)("api", () => {
         const other = await talentProfile("outra@example.com", 1);
         const id = await applyTo(owner, await seedJob("private"));
 
+        const patched = await send(other, `/me/applications/${id}`, "PATCH", {
+          status: "in_review",
+        });
+
+        expect(patched.status).toBe(404);
+        expect(await patched.json()).toEqual({ error: "Application not found" });
+
+        expect(await (await send(owner, "/me/applications")).json()).toMatchObject([
+          { status: "sent" },
+        ]);
+
         const created = await send(owner, `/me/applications/${id}/interviews`, "POST", {
           startsAt: "2026-03-10T17:00:00Z",
           mode: "video",
@@ -932,13 +943,6 @@ describe.skipIf(!url)("api", () => {
         });
 
         const interview = await created.json();
-
-        const patched = await send(other, `/me/applications/${id}`, "PATCH", {
-          status: "in_review",
-        });
-
-        expect(patched.status).toBe(404);
-        expect(await patched.json()).toEqual({ error: "Application not found" });
 
         const logged = await send(other, `/me/applications/${id}/interviews`, "POST", {
           startsAt: "2026-03-10T18:00:00Z",

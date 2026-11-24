@@ -151,6 +151,41 @@ describe.skipIf(!url)("applications repository", () => {
     expect(await events(applicationId)).toEqual([{ status: "sent", closedReason: null }]);
   });
 
+  it("stores application and event times from the application clock", async () => {
+    const before = Date.now();
+    const applicationId = await applied(profileId, "relogio");
+
+    await change(applicationId, "in_review");
+    await change(applicationId, "interview");
+
+    const [stored] = await db
+      .select({
+        appliedAt: applications.appliedAt,
+        statusChangedAt: applications.statusChangedAt,
+        updatedAt: applications.updatedAt,
+      })
+      .from(applications)
+      .where(eq(applications.id, applicationId));
+
+    const times = await db
+      .select({ status: applicationEvents.status, createdAt: applicationEvents.createdAt })
+      .from(applicationEvents)
+      .where(eq(applicationEvents.applicationId, applicationId))
+      .orderBy(asc(applicationEvents.createdAt));
+
+    for (const date of [
+      stored.appliedAt,
+      stored.statusChangedAt,
+      ...times.map((t) => t.createdAt),
+    ]) {
+      expect(Math.abs((date?.getTime() ?? 0) - Date.now())).toBeLessThan(10_000);
+      expect(date?.getTime()).toBeGreaterThanOrEqual(before);
+    }
+
+    expect(times.map((t) => t.status)).toEqual(["sent", "in_review", "interview"]);
+    expect(stored.statusChangedAt.getTime()).toBeGreaterThanOrEqual(stored.appliedAt.getTime());
+  });
+
   it("applies once per profile and job", async () => {
     const jobId = await job("unica");
 

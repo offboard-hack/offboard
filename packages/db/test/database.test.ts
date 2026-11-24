@@ -17,7 +17,7 @@ import {
   talentProfiles,
   tasks,
 } from "../src/schema/index.ts";
-import { seedCases, seedDatabase } from "../src/seed-database.ts";
+import { seedCases, seedDatabase, testSeedFixtures } from "../src/seed-database.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 
@@ -146,6 +146,22 @@ it.skipIf(!url)("stores jobs with a unique source key and a valid salary range",
         salaryMaxCents: 100,
       }),
     ).rejects.toMatchObject({ cause: { code: "23514" } });
+  } finally {
+    await db.$client.end();
+  }
+});
+
+it.skipIf(!url)("refuses to seed applications without a talent profile", async () => {
+  const db = createClient(url ?? "");
+
+  try {
+    await migrate(db, {
+      migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
+    });
+
+    await expect(
+      seedDatabase(db, { ...testSeedFixtures, jobs: seedJobs, applications: seedApplications }),
+    ).rejects.toThrow("Seeding applications requires at least one talent profile");
   } finally {
     await db.$client.end();
   }

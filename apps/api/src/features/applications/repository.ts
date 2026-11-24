@@ -123,20 +123,25 @@ async function advance(
   applicationId: string,
   next: FunnelState,
 ) {
+  const now = new Date();
+
   await tx
     .update(applications)
     .set({
       status: next.status,
       closedReason: next.closedReason,
       furthestStage: next.furthestStage,
-      statusChangedAt: sql`now()`,
-      updatedAt: sql`now()`,
+      statusChangedAt: now,
+      updatedAt: now,
     })
     .where(owned(profileId, applicationId));
 
-  await tx
-    .insert(applicationEvents)
-    .values({ applicationId, status: next.status, closedReason: next.closedReason });
+  await tx.insert(applicationEvents).values({
+    applicationId,
+    status: next.status,
+    closedReason: next.closedReason,
+    createdAt: now,
+  });
 }
 
 export function createApplicationsRepository(db: Database) {
@@ -150,15 +155,19 @@ export function createApplicationsRepository(db: Database) {
 
       if (!job) return "job_not_found" as const;
 
+      const now = new Date();
+
       const [created] = await tx
         .insert(applications)
-        .values({ profileId, jobId })
+        .values({ profileId, jobId, appliedAt: now, statusChangedAt: now })
         .onConflictDoNothing({ target: [applications.profileId, applications.jobId] })
         .returning({ id: applications.id });
 
       if (!created) return "already_applied" as const;
 
-      await tx.insert(applicationEvents).values({ applicationId: created.id, status: "sent" });
+      await tx
+        .insert(applicationEvents)
+        .values({ applicationId: created.id, status: "sent", createdAt: now });
 
       return { applicationId: created.id, jobUrl: job.url };
     });
