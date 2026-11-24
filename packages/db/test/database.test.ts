@@ -17,6 +17,8 @@ import {
   jobs,
   llmUsage,
   offboardingCases,
+  publicPageDailyViews,
+  publicPages,
   resumeSuggestions,
   resumes,
   talentProfiles,
@@ -432,6 +434,103 @@ it.skipIf(!url)("stores jobs, suggestions and usage", async () => {
 
     await db.delete(talentProfiles).where(eq(talentProfiles.id, base.profileId));
     expect(await db.select().from(llmUsage)).toHaveLength(0);
+  } finally {
+    await db.$client.end();
+  }
+});
+
+it.skipIf(!url)("stores public pages and daily counters", async () => {
+  const db = createClient(url ?? "");
+
+  try {
+    await migrate(db, {
+      migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
+    });
+    await seedDatabase(db);
+
+    const [page] = await db.select().from(publicPages);
+    expect(page.slug).toBe("marina-lopes");
+    expect(page.enabled).toBe(true);
+    expect(page.resumeId).toBeNull();
+
+    const views = await db.select().from(publicPageDailyViews);
+    expect(views).toHaveLength(7);
+    expect(views.reduce((sum, item) => sum + item.visits, 0)).toBe(31);
+    expect(views.reduce((sum, item) => sum + item.recruiterVisits, 0)).toBe(6);
+    expect(views.every((item) => item.recruiterVisits <= item.visits)).toBe(true);
+
+    const saoPaulo = (offset: number) =>
+      new Date(Date.now() - 3 * 3_600_000 - offset * 86_400_000).toISOString().slice(0, 10);
+
+    expect(views.map((item) => item.day).sort()).toEqual(
+      [6, 5, 4, 3, 2, 1, 0].map((offset) => saoPaulo(offset)),
+    );
+
+    const tokens = (await db.select().from(applications)).map((item) => item.publicToken);
+    expect(tokens).toHaveLength(4);
+    expect(new Set(tokens).size).toBe(4);
+    expect(tokens.every((token) => /^[A-Za-z0-9_-]{32}$/.test(token ?? ""))).toBe(true);
+
+    await expect(
+      db.insert(publicPageDailyViews).values({ profileId: page.profileId, day: saoPaulo(0) }),
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
+
+    const [other] = await db
+      .insert(talentProfiles)
+      .values({
+        personalEmail: "outra@exemplo.com",
+        name: "Outra",
+        sponsoredUntil: saoPaulo(-30),
+      })
+      .returning();
+
+    await expect(
+      db.insert(publicPages).values({ profileId: other.id, slug: "marina-lopes" }),
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
+    await expect(
+      db.insert(publicPages).values({ profileId: other.id, slug: "Marina" }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+    await expect(
+      db.insert(publicPages).values({ profileId: other.id, slug: "ab" }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+    await expect(
+      db.insert(publicPages).values({ profileId: other.id, slug: "a--b" }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+    await expect(
+      db.insert(publicPageDailyViews).values({
+        profileId: other.id,
+        day: saoPaulo(0),
+        visits: 1,
+        recruiterVisits: 2,
+      }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+
+    const [created] = await db
+      .insert(publicPages)
+      .values({ profileId: other.id, slug: "outra" })
+      .returning();
+
+    expect(created.enabled).toBe(false);
+    expect(created.resumeId).toBeNull();
+    await db.delete(publicPages).where(eq(publicPages.profileId, other.id));
+
+    const [application] = await db.select().from(applications);
+    await expect(
+      db
+        .update(applications)
+        .set({ publicToken: tokens.find((token) => token !== application.publicToken) })
+        .where(eq(applications.id, application.id)),
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
+
+    const [ready] = await db.select().from(resumes).where(eq(resumes.kind, "tailored"));
+    await db.update(publicPages).set({ resumeId: ready.id });
+    await db.delete(resumes).where(eq(resumes.id, ready.id));
+    const [after] = await db.select().from(publicPages);
+    expect(after.resumeId).toBeNull();
+
+    await db.delete(talentProfiles).where(eq(talentProfiles.id, page.profileId));
+    expect(await db.select().from(publicPages)).toHaveLength(0);
+    expect(await db.select().from(publicPageDailyViews)).toHaveLength(0);
   } finally {
     await db.$client.end();
   }

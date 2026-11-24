@@ -205,6 +205,7 @@ export const applications = pgTable(
       .notNull()
       .references(() => jobs.id, { onDelete: "restrict" }),
     resumeId: uuid("resume_id").references(() => resumes.id, { onDelete: "set null" }),
+    publicToken: varchar("public_token", { length: 64 }),
     status: applicationStatusEnum("status").notNull().default("sent"),
     furthestStage: applicationStatusEnum("furthest_stage").notNull().default("sent"),
     closedReason: applicationClosedReasonEnum("closed_reason"),
@@ -217,6 +218,7 @@ export const applications = pgTable(
     uniqueIndex("applications_profile_job_idx").on(table.profileId, table.jobId),
     index("applications_profile_id_idx").on(table.profileId),
     index("applications_resume_id_idx").on(table.resumeId),
+    uniqueIndex("applications_public_token_idx").on(table.publicToken),
     check(
       "applications_closed_reason",
       sql`(${table.status} = 'closed') = (${table.closedReason} is not null)`,
@@ -579,5 +581,45 @@ export const jobMatches = pgTable(
     primaryKey({ columns: [table.profileId, table.jobId] }),
     index("job_matches_job_idx").on(table.jobId),
     check("job_matches_score_range", sql`${table.score} between 0 and 100`),
+  ],
+);
+
+export const publicPages = pgTable(
+  "public_pages",
+  {
+    profileId: uuid("profile_id")
+      .primaryKey()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    slug: varchar("slug", { length: 40 }).notNull(),
+    enabled: boolean("enabled").notNull().default(false),
+    resumeId: uuid("resume_id").references(() => resumes.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("public_pages_slug_idx").on(table.slug),
+    check(
+      "public_pages_slug_format",
+      sql`${table.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' and char_length(${table.slug}) between 3 and 40`,
+    ),
+  ],
+);
+
+export const publicPageDailyViews = pgTable(
+  "public_page_daily_views",
+  {
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    visits: integer("visits").notNull().default(0),
+    recruiterVisits: integer("recruiter_visits").notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.profileId, table.day] }),
+    check(
+      "public_page_daily_views_counts",
+      sql`${table.visits} >= 0 and ${table.recruiterVisits} >= 0 and ${table.recruiterVisits} <= ${table.visits}`,
+    ),
   ],
 );

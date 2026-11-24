@@ -30,6 +30,8 @@ import {
   jobs,
   offboardingCases,
   plans,
+  publicPageDailyViews,
+  publicPages,
   resumeSuggestions,
   resumes,
   subscriptions,
@@ -44,6 +46,12 @@ import {
   type SeedResume,
   type SeedTailoredResume,
 } from "./resume.fixture.ts";
+import {
+  publicToken,
+  saoPauloDaysEndingToday,
+  seedPublicPages,
+  type SeedPublicPage,
+} from "./public-page.fixture.ts";
 import { seedTalentProfiles, type SeedTalentProfile } from "./talent-profile.fixture.ts";
 import { baseSeedTeamMembers, seedTeamMembers } from "./team-member.fixture.ts";
 
@@ -54,6 +62,7 @@ const noInterviews: SeedInterview[] = [];
 const noResumes: SeedResume[] = [];
 const noTailoredResumes: SeedTailoredResume[] = [];
 const noJobMatches: SeedJobMatch[] = [];
+const noPublicPages: SeedPublicPage[] = [];
 
 export const testSeedFixtures = {
   cases: baseSeedCases,
@@ -65,6 +74,7 @@ export const testSeedFixtures = {
   resumes: noResumes,
   tailoredResumes: noTailoredResumes,
   jobMatches: noJobMatches,
+  publicPages: noPublicPages,
 };
 
 export async function seedDatabase(
@@ -79,10 +89,13 @@ export async function seedDatabase(
     resumes: seedResumes,
     tailoredResumes: seedTailoredResumes,
     jobMatches: seedJobMatches,
+    publicPages: seedPublicPages,
   },
 ) {
   await db.transaction(async (tx) => {
     await tx.delete(backgroundJobs);
+    await tx.delete(publicPageDailyViews);
+    await tx.delete(publicPages);
     await tx.delete(jobMatches);
     await tx.delete(resumes);
     await tx.delete(interviews);
@@ -298,6 +311,7 @@ export async function seedDatabase(
           profileId: seededProfileId,
           jobId: insertedJobs[item.jobIndex].id,
           resumeId: item.usesTailoredResume ? tailoredResumeIds.get(item.jobIndex) : null,
+          publicToken: publicToken(),
           status: item.status,
           furthestStage: item.status,
           appliedAt,
@@ -323,6 +337,29 @@ export async function seedDatabase(
         mode: item.mode,
         withWhom: item.withWhom,
       });
+    }
+
+    for (const page of fixtures.publicPages) {
+      const profileId = profileIds.get(page.caseName);
+
+      if (!profileId) {
+        throw new Error(`Seed public page needs a profile for ${page.caseName}`);
+      }
+
+      await tx
+        .insert(publicPages)
+        .values({ profileId, slug: page.slug, enabled: page.enabled, resumeId: null });
+
+      const days = saoPauloDaysEndingToday(page.dailyVisits.length);
+
+      await tx.insert(publicPageDailyViews).values(
+        days.map((day, index) => ({
+          profileId,
+          day,
+          visits: page.dailyVisits[index],
+          recruiterVisits: page.dailyRecruiterVisits[index],
+        })),
+      );
     }
 
     if (seedIntegrations.length > 0) {
