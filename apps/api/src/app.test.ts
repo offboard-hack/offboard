@@ -8,9 +8,9 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
-import { backgroundJobs, interviews, jobs, llmUsage, tasks } from "@offboard/db/schema";
+import { backgroundJobs, interviews, jobMatches, jobs, llmUsage, tasks } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1077,12 +1077,22 @@ describe.skipIf(!url)("api", () => {
 
       type Scoring = { output: object; calls: number };
 
+      type Matching = {
+        scores: Record<string, number>;
+        batches: string[][];
+        before?: () => Promise<void>;
+      };
+
+      const jobsInPrompt = z.array(z.object({ id: z.string(), title: z.string() }));
+
       function resumesApp(
         options: { generate?: GenerateStructured | null; storage?: boolean; draft?: object } = {},
       ) {
         const store: Store = { puts: [], removed: [], prefixes: [], failRemove: false };
 
         const scoring: Scoring = { output: { score: 0, suggestions: [] }, calls: 0 };
+
+        const matching: Matching = { scores: {}, batches: [] };
 
         const background: (() => Promise<void>)[] = [];
 
@@ -1102,10 +1112,31 @@ describe.skipIf(!url)("api", () => {
           },
         };
 
-        const generate: GenerateStructured = async ({ schema }) => {
+        const generate: GenerateStructured = async ({ schema, prompt }) => {
           const extracted = schema.safeParse(options.draft ?? draft);
 
           if (extracted.success) return extracted.data;
+
+          if (schema.safeParse({ matches: [] }).success) {
+            const batch = jobsInPrompt.parse(
+              JSON.parse(prompt.slice(prompt.indexOf("<jobs>") + 6, prompt.indexOf("</jobs>"))),
+            );
+
+            matching.batches.push(batch.map((job) => job.title));
+
+            const before = matching.before;
+
+            matching.before = undefined;
+            await before?.();
+
+            return schema.parse({
+              matches: batch.map((job) => ({
+                jobId: job.id,
+                score: matching.scores[job.title] ?? 50,
+                reasons: [`Combina com ${job.title}`],
+              })),
+            });
+          }
 
           scoring.calls += 1;
 
@@ -1122,11 +1153,32 @@ describe.skipIf(!url)("api", () => {
           },
         });
 
-        async function settle() {
-          await Promise.all(background.splice(0).map((task) => task()));
+        async function kicks() {
+          const tasks = background.splice(0);
+
+          await Promise.all(tasks.map((task) => task()));
+
+          return tasks.length;
         }
 
-        return { instance, store, scoring, settle };
+        async function settle() {
+          await kicks();
+
+          for (let round = 0; round < 10; round += 1) {
+            const drained = await instance.handle(
+              new Request("http://localhost/api/background/drain", {
+                method: "POST",
+                headers: { authorization: `Bearer ${cronSecret}` },
+              }),
+            );
+
+            if ((await drained.json()).processed === 0) return;
+          }
+
+          throw new Error("background queue did not settle");
+        }
+
+        return { instance, store, scoring, matching, kicks, settle };
       }
 
       async function profile(email = personalEmail, caseIndex = 0) {
@@ -1635,6 +1687,10 @@ describe.skipIf(!url)("api", () => {
           { status: "done" },
           { subject: resume.id, status: "pending" },
         ]);
+        expect(await matchJobs()).toMatchObject([
+          { subject: id, status: "done" },
+          { subject: id, status: "pending" },
+        ]);
         expect(
           (await (await request(instance, id, "/me/resume/suggestions")).json()).map(
             (suggestion: { id: string }) => suggestion.id,
@@ -1772,6 +1828,9 @@ describe.skipIf(!url)("api", () => {
         expect(await scoreJobs()).toMatchObject([
           { status: "pending", attempts: 1, lastError: "Error: AI not configured" },
         ]);
+        expect(await matchJobs()).toMatchObject([
+          { status: "pending", attempts: 1, lastError: "Error: AI not configured" },
+        ]);
         expect(await db.select().from(llmUsage).where(eq(llmUsage.profileId, id))).toEqual([]);
       });
 
@@ -1802,9 +1861,13 @@ describe.skipIf(!url)("api", () => {
 
         await repos.background.enqueue("score_resume", crypto.randomUUID());
         await upload(app.instance, id);
-        await app.settle();
 
-        expect((await scoreJobs()).map((job) => job.status).sort()).toEqual(["done", "pending"]);
+        expect(await app.kicks()).toBe(1);
+        expect(
+          (await db.select({ status: backgroundJobs.status }).from(backgroundJobs))
+            .map((job) => job.status)
+            .sort(),
+        ).toEqual(["done", "pending", "pending"]);
       });
 
       it("keeps a saved résumé when enqueueing its score fails", async () => {
@@ -1906,6 +1969,349 @@ describe.skipIf(!url)("api", () => {
 
         expect((await upload(instance, await profile())).status).toBe(200);
         await vi.waitFor(() => expect(claims).toBe(1));
+      });
+
+      function matchJobs() {
+        return db
+          .select({
+            subject: backgroundJobs.subject,
+            status: backgroundJobs.status,
+            attempts: backgroundJobs.attempts,
+            runAfter: backgroundJobs.runAfter,
+            lastError: backgroundJobs.lastError,
+          })
+          .from(backgroundJobs)
+          .where(eq(backgroundJobs.kind, "compute_matches"))
+          .orderBy(backgroundJobs.createdAt);
+      }
+
+      function storedMatches(profileId: string) {
+        return db.select().from(jobMatches).where(eq(jobMatches.profileId, profileId));
+      }
+
+      async function openJobs(titles: string[]) {
+        await db.insert(jobs).values(
+          titles.map(
+            (title, index) =>
+              ({
+                origin: "external",
+                source: "seed",
+                sourceKey: `match-${index}`,
+                title,
+                company: "Acme",
+                description: `Vaga de ${title}`,
+                url: `https://jobs.example.com/match-${index}`,
+                postedAt: new Date(Date.UTC(2026, 0, 31 - index)),
+              }) satisfies typeof jobs.$inferInsert,
+          ),
+        );
+      }
+
+      async function listedMatches(
+        instance: ReturnType<typeof resumesApp>["instance"],
+        talentId: string,
+      ) {
+        const listed = await (await request(instance, talentId, "/me/jobs")).json();
+
+        return listed.items.map((item: { title: string; match: { score: number } | null }) => [
+          item.title,
+          item.match?.score ?? null,
+        ]);
+      }
+
+      it("lists jobs by match score after an upload", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        await openJobs(["Engenheira de Software", "Designer", "Analista de Dados"]);
+        app.matching.scores = {
+          "Engenheira de Software": 40,
+          Designer: 90,
+          "Analista de Dados": 70,
+        };
+
+        await upload(app.instance, id);
+        await app.settle();
+
+        expect(app.matching.batches).toHaveLength(1);
+        expect(await matchJobs()).toMatchObject([{ subject: id, status: "done" }]);
+        expect(await listedMatches(app.instance, id)).toEqual([
+          ["Designer", 90],
+          ["Analista de Dados", 70],
+          ["Engenheira de Software", 40],
+        ]);
+        expect((await (await request(app.instance, id, "/me/jobs")).json()).items[0].match).toEqual(
+          { score: 90, reasons: ["Combina com Designer"] },
+        );
+      });
+
+      it("hides matches of an edited résumé until they are recomputed", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        await openJobs(["Engenheira de Software", "Designer"]);
+        app.matching.scores = { "Engenheira de Software": 30, Designer: 80 };
+
+        const created = await (await upload(app.instance, id)).json();
+
+        await app.settle();
+
+        const edited = await request(app.instance, id, "/me/resume", {
+          method: "PATCH",
+          json: {
+            content: {
+              ...created.content,
+              headline: { ...created.content.headline, text: "Designer" },
+            },
+          },
+        });
+
+        expect(edited.status).toBe(200);
+        expect(await listedMatches(app.instance, id)).toEqual([
+          ["Engenheira de Software", null],
+          ["Designer", null],
+        ]);
+        expect(await matchJobs()).toMatchObject([{ status: "done" }, { status: "pending" }]);
+
+        await app.settle();
+
+        expect(app.matching.batches).toHaveLength(2);
+        expect(await listedMatches(app.instance, id)).toEqual([
+          ["Designer", 80],
+          ["Engenheira de Software", 30],
+        ]);
+      });
+
+      it("postpones matching at the daily cap", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        const usage = () =>
+          db.select({ calls: llmUsage.calls }).from(llmUsage).where(eq(llmUsage.profileId, id));
+
+        await upload(app.instance, id);
+        await app.settle();
+
+        expect(await usage()).toEqual([{ calls: 1 }]);
+
+        await openJobs(Array.from({ length: 25 }, (_, index) => `Vaga ${index}`));
+        await db.update(llmUsage).set({ calls: 29 }).where(eq(llmUsage.profileId, id));
+        await repos.background.enqueue("compute_matches", id);
+        await app.settle();
+
+        const day = new Date(Date.now() - 3 * 60 * 60_000).toISOString().slice(0, 10);
+        const [, postponed] = await matchJobs();
+
+        expect(app.matching.batches.map((batch) => batch.length)).toEqual([10]);
+        expect(await usage()).toEqual([{ calls: 30 }]);
+        expect(await storedMatches(id)).toHaveLength(10);
+        expect(postponed).toMatchObject({
+          subject: id,
+          status: "pending",
+          attempts: 0,
+          lastError: null,
+        });
+        expect(postponed.runAfter.getTime()).toBe(
+          Date.parse(`${day}T03:00:00.000Z`) + 24 * 60 * 60_000,
+        );
+
+        await db.update(llmUsage).set({ calls: 0 }).where(eq(llmUsage.profileId, id));
+        await db
+          .update(backgroundJobs)
+          .set({ runAfter: new Date() })
+          .where(
+            and(eq(backgroundJobs.kind, "compute_matches"), eq(backgroundJobs.status, "pending")),
+          );
+        await app.settle();
+
+        expect(app.matching.batches.map((batch) => batch.length)).toEqual([10, 10, 5]);
+        expect(new Set(app.matching.batches.flat()).size).toBe(25);
+        expect(await usage()).toEqual([{ calls: 2 }]);
+        expect(await storedMatches(id)).toHaveLength(25);
+        expect((await matchJobs()).map((job) => job.status)).toEqual(["done", "done"]);
+      });
+
+      it("stops matching when the résumé changes during a run", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        await openJobs(Array.from({ length: 15 }, (_, index) => `Vaga ${index}`));
+
+        const created = await (await upload(app.instance, id)).json();
+
+        app.matching.before = async () => {
+          await repos.resumes.updateBaseContent(id, created.content);
+        };
+
+        await app.settle();
+
+        expect(app.matching.batches).toHaveLength(1);
+        expect(await storedMatches(id)).toEqual([]);
+        expect(await matchJobs()).toMatchObject([{ status: "done" }]);
+      });
+
+      it("completes matching for a profile without a base résumé", async () => {
+        const app = resumesApp();
+
+        await openJobs(["Designer"]);
+        await repos.background.enqueue("compute_matches", crypto.randomUUID());
+        await app.settle();
+
+        expect(app.matching.batches).toEqual([]);
+        expect(await matchJobs()).toMatchObject([{ status: "done", attempts: 1 }]);
+      });
+
+      it("enqueues matching when enqueueing the score fails", async () => {
+        let kicks = 0;
+
+        const instance = createApp(
+          webOrigin,
+          {
+            ...repos,
+            background: {
+              ...repos.background,
+              enqueue: (kind, ...rest) =>
+                kind === "score_resume"
+                  ? Promise.reject(new Error("queue down"))
+                  : repos.background.enqueue(kind, ...rest),
+            },
+          },
+          {
+            ...appOptions,
+            generateStructured: async ({ schema }) => schema.parse(draft),
+            storage: {
+              put: async () => undefined,
+              remove: async () => undefined,
+              removePrefix: async () => undefined,
+            },
+            runInBackground: () => {
+              kicks += 1;
+            },
+          },
+        );
+
+        const id = await profile();
+
+        expect((await upload(instance, id)).status).toBe(200);
+        expect(kicks).toBe(1);
+        expect(await scoreJobs()).toEqual([]);
+        expect(await matchJobs()).toMatchObject([{ subject: id, status: "pending" }]);
+      });
+
+      const sharedJob = {
+        isJobPosting: true,
+        title: "Engenheira de Software",
+        company: "Acme",
+        workModel: "remote",
+        city: null,
+        state: null,
+        salaryMinCents: null,
+        salaryMaxCents: null,
+        description: "Vaga de engenharia",
+      };
+
+      function shareApp(
+        overrides: Partial<typeof repos> = {},
+        generate: GenerateStructured = async ({ schema }) => schema.parse(sharedJob),
+      ) {
+        const instance = createApp(
+          webOrigin,
+          { ...repos, ...overrides },
+          {
+            ...appOptions,
+            generateStructured: generate,
+            fetchPage: async (pageUrl) => ({ url: pageUrl, text: "Vaga de engenharia" }),
+            runInBackground: () => {
+              throw new Error("should not kick a drain");
+            },
+          },
+        );
+
+        return (shareUrl: string) =>
+          instance.handle(
+            new Request("http://localhost/api/jobs/share", {
+              method: "POST",
+              headers: {
+                "x-test-session": "rh",
+                origin: webOrigin,
+                "content-type": "application/json",
+              },
+              body: JSON.stringify({ url: shareUrl }),
+            }),
+          );
+      }
+
+      it("fans out matching to profiles with a base résumé when HR shares a new job", async () => {
+        const app = resumesApp();
+        const withResume = await profile();
+
+        await profile("outra.pessoal@example.com", 1);
+        await upload(app.instance, withResume);
+        await app.settle();
+        await db.delete(backgroundJobs);
+
+        const share = shareApp();
+
+        expect((await share("https://jobs.example.com/nova")).status).toBe(201);
+        expect(await matchJobs()).toMatchObject([{ subject: withResume, status: "pending" }]);
+
+        await db.delete(backgroundJobs);
+
+        expect((await share("https://jobs.example.com/nova")).status).toBe(200);
+        expect(await matchJobs()).toEqual([]);
+      });
+
+      it("fans out nothing when a concurrent share created the job first", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        await upload(app.instance, id);
+        await app.settle();
+        await db.delete(backgroundJobs);
+
+        const share = shareApp({}, async ({ schema }) => {
+          const { isJobPosting: _ignored, ...job } = jobDraftSchema.parse(sharedJob);
+
+          await repos.jobs.createShared({
+            ...job,
+            url: "https://jobs.example.com/corrida",
+            sourceKey: "https://jobs.example.com/corrida",
+          });
+
+          return schema.parse(sharedJob);
+        });
+
+        expect((await share("https://jobs.example.com/corrida")).status).toBe(200);
+        expect(await matchJobs()).toEqual([]);
+      });
+
+      it("keeps a shared job when fanning out matching fails", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        await upload(app.instance, id);
+        await app.settle();
+
+        const failingEnqueue = shareApp({
+          background: {
+            ...repos.background,
+            enqueue: () => Promise.reject(new Error("queue down")),
+          },
+        });
+
+        expect((await failingEnqueue("https://jobs.example.com/fila")).status).toBe(201);
+
+        const failingProfiles = shareApp({
+          matches: {
+            ...repos.matches,
+            profilesWithBaseResume: () => Promise.reject(new Error("db down")),
+          },
+        });
+
+        expect((await failingProfiles("https://jobs.example.com/perfis")).status).toBe(201);
+        expect(
+          await repos.jobs.findBySource("hr-link", "https://jobs.example.com/perfis"),
+        ).toBeDefined();
       });
 
       it("exports the person's data", async () => {

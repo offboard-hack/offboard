@@ -47,6 +47,7 @@ export function jobsRoutes(
   deps: {
     generate: GenerateStructured | undefined;
     fetchPage: (url: URL) => Promise<FetchPageResult>;
+    onShared?: (jobId: string) => Promise<void>;
   },
 ) {
   return new Elysia()
@@ -92,6 +93,8 @@ export function jobsRoutes(
         const { job, created } = await repos.createShared({ ...draft, url: sourceKey, sourceKey });
 
         set.status = created ? 201 : 200;
+
+        if (created) await deps.onShared?.(job.id).catch(() => undefined);
 
         return job;
       },

@@ -27,7 +27,7 @@ export function resumesRoutes(
     generate: GenerateStructured | undefined;
     storage: ObjectStorage | undefined;
     suggestions: SuggestionsRepository;
-    rescore: (resumeId: string) => Promise<void>;
+    rescore: (resumeId: string, profileId: string) => Promise<void>;
   },
 ) {
   return new Elysia()
@@ -73,7 +73,7 @@ export function resumesRoutes(
 
         if (saved.previousFileKey) await discard(storage, [saved.previousFileKey]);
 
-        await deps.rescore(saved.resume.id);
+        await deps.rescore(saved.resume.id, me.id);
 
         return saved.resume;
       },
@@ -112,7 +112,7 @@ export function resumesRoutes(
 
         if (!saved) return status(404, { error: "Résumé not found" });
 
-        await deps.rescore(saved.id);
+        await deps.rescore(saved.id, me.id);
 
         return saved;
       },
@@ -139,7 +139,7 @@ export function resumesRoutes(
           return status(409, { error: "Résumé changed since this suggestion" });
         }
 
-        await deps.rescore(applied.id);
+        await deps.rescore(applied.id, me.id);
 
         return applied;
       },
