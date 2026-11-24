@@ -1,13 +1,21 @@
 import type { Database } from "@offboard/db/client";
 import { offboardingCases, talentProfiles } from "@offboard/db/schema";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
-const namedUniqueViolation = z.object({
-  cause: z.object({ code: z.literal("23505"), constraint: z.string() }),
+const caseViolation = z.object({
+  cause: z.object({
+    code: z.literal("23505"),
+    constraint: z.literal("talent_profiles_case_id_unique"),
+  }),
 });
 
-const caseConstraint = "talent_profiles_case_id_unique";
+const emailViolation = z.object({
+  cause: z.object({
+    code: z.literal("23505"),
+    constraint: z.literal("talent_profiles_email_lower_idx"),
+  }),
+});
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
@@ -51,33 +59,37 @@ export function createTalentRepository(db: Database) {
   }
 
   async function enable(input: { caseId: string; personalEmail: string; sponsoredUntil: string }) {
-    const [offboardingCase] = await db
-      .select({ name: offboardingCases.name })
-      .from(offboardingCases)
-      .where(eq(offboardingCases.id, input.caseId));
-
-    if (!offboardingCase) return "case_not_found" as const;
-
     try {
       const [row] = await db
         .insert(talentProfiles)
-        .values({
-          caseId: input.caseId,
-          name: offboardingCase.name,
-          personalEmail: normalizeEmail(input.personalEmail),
-          sponsoredUntil: input.sponsoredUntil,
-        })
+        .select(
+          db
+            .select({
+              id: sql<string>`gen_random_uuid()`.as("id"),
+              caseId: sql<string>`${offboardingCases.id}`.as("case_id"),
+              personalEmail: sql<string>`${normalizeEmail(input.personalEmail)}`.as(
+                "personal_email",
+              ),
+              name: sql<string>`${offboardingCases.name}`.as("name"),
+              sponsoredUntil: sql<string>`${input.sponsoredUntil}::date`.as("sponsored_until"),
+              termsAcceptedAt: sql<null>`null::timestamp`.as("terms_accepted_at"),
+              firstSignedInAt: sql<null>`null::timestamp`.as("first_signed_in_at"),
+              shareOutcomeWithHr: sql<boolean>`false`.as("share_outcome_with_hr"),
+              createdAt: sql<Date>`now()`.as("created_at"),
+              updatedAt: sql<Date>`now()`.as("updated_at"),
+            })
+            .from(offboardingCases)
+            .where(eq(offboardingCases.id, input.caseId)),
+        )
         .returning();
 
-      return toProfile(row);
+      return row ? toProfile(row) : ("case_not_found" as const);
     } catch (error) {
-      const violation = namedUniqueViolation.safeParse(error);
+      if (caseViolation.safeParse(error).success) return "already_enabled" as const;
 
-      if (!violation.success) throw error;
+      if (emailViolation.safeParse(error).success) return "email_taken" as const;
 
-      return violation.data.cause.constraint === caseConstraint
-        ? ("already_enabled" as const)
-        : ("email_taken" as const);
+      throw error;
     }
   }
 
@@ -85,33 +97,33 @@ export function createTalentRepository(db: Database) {
     caseId: string,
     patch: { personalEmail?: string; sponsoredUntil?: string },
   ) {
-    const current = await findByCase(caseId);
-
-    if (!current) return "not_found" as const;
-
     const personalEmail =
       patch.personalEmail === undefined ? undefined : normalizeEmail(patch.personalEmail);
-
-    if (
-      personalEmail !== undefined &&
-      personalEmail !== current.email.toLowerCase() &&
-      current.firstSignedInAt !== null
-    ) {
-      return "email_locked" as const;
-    }
 
     try {
       const [row] = await db
         .update(talentProfiles)
         .set({ personalEmail, sponsoredUntil: patch.sponsoredUntil, updatedAt: new Date() })
-        .where(eq(talentProfiles.caseId, caseId))
+        .where(
+          and(
+            eq(talentProfiles.caseId, caseId),
+            personalEmail === undefined
+              ? undefined
+              : or(
+                  isNull(talentProfiles.firstSignedInAt),
+                  sql`lower(${talentProfiles.personalEmail}) = ${personalEmail}`,
+                ),
+          ),
+        )
         .returning();
 
-      return toProfile(row);
-    } catch (error) {
-      if (!namedUniqueViolation.safeParse(error).success) throw error;
+      if (row) return toProfile(row);
 
-      return "email_taken" as const;
+      return (await findByCase(caseId)) ? ("email_locked" as const) : ("not_found" as const);
+    } catch (error) {
+      if (emailViolation.safeParse(error).success) return "email_taken" as const;
+
+      throw error;
     }
   }
 

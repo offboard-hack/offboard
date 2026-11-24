@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
-import { offboardingCases } from "@offboard/db/schema";
+import { offboardingCases, talentProfiles } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -99,6 +99,22 @@ describe.skipIf(!url)("talent repository", () => {
     expect(await talent.updateAccess(missingId, { sponsoredUntil: "2027-06-30" })).toBe(
       "not_found",
     );
+  });
+
+  it("enforces the email lock in the update itself and changes nothing when locked", async () => {
+    await enable(first.id);
+    await db.update(talentProfiles).set({ firstSignedInAt: new Date() });
+
+    expect(
+      await talent.updateAccess(first.id, {
+        personalEmail: "outra@exemplo.com",
+        sponsoredUntil: "2030-01-01",
+      }),
+    ).toBe("email_locked");
+    expect(await talent.findByCase(first.id)).toMatchObject({
+      email: "pessoa@exemplo.com",
+      sponsoredUntil: "2026-12-31",
+    });
   });
 
   it("rethrows unexpected errors while updating", async () => {
