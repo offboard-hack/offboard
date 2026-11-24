@@ -159,6 +159,57 @@ describe("renderResumePdf", () => {
     expect(summary.every((line) => font.widthOfTextAtSize(line, 10) <= 495.28)).toBe(true);
   });
 
+  it("wraps kerned text exactly like measuring each whole line", async () => {
+    const document = await PDFDocument.create();
+    const font = await document.embedFont(StandardFonts.Helvetica);
+    const words = ["AV", "To", "Ty", "WA", "Yo", "LT", "P.", "r,", "Vovó", "T", "A", "y"];
+    const text = Array.from({ length: 400 }, (_, index) => words[(index * 7) % words.length]);
+    const expected: string[] = [];
+
+    for (const word of text) {
+      const last = expected.at(-1);
+
+      if (last !== undefined && font.widthOfTextAtSize(`${last} ${word}`, 10) <= 495.28) {
+        expected[expected.length - 1] = `${last} ${word}`;
+      } else expected.push(word);
+    }
+
+    const lines = await drawnLines(await renderResumePdf({ ...resume, summary: text.join(" ") }));
+
+    expect(lines.slice(lines.indexOf("Resumo") + 1, lines.indexOf("Experiência"))).toEqual(
+      expected,
+    );
+  });
+
+  it("renders a résumé made of 2 000-character tokens quickly", async () => {
+    const token = (letter: string) => letter.repeat(2000);
+    const started = performance.now();
+
+    const bytes = await renderResumePdf({
+      name: token("N"),
+      headline: token("h"),
+      summary: token("s"),
+      experiences: [
+        {
+          company: token("c"),
+          role: token("r"),
+          start: token("1"),
+          end: token("2"),
+          bullets: [token("b")],
+        },
+      ],
+      education: [
+        { institution: token("i"), degree: token("d"), start: token("3"), end: token("4") },
+      ],
+      skills: [token("k")],
+      languages: [{ name: token("l"), level: token("v") }],
+      contact: { email: token("e"), phone: token("p"), city: token("y"), links: [token("u")] },
+    });
+
+    expect(performance.now() - started).toBeLessThan(1500);
+    expect((await PDFDocument.load(bytes)).getPageCount()).toBeGreaterThan(1);
+  });
+
   it("replaces characters outside WinAnsi", async () => {
     const lines = await drawnLines(
       await renderResumePdf({

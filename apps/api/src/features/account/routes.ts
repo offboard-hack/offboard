@@ -70,6 +70,25 @@ const exportResponse = t.Object({
       computedAt: t.String(),
     }),
   ),
+  page: t.Union([
+    t.Object({
+      slug: t.String(),
+      enabled: t.Boolean(),
+      resume: t.Union([
+        t.Object({
+          kind: t.Union([t.Literal("base"), t.Literal("tailored")]),
+          job: t.Union([t.Object({ title: t.String(), company: t.String() }), t.Null()]),
+        }),
+        t.Null(),
+      ]),
+      createdAt: nullable,
+      updatedAt: nullable,
+    }),
+    t.Null(),
+  ]),
+  pageViews: t.Array(
+    t.Object({ day: t.String(), visits: t.Number(), recruiterVisits: t.Number() }),
+  ),
 });
 
 export function accountRoutes(

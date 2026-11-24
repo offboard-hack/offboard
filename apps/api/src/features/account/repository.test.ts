@@ -10,6 +10,8 @@ import {
   jobMatches,
   jobs,
   offboardingCases,
+  publicPageDailyViews,
+  publicPages,
   resumes,
   resumeSuggestions,
   talentProfiles,
@@ -467,6 +469,63 @@ describe.skipIf(!url)("account repository", () => {
 
     expect(exported?.resumes).toEqual([]);
     expect(exported?.applications).toEqual([]);
+  });
+
+  it("exports no page and no views when none exist", async () => {
+    const exported = await repository.exportData(profileId);
+
+    expect(exported?.page).toBeNull();
+    expect(exported?.pageViews).toEqual([]);
+  });
+
+  it("exports the page with its tailored résumé and the daily views oldest first", async () => {
+    const tailoredJob = await job("page-tailored");
+
+    const version = identified.parse(
+      await repos.resumeVersions.saveDraft(profileId, tailoredJob, content, 80, new Date()),
+    );
+
+    await db.insert(publicPages).values({
+      profileId,
+      slug: "marina-lopes",
+      enabled: true,
+      resumeId: version.id,
+      createdAt: new Date("2026-11-10T10:00:00Z"),
+      updatedAt: new Date("2026-11-11T10:00:00Z"),
+    });
+    await db.insert(publicPageDailyViews).values([
+      { profileId, day: "2026-11-12", visits: 5, recruiterVisits: 2 },
+      { profileId, day: "2026-11-10", visits: 3, recruiterVisits: 0 },
+      { profileId: otherProfileId, day: "2026-11-11", visits: 9, recruiterVisits: 9 },
+    ]);
+
+    const exported = await repository.exportData(profileId);
+
+    expect(exported?.page).toEqual({
+      slug: "marina-lopes",
+      enabled: true,
+      resume: { kind: "tailored", job: { title: "Vaga page-tailored", company: "Acme" } },
+      createdAt: "2026-11-10T10:00:00.000Z",
+      updatedAt: "2026-11-11T10:00:00.000Z",
+    });
+    expect(exported?.pageViews).toEqual([
+      { day: "2026-11-10", visits: 3, recruiterVisits: 0 },
+      { day: "2026-11-12", visits: 5, recruiterVisits: 2 },
+    ]);
+  });
+
+  it("exports a page that follows the base résumé without a résumé reference", async () => {
+    await db
+      .insert(publicPages)
+      .values({ profileId, slug: "base-page", createdAt: null, updatedAt: null });
+
+    expect((await repository.exportData(profileId))?.page).toEqual({
+      slug: "base-page",
+      enabled: false,
+      resume: null,
+      createdAt: null,
+      updatedAt: null,
+    });
   });
 
   it("exports nothing for an unknown profile", async () => {

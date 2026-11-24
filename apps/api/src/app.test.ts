@@ -16,6 +16,7 @@ import {
   jobs,
   llmUsage,
   publicPageDailyViews,
+  publicPages,
   resumes,
   talentProfiles,
   tasks,
@@ -3613,6 +3614,19 @@ describe.skipIf(!url)("api", () => {
           computedAt: new Date("2026-02-01T00:00:00Z"),
         });
 
+        await db.insert(publicPages).values({
+          profileId: id,
+          slug: "export-page",
+          enabled: true,
+          resumeId: version.id,
+          createdAt: new Date("2026-03-01T00:00:00Z"),
+          updatedAt: new Date("2026-03-02T00:00:00Z"),
+        });
+        await db.insert(publicPageDailyViews).values([
+          { profileId: id, day: "2026-03-03", visits: 4, recruiterVisits: 1 },
+          { profileId: id, day: "2026-03-02", visits: 2, recruiterVisits: 0 },
+        ]);
+
         const res = await request(instance, id, "/me/export");
 
         expect(res.status).toBe(200);
@@ -3687,6 +3701,17 @@ describe.skipIf(!url)("api", () => {
             reasons: ["Stack em comum"],
             computedAt: "2026-02-01T00:00:00.000Z",
           },
+        ]);
+        expect(body.page).toEqual({
+          slug: "export-page",
+          enabled: true,
+          resume: { kind: "tailored", job: { title: "Frontend", company: "Globex" } },
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+        });
+        expect(body.pageViews).toEqual([
+          { day: "2026-03-02", visits: 2, recruiterVisits: 0 },
+          { day: "2026-03-03", visits: 4, recruiterVisits: 1 },
         ]);
         expect((await request(instance, id, "/me/export", { session: "admin" })).status).toBe(403);
       });

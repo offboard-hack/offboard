@@ -6,6 +6,8 @@ import {
   interviews,
   jobMatches,
   jobs,
+  publicPageDailyViews,
+  publicPages,
   resumes,
   resumeSuggestions,
   talentProfiles,
@@ -125,6 +127,30 @@ export function createAccountRepository(db: Database) {
       .where(eq(jobMatches.profileId, profileId))
       .orderBy(desc(jobMatches.score), desc(jobMatches.computedAt), asc(jobMatches.jobId));
 
+    const [ownPage] = await db
+      .select({
+        slug: publicPages.slug,
+        enabled: publicPages.enabled,
+        createdAt: publicPages.createdAt,
+        updatedAt: publicPages.updatedAt,
+        resume: { kind: resumes.kind },
+        resumeJob: { title: resumeJobs.title, company: resumeJobs.company },
+      })
+      .from(publicPages)
+      .leftJoin(resumes, eq(resumes.id, publicPages.resumeId))
+      .leftJoin(resumeJobs, eq(resumeJobs.id, resumes.jobId))
+      .where(eq(publicPages.profileId, profileId));
+
+    const views = await db
+      .select({
+        day: publicPageDailyViews.day,
+        visits: publicPageDailyViews.visits,
+        recruiterVisits: publicPageDailyViews.recruiterVisits,
+      })
+      .from(publicPageDailyViews)
+      .where(eq(publicPageDailyViews.profileId, profileId))
+      .orderBy(asc(publicPageDailyViews.day));
+
     return {
       profile: {
         name: profile.name,
@@ -179,6 +205,16 @@ export function createAccountRepository(db: Database) {
         ...match,
         computedAt: match.computedAt.toISOString(),
       })),
+      page: ownPage
+        ? {
+            slug: ownPage.slug,
+            enabled: ownPage.enabled,
+            resume: ownPage.resume && { kind: ownPage.resume.kind, job: ownPage.resumeJob },
+            createdAt: ownPage.createdAt?.toISOString() ?? null,
+            updatedAt: ownPage.updatedAt?.toISOString() ?? null,
+          }
+        : null,
+      pageViews: views,
     };
   }
 

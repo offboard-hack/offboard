@@ -85,28 +85,44 @@ function blocks(resume: PdfResume) {
   ] satisfies Block[];
 }
 
-function pack(items: string[], separator: string, fits: (text: string) => boolean) {
+type Measure = (text: string) => number;
+
+function pack(items: string[], separator: string, measure: Measure, limit: number) {
   const packed: string[] = [];
+  let used = 0;
+  let tail = "";
 
   for (const item of items) {
-    const last = packed.at(-1);
-    const candidate = `${last}${separator}${item}`;
+    const joined = `${separator}${item}`;
+    const head = joined.slice(0, 1);
 
-    if (last !== undefined && fits(candidate)) packed[packed.length - 1] = candidate;
-    else packed.push(item);
+    const next =
+      packed.length === 0
+        ? Number.POSITIVE_INFINITY
+        : used + measure(joined) + measure(`${tail}${head}`) - measure(tail) - measure(head);
+
+    if (next <= limit) {
+      packed[packed.length - 1] += joined;
+      used = next;
+    } else {
+      packed.push(item);
+      used = measure(item);
+    }
+
+    tail = item.slice(-1);
   }
 
   return packed;
 }
 
-function lines(text: string, encodable: Set<string>, fits: (text: string) => boolean) {
+function lines(text: string, encodable: Set<string>, measure: Measure, limit: number) {
   const words = (text.normalize("NFC").match(/\S+/g) ?? []).flatMap((word) => {
     const safe = Array.from(word, (char) => (encodable.has(char) ? char : "?")).join("");
 
-    return fits(safe) ? [safe] : pack(Array.from(safe), "", fits);
+    return measure(safe) <= limit ? [safe] : pack(Array.from(safe), "", measure, limit);
   });
 
-  return pack(words, " ", fits);
+  return pack(words, " ", measure, limit);
 }
 
 export async function renderResumePdf(resume: PdfResume) {
@@ -121,11 +137,11 @@ export async function renderResumePdf(resume: PdfResume) {
     const font = block.bold ? bold : regular;
     const height = block.size * leading;
     const width = pageWidth - 2 * margin - block.indent;
-    const fits = (text: string) => font.widthOfTextAtSize(text, block.size) <= width;
+    const measure = (text: string) => font.widthOfTextAtSize(text, block.size);
 
     cursor -= block.gap;
 
-    for (const line of lines(block.text, encodable, fits)) {
+    for (const line of lines(block.text, encodable, measure, width)) {
       if (cursor - height < margin) {
         page = document.addPage([pageWidth, pageHeight]);
         cursor = pageHeight - margin;
