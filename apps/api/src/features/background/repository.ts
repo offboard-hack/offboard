@@ -1,7 +1,8 @@
 import type { Database } from "@offboard/db/client";
 import { backgroundJobs, type ConfigValue } from "@offboard/db/schema";
-import { and, asc, eq, inArray, lt, lte, notExists, or, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { and, asc, eq, gte, inArray, lt, lte, notExists, or, sql, type SQL } from "drizzle-orm";
+import { alias, type PgUpdateSetSource } from "drizzle-orm/pg-core";
+import { z } from "zod";
 
 export type BackgroundJob = {
   id: string;
@@ -11,18 +12,35 @@ export type BackgroundJob = {
   attempts: number;
 };
 
+type Claimed = Pick<BackgroundJob, "id" | "attempts">;
+
 const lockMs = 5 * 60_000;
 const maxAttempts = 3;
 const maxErrorLength = 2_000;
 
 const twin = alias(backgroundJobs, "pending_twin");
 
-function running(id: string) {
-  return and(eq(backgroundJobs.id, id), eq(backgroundJobs.status, "running"));
+const pendingViolation = z.object({
+  cause: z.object({
+    code: z.literal("23505"),
+    constraint: z.literal("background_jobs_pending_idx"),
+  }),
+});
+
+function held(job: Claimed) {
+  return and(
+    eq(backgroundJobs.id, job.id),
+    eq(backgroundJobs.status, "running"),
+    eq(backgroundJobs.attempts, job.attempts),
+  );
 }
 
-function withoutPendingTwin(db: Database) {
-  return notExists(
+function expired(now: Date) {
+  return and(eq(backgroundJobs.status, "running"), lt(backgroundJobs.lockedUntil, now));
+}
+
+export function createBackgroundRepository(db: Database) {
+  const withoutPendingTwin = notExists(
     db
       .select({ id: twin.id })
       .from(twin)
@@ -34,9 +52,23 @@ function withoutPendingTwin(db: Database) {
         ),
       ),
   );
-}
 
-export function createBackgroundRepository(db: Database) {
+  async function requeue(where: SQL | undefined, values: PgUpdateSetSource<typeof backgroundJobs>) {
+    try {
+      const requeued = await db
+        .update(backgroundJobs)
+        .set({ ...values, status: "pending", lockedUntil: null })
+        .where(and(where, withoutPendingTwin))
+        .returning({ id: backgroundJobs.id });
+
+      return requeued.length > 0;
+    } catch (error) {
+      if (pendingViolation.safeParse(error).success) return false;
+
+      throw error;
+    }
+  }
+
   async function enqueue(
     kind: string,
     subject: string,
@@ -56,13 +88,32 @@ export function createBackgroundRepository(db: Database) {
 
   async function claim(limit: number, now = new Date()) {
     return db.transaction(async (tx) => {
+      await tx
+        .update(backgroundJobs)
+        .set({
+          status: "failed",
+          lockedUntil: null,
+          lastError: "Stopped while running",
+          updatedAt: now,
+        })
+        .where(
+          inArray(
+            backgroundJobs.id,
+            tx
+              .select({ id: backgroundJobs.id })
+              .from(backgroundJobs)
+              .where(and(expired(now), gte(backgroundJobs.attempts, maxAttempts)))
+              .for("update", { skipLocked: true }),
+          ),
+        );
+
       const due = await tx
         .select({ id: backgroundJobs.id })
         .from(backgroundJobs)
         .where(
           or(
             and(eq(backgroundJobs.status, "pending"), lte(backgroundJobs.runAfter, now)),
-            and(eq(backgroundJobs.status, "running"), lt(backgroundJobs.lockedUntil, now)),
+            and(expired(now), lt(backgroundJobs.attempts, maxAttempts)),
           ),
         )
         .orderBy(asc(backgroundJobs.runAfter), asc(backgroundJobs.id))
@@ -96,59 +147,47 @@ export function createBackgroundRepository(db: Database) {
     });
   }
 
-  async function complete(id: string) {
+  async function complete(job: Claimed) {
     await db
       .update(backgroundJobs)
       .set({ status: "done", lockedUntil: null, updatedAt: new Date() })
-      .where(running(id));
+      .where(held(job));
   }
 
-  async function retry(id: string, error: string, attempts: number, now = new Date()) {
+  async function retry(job: Claimed, error: string, now = new Date()) {
     const lastError = error.slice(0, maxErrorLength);
 
-    if (attempts < maxAttempts) {
-      const rescheduled = await db
-        .update(backgroundJobs)
-        .set({
-          status: "pending",
-          runAfter: new Date(now.getTime() + 2 ** attempts * 60_000),
-          lockedUntil: null,
-          lastError,
-          updatedAt: now,
-        })
-        .where(and(running(id), withoutPendingTwin(db)))
-        .returning({ id: backgroundJobs.id });
+    const rescheduled =
+      job.attempts < maxAttempts &&
+      (await requeue(held(job), {
+        runAfter: new Date(now.getTime() + 2 ** job.attempts * 60_000),
+        lastError,
+        updatedAt: now,
+      }));
 
-      if (rescheduled.length > 0) return;
-    }
+    if (rescheduled) return;
 
     await db
       .update(backgroundJobs)
       .set({ status: "failed", lockedUntil: null, lastError, updatedAt: now })
-      .where(running(id));
+      .where(held(job));
   }
 
-  async function postpone(id: string, runAfter: Date) {
+  async function postpone(job: Claimed, runAfter: Date) {
     const now = new Date();
 
-    const postponed = await db
-      .update(backgroundJobs)
-      .set({
-        status: "pending",
-        runAfter,
-        lockedUntil: null,
-        attempts: sql`${backgroundJobs.attempts} - 1`,
-        updatedAt: now,
-      })
-      .where(and(running(id), withoutPendingTwin(db)))
-      .returning({ id: backgroundJobs.id });
+    const postponed = await requeue(held(job), {
+      runAfter,
+      attempts: sql`${backgroundJobs.attempts} - 1`,
+      updatedAt: now,
+    });
 
-    if (postponed.length > 0) return;
+    if (postponed) return;
 
     await db
       .update(backgroundJobs)
       .set({ status: "done", lockedUntil: null, updatedAt: now })
-      .where(running(id));
+      .where(held(job));
   }
 
   return { enqueue, claim, complete, retry, postpone };

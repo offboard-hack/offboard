@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { backgroundJobs } from "@offboard/db/schema";
@@ -76,7 +77,46 @@ describe.skipIf(!url)("background repository", () => {
 
     expect(job).toMatchObject({ attempts });
 
-    return job?.id ?? "";
+    return { id: job?.id ?? "", attempts };
+  }
+
+  async function fail(id: string) {
+    await db
+      .update(backgroundJobs)
+      .set({ status: "failed", lockedUntil: null, lastError: "boom" })
+      .where(eq(backgroundJobs.id, id));
+  }
+
+  async function lockWait() {
+    for (;;) {
+      const { rows: waiting } = await db.$client.query<{ count: number }>(
+        "select count(*)::int as count from pg_locks where not granted",
+      );
+
+      if (waiting[0].count > 0) return;
+
+      await delay(5);
+    }
+  }
+
+  async function withRacingTwin(subject: string, finish: () => Promise<void>) {
+    const client = await db.$client.connect();
+
+    try {
+      await client.query("begin");
+      await client.query(
+        "insert into background_jobs (kind, subject, run_after) values ('score_resume', $1, now())",
+        [subject],
+      );
+
+      const finishing = finish();
+
+      await lockWait();
+      await client.query("commit");
+      await finishing;
+    } finally {
+      client.release();
+    }
   }
 
   it("enqueues one pending job per kind and subject", async () => {
@@ -113,15 +153,15 @@ describe.skipIf(!url)("background repository", () => {
   });
 
   it("allows a new pending job while the same subject is running", async () => {
-    const id = await running("resume-1");
+    const job = await running("resume-1");
 
     await repository.enqueue("score_resume", "resume-1", {}, start);
     await repository.enqueue("score_resume", "resume-1", {}, start);
 
     const stored = await rows();
 
-    expect(stored.map((job) => job.status).sort()).toEqual(["pending", "running"]);
-    expect(stored.find((job) => job.status === "running")?.id).toBe(id);
+    expect(stored.map((stored) => stored.status).sort()).toEqual(["pending", "running"]);
+    expect(stored.find((stored) => stored.status === "running")?.id).toBe(job.id);
   });
 
   it("claims due jobs in run order and locks them for five minutes", async () => {
@@ -167,6 +207,17 @@ describe.skipIf(!url)("background repository", () => {
     expect(await repository.claim(5, start)).toEqual([]);
   });
 
+  it("breaks run order ties by id", async () => {
+    for (const subject of ["a", "b", "c", "d"]) {
+      await repository.enqueue("score_resume", subject, {}, start);
+    }
+
+    const ids = (await rows()).map((job) => job.id).sort();
+
+    expect((await repository.claim(2, start)).map((job) => job.id)).toEqual(ids.slice(0, 2));
+    expect((await repository.claim(2, start)).map((job) => job.id)).toEqual(ids.slice(2));
+  });
+
   it("claims with the current time by default", async () => {
     await repository.enqueue("score_resume", "now");
 
@@ -177,16 +228,42 @@ describe.skipIf(!url)("background repository", () => {
   });
 
   it("reclaims a running job whose lock expired", async () => {
-    const id = await running("stuck");
+    const job = await running("stuck");
 
     expect(await repository.claim(5, minutesAfter(start, 5))).toEqual([]);
 
     const reclaimed = await repository.claim(5, new Date(minutesAfter(start, 5).getTime() + 1));
 
-    expect(reclaimed).toEqual([expect.objectContaining({ id, attempts: 2 })]);
-    expect(await row(id)).toMatchObject({
+    expect(reclaimed).toEqual([expect.objectContaining({ id: job.id, attempts: 2 })]);
+    expect(await row(job.id)).toMatchObject({
       status: "running",
       lockedUntil: new Date(minutesAfter(start, 10).getTime() + 1),
+    });
+  });
+
+  it("fails a job that stopped while running three times and claims the next one", async () => {
+    await repository.enqueue("score_resume", "poison", {}, minutesAfter(start, -10));
+    await repository.enqueue("score_resume", "next", {}, start);
+
+    const [first] = await repository.claim(1, start);
+    const [second] = await repository.claim(1, minutesAfter(start, 6));
+    const [third] = await repository.claim(1, minutesAfter(start, 12));
+
+    expect([first, second, third]).toEqual([
+      expect.objectContaining({ subject: "poison", attempts: 1 }),
+      expect.objectContaining({ subject: "poison", attempts: 2 }),
+      expect.objectContaining({ subject: "poison", attempts: 3 }),
+    ]);
+
+    expect(await repository.claim(1, minutesAfter(start, 18))).toEqual([
+      expect.objectContaining({ subject: "next", attempts: 1 }),
+    ]);
+    expect(await row(first.id)).toEqual({
+      status: "failed",
+      attempts: 3,
+      runAfter: minutesAfter(start, -10),
+      lockedUntil: null,
+      lastError: "Stopped while running",
     });
   });
 
@@ -195,25 +272,25 @@ describe.skipIf(!url)("background repository", () => {
     const failed = await running("failed");
 
     await repository.complete(done);
-    await repository.retry(failed, "boom", 3, start);
+    await fail(failed.id);
 
     expect(await repository.claim(5, minutesAfter(start, 60))).toEqual([]);
   });
 
   it("completes a running job", async () => {
-    const id = await running("resume-1");
+    const job = await running("resume-1");
 
-    await repository.complete(id);
+    await repository.complete(job);
 
-    expect(await row(id)).toMatchObject({ status: "done", lockedUntil: null, attempts: 1 });
+    expect(await row(job.id)).toMatchObject({ status: "done", lockedUntil: null, attempts: 1 });
   });
 
   it("retries with exponential backoff and then fails", async () => {
-    const id = await running("resume-1");
+    const job = await running("resume-1");
 
-    await repository.retry(id, "first failure", 1, start);
+    await repository.retry(job, "first failure", start);
 
-    expect(await row(id)).toEqual({
+    expect(await row(job.id)).toEqual({
       status: "pending",
       attempts: 1,
       runAfter: minutesAfter(start, 2),
@@ -221,46 +298,34 @@ describe.skipIf(!url)("background repository", () => {
       lastError: "first failure",
     });
 
-    await repository.claim(1, minutesAfter(start, 2));
-    await repository.retry(id, "second failure", 2, minutesAfter(start, 2));
+    const [second] = await repository.claim(1, minutesAfter(start, 2));
 
-    expect(await row(id)).toMatchObject({
+    await repository.retry(second, "second failure", minutesAfter(start, 2));
+
+    expect(await row(job.id)).toMatchObject({
       status: "pending",
       attempts: 2,
       runAfter: minutesAfter(start, 6),
       lastError: "second failure",
     });
 
-    await repository.claim(1, minutesAfter(start, 6));
-    await repository.retry(id, "x".repeat(2_500), 3, minutesAfter(start, 6));
+    const [third] = await repository.claim(1, minutesAfter(start, 6));
 
-    const failed = await row(id);
+    await repository.retry(third, "x".repeat(2_500), minutesAfter(start, 6));
+
+    const failed = await row(job.id);
 
     expect(failed).toMatchObject({ status: "failed", attempts: 3, lockedUntil: null });
     expect(failed.lastError).toBe("x".repeat(2_000));
   });
 
-  it("fails a job whose attempts grew past the limit through stale reclaims", async () => {
-    const id = await running("stuck");
-
-    await repository.claim(5, minutesAfter(start, 6));
-    await repository.claim(5, minutesAfter(start, 12));
-    const [fourth] = await repository.claim(5, minutesAfter(start, 18));
-
-    expect(fourth).toMatchObject({ id, attempts: 4 });
-
-    await repository.retry(id, "crashed", fourth.attempts);
-
-    expect(await row(id)).toMatchObject({ status: "failed", lastError: "crashed" });
-  });
-
   it("schedules a retry from the current time by default", async () => {
-    const id = await running("resume-1");
+    const job = await running("resume-1");
     const before = Date.now();
 
-    await repository.retry(id, "boom", 1);
+    await repository.retry(job, "boom");
 
-    const retried = await row(id);
+    const retried = await row(job.id);
 
     expect(retried.status).toBe("pending");
     expect(retried.runAfter.getTime()).toBeGreaterThanOrEqual(before + 2 * 60_000);
@@ -268,22 +333,26 @@ describe.skipIf(!url)("background repository", () => {
   });
 
   it("fails a retried job that a newer pending job supersedes", async () => {
-    const id = await running("resume-1");
+    const job = await running("resume-1");
 
     await repository.enqueue("score_resume", "resume-1", {}, start);
-    await repository.retry(id, "boom", 1, start);
+    await repository.retry(job, "boom", start);
 
-    expect(await row(id)).toMatchObject({ status: "failed", lastError: "boom", lockedUntil: null });
-    expect((await rows()).filter((job) => job.status === "pending")).toHaveLength(1);
+    expect(await row(job.id)).toMatchObject({
+      status: "failed",
+      lastError: "boom",
+      lockedUntil: null,
+    });
+    expect((await rows()).filter((stored) => stored.status === "pending")).toHaveLength(1);
   });
 
   it("postpones a job without counting the attempt", async () => {
-    const id = await running("resume-1");
+    const job = await running("resume-1");
     const until = minutesAfter(start, 90);
 
-    await repository.postpone(id, until);
+    await repository.postpone(job, until);
 
-    expect(await row(id)).toEqual({
+    expect(await row(job.id)).toEqual({
       status: "pending",
       attempts: 0,
       runAfter: until,
@@ -295,13 +364,55 @@ describe.skipIf(!url)("background repository", () => {
   });
 
   it("completes a postponed job that a newer pending job supersedes", async () => {
-    const id = await running("resume-1");
+    const job = await running("resume-1");
 
     await repository.enqueue("score_resume", "resume-1", {}, start);
-    await repository.postpone(id, minutesAfter(start, 90));
+    await repository.postpone(job, minutesAfter(start, 90));
 
-    expect(await row(id)).toMatchObject({ status: "done", lockedUntil: null });
-    expect((await rows()).filter((job) => job.status === "pending")).toHaveLength(1);
+    expect(await row(job.id)).toMatchObject({ status: "done", lockedUntil: null });
+    expect((await rows()).filter((stored) => stored.status === "pending")).toHaveLength(1);
+  });
+
+  it("treats a pending twin that races the requeue as superseding the job", async () => {
+    const retried = await running("retried");
+    const postponed = await running("postponed");
+
+    await withRacingTwin("retried", () => repository.retry(retried, "boom", start));
+    await withRacingTwin("postponed", () =>
+      repository.postpone(postponed, minutesAfter(start, 90)),
+    );
+
+    expect(await row(retried.id)).toMatchObject({ status: "failed", lastError: "boom" });
+    expect(await row(postponed.id)).toMatchObject({ status: "done", attempts: 1 });
+    expect((await rows()).filter((stored) => stored.status === "pending")).toHaveLength(2);
+  });
+
+  it("propagates database errors other than a pending twin", async () => {
+    await expect(repository.retry({ id: "not-a-uuid", attempts: 1 }, "boom")).rejects.toThrow();
+    await expect(repository.postpone({ id: "not-a-uuid", attempts: 1 }, start)).rejects.toThrow();
+  });
+
+  it("ignores a finisher whose claim was taken over", async () => {
+    const stale = await running("resume-1");
+    const [current] = await repository.claim(1, minutesAfter(start, 6));
+
+    expect(current).toMatchObject({ id: stale.id, attempts: 2 });
+
+    await repository.complete(stale);
+    await repository.retry(stale, "late", minutesAfter(start, 7));
+    await repository.postpone(stale, minutesAfter(start, 90));
+
+    expect(await row(stale.id)).toEqual({
+      status: "running",
+      attempts: 2,
+      runAfter: start,
+      lockedUntil: minutesAfter(start, 11),
+      lastError: null,
+    });
+
+    await repository.complete(current);
+
+    expect(await row(stale.id)).toMatchObject({ status: "done", attempts: 2 });
   });
 
   it("leaves jobs that are no longer running untouched", async () => {
@@ -309,14 +420,14 @@ describe.skipIf(!url)("background repository", () => {
     const failed = await running("failed");
 
     await repository.complete(done);
-    await repository.retry(failed, "boom", 3, start);
+    await fail(failed.id);
 
-    await repository.retry(done, "late", 1, start);
+    await repository.retry(done, "late", start);
     await repository.postpone(done, start);
     await repository.complete(failed);
     await repository.postpone(failed, start);
 
-    expect(await row(done)).toMatchObject({ status: "done", lastError: null });
-    expect(await row(failed)).toMatchObject({ status: "failed", lastError: "boom" });
+    expect(await row(done.id)).toMatchObject({ status: "done", lastError: null });
+    expect(await row(failed.id)).toMatchObject({ status: "failed", lastError: "boom" });
   });
 });

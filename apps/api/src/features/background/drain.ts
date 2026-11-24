@@ -20,25 +20,22 @@ export async function drain(
 ) {
   const { limit = 5, budgetMs = 20_000, now = Date.now } = options;
   const startedAt = now();
-  const jobs = await repo.claim(limit);
   let processed = 0;
   let failed = 0;
 
-  for (const [index, job] of jobs.entries()) {
-    if (now() - startedAt >= budgetMs) {
-      for (const unstarted of jobs.slice(index)) await repo.postpone(unstarted.id, new Date());
+  while (processed + failed < limit && now() - startedAt < budgetMs) {
+    const [job] = await repo.claim(1);
 
-      break;
-    }
+    if (!job) break;
 
     const result = await run(handlers, job);
 
     if (!result.ok) {
-      await repo.retry(job.id, result.failure, job.attempts);
+      await repo.retry(job, result.failure);
       failed += 1;
     } else {
-      if (result.outcome) await repo.postpone(job.id, result.outcome.postponeUntil);
-      else await repo.complete(job.id);
+      if (result.outcome) await repo.postpone(job, result.outcome.postponeUntil);
+      else await repo.complete(job);
       processed += 1;
     }
   }

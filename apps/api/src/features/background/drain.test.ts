@@ -56,8 +56,8 @@ describe.skipIf(!url)("background drain", () => {
     return {
       ...repository,
       claim: (limit: number) => repository.claim(limit, clock.now),
-      retry: (id: string, error: string, attempts: number) =>
-        repository.retry(id, error, attempts, clock.now),
+      retry: (job: Pick<BackgroundJob, "id" | "attempts">, error: string) =>
+        repository.retry(job, error, clock.now),
     } satisfies BackgroundRepository;
   }
 
@@ -78,13 +78,14 @@ describe.skipIf(!url)("background drain", () => {
     };
 
     const results = await Promise.all([
-      drain(repository, { score_resume: record }, { limit: 10 }),
-      drain(repository, { score_resume: record }, { limit: 10 }),
+      drain(repository, { score_resume: record }),
+      drain(repository, { score_resume: record }),
     ]);
 
     expect(seen.sort()).toEqual([...subjects].sort());
     expect(results.reduce((total, result) => total + result.processed, 0)).toBe(10);
     expect(results.every((result) => result.failed === 0)).toBe(true);
+    expect(results.every((result) => result.processed >= 1)).toBe(true);
     expect(await rows()).toEqual(
       subjects
         .sort()
@@ -217,14 +218,13 @@ describe.skipIf(!url)("background drain", () => {
     ]);
   });
 
-  it("stops starting jobs when the budget runs out and releases the rest", async () => {
+  it("stops starting jobs after the budget", async () => {
     for (const [index, subject] of ["a", "b", "c", "d"].entries()) {
       await repository.enqueue("score_resume", subject, {}, minutesAfter(start, index));
     }
 
     const clock = { elapsed: 0 };
     const seen: string[] = [];
-    const before = Date.now();
 
     const result = await drain(
       repository,
@@ -239,22 +239,12 @@ describe.skipIf(!url)("background drain", () => {
 
     expect(result).toEqual({ processed: 2, failed: 0 });
     expect(seen).toEqual(["a", "b"]);
-
-    const stored = await rows();
-
-    expect(stored.slice(0, 2)).toEqual([
-      expect.objectContaining({ status: "done" }),
-      expect.objectContaining({ status: "done" }),
+    expect((await rows()).map((job) => [job.subject, job.status, job.attempts])).toEqual([
+      ["a", "done", 1],
+      ["b", "done", 1],
+      ["c", "pending", 0],
+      ["d", "pending", 0],
     ]);
-    expect(stored.slice(2)).toEqual([
-      expect.objectContaining({ subject: "c", status: "pending", attempts: 0, lockedUntil: null }),
-      expect.objectContaining({ subject: "d", status: "pending", attempts: 0, lockedUntil: null }),
-    ]);
-
-    for (const released of stored.slice(2)) {
-      expect(released.runAfter.getTime()).toBeGreaterThanOrEqual(before);
-      expect(released.runAfter.getTime()).toBeLessThanOrEqual(Date.now());
-    }
   });
 
   it("honours a custom budget", async () => {
