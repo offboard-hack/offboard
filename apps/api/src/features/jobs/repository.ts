@@ -1,6 +1,6 @@
 import type { Database } from "@offboard/db/client";
-import { jobs } from "@offboard/db/schema";
-import { and, count, desc, eq, isNull, sql } from "drizzle-orm";
+import { applications, jobMatches, jobs, resumes } from "@offboard/db/schema";
+import { and, count, desc, eq, getTableColumns, isNull, sql } from "drizzle-orm";
 import type { JobDraft } from "./extract.js";
 
 type WorkModel = "remote" | "hybrid" | "onsite";
@@ -17,6 +17,11 @@ export type JobView = {
   salaryMaxCents: number | null;
   url: string;
   postedAt: string | null;
+};
+
+export type TalentJobView = JobView & {
+  match: { score: number; reasons: string[] } | null;
+  applied: boolean;
 };
 
 type Row = typeof jobs.$inferSelect;
@@ -80,27 +85,62 @@ export function createJobsRepository(db: Database) {
     return { job: toJob(existing), created: false };
   }
 
-  async function listOpen(filter: { workModel?: WorkModel; page: number; pageSize: number }) {
+  async function listForTalent(
+    profileId: string,
+    filter: { workModel?: WorkModel; page: number; pageSize: number },
+  ) {
     const where = and(
       isNull(jobs.closedAt),
       filter.workModel === undefined ? undefined : eq(jobs.workModel, filter.workModel),
     );
 
+    const baseVersion = db
+      .select({
+        version: sql`date_trunc('milliseconds', coalesce(${resumes.updatedAt}, ${resumes.createdAt}))`,
+      })
+      .from(resumes)
+      .where(and(eq(resumes.profileId, profileId), eq(resumes.kind, "base")));
+
     const [rows, [totals]] = await Promise.all([
       db
-        .select()
+        .select({
+          job: getTableColumns(jobs),
+          score: jobMatches.score,
+          reasons: jobMatches.reasons,
+          applied: sql<boolean>`exists (select 1 from ${applications} where ${applications.profileId} = ${profileId} and ${applications.jobId} = ${jobs.id})`,
+        })
         .from(jobs)
+        .leftJoin(
+          jobMatches,
+          and(
+            eq(jobMatches.jobId, jobs.id),
+            eq(jobMatches.profileId, profileId),
+            sql`${jobMatches.resumeUpdatedAt} = (${baseVersion})`,
+          ),
+        )
         .where(where)
-        .orderBy(sql`${jobs.postedAt} desc nulls last`, desc(jobs.createdAt), jobs.id)
+        .orderBy(
+          sql`(${jobMatches.score} is null)`,
+          sql`${jobMatches.score} desc`,
+          sql`${jobs.postedAt} desc nulls last`,
+          desc(jobs.createdAt),
+          jobs.id,
+        )
         .limit(filter.pageSize)
         .offset((filter.page - 1) * filter.pageSize),
       db.select({ total: count() }).from(jobs).where(where),
     ]);
 
-    return { items: rows.map(toJob), total: totals.total };
+    const items = rows.map(({ job, score, reasons, applied }) => ({
+      ...toJob(job),
+      match: score === null || reasons === null ? null : { score, reasons },
+      applied,
+    })) satisfies TalentJobView[];
+
+    return { items, total: totals.total };
   }
 
-  return { findBySource, createShared, listOpen };
+  return { findBySource, createShared, listForTalent };
 }
 
 export type JobsRepository = ReturnType<typeof createJobsRepository>;

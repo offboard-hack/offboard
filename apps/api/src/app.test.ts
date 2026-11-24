@@ -663,6 +663,7 @@ describe.skipIf(!url)("api", () => {
         expect(listed.status).toBe(200);
         expect(body).toMatchObject({ page: 1, pageSize: 20, total: 2 });
         expect(body.items.map((item: { title: string }) => item.title)).toEqual(["A", "B"]);
+        expect(body.items[0]).toMatchObject({ match: null, applied: false });
 
         const remote = await asSession(
           "talent",

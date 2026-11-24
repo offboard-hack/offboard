@@ -25,8 +25,16 @@ const jobResponse = t.Object({
   postedAt: t.Union([t.String(), t.Null()]),
 });
 
+const talentJobResponse = t.Composite([
+  jobResponse,
+  t.Object({
+    match: t.Union([t.Object({ score: t.Integer(), reasons: t.Array(t.String()) }), t.Null()]),
+    applied: t.Boolean(),
+  }),
+]);
+
 const listResponse = t.Object({
-  items: t.Array(jobResponse),
+  items: t.Array(talentJobResponse),
   page: t.Integer(),
   pageSize: t.Literal(pageSize),
   total: t.Integer(),
@@ -101,10 +109,10 @@ export function jobsRoutes(
     )
     .get(
       "/me/jobs",
-      async ({ query }) => {
+      async ({ query, me }) => {
         const page = query.page ?? 1;
 
-        const { items, total } = await repos.listOpen({
+        const { items, total } = await repos.listForTalent(me.id, {
           workModel: query.workModel,
           page,
           pageSize,
