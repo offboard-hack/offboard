@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
-import { jobs, tasks } from "@offboard/db/schema";
+import { interviews, jobs, tasks } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -958,6 +958,37 @@ describe.skipIf(!url)("api", () => {
         expect(
           await (await send(owner, "/me/interviews?from=2026-03-09&to=2026-03-15")).json(),
         ).toHaveLength(1);
+      });
+
+      it("rejects invalid interview input without storing anything", async () => {
+        const headers = await talentProfile(personalEmail, 0);
+        const id = await applyTo(headers, await seedJob("invalid"));
+        const path = `/me/applications/${id}/interviews`;
+        const valid = { startsAt: "2026-03-10T17:00:00Z", mode: "video", with: "Maria" };
+
+        const bodies = [
+          { ...valid, startsAt: "2026-11-26T23:59:60Z" },
+          { ...valid, startsAt: "2026-11-26T10:00:00+03" },
+          { ...valid, with: "a".repeat(256) },
+          { ...valid, notes: "a".repeat(2001) },
+          { ...valid, mode: "carrier_pigeon" },
+        ];
+
+        for (const body of bodies) {
+          expect((await send(headers, path, "POST", body)).status).toBe(422);
+        }
+
+        const patched = await send(headers, `/me/applications/${id}`, "PATCH", {
+          status: "closed",
+          closedReason: "ghosted",
+        });
+
+        expect(patched.status).toBe(422);
+        expect(await (await send(headers, "/me/applications")).json()).toMatchObject([
+          { status: "sent" },
+        ]);
+
+        expect(await db.select().from(interviews)).toEqual([]);
       });
 
       it("validates the agenda range", async () => {

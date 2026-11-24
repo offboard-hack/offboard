@@ -6,7 +6,7 @@ import type { ApplicationsRepository } from "./repository.js";
 
 const id = t.String({ format: "uuid" });
 
-const status = t.Union([
+const statusSchema = t.Union([
   t.Literal("sent"),
   t.Literal("in_review"),
   t.Literal("interview"),
@@ -18,7 +18,7 @@ const closedReason = t.Union([t.Literal("rejected"), t.Literal("withdrawn"), t.L
 
 const applicationResponse = t.Object({
   id: t.String(),
-  status,
+  status: statusSchema,
   closedReason: t.Union([closedReason, t.Null()]),
   appliedAt: t.String(),
   statusChangedAt: t.String(),
@@ -100,7 +100,7 @@ export function applicationsRoutes(
       {
         talent: "active",
         params: t.Object({ id }),
-        body: t.Object({ status, closedReason: t.Optional(closedReason) }),
+        body: t.Object({ status: statusSchema, closedReason: t.Optional(closedReason) }),
         response: { 200: applicationResponse, 404: errorResponse, 409: errorResponse },
       },
     )
@@ -129,7 +129,11 @@ export function applicationsRoutes(
           with: t.String({ minLength: 1, maxLength: 255 }),
           notes: t.Optional(t.String({ maxLength: 2000 })),
         }),
-        response: { 201: interviewResponse, 404: errorResponse, 409: errorResponse },
+        response: {
+          201: interviewResponse,
+          404: errorResponse,
+          409: errorResponse,
+        },
       },
     )
     .delete(
