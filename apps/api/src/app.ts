@@ -3,6 +3,7 @@ import { Elysia, t } from "elysia";
 import { actionConfigsRoutes } from "./features/action-configs/routes.js";
 import { fireActions } from "./features/action-configs/actions.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
+import { applicationsRoutes } from "./features/applications/routes.js";
 import { authRoutes } from "./features/auth/routes.js";
 import { createAbacatePayGateway, type AbacatePayGateway } from "./features/billing/abacatepay.js";
 import { billingRoutes } from "./features/billing/routes.js";
@@ -76,6 +77,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         fetchPage: options.fetchPage ?? fetchPageText,
       }),
     )
+    .use(applicationsRoutes(repos.applications, talent))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
     .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret))

@@ -687,6 +687,321 @@ describe.skipIf(!url)("api", () => {
         ).toBe(402);
       });
     });
+
+    describe("applications", () => {
+      type TalentHeaders = { "x-test-talent-id": string };
+
+      async function talentProfile(email: string, caseIndex: number) {
+        const cases: { id: string }[] = await (await call("/offboardings")).json();
+
+        const created = await repos.talent.enable({
+          caseId: cases[caseIndex].id,
+          personalEmail: email,
+          sponsoredUntil,
+        });
+
+        if (
+          created === "case_not_found" ||
+          created === "already_enabled" ||
+          created === "email_taken"
+        ) {
+          throw new Error(created);
+        }
+
+        await repos.talent.acceptTerms(created.id);
+
+        return { "x-test-talent-id": created.id };
+      }
+
+      async function seedJob(sourceKey: string, closedAt?: Date) {
+        const [job] = await db
+          .insert(jobs)
+          .values({
+            origin: "external",
+            source: "seed",
+            sourceKey,
+            title: `Job ${sourceKey}`,
+            company: "Acme",
+            url: `https://jobs.example.com/${sourceKey}`,
+            closedAt,
+          })
+          .returning({ id: jobs.id });
+
+        return job.id;
+      }
+
+      function send(
+        headers: TalentHeaders,
+        path: string,
+        method = "GET",
+        body?: Record<string, string>,
+      ) {
+        return app.handle(
+          new Request(`http://localhost/api${path}`, {
+            method,
+            headers: {
+              "x-test-session": "talent",
+              origin: webOrigin,
+              "content-type": "application/json",
+              ...headers,
+            },
+            body: body === undefined ? undefined : JSON.stringify(body),
+          }),
+        );
+      }
+
+      async function applyTo(headers: TalentHeaders, jobId: string) {
+        const response = await send(headers, `/me/jobs/${jobId}/apply`, "POST");
+
+        expect(response.status).toBe(201);
+
+        return z.object({ applicationId: z.string() }).parse(await response.json()).applicationId;
+      }
+
+      it("applies once to open jobs", async () => {
+        const headers = await talentProfile(personalEmail, 0);
+        const jobId = await seedJob("open");
+
+        const applied = await send(headers, `/me/jobs/${jobId}/apply`, "POST");
+
+        expect(applied.status).toBe(201);
+        expect(await applied.json()).toEqual({
+          applicationId: expect.any(String),
+          jobUrl: "https://jobs.example.com/open",
+        });
+
+        const again = await send(headers, `/me/jobs/${jobId}/apply`, "POST");
+
+        expect(again.status).toBe(409);
+        expect(await again.json()).toEqual({ error: "Already applied" });
+
+        const closed = await send(
+          headers,
+          `/me/jobs/${await seedJob("gone", new Date())}/apply`,
+          "POST",
+        );
+
+        expect(closed.status).toBe(404);
+        expect(await closed.json()).toEqual({ error: "Job not found" });
+
+        const unknown = await send(headers, `/me/jobs/${crypto.randomUUID()}/apply`, "POST");
+
+        expect(unknown.status).toBe(404);
+        expect((await send(headers, "/me/jobs/not-a-uuid/apply", "POST")).status).toBe(422);
+
+        const listed = await (await send(headers, "/me/applications")).json();
+
+        expect(listed).toHaveLength(1);
+        expect(listed[0]).toMatchObject({ status: "sent", closedReason: null });
+      });
+
+      it("moves an application through the funnel", async () => {
+        const headers = await talentProfile(personalEmail, 0);
+        const id = await applyTo(headers, await seedJob("funnel"));
+
+        const patch = (body: Record<string, string>) =>
+          send(headers, `/me/applications/${id}`, "PATCH", body);
+
+        const reviewed = await patch({ status: "in_review" });
+
+        expect(reviewed.status).toBe(200);
+        expect(await reviewed.json()).toMatchObject({ id, status: "in_review" });
+
+        const backwards = await patch({ status: "sent" });
+
+        expect(backwards.status).toBe(409);
+        expect(await backwards.json()).toEqual({ error: "Invalid status transition" });
+        expect((await patch({ status: "offer" })).status).toBe(200);
+
+        const closed = await patch({ status: "closed", closedReason: "hired" });
+
+        expect(await closed.json()).toMatchObject({ status: "closed", closedReason: "hired" });
+        expect((await patch({ status: "closed", closedReason: "rejected" })).status).toBe(409);
+        expect((await patch({ status: "moon" })).status).toBe(422);
+
+        expect(await (await send(headers, "/me/applications/summary")).json()).toEqual({
+          sent: 1,
+          responded: 1,
+          interviews: 1,
+          offers: 1,
+        });
+
+        expect(
+          (await send(headers, "/me/applications/not-a-uuid", "PATCH", { status: "offer" })).status,
+        ).toBe(422);
+      });
+
+      it("logs interviews and lists the week", async () => {
+        const headers = await talentProfile(personalEmail, 0);
+        const id = await applyTo(headers, await seedJob("agenda"));
+        const path = `/me/applications/${id}/interviews`;
+
+        const created = await send(headers, path, "POST", {
+          startsAt: "2026-03-10T17:00:00.000Z",
+          mode: "video",
+          with: "Maria",
+          notes: "Prepare a case",
+        });
+
+        expect(created.status).toBe(201);
+
+        const interview = await created.json();
+
+        expect(interview).toMatchObject({
+          applicationId: id,
+          startsAt: "2026-03-10T17:00:00.000Z",
+          mode: "video",
+          with: "Maria",
+          job: { title: "Job agenda", company: "Acme" },
+        });
+
+        expect(await (await send(headers, "/me/applications")).json()).toMatchObject([
+          { status: "interview" },
+        ]);
+
+        const week = await send(headers, "/me/interviews?from=2026-03-09&to=2026-03-15");
+
+        expect(week.status).toBe(200);
+        expect(await week.json()).toHaveLength(1);
+        expect(
+          await (await send(headers, "/me/interviews?from=2026-03-11&to=2026-03-15")).json(),
+        ).toEqual([]);
+
+        const bad = await send(headers, path, "POST", {
+          startsAt: "tomorrow",
+          mode: "video",
+          with: "Maria",
+        });
+
+        expect(bad.status).toBe(422);
+        expect(
+          (
+            await send(headers, path, "POST", {
+              startsAt: "2026-03-10T17:00:00Z",
+              mode: "video",
+              with: "",
+            })
+          ).status,
+        ).toBe(422);
+
+        expect(
+          (
+            await send(headers, "/me/applications/not-a-uuid/interviews", "POST", {
+              startsAt: "2026-03-10T17:00:00Z",
+              mode: "phone",
+              with: "Ana",
+            })
+          ).status,
+        ).toBe(422);
+
+        await send(headers, `/me/applications/${id}`, "PATCH", {
+          status: "closed",
+          closedReason: "withdrawn",
+        });
+
+        const onClosed = await send(headers, path, "POST", {
+          startsAt: "2026-03-11T17:00:00Z",
+          mode: "phone",
+          with: "Ana",
+        });
+
+        expect(onClosed.status).toBe(409);
+        expect(await onClosed.json()).toEqual({ error: "Application is closed" });
+
+        const removed = await send(headers, `/me/interviews/${interview.id}`, "DELETE");
+
+        expect(removed.status).toBe(204);
+        expect(await removed.text()).toBe("");
+
+        const gone = await send(headers, `/me/interviews/${interview.id}`, "DELETE");
+
+        expect(gone.status).toBe(404);
+        expect(await gone.json()).toEqual({ error: "Interview not found" });
+        expect((await send(headers, "/me/interviews/not-a-uuid", "DELETE")).status).toBe(422);
+      });
+
+      it("hides other profiles' applications", async () => {
+        const owner = await talentProfile(personalEmail, 0);
+        const other = await talentProfile("outra@example.com", 1);
+        const id = await applyTo(owner, await seedJob("private"));
+
+        const created = await send(owner, `/me/applications/${id}/interviews`, "POST", {
+          startsAt: "2026-03-10T17:00:00Z",
+          mode: "video",
+          with: "Maria",
+        });
+
+        const interview = await created.json();
+
+        const patched = await send(other, `/me/applications/${id}`, "PATCH", {
+          status: "in_review",
+        });
+
+        expect(patched.status).toBe(404);
+        expect(await patched.json()).toEqual({ error: "Application not found" });
+
+        const logged = await send(other, `/me/applications/${id}/interviews`, "POST", {
+          startsAt: "2026-03-10T18:00:00Z",
+          mode: "phone",
+          with: "Ana",
+        });
+
+        expect(logged.status).toBe(404);
+        expect((await send(other, `/me/interviews/${interview.id}`, "DELETE")).status).toBe(404);
+        expect(await (await send(other, "/me/applications")).json()).toEqual([]);
+        expect(
+          await (await send(other, "/me/interviews?from=2026-03-09&to=2026-03-15")).json(),
+        ).toEqual([]);
+        expect(await (await send(owner, "/me/applications")).json()).toMatchObject([
+          { status: "interview" },
+        ]);
+        expect(
+          await (await send(owner, "/me/interviews?from=2026-03-09&to=2026-03-15")).json(),
+        ).toHaveLength(1);
+      });
+
+      it("validates the agenda range", async () => {
+        const headers = await talentProfile(personalEmail, 0);
+
+        const reversed = await send(headers, "/me/interviews?from=2026-03-15&to=2026-03-09");
+
+        expect(reversed.status).toBe(422);
+        expect(await reversed.json()).toEqual({ error: "Invalid date range" });
+
+        const wide = await send(headers, "/me/interviews?from=2026-03-01&to=2026-04-01");
+
+        expect(wide.status).toBe(422);
+        expect(await wide.json()).toEqual({ error: "Invalid date range" });
+        expect((await send(headers, "/me/interviews?from=2026-03-01")).status).toBe(422);
+        expect((await send(headers, "/me/interviews")).status).toBe(422);
+        expect((await send(headers, "/me/interviews?from=x&to=y")).status).toBe(422);
+      });
+
+      it("guards the routes with active talent access", async () => {
+        const headers = await talentProfile(personalEmail, 0);
+
+        expect(
+          (await send({ "x-test-talent-id": crypto.randomUUID() }, "/me/applications")).status,
+        ).toBe(403);
+        expect(
+          (
+            await app.handle(
+              new Request("http://localhost/api/me/applications", {
+                headers: { "x-test-session": "admin", origin: webOrigin },
+              }),
+            )
+          ).status,
+        ).toBe(403);
+
+        const subscription = await repos.billing.getSubscription();
+
+        if (!subscription) throw new Error("missing subscription");
+
+        await repos.billing.updateSubscription(subscription.id, { status: "canceled" });
+
+        expect((await send(headers, "/me/applications")).status).toBe(402);
+      });
+    });
   });
 
   afterAll(async () => {
