@@ -1496,7 +1496,11 @@ describe.skipIf(!url)("api", () => {
           expect(await missing.json()).toEqual({ error: "Résumé not ready" });
 
           expect((await patch({})).status).toBe(422);
-          expect((await patch({ slug: "a".repeat(41) })).status).toBe(422);
+
+          const long = await patch({ slug: "a".repeat(41) });
+
+          expect(long.status).toBe(422);
+          expect(await long.json()).toEqual({ error: "Invalid slug" });
           expect((await patch({ resumeId: "not-a-uuid" })).status).toBe(422);
 
           const { resumeId } = await baseResume(headers);
@@ -1530,6 +1534,104 @@ describe.skipIf(!url)("api", () => {
               )
             ).status,
           ).toBe(403);
+        });
+
+        it("serves the page when the viewer lookup or the visit write fails", async () => {
+          const headers = await publicProfile();
+
+          await publish(headers, "ana-dev");
+
+          const logged = vi.spyOn(console, "error");
+
+          const sessionDown = createApp(webOrigin, repos, {
+            ...appOptions,
+            auth: { ...auth, resolvePrincipal: () => Promise.reject(new Error("session down")) },
+          });
+
+          const viewed = await sessionDown.handle(
+            new Request("http://localhost/api/public/pages/ana-dev"),
+          );
+
+          expect(viewed.status).toBe(200);
+          expect(await viewed.json()).toMatchObject({ headline: "Engenheira" });
+          expect(await counters()).toMatchObject([{ visits: 1, recruiterVisits: 0 }]);
+
+          const visitsDown = createApp(
+            webOrigin,
+            {
+              ...repos,
+              pages: {
+                ...repos.pages,
+                recordVisit: () => Promise.reject(new Error("visits down")),
+              },
+            },
+            appOptions,
+          );
+
+          const unrecorded = await visitsDown.handle(
+            new Request("http://localhost/api/public/pages/ana-dev", {
+              headers: { "x-test-session": "anonymous" },
+            }),
+          );
+
+          expect(unrecorded.status).toBe(200);
+          expect(unrecorded.headers.get("cache-control")).toBe("private, max-age=60");
+          expect(await unrecorded.json()).toMatchObject({ headline: "Engenheira" });
+          expect(await counters()).toMatchObject([{ visits: 1, recruiterVisits: 0 }]);
+          expect(logged.mock.calls).toEqual([
+            ["public page viewer lookup failed", { name: "Error", message: "session down" }],
+            ["public page visit failed", { name: "Error", message: "visits down" }],
+          ]);
+          logged.mockRestore();
+        });
+
+        it("applies without a page link when the link lookup fails", async () => {
+          const headers = await publicProfile();
+
+          await publish(headers, "ana-dev");
+
+          const logged = vi.spyOn(console, "error");
+
+          const linksDown = createApp(
+            webOrigin,
+            {
+              ...repos,
+              pages: { ...repos.pages, urlFor: () => Promise.reject(new Error("links down")) },
+            },
+            appOptions,
+          );
+
+          const applied = await pageRequest(
+            headers,
+            `/me/jobs/${await seedJob("links-down")}/apply`,
+            "POST",
+            await baseResume(headers),
+            linksDown,
+          );
+
+          expect(applied.status).toBe(201);
+          expect(await applied.json()).toMatchObject({ publicPageUrl: null });
+          expect(await db.select().from(applications)).toHaveLength(1);
+          expect(logged.mock.calls).toEqual([
+            ["public page link failed", { name: "Error", message: "links down" }],
+          ]);
+          logged.mockRestore();
+        });
+
+        it("falls back to the portal origin for an empty page origin", async () => {
+          const headers = await publicProfile();
+
+          const instance = createApp(webOrigin, repos, { ...appOptions, publicPageOrigin: "" });
+
+          const saved = await pageRequest(
+            headers,
+            "/me/page",
+            "PATCH",
+            { enabled: true, slug: "ana-dev" },
+            instance,
+          );
+
+          expect(await saved.json()).toMatchObject({ url: `${webOrigin}/p/ana-dev` });
         });
 
         it("builds page URLs on the configured origin", async () => {

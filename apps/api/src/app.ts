@@ -76,7 +76,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     companyActive,
   });
 
-  const pageOrigin = (options.publicPageOrigin ?? webOrigin).replace(/\/$/, "");
+  const pageOrigin = (options.publicPageOrigin || webOrigin).replace(/\/$/, "");
 
   async function publicPageUrl(profileId: string, token: string) {
     const slug = await repos.pages.urlFor(profileId);

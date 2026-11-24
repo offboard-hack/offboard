@@ -1,4 +1,5 @@
 import { Elysia, t } from "elysia";
+import { logFailure } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
 import { saoPauloDayRange } from "./funnel.js";
@@ -65,7 +66,10 @@ export function applicationsRoutes(
         return status(201, {
           applicationId: result.applicationId,
           jobUrl: result.jobUrl,
-          publicPageUrl: await publicPageUrl(me.id, result.publicToken),
+          publicPageUrl:
+            (await publicPageUrl(me.id, result.publicToken).catch(
+              logFailure("public page link failed"),
+            )) ?? null,
         });
       },
       {

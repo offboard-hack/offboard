@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { entitlementOf } from "../../shared/entitlement.js";
+import { logFailure } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import type { PortalAuth } from "../../shared/portal-auth.js";
 import { pdfAttachment, renderResumePdf } from "../../shared/resume-pdf.js";
@@ -59,23 +60,21 @@ export function pagesRoutes(
   deps: { auth: PortalAuth; companyActive: () => Promise<boolean>; origin: string },
 ) {
   async function published(slug: string, now: Date) {
-    const page = await repos.publicPage(slug);
+    const [page, companyActive] = await Promise.all([repos.publicPage(slug), deps.companyActive()]);
 
     if (!page) return undefined;
 
-    const entitlement = entitlementOf({
-      sponsoredUntil: page.sponsoredUntil,
-      companyActive: await deps.companyActive(),
-      now,
-    });
+    const entitlement = entitlementOf({ sponsoredUntil: page.sponsoredUntil, companyActive, now });
 
     return entitlement.kind === "lapsed" ? undefined : page;
   }
 
   async function owns(headers: Headers, profileId: string) {
-    const viewer = await deps.auth.resolvePrincipal(headers);
+    const viewer = await deps.auth
+      .resolvePrincipal(headers)
+      .catch(logFailure("public page viewer lookup failed"));
 
-    return viewer.kind === "talent" && viewer.profile.id === profileId;
+    return viewer?.kind === "talent" && viewer.profile.id === profileId;
   }
 
   async function settingsView(profileId: string, settings: PageSettings, now: Date) {
@@ -105,7 +104,9 @@ export function pagesRoutes(
         if (!(await owns(request.headers, page.profileId))) {
           const token = query.a !== undefined && query.a.length <= maxTokenLength ? query.a : null;
 
-          await repos.recordVisit(page.profileId, token, now);
+          await repos
+            .recordVisit(page.profileId, token, now)
+            .catch(logFailure("public page visit failed"));
         }
 
         set.headers["cache-control"] = "private, max-age=60";
@@ -165,7 +166,7 @@ export function pagesRoutes(
         body: t.Object(
           {
             enabled: t.Optional(t.Boolean()),
-            slug: t.Optional(t.String({ maxLength: 40 })),
+            slug: t.Optional(t.String()),
             resumeId: t.Optional(t.Union([t.String({ format: "uuid" }), t.Null()])),
           },
           { minProperties: 1 },
