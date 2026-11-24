@@ -8,7 +8,16 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
-import { backgroundJobs, interviews, jobMatches, jobs, llmUsage, tasks } from "@offboard/db/schema";
+import {
+  applications,
+  backgroundJobs,
+  interviews,
+  jobMatches,
+  jobs,
+  llmUsage,
+  resumes,
+  tasks,
+} from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { and, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -1119,7 +1128,13 @@ describe.skipIf(!url)("api", () => {
         scores: Record<string, number>;
         batches: string[][];
         before?: () => Promise<void>;
+        omit?: boolean;
+        fail?: boolean;
       };
+
+      type Tailoring = { output: object; fail?: boolean };
+
+      type ModelCall = { kind: "tailor" | "match"; prompt: string };
 
       const jobsInPrompt = z.array(z.object({ id: z.string(), title: z.string() }));
 
@@ -1131,6 +1146,12 @@ describe.skipIf(!url)("api", () => {
         const scoring: Scoring = { output: { score: 0, suggestions: [] }, calls: 0 };
 
         const matching: Matching = { scores: {}, batches: [] };
+
+        const tailoring: Tailoring = {
+          output: { rewrites: [], experienceOrder: [], bulletOrder: [], skillIds: [] },
+        };
+
+        const calls: ModelCall[] = [];
 
         const background: (() => Promise<void>)[] = [];
 
@@ -1150,12 +1171,24 @@ describe.skipIf(!url)("api", () => {
           },
         };
 
-        const generate: GenerateStructured = async ({ schema, prompt }) => {
+        const generate: GenerateStructured = async ({ schema, system, prompt }) => {
+          if (system.startsWith("You tailor")) {
+            calls.push({ kind: "tailor", prompt });
+
+            if (tailoring.fail) throw new Error("gateway down");
+
+            return schema.parse(tailoring.output);
+          }
+
           const extracted = schema.safeParse(options.draft ?? draft);
 
           if (extracted.success) return extracted.data;
 
-          if (schema.safeParse({ matches: [] }).success) {
+          if (system.startsWith("You rate how well")) {
+            calls.push({ kind: "match", prompt });
+
+            if (matching.fail) throw new Error("gateway down");
+
             const batch = jobsInPrompt.parse(
               JSON.parse(prompt.slice(prompt.indexOf("<jobs>") + 6, prompt.indexOf("</jobs>"))),
             );
@@ -1168,11 +1201,13 @@ describe.skipIf(!url)("api", () => {
             await before?.();
 
             return schema.parse({
-              matches: batch.map((job) => ({
-                jobId: job.id,
-                score: matching.scores[job.title] ?? 50,
-                reasons: [`Combina com ${job.title}`],
-              })),
+              matches: matching.omit
+                ? []
+                : batch.map((job) => ({
+                    jobId: job.id,
+                    score: matching.scores[job.title] ?? 50,
+                    reasons: [`Combina com ${job.title}`],
+                  })),
             });
           }
 
@@ -1216,7 +1251,7 @@ describe.skipIf(!url)("api", () => {
           throw new Error("background queue did not settle");
         }
 
-        return { instance, store, scoring, matching, kicks, settle };
+        return { instance, store, scoring, matching, tailoring, calls, kicks, settle };
       }
 
       async function profile(email = personalEmail, caseIndex = 0) {
@@ -2405,6 +2440,488 @@ describe.skipIf(!url)("api", () => {
         expect(
           await repos.jobs.findBySource("hr-link", "https://jobs.example.com/perfis"),
         ).toBeDefined();
+      });
+
+      describe("tailored résumés", () => {
+        const emptyTailoring = {
+          rewrites: [],
+          experienceOrder: [],
+          bulletOrder: [],
+          skillIds: [],
+        };
+
+        async function openJob(sourceKey: string, closedAt?: Date) {
+          const [job] = await db
+            .insert(jobs)
+            .values({
+              origin: "external",
+              source: "seed",
+              sourceKey,
+              title: "Backend",
+              company: "Acme",
+              description: "Vaga de backend",
+              url: `https://jobs.example.com/${sourceKey}`,
+              closedAt,
+            })
+            .returning({ id: jobs.id });
+
+          return job.id;
+        }
+
+        function usage(profileId: string) {
+          return db
+            .select({ calls: llmUsage.calls })
+            .from(llmUsage)
+            .where(eq(llmUsage.profileId, profileId));
+        }
+
+        function tailoredRows(profileId: string) {
+          return db
+            .select({
+              id: resumes.id,
+              jobId: resumes.jobId,
+              status: resumes.status,
+              content: resumes.content,
+              matchScore: resumes.matchScore,
+              updatedAt: resumes.updatedAt,
+            })
+            .from(resumes)
+            .where(and(eq(resumes.profileId, profileId), eq(resumes.kind, "tailored")));
+        }
+
+        async function tailoringApp(email = personalEmail, caseIndex = 0) {
+          const app = resumesApp();
+          const id = await profile(email, caseIndex);
+          const base = await (await upload(app.instance, id)).json();
+
+          await app.settle();
+
+          app.tailoring.output = {
+            ...emptyTailoring,
+            rewrites: [{ nodeId: base.content.headline.id, text: "Engenheira Backend" }],
+          };
+          app.matching.scores = { Backend: 88 };
+          app.calls.length = 0;
+
+          const call = (
+            path: string,
+            init: { method?: string; json?: unknown; session?: string } = {},
+            talentId = id,
+          ) => request(app.instance, talentId, path, init);
+
+          const tailor = (jobId: string, talentId = id) =>
+            call(`/me/jobs/${jobId}/tailor`, { method: "POST" }, talentId);
+
+          const ready = (versionId: string, talentId = id) =>
+            call(`/me/resumes/${versionId}/ready`, { method: "POST" }, talentId);
+
+          const apply = (jobId: string, resumeId: string, talentId = id) =>
+            call(`/me/jobs/${jobId}/apply`, { method: "POST", json: { resumeId } }, talentId);
+
+          return { app, id, base, call, tailor, ready, apply };
+        }
+
+        it("tailors a résumé for a job, edits it and applies with it once ready", async () => {
+          const jobId = await openJob("fluxo");
+          const { app, id, base, call, tailor, ready, apply } = await tailoringApp();
+          const queued = await db.select().from(backgroundJobs);
+          const [before] = await usage(id);
+
+          const tailored = await tailor(jobId);
+
+          expect(tailored.status).toBe(200);
+
+          const body = await tailored.json();
+
+          const headlineDiff = {
+            nodeId: base.content.headline.id,
+            kind: "headline",
+            before: "Engenheira de Software",
+            after: "Engenheira Backend",
+          };
+
+          expect(body).toEqual({
+            version: {
+              id: expect.any(String),
+              job: { id: jobId, title: "Backend", company: "Acme" },
+              status: "draft",
+              matchScore: 88,
+              content: {
+                ...base.content,
+                headline: { ...base.content.headline, text: "Engenheira Backend" },
+              },
+              application: null,
+              updatedAt: expect.any(String),
+            },
+            diff: [headlineDiff],
+          });
+          expect(app.calls.map((modelCall) => modelCall.kind)).toEqual(["tailor", "match"]);
+          expect(app.calls[1].prompt).toContain("Engenheira Backend");
+          expect(await usage(id)).toEqual([{ calls: before.calls + 2 }]);
+
+          const versionId = body.version.id;
+
+          expect(await (await call("/me/resumes")).json()).toEqual([body.version]);
+          expect(await (await call(`/me/resumes/${versionId}`)).json()).toEqual(body);
+
+          const marked = await ready(versionId);
+
+          expect(marked.status).toBe(200);
+          expect(await marked.json()).toMatchObject({ id: versionId, status: "ready" });
+
+          const edited = await call(`/me/resumes/${versionId}`, {
+            method: "PATCH",
+            json: {
+              content: {
+                ...body.version.content,
+                experiences: [
+                  {
+                    ...body.version.content.experiences[0],
+                    bullets: [
+                      ...body.version.content.experiences[0].bullets,
+                      { text: "Escreveu testes" },
+                    ],
+                  },
+                ],
+              },
+            },
+          });
+
+          expect(edited.status).toBe(200);
+
+          const editedBody = await edited.json();
+          const added = editedBody.version.content.experiences[0].bullets[1];
+
+          expect(editedBody.version).toMatchObject({
+            id: versionId,
+            status: "draft",
+            matchScore: 88,
+          });
+          expect(added).toEqual({ id: expect.any(String), text: "Escreveu testes" });
+          expect(editedBody.diff).toEqual([
+            headlineDiff,
+            { nodeId: added.id, kind: "bullet", before: "", after: "Escreveu testes" },
+          ]);
+          expect((await ready(versionId)).status).toBe(200);
+          expect(await db.select().from(backgroundJobs)).toEqual(queued);
+
+          const applied = await apply(jobId, versionId);
+
+          expect(applied.status).toBe(201);
+
+          const { applicationId } = await applied.json();
+
+          expect(await (await call("/me/resumes")).json()).toEqual([
+            expect.objectContaining({
+              id: versionId,
+              status: "ready",
+              application: { id: applicationId, status: "sent", appliedAt: expect.any(String) },
+            }),
+          ]);
+
+          const locked = await call(`/me/resumes/${versionId}`, {
+            method: "PATCH",
+            json: { content: base.content },
+          });
+
+          expect(locked.status).toBe(409);
+          expect(await locked.json()).toEqual({ error: "Already applied with this version" });
+        });
+
+        it("refuses to replace a version used by an application", async () => {
+          const jobId = await openJob("usada");
+          const { app, id, base, tailor, ready, apply } = await tailoringApp();
+          const { version } = await (await tailor(jobId)).json();
+
+          await ready(version.id);
+          expect((await apply(jobId, version.id)).status).toBe(201);
+
+          const [stored] = await tailoredRows(id);
+
+          app.tailoring.output = {
+            ...emptyTailoring,
+            rewrites: [{ nodeId: base.content.headline.id, text: "Outra versão" }],
+          };
+
+          const again = await tailor(jobId);
+
+          expect(again.status).toBe(409);
+          expect(await again.json()).toEqual({ error: "Already applied with this version" });
+          expect(await tailoredRows(id)).toEqual([stored]);
+          expect(stored).toMatchObject({ status: "ready", matchScore: 88 });
+        });
+
+        it("requires a ready résumé for this job", async () => {
+          const jobId = await openJob("pronta");
+          const otherJobId = await openJob("outra");
+          const { id, tailor, ready, apply } = await tailoringApp();
+          const other = await tailoringApp("outra.pessoal@example.com", 1);
+
+          const { version: draftVersion } = await (await tailor(jobId)).json();
+          const { version: otherJobVersion } = await (await tailor(otherJobId)).json();
+          const { version: foreignVersion } = await (await other.tailor(jobId)).json();
+
+          await ready(otherJobVersion.id);
+          await other.ready(foreignVersion.id);
+
+          for (const resumeId of [
+            draftVersion.id,
+            otherJobVersion.id,
+            foreignVersion.id,
+            other.base.id,
+          ]) {
+            const refused = await apply(jobId, resumeId);
+
+            expect(refused.status).toBe(422);
+            expect(await refused.json()).toEqual({ error: "Résumé not ready for this job" });
+          }
+
+          expect(await db.select().from(applications)).toEqual([]);
+          expect(await tailoredRows(id)).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ id: draftVersion.id, status: "draft" }),
+            ]),
+          );
+
+          await ready(draftVersion.id);
+
+          expect((await apply(jobId, draftVersion.id)).status).toBe(201);
+        });
+
+        it("writes nothing when the cap is hit mid-tailoring", async () => {
+          const jobId = await openJob("teto");
+          const { app, id, base, tailor } = await tailoringApp();
+
+          await db.update(llmUsage).set({ calls: 29 }).where(eq(llmUsage.profileId, id));
+
+          const capped = await tailor(jobId);
+
+          expect(capped.status).toBe(429);
+          expect(await capped.json()).toEqual({ error: "Daily AI limit reached" });
+          expect(app.calls.map((modelCall) => modelCall.kind)).toEqual(["tailor"]);
+          expect(await usage(id)).toEqual([{ calls: 30 }]);
+          expect(await tailoredRows(id)).toEqual([]);
+
+          app.calls.length = 0;
+
+          const exhausted = await tailor(jobId);
+
+          expect(exhausted.status).toBe(429);
+          expect(app.calls).toEqual([]);
+
+          await db.update(llmUsage).set({ calls: 0 }).where(eq(llmUsage.profileId, id));
+
+          expect((await tailor(jobId)).status).toBe(200);
+
+          const [saved] = await tailoredRows(id);
+
+          await db.update(llmUsage).set({ calls: 29 }).where(eq(llmUsage.profileId, id));
+          app.tailoring.output = {
+            ...emptyTailoring,
+            rewrites: [{ nodeId: base.content.headline.id, text: "Outra versão" }],
+          };
+          app.matching.scores = { Backend: 10 };
+          app.calls.length = 0;
+
+          expect((await tailor(jobId)).status).toBe(429);
+          expect(app.calls.map((modelCall) => modelCall.kind)).toEqual(["tailor"]);
+          expect(await tailoredRows(id)).toEqual([saved]);
+          expect(saved).toMatchObject({ status: "draft", matchScore: 88 });
+        });
+
+        it("checks the base, the job, the AI and the cap in order", async () => {
+          const { app, id, tailor } = await tailoringApp();
+          const jobId = await openJob("ordem");
+          const closedId = await openJob("fechada", new Date());
+          const unconfigured = resumesApp({ generate: null });
+          const bare = await profile("sem.curriculo@example.com", 1);
+
+          const noBase = await tailor(crypto.randomUUID(), bare);
+
+          expect(noBase.status).toBe(409);
+          expect(await noBase.json()).toEqual({ error: "Upload a résumé first" });
+
+          for (const missing of [crypto.randomUUID(), closedId]) {
+            const notFound = await request(
+              unconfigured.instance,
+              id,
+              `/me/jobs/${missing}/tailor`,
+              {
+                method: "POST",
+              },
+            );
+
+            expect(notFound.status).toBe(404);
+            expect(await notFound.json()).toEqual({ error: "Job not found" });
+          }
+
+          await db.update(llmUsage).set({ calls: 30 }).where(eq(llmUsage.profileId, id));
+
+          const noAi = await request(unconfigured.instance, id, `/me/jobs/${jobId}/tailor`, {
+            method: "POST",
+          });
+
+          expect(noAi.status).toBe(503);
+          expect(await noAi.json()).toEqual({ error: "AI not configured" });
+          expect(await usage(id)).toEqual([{ calls: 30 }]);
+          expect((await tailor("not-a-uuid")).status).toBe(422);
+          expect(
+            (
+              await request(app.instance, id, `/me/jobs/${jobId}/tailor`, {
+                method: "POST",
+                session: "admin",
+              })
+            ).status,
+          ).toBe(403);
+          expect(app.calls).toEqual([]);
+        });
+
+        it("answers a failed model call without writing a version", async () => {
+          const jobId = await openJob("falha");
+          const { app, id, tailor } = await tailoringApp();
+          const [before] = await usage(id);
+
+          app.tailoring.fail = true;
+
+          const tailorFailed = await tailor(jobId);
+
+          expect(tailorFailed.status).toBe(502);
+          expect(await tailorFailed.json()).toEqual({ error: "Could not tailor the résumé" });
+          expect(await usage(id)).toEqual([{ calls: before.calls + 1 }]);
+
+          app.tailoring.fail = false;
+          app.matching.fail = true;
+
+          const matchFailed = await tailor(jobId);
+
+          expect(matchFailed.status).toBe(502);
+          expect(await matchFailed.json()).toEqual({ error: "Could not tailor the résumé" });
+          expect(await usage(id)).toEqual([{ calls: before.calls + 3 }]);
+          expect(app.calls.map((modelCall) => modelCall.kind)).toEqual([
+            "tailor",
+            "tailor",
+            "match",
+          ]);
+          expect(await tailoredRows(id)).toEqual([]);
+
+          app.matching.fail = false;
+          app.matching.omit = true;
+
+          const unscored = await tailor(jobId);
+
+          expect(unscored.status).toBe(200);
+          expect((await unscored.json()).version.matchScore).toBeNull();
+        });
+
+        it("lists jobs with a tailored version present", async () => {
+          const jobId = await openJob("lista");
+          const { app, id, tailor } = await tailoringApp();
+
+          expect(await listedMatches(app.instance, id)).toEqual([["Backend", 50]]);
+          expect((await tailor(jobId)).status).toBe(200);
+
+          const queued = await db.select().from(backgroundJobs);
+
+          await app.settle();
+
+          expect(await listedMatches(app.instance, id)).toEqual([["Backend", 50]]);
+          expect(await db.select().from(backgroundJobs)).toEqual(queued);
+          expect(app.matching.batches).toEqual([["Backend"], ["Backend"]]);
+        });
+
+        it("reads and edits only the profile's own tailored versions", async () => {
+          const jobId = await openJob("leitura");
+          const { id, base, call, tailor, ready } = await tailoringApp();
+          const other = await tailoringApp("outra.pessoal@example.com", 1);
+          const { version } = await (await tailor(jobId)).json();
+          const { version: foreign } = await (await other.tailor(jobId)).json();
+
+          const edit = (versionId: string, body: { content: object }) =>
+            call(`/me/resumes/${versionId}`, { method: "PATCH", json: body });
+
+          for (const missing of [foreign.id, base.id, crypto.randomUUID()]) {
+            const read = await call(`/me/resumes/${missing}`);
+
+            expect(read.status).toBe(404);
+            expect(await read.json()).toEqual({ error: "Résumé version not found" });
+            expect((await edit(missing, { content: base.content })).status).toBe(404);
+            expect((await ready(missing)).status).toBe(404);
+          }
+
+          for (const path of ["/me/resumes/not-a-uuid", "/me/resumes/not-a-uuid/ready"]) {
+            expect(
+              (await call(path, { method: path.endsWith("ready") ? "POST" : "GET" })).status,
+            ).toBe(422);
+          }
+
+          const invalid = await edit(version.id, {
+            content: { ...version.content, headline: { text: "x".repeat(2_001) } },
+          });
+
+          expect(invalid.status).toBe(422);
+          expect(await invalid.json()).toEqual({ error: "Invalid résumé content" });
+
+          const malformed = await edit(version.id, { content: { headline: 1 } });
+
+          expect(malformed.status).toBe(422);
+          expect(await malformed.json()).toEqual({ error: "Invalid résumé content" });
+
+          const duplicated = await edit(version.id, {
+            content: { ...version.content, summary: { ...version.content.headline } },
+          });
+
+          expect(duplicated.status).toBe(422);
+          expect(await duplicated.json()).toEqual({ error: "Duplicate node ids" });
+          expect(await tailoredRows(id)).toEqual([
+            expect.objectContaining({ content: version.content }),
+          ]);
+          expect((await call("/me/resumes", { session: "admin" })).status).toBe(403);
+          expect(await (await other.call("/me/resumes")).json()).toEqual([foreign]);
+
+          await db.delete(resumes).where(and(eq(resumes.profileId, id), eq(resumes.kind, "base")));
+
+          expect(await (await call(`/me/resumes/${version.id}`)).json()).toEqual({
+            version,
+            diff: [],
+          });
+
+          const edited = await edit(version.id, { content: version.content });
+
+          expect(edited.status).toBe(200);
+          expect((await edited.json()).diff).toEqual([]);
+
+          const tailorWithoutBase = await tailor(jobId);
+
+          expect(tailorWithoutBase.status).toBe(409);
+        });
+
+        it("answers 500 when saving an edited version fails", async () => {
+          const jobId = await openJob("quebra");
+          const { id, tailor } = await tailoringApp();
+          const { version } = await (await tailor(jobId)).json();
+
+          const failing = createApp(
+            webOrigin,
+            {
+              ...repos,
+              resumeVersions: {
+                ...repos.resumeVersions,
+                update: () => Promise.reject(new Error("db down")),
+              },
+            },
+            appOptions,
+          );
+
+          const crashed = await request(failing, id, `/me/resumes/${version.id}`, {
+            method: "PATCH",
+            json: { content: version.content },
+          });
+
+          expect(crashed.status).toBe(500);
+          expect(await tailoredRows(id)).toEqual([
+            expect.objectContaining({ content: version.content }),
+          ]);
+        });
       });
 
       it("exports the person's data", async () => {

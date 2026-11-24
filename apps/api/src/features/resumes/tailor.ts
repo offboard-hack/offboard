@@ -10,6 +10,7 @@ export type NodeDiff = { nodeId: string; kind: TextNode["kind"]; before: string;
 
 const resumeLimit = 60_000;
 const descriptionLimit = 6_000;
+const headingLimit = 300;
 
 const tailorSchema = z.object({
   rewrites: z.array(z.object({ nodeId: z.string(), text: z.string() })),
@@ -64,8 +65,8 @@ function serializeResume(content: ResumeContent) {
 function serializeJob(job: TailorJob) {
   const json = JSON.stringify(
     {
-      title: job.title,
-      company: job.company,
+      title: clipText(job.title, headingLimit),
+      company: clipText(job.company, headingLimit),
       description: clipText(job.description, descriptionLimit),
     },
     null,
@@ -75,7 +76,7 @@ function serializeJob(job: TailorJob) {
   return escapeTags(json);
 }
 
-const digitRuns = (text: string | null) => text?.match(/\d+/g) ?? [];
+const digitRuns = (text: string | null) => text?.match(/\p{Nd}+/gu) ?? [];
 
 function baseDigits(content: ResumeContent) {
   const texts = [
@@ -193,13 +194,13 @@ export function diffContents(base: ResumeContent, tailored: ResumeContent) {
   return textNodes(tailored).flatMap((node) => {
     const previous = before.get(node.id);
 
-    return previous === undefined || previous === node.text
+    return previous === node.text
       ? []
       : [
           {
             nodeId: node.id,
             kind: node.kind,
-            before: previous,
+            before: previous ?? "",
             after: node.text,
           } satisfies NodeDiff,
         ];

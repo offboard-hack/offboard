@@ -92,6 +92,9 @@ export function createVersionsRepository(db: Database) {
         id: jobs.id,
         title: jobs.title,
         company: jobs.company,
+        workModel: jobs.workModel,
+        city: jobs.city,
+        state: jobs.state,
         description: jobs.description,
       })
       .from(jobs)
@@ -108,6 +111,10 @@ export function createVersionsRepository(db: Database) {
     now: Date,
   ) {
     return db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${profileId} || ':' || ${jobId}, 0))`,
+      );
+
       const existing = await lock(tx, profileId, eq(resumes.jobId, jobId));
 
       if (existing && (await used(tx, profileId, existing.id))) return "used" as const;
@@ -166,15 +173,14 @@ export function createVersionsRepository(db: Database) {
 
   async function markReady(profileId: string, id: string, now: Date) {
     return db.transaction(async (tx) => {
-      const marked = await tx
+      await tx
         .update(resumes)
         .set({ status: "ready", updatedAt: now })
-        .where(and(eq(resumes.id, id), tailoredOf(profileId)))
-        .returning({ id: resumes.id });
+        .where(and(eq(resumes.id, id), tailoredOf(profileId), eq(resumes.status, "draft")));
 
-      if (marked.length === 0) return "not_found" as const;
+      const row = await find(tx, profileId, id);
 
-      return toVersion(await find(tx, profileId, id));
+      return row ? toVersion(row) : ("not_found" as const);
     });
   }
 

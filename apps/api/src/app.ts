@@ -18,7 +18,7 @@ import { companySponsors } from "./shared/entitlement.js";
 import { welcomeEmail, type WelcomeMessage } from "./features/talent/welcome.js";
 import { resumesRoutes } from "./features/resumes/routes.js";
 import { scoreResume } from "./features/resumes/score.js";
-import { scoreMatches } from "./features/matches/score.js";
+import { scoreMatches, type MatchJob } from "./features/matches/score.js";
 import { searchTerms, toTsQuery } from "./features/matches/terms.js";
 import { backgroundRoutes } from "./features/background/routes.js";
 import { drain, type JobHandler } from "./features/background/drain.js";
@@ -26,6 +26,7 @@ import { accountRoutes } from "./features/account/routes.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
+import type { ResumeContent } from "@offboard/db/schema";
 import { portalAccess } from "./shared/access.js";
 import type { GenerateStructured } from "./shared/ai.js";
 import { fetchPageText, type FetchPageResult } from "./shared/page-text.js";
@@ -140,6 +141,12 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     });
   }
 
+  const generate = options.generateStructured;
+
+  const fitScore = (model: GenerateStructured) => async (content: ResumeContent, job: MatchJob) =>
+    (await scoreMatches(model, content, [job])).find((result) => result.jobId === job.id)?.score ??
+    null;
+
   async function matchNewJob() {
     if (!(await companyActive())) return;
 
@@ -188,6 +195,9 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         storage: options.storage,
         suggestions: repos.resumeSuggestions,
         rescore,
+        versions: repos.resumeVersions,
+        takeLlmCall: repos.llmUsage.takeLlmCall,
+        fitScore: generate && fitScore(generate),
       }),
     )
     .use(backgroundRoutes(repos.background, handlers, options.cronSecret))

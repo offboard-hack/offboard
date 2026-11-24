@@ -8,9 +8,9 @@ import {
   resumes,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createRepositories } from "../../repositories.js";
 import type { ResumeContent } from "./content.js";
@@ -120,13 +120,16 @@ describe.skipIf(!url)("résumé versions repository", () => {
   }
 
   it("finds open jobs for tailoring", async () => {
-    const openId = await job("aberta");
+    const openId = await job("aberta", { workModel: "hybrid", city: "Campinas", state: "SP" });
     const closedId = await job("fechada", { closedAt: at("2026-11-01T00:00:00Z") });
 
     expect(await repository.jobForTailoring(openId)).toEqual({
       id: openId,
       title: "Vaga aberta",
       company: "Acme",
+      workModel: "hybrid",
+      city: "Campinas",
+      state: "SP",
       description: "Descrição aberta",
     });
     expect(await repository.jobForTailoring(closedId)).toBeUndefined();
@@ -187,6 +190,45 @@ describe.skipIf(!url)("résumé versions repository", () => {
       },
     ]);
     expect(await db.select().from(resumes)).toHaveLength(1);
+  });
+
+  it("waits for the profile and job advisory lock before saving a draft", async () => {
+    const jobId = await job("trava");
+    const holder = await db.$client.connect();
+
+    const waiting = async () => {
+      const result = await db.execute(
+        sql`select count(*)::int as waiting from pg_locks where locktype = 'advisory' and not granted`,
+      );
+
+      return z.array(z.object({ waiting: z.number() })).parse(result.rows)[0].waiting;
+    };
+
+    try {
+      await holder.query("begin");
+      await holder.query(
+        "select pg_advisory_xact_lock(hashtextextended($1::text || ':' || $2::text, 0))",
+        [profileId, jobId],
+      );
+
+      const saving = repository.saveDraft(
+        profileId,
+        jobId,
+        content("Travada"),
+        70,
+        at("2026-11-20T10:00:00Z"),
+      );
+
+      await vi.waitFor(async () => expect(await waiting()).toBe(1));
+      expect(await db.select().from(resumes)).toEqual([]);
+
+      await holder.query("commit");
+
+      expect(await saving).toMatchObject({ status: "draft", content: content("Travada") });
+    } finally {
+      await holder.query("rollback");
+      holder.release();
+    }
   });
 
   it("keeps one version per profile and job", async () => {
@@ -330,7 +372,11 @@ describe.skipIf(!url)("résumé versions repository", () => {
       id,
       status: "ready",
       application: { status: "sent" },
+      updatedAt: "2026-11-20T11:00:00.000Z",
     });
+    expect(await stored(id)).toEqual([
+      expect.objectContaining({ status: "ready", updatedAt: at("2026-11-20T11:00:00Z") }),
+    ]);
   });
 
   it("never edits a version an application is being created with", async () => {

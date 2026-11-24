@@ -162,6 +162,36 @@ describe("tailorResume", () => {
     ]);
   });
 
+  it("checks non-ASCII digit runs against the base text", async () => {
+    const { generate } = fake({
+      rewrites: [
+        { nodeId: "headline", text: "Engenheira com ٤٥ clientes" },
+        { nodeId: "summary", text: "Dez anos de backend com ٣٠٪ menos custo." },
+        { nodeId: "b2", text: "Cuidou do faturamento de ３０ clientes" },
+      ],
+    });
+
+    const withArabicDigits: ResumeContent = {
+      ...base,
+      experiences: [
+        {
+          ...base.experiences[0],
+          bullets: [{ id: "b1", text: "Atendeu ٤٥ clientes" }, base.experiences[0].bullets[1]],
+        },
+        ...base.experiences.slice(1),
+      ],
+    };
+
+    const { content } = await tailorResume(generate, withArabicDigits, job);
+
+    expect(content.headline.text).toBe("Engenheira com ٤٥ clientes");
+    expect(content.summary.text).toBe(base.summary.text);
+    expect(content.experiences[0].bullets[1]).toEqual({
+      id: "b2",
+      text: "Cuidou do faturamento",
+    });
+  });
+
   it("checks digits after clipping a rewrite to the content length", async () => {
     const { generate } = fake({
       rewrites: [
@@ -406,7 +436,8 @@ describe("tailorResume", () => {
     };
 
     await tailorResume(generate, long, {
-      ...job,
+      title: `${"t".repeat(299)}😀 resto`,
+      company: `${"c".repeat(300)} resto`,
       description: `${"d".repeat(5_999)}😀 resto`,
     });
 
@@ -416,12 +447,16 @@ describe("tailorResume", () => {
 
     expect(resumeBlock.length).toBeLessThanOrEqual(60_002);
     expect(prompt.trimEnd().endsWith("</job>")).toBe(true);
-    expect(JSON.parse(jobBlock).description).toBe("d".repeat(5_999));
+    expect(JSON.parse(jobBlock)).toEqual({
+      title: "t".repeat(299),
+      company: "c".repeat(300),
+      description: "d".repeat(5_999),
+    });
   });
 });
 
 describe("diffContents", () => {
-  it("lists only changed text nodes in document order", () => {
+  it("lists changed and added text nodes in document order", () => {
     const tailored: ResumeContent = {
       ...base,
       headline: { id: "headline", text: "Engenheira Backend" },
@@ -438,6 +473,7 @@ describe("diffContents", () => {
           bullets: [
             { id: "b2", text: "Automatizou o faturamento" },
             { id: "new", text: "Bullet sem base" },
+            { id: "blank", text: "" },
           ],
         },
       ],
@@ -462,6 +498,8 @@ describe("diffContents", () => {
         before: "Cuidou do faturamento",
         after: "Automatizou o faturamento",
       },
+      { nodeId: "new", kind: "bullet", before: "", after: "Bullet sem base" },
+      { nodeId: "blank", kind: "bullet", before: "", after: "" },
     ]);
   });
 

@@ -40,10 +40,12 @@ function contentObject<Id extends TSchema>(id: Id) {
 
 export const resumeContentBody = contentObject(t.Optional(t.String()));
 
+const resumeContent = contentObject(t.String());
+
 export const resumeResponse = t.Object({
   id: t.String(),
   kind: t.Literal("base"),
-  content: contentObject(t.String()),
+  content: resumeContent,
   score: t.Union([t.Number(), t.Null()]),
   scoredAt: nullable,
   updatedAt: t.String(),
@@ -56,4 +58,29 @@ export const suggestionResponse = t.Object({
   suggestedText: t.String(),
   rationale: t.String(),
   estimatedGain: t.Number(),
+});
+
+export const versionResponse = t.Object({
+  id: t.String(),
+  job: t.Object({ id: t.String(), title: t.String(), company: t.String() }),
+  status: t.Union([t.Literal("draft"), t.Literal("ready")]),
+  matchScore: t.Union([t.Number(), t.Null()]),
+  content: resumeContent,
+  application: t.Union([
+    t.Object({ id: t.String(), status: t.String(), appliedAt: t.String() }),
+    t.Null(),
+  ]),
+  updatedAt: t.String(),
+});
+
+export const versionDiffResponse = t.Object({
+  version: versionResponse,
+  diff: t.Array(
+    t.Object({
+      nodeId: t.String(),
+      kind: t.Union([t.Literal("headline"), t.Literal("summary"), t.Literal("bullet")]),
+      before: t.String(),
+      after: t.String(),
+    }),
+  ),
 });
