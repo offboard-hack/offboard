@@ -12,7 +12,7 @@ export type ResumeView = {
   updatedAt: string;
 };
 
-const columns = {
+export const resumeColumns = {
   id: resumes.id,
   content: resumes.content,
   score: resumes.score,
@@ -22,7 +22,7 @@ const columns = {
   ),
 };
 
-function toView(row: {
+export function toResumeView(row: {
   id: string;
   content: ResumeContent;
   score: number | null;
@@ -39,15 +39,15 @@ function toView(row: {
   } satisfies ResumeView;
 }
 
-function base(profileId: string) {
+export function baseOf(profileId: string) {
   return and(eq(resumes.profileId, profileId), eq(resumes.kind, "base"));
 }
 
 export function createResumesRepository(db: Database) {
   async function getBase(profileId: string) {
-    const [row] = await db.select(columns).from(resumes).where(base(profileId));
+    const [row] = await db.select(resumeColumns).from(resumes).where(baseOf(profileId));
 
-    return row && toView(row);
+    return row && toResumeView(row);
   }
 
   async function replaceBase(profileId: string, content: ResumeContent, sourceFileKey: string) {
@@ -55,7 +55,7 @@ export function createResumesRepository(db: Database) {
       const [previous] = await tx
         .select({ sourceFileKey: resumes.sourceFileKey })
         .from(resumes)
-        .where(base(profileId))
+        .where(baseOf(profileId))
         .for("update");
 
       const now = new Date();
@@ -75,9 +75,9 @@ export function createResumesRepository(db: Database) {
           targetWhere: sql`${resumes.kind} = 'base'`,
           set: { content, sourceFileKey, score: null, scoredAt: null, updatedAt: now },
         })
-        .returning(columns);
+        .returning(resumeColumns);
 
-      return { resume: toView(row), previousFileKey: previous?.sourceFileKey ?? null };
+      return { resume: toResumeView(row), previousFileKey: previous?.sourceFileKey ?? null };
     });
   }
 
@@ -85,13 +85,26 @@ export function createResumesRepository(db: Database) {
     const [row] = await db
       .update(resumes)
       .set({ content, score: null, scoredAt: null, updatedAt: new Date() })
-      .where(base(profileId))
-      .returning(columns);
+      .where(baseOf(profileId))
+      .returning(resumeColumns);
 
-    return row && toView(row);
+    return row && toResumeView(row);
   }
 
-  return { getBase, replaceBase, updateBaseContent };
+  async function forScoring(resumeId: string) {
+    const [row] = await db
+      .select({
+        profileId: resumes.profileId,
+        content: resumes.content,
+        updatedAt: resumeColumns.updatedAt,
+      })
+      .from(resumes)
+      .where(eq(resumes.id, resumeId));
+
+    return row;
+  }
+
+  return { getBase, replaceBase, updateBaseContent, forScoring };
 }
 
 export type ResumesRepository = ReturnType<typeof createResumesRepository>;

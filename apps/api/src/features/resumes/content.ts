@@ -5,13 +5,21 @@ export type { ResumeContent };
 
 const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
-const storable = () =>
-  z
-    .string()
-    .overwrite((value) => value.replaceAll("\u0000", "").replace(loneSurrogate, "\uFFFD"))
+const textLimit = 2_000;
+
+const sanitize = (value: string) => value.replaceAll("\u0000", "").replace(loneSurrogate, "\uFFFD");
+
+const storable = () => z.string().overwrite(sanitize).trim();
+
+const text = storable().max(textLimit);
+
+export const storableText = (value: string) =>
+  sanitize(value)
+    .trim()
+    .slice(0, textLimit)
+    .replace(/[\uD800-\uDBFF]$/, "")
     .trim();
 
-const text = storable().max(2_000);
 const nodeId = storable().min(1).max(64);
 
 function contentSchema<Id extends z.ZodType<string | undefined>>(id: Id) {

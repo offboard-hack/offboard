@@ -10,6 +10,8 @@ import { createTalentRepository } from "./features/talent/repository.js";
 import { createJobsRepository } from "./features/jobs/repository.js";
 import { createApplicationsRepository } from "./features/applications/repository.js";
 import { createResumesRepository } from "./features/resumes/repository.js";
+import { createSuggestionsRepository } from "./features/resumes/suggestions.js";
+import { createUsageRepository } from "./features/resumes/usage.js";
 import { createAccountRepository } from "./features/account/repository.js";
 import { createBackgroundRepository } from "./features/background/repository.js";
 
@@ -26,6 +28,8 @@ export function createRepositories(db: Database) {
     jobs: createJobsRepository(db),
     applications: createApplicationsRepository(db),
     resumes: createResumesRepository(db),
+    resumeSuggestions: createSuggestionsRepository(db),
+    llmUsage: createUsageRepository(db),
     account: createAccountRepository(db),
     background: createBackgroundRepository(db),
   };

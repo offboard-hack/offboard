@@ -138,4 +138,20 @@ describe.skipIf(!url)("resumes repository", () => {
     expect(other.previousFileKey).toBeNull();
     expect(await repository.getBase(profileId)).toMatchObject({ content: content("Minha") });
   });
+
+  it("reads a résumé for scoring with its full update time", async () => {
+    const { resume } = await repository.replaceBase(profileId, content("A"), "resumes/a.pdf");
+
+    await db
+      .update(resumes)
+      .set({ updatedAt: new Date("2026-11-24T12:00:00.987Z") })
+      .where(eq(resumes.id, resume.id));
+
+    expect(await repository.forScoring(resume.id)).toEqual({
+      profileId,
+      content: content("A"),
+      updatedAt: new Date("2026-11-24T12:00:00.987Z"),
+    });
+    expect(await repository.forScoring(crypto.randomUUID())).toBeUndefined();
+  });
 });
