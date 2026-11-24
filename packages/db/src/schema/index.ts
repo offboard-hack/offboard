@@ -111,6 +111,40 @@ export const talentProfiles = pgTable(
   ],
 );
 
+export const jobOriginEnum = pgEnum("job_origin", ["external", "hr", "recruiter"]);
+
+export const jobWorkModelEnum = pgEnum("job_work_model", ["remote", "hybrid", "onsite"]);
+
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    origin: jobOriginEnum("origin").notNull(),
+    source: varchar("source", { length: 50 }).notNull(),
+    sourceKey: varchar("source_key", { length: 2048 }).notNull(),
+    title: varchar("title", { length: 255 }).notNull(),
+    company: varchar("company", { length: 255 }).notNull(),
+    workModel: jobWorkModelEnum("work_model"),
+    city: varchar("city", { length: 255 }),
+    state: varchar("state", { length: 2 }),
+    salaryMinCents: integer("salary_min_cents"),
+    salaryMaxCents: integer("salary_max_cents"),
+    url: text("url").notNull(),
+    description: text("description").notNull().default(""),
+    postedAt: timestamp("posted_at"),
+    closedAt: timestamp("closed_at"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("jobs_source_key_idx").on(table.source, table.sourceKey),
+    check(
+      "jobs_salary_range",
+      sql`${table.salaryMinCents} is null or ${table.salaryMaxCents} is null or ${table.salaryMinCents} <= ${table.salaryMaxCents}`,
+    ),
+  ],
+);
+
 export const offboardingCasesRelations = relations(offboardingCases, ({ many, one }) => ({
   tasks: many(tasks),
   equipment: many(equipment),

@@ -4,6 +4,7 @@ import { seedPlans, seedSubscription } from "./billing.fixture.ts";
 import { seedEquipment } from "./equipment.fixture.ts";
 import type { Database } from "./client.ts";
 import { seedExitSurveys } from "./exit-survey.fixture.ts";
+import { seedJobs, type SeedJob } from "./job.fixture.ts";
 import { seedIntegrations } from "./integration.fixture.ts";
 import { baseSeedCases, seedCases } from "./offboarding.fixture.ts";
 import {
@@ -12,6 +13,7 @@ import {
   exitSurveys,
   integrations,
   invoices,
+  jobs,
   offboardingCases,
   plans,
   subscriptions,
@@ -24,18 +26,26 @@ import { seedTalentProfiles, type SeedTalentProfile } from "./talent-profile.fix
 import { baseSeedTeamMembers, seedTeamMembers } from "./team-member.fixture.ts";
 
 const noTalentProfiles: SeedTalentProfile[] = [];
+const noJobs: SeedJob[] = [];
 
 export const testSeedFixtures = {
   cases: baseSeedCases,
   members: baseSeedTeamMembers,
   talentProfiles: noTalentProfiles,
+  jobs: noJobs,
 };
 
 export async function seedDatabase(
   db: Database,
-  fixtures = { cases: seedCases, members: seedTeamMembers, talentProfiles: seedTalentProfiles },
+  fixtures = {
+    cases: seedCases,
+    members: seedTeamMembers,
+    talentProfiles: seedTalentProfiles,
+    jobs: seedJobs,
+  },
 ) {
   await db.transaction(async (tx) => {
+    await tx.delete(jobs);
     await tx.delete(actionConfigs);
     await tx.delete(invoices);
     await tx.delete(subscriptions);
@@ -124,6 +134,10 @@ export async function seedDatabase(
         .slice(0, 10);
 
       await tx.insert(talentProfiles).values({ caseId, sponsoredUntil, ...profile });
+    }
+
+    if (fixtures.jobs.length > 0) {
+      await tx.insert(jobs).values(fixtures.jobs);
     }
 
     if (seedIntegrations.length > 0) {

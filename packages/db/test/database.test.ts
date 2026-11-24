@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import { createClient, createRequestScopedClient } from "../src/client.ts";
 import { eq } from "drizzle-orm";
 import { seedTalentProfiles } from "../src/talent-profile.fixture.ts";
-import { authSession, offboardingCases, talentProfiles, tasks } from "../src/schema/index.ts";
+import { seedJobs } from "../src/job.fixture.ts";
+import { authSession, jobs, offboardingCases, talentProfiles, tasks } from "../src/schema/index.ts";
 import { seedCases, seedDatabase } from "../src/seed-database.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -102,6 +103,43 @@ it.skipIf(!url)(
     }
   },
 );
+
+it.skipIf(!url)("stores jobs with a unique source key and a valid salary range", async () => {
+  const db = createClient(url ?? "");
+
+  try {
+    await migrate(db, { migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)) });
+    await seedDatabase(db);
+
+    const rows = await db.select().from(jobs);
+    expect(rows).toHaveLength(seedJobs.length);
+
+    const [job] = rows;
+
+    const base = {
+      origin: job.origin,
+      title: job.title,
+      company: job.company,
+      url: job.url,
+    };
+
+    await expect(
+      db.insert(jobs).values({ ...base, source: job.source, sourceKey: job.sourceKey }),
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
+
+    await expect(
+      db.insert(jobs).values({
+        ...base,
+        source: "seed",
+        sourceKey: "invalid-range",
+        salaryMinCents: 200,
+        salaryMaxCents: 100,
+      }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+  } finally {
+    await db.$client.end();
+  }
+});
 
 describe("createClient", () => {
   it("strips sslmode and disables certificate verification for cloud hosts", async () => {
