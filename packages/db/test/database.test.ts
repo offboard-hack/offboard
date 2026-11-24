@@ -13,6 +13,7 @@ import {
   authSession,
   backgroundJobs,
   interviews,
+  jobMatches,
   jobs,
   llmUsage,
   offboardingCases,
@@ -366,6 +367,83 @@ it.skipIf(!url)("stores jobs, suggestions and usage", async () => {
 
     await db.delete(talentProfiles).where(eq(talentProfiles.id, base.profileId));
     expect(await db.select().from(llmUsage)).toHaveLength(0);
+  } finally {
+    await db.$client.end();
+  }
+});
+
+it.skipIf(!url)("stores one match per profile and job", async () => {
+  const db = createClient(url ?? "");
+
+  try {
+    await migrate(db, {
+      migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
+    });
+    await seedDatabase(db);
+
+    const [base] = await db.select().from(resumes);
+
+    const seeded = await db
+      .select({ score: jobMatches.score, reasons: jobMatches.reasons, title: jobs.title })
+      .from(jobMatches)
+      .innerJoin(jobs, eq(jobs.id, jobMatches.jobId))
+      .orderBy(sql`${jobMatches.score} desc`);
+
+    expect(seeded.map((item) => item.score)).toEqual([94, 89, 86, 85]);
+    expect(seeded.map((item) => item.title)).toEqual(seedJobs.map((item) => item.title));
+    expect(seeded.every((item) => item.reasons.length === 2)).toBe(true);
+
+    const matches = await db.select().from(jobMatches);
+    expect(matches).toHaveLength(4);
+    expect(matches.every((item) => item.profileId === base.profileId)).toBe(true);
+    expect(
+      matches.every((item) => item.resumeUpdatedAt.getTime() === base.updatedAt?.getTime()),
+    ).toBe(true);
+
+    const [first] = matches;
+    await expect(db.insert(jobMatches).values({ ...first, score: 50 })).rejects.toMatchObject({
+      cause: { code: "23505" },
+    });
+
+    const [spare] = await db
+      .insert(jobs)
+      .values({
+        origin: "external",
+        source: "test",
+        sourceKey: "spare",
+        title: "Vaga",
+        company: "Empresa",
+        url: "https://example.com/spare",
+      })
+      .returning({ id: jobs.id });
+
+    const row = { profileId: base.profileId, jobId: spare.id, resumeUpdatedAt: new Date() };
+    await expect(
+      db.insert(jobMatches).values({ ...row, score: 101, computedAt: new Date() }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+    await expect(
+      db.insert(jobMatches).values({ ...row, score: -1, computedAt: new Date() }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+    await db.insert(jobMatches).values({ ...row, score: 0, computedAt: new Date() });
+    const [stored] = await db.select().from(jobMatches).where(eq(jobMatches.jobId, spare.id));
+    expect(stored.reasons).toEqual([]);
+
+    await db.delete(jobs).where(eq(jobs.id, spare.id));
+    expect(await db.select().from(jobMatches)).toHaveLength(4);
+
+    await db.delete(applications);
+    await db.delete(jobs).where(eq(jobs.id, first.jobId));
+    expect(await db.select().from(jobMatches)).toHaveLength(3);
+
+    await db.delete(talentProfiles).where(eq(talentProfiles.id, base.profileId));
+    expect(await db.select().from(jobMatches)).toHaveLength(0);
+
+    const indexes = await db.execute(
+      sql`select indexdef from pg_indexes where indexname = 'jobs_search_idx'`,
+    );
+
+    expect(indexes.rows).toHaveLength(1);
+    expect(indexes.rows[0].indexdef).toContain("gin");
   } finally {
     await db.$client.end();
   }

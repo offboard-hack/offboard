@@ -12,6 +12,7 @@ import { seedPlans, seedSubscription } from "./billing.fixture.ts";
 import { seedEquipment } from "./equipment.fixture.ts";
 import type { Database } from "./client.ts";
 import { seedExitSurveys } from "./exit-survey.fixture.ts";
+import { seedJobMatches, type SeedJobMatch } from "./job-match.fixture.ts";
 import { seedJobs, type SeedJob } from "./job.fixture.ts";
 import { seedIntegrations } from "./integration.fixture.ts";
 import { baseSeedCases, seedCases } from "./offboarding.fixture.ts";
@@ -25,6 +26,7 @@ import {
   integrations,
   interviews,
   invoices,
+  jobMatches,
   jobs,
   offboardingCases,
   plans,
@@ -45,6 +47,7 @@ const noJobs: SeedJob[] = [];
 const noApplications: SeedApplication[] = [];
 const noInterviews: SeedInterview[] = [];
 const noResumes: SeedResume[] = [];
+const noJobMatches: SeedJobMatch[] = [];
 
 export const testSeedFixtures = {
   cases: baseSeedCases,
@@ -54,6 +57,7 @@ export const testSeedFixtures = {
   applications: noApplications,
   interviews: noInterviews,
   resumes: noResumes,
+  jobMatches: noJobMatches,
 };
 
 export async function seedDatabase(
@@ -66,10 +70,12 @@ export async function seedDatabase(
     applications: seedApplications,
     interviews: seedInterviews,
     resumes: seedResumes,
+    jobMatches: seedJobMatches,
   },
 ) {
   await db.transaction(async (tx) => {
     await tx.delete(backgroundJobs);
+    await tx.delete(jobMatches);
     await tx.delete(resumes);
     await tx.delete(interviews);
     await tx.delete(applicationEvents);
@@ -154,6 +160,8 @@ export async function seedDatabase(
     }
 
     let seededProfileId: string | undefined;
+    const profileIds = new Map<string, string>();
+    const resumeVersions = new Map<string, Date>();
 
     for (const { caseName, sponsoredForDays, ...profile } of fixtures.talentProfiles) {
       const caseId = caseIds.get(caseName);
@@ -170,6 +178,7 @@ export async function seedDatabase(
         .returning({ id: talentProfiles.id });
 
       seededProfileId ??= inserted.id;
+      profileIds.set(caseName, inserted.id);
 
       for (const resume of fixtures.resumes.filter((item) => item.caseName === caseName)) {
         const scoredAt = new Date(Date.now() - resume.scoredDaysAgo * 86_400_000);
@@ -182,8 +191,11 @@ export async function seedDatabase(
             content: resume.content,
             score: resume.score,
             scoredAt,
+            updatedAt: scoredAt,
           })
           .returning({ id: resumes.id });
+
+        resumeVersions.set(caseName, scoredAt);
 
         const nodes = [
           resume.content.headline,
@@ -215,6 +227,24 @@ export async function seedDatabase(
       fixtures.jobs.length > 0
         ? await tx.insert(jobs).values(fixtures.jobs).returning({ id: jobs.id })
         : [];
+
+    for (const match of fixtures.jobMatches) {
+      const profileId = profileIds.get(match.caseName);
+      const resumeUpdatedAt = resumeVersions.get(match.caseName);
+
+      if (!profileId || !resumeUpdatedAt) {
+        throw new Error(`Seed job match needs a profile and résumé for ${match.caseName}`);
+      }
+
+      await tx.insert(jobMatches).values({
+        profileId,
+        jobId: insertedJobs[match.jobIndex].id,
+        score: match.score,
+        reasons: match.reasons,
+        resumeUpdatedAt,
+        computedAt: resumeUpdatedAt,
+      });
+    }
 
     const applicationIds: string[] = [];
 

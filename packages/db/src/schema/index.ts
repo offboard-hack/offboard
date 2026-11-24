@@ -171,6 +171,10 @@ export const jobs = pgTable(
       "jobs_salary_range",
       sql`${table.salaryMinCents} is null or ${table.salaryMaxCents} is null or ${table.salaryMinCents} <= ${table.salaryMaxCents}`,
     ),
+    index("jobs_search_idx").using(
+      "gin",
+      sql`to_tsvector('portuguese', ${table.title} || ' ' || ${table.description})`,
+    ),
   ],
 );
 
@@ -548,4 +552,25 @@ export const llmUsage = pgTable(
     calls: integer("calls").notNull().default(0),
   },
   (table) => [primaryKey({ columns: [table.profileId, table.day] })],
+);
+
+export const jobMatches = pgTable(
+  "job_matches",
+  {
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    score: integer("score").notNull(),
+    reasons: jsonb("reasons").$type<string[]>().notNull().default([]),
+    resumeUpdatedAt: timestamp("resume_updated_at").notNull(),
+    computedAt: timestamp("computed_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.profileId, table.jobId] }),
+    index("job_matches_job_idx").on(table.jobId),
+    check("job_matches_score_range", sql`${table.score} between 0 and 100`),
+  ],
 );
