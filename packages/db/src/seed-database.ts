@@ -38,7 +38,12 @@ import {
   tasks,
   teamMembers,
 } from "./schema/index.ts";
-import { seedResumes, type SeedResume } from "./resume.fixture.ts";
+import {
+  seedResumes,
+  seedTailoredResumes,
+  type SeedResume,
+  type SeedTailoredResume,
+} from "./resume.fixture.ts";
 import { seedTalentProfiles, type SeedTalentProfile } from "./talent-profile.fixture.ts";
 import { baseSeedTeamMembers, seedTeamMembers } from "./team-member.fixture.ts";
 
@@ -47,6 +52,7 @@ const noJobs: SeedJob[] = [];
 const noApplications: SeedApplication[] = [];
 const noInterviews: SeedInterview[] = [];
 const noResumes: SeedResume[] = [];
+const noTailoredResumes: SeedTailoredResume[] = [];
 const noJobMatches: SeedJobMatch[] = [];
 
 export const testSeedFixtures = {
@@ -57,6 +63,7 @@ export const testSeedFixtures = {
   applications: noApplications,
   interviews: noInterviews,
   resumes: noResumes,
+  tailoredResumes: noTailoredResumes,
   jobMatches: noJobMatches,
 };
 
@@ -70,6 +77,7 @@ export async function seedDatabase(
     applications: seedApplications,
     interviews: seedInterviews,
     resumes: seedResumes,
+    tailoredResumes: seedTailoredResumes,
     jobMatches: seedJobMatches,
   },
 ) {
@@ -246,6 +254,32 @@ export async function seedDatabase(
       });
     }
 
+    const tailoredResumeIds = new Map<number, string>();
+
+    for (const tailored of fixtures.tailoredResumes) {
+      const profileId = profileIds.get(tailored.caseName);
+      const scoredAt = resumeVersions.get(tailored.caseName);
+
+      if (!profileId || !scoredAt) {
+        throw new Error(`Seed tailored résumé needs a profile and résumé for ${tailored.caseName}`);
+      }
+
+      const [insertedTailored] = await tx
+        .insert(resumes)
+        .values({
+          profileId,
+          kind: "tailored",
+          status: tailored.status,
+          jobId: insertedJobs[tailored.jobIndex].id,
+          content: tailored.content,
+          matchScore: tailored.matchScore,
+          updatedAt: scoredAt,
+        })
+        .returning({ id: resumes.id });
+
+      tailoredResumeIds.set(tailored.jobIndex, insertedTailored.id);
+    }
+
     const applicationIds: string[] = [];
 
     for (const item of fixtures.applications) {
@@ -262,6 +296,7 @@ export async function seedDatabase(
         .values({
           profileId: seededProfileId,
           jobId: insertedJobs[item.jobIndex].id,
+          resumeId: item.usesTailoredResume ? tailoredResumeIds.get(item.jobIndex) : null,
           status: item.status,
           furthestStage: item.status,
           appliedAt,

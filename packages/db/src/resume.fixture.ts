@@ -119,3 +119,100 @@ export const seedResumes: SeedResume[] = [
     },
   },
 ];
+
+export type SeedTailoredResume = {
+  caseName: string;
+  jobIndex: number;
+  status: "ready" | "draft";
+  matchScore: number;
+  content: ResumeContent;
+};
+
+type Tailoring = {
+  headline: string;
+  summary: string;
+  bullets: Record<string, string>;
+  dropBullets: string[];
+  experienceOrder: string[];
+  skillOrder: string[];
+};
+
+const marinaBase = seedResumes[0].content;
+
+const tailor = (base: ResumeContent, tailoring: Tailoring) => ({
+  ...base,
+  headline: { ...base.headline, text: tailoring.headline },
+  summary: { ...base.summary, text: tailoring.summary },
+  experiences: tailoring.experienceOrder.flatMap((id) =>
+    base.experiences
+      .filter((experience) => experience.id === id)
+      .map((experience) => ({
+        ...experience,
+        bullets: experience.bullets
+          .filter((bullet) => !tailoring.dropBullets.includes(bullet.id))
+          .map((bullet) => ({ ...bullet, text: tailoring.bullets[bullet.id] ?? bullet.text })),
+      })),
+  ),
+  skills: tailoring.skillOrder.flatMap((id) => base.skills.filter((skill) => skill.id === id)),
+});
+
+export const seedTailoredResumes: SeedTailoredResume[] = [
+  {
+    caseName: "Marina Lopes",
+    jobIndex: 0,
+    status: "ready",
+    matchScore: 92,
+    content: tailor(marinaBase, {
+      headline: "Analista de Marketing Pleno em Mídia Paga e CRM",
+      summary:
+        "Analista de marketing com 6 anos de experiência em mídia paga, CRM e conteúdo, com foco em campanhas orientadas por dados e crescimento mensurável.",
+      bullets: {
+        "5b1f0a10-0000-4000-8000-000000000011":
+          "Liderou campanhas de mídia paga com investimento mensal de R$ 250 mil e reduziu o custo de aquisição em 28%.",
+        "5b1f0a10-0000-4000-8000-000000000012":
+          "Estruturou a régua de e-mail marketing e elevou a taxa de abertura de 18% para 31%.",
+        "5b1f0a10-0000-4000-8000-000000000022":
+          "Montou relatórios mensais de desempenho das campanhas para a diretoria, apoiando decisões de investimento.",
+      },
+      dropBullets: ["5b1f0a10-0000-4000-8000-000000000013"],
+      experienceOrder: [
+        "5b1f0a10-0000-4000-8000-000000000010",
+        "5b1f0a10-0000-4000-8000-000000000020",
+      ],
+      skillOrder: [
+        "5b1f0a10-0000-4000-8000-000000000040",
+        "5b1f0a10-0000-4000-8000-000000000044",
+        "5b1f0a10-0000-4000-8000-000000000041",
+        "5b1f0a10-0000-4000-8000-000000000043",
+        "5b1f0a10-0000-4000-8000-000000000042",
+      ],
+    }),
+  },
+  {
+    caseName: "Marina Lopes",
+    jobIndex: 3,
+    status: "draft",
+    matchScore: 85,
+    content: tailor(marinaBase, {
+      headline: "Analista de Marketing com foco em Conteúdo e Produto",
+      summary:
+        "Analista de marketing com 6 anos de experiência em conteúdo, CRM e mídia paga, acostumada a transformar dados de campanhas em decisões.",
+      bullets: {
+        "5b1f0a10-0000-4000-8000-000000000021":
+          "Planejou o calendário editorial e dobrou o tráfego orgânico do blog em 18 meses.",
+        "5b1f0a10-0000-4000-8000-000000000013":
+          "Coordenou um time de 3 pessoas e a agência de conteúdo parceira em entregas de campanha.",
+      },
+      dropBullets: ["5b1f0a10-0000-4000-8000-000000000012"],
+      experienceOrder: [
+        "5b1f0a10-0000-4000-8000-000000000020",
+        "5b1f0a10-0000-4000-8000-000000000010",
+      ],
+      skillOrder: [
+        "5b1f0a10-0000-4000-8000-000000000042",
+        "5b1f0a10-0000-4000-8000-000000000040",
+        "5b1f0a10-0000-4000-8000-000000000043",
+      ],
+    }),
+  },
+];

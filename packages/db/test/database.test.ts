@@ -235,7 +235,7 @@ it.skipIf(!url)("stores one base résumé per profile", async () => {
     });
     await seedDatabase(db);
 
-    const [base] = await db.select().from(resumes);
+    const [base] = await db.select().from(resumes).where(eq(resumes.kind, "base"));
     expect(base.kind).toBe("base");
     expect(base.status).toBe("ready");
     expect(base.jobId).toBeNull();
@@ -291,6 +291,58 @@ it.skipIf(!url)("stores one base résumé per profile", async () => {
   }
 });
 
+it.skipIf(!url)("links applications to the résumé they used", async () => {
+  const db = createClient(url ?? "");
+
+  try {
+    await migrate(db, {
+      migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
+    });
+    await seedDatabase(db);
+
+    const tailored = await db.select().from(resumes).where(eq(resumes.kind, "tailored"));
+    const ready = tailored.filter((item) => item.status === "ready");
+    const drafts = tailored.filter((item) => item.status === "draft");
+    expect(tailored).toHaveLength(2);
+    expect(ready.map((item) => item.matchScore)).toEqual([92]);
+    expect(drafts.map((item) => item.matchScore)).toEqual([85]);
+
+    const used = await db
+      .select()
+      .from(applications)
+      .where(sql`${applications.resumeId} is not null`);
+
+    expect(used.map((item) => item.resumeId)).toEqual([ready[0].id]);
+    expect(used[0].jobId).toBe(ready[0].jobId);
+    expect(drafts[0].jobId).not.toBe(ready[0].jobId);
+
+    const [job] = await db
+      .insert(jobs)
+      .values({ origin: "hr", source: "m", sourceKey: "m1", title: "t", company: "t", url: "t" })
+      .returning();
+
+    const { profileId, content } = ready[0];
+
+    await expect(
+      db
+        .insert(resumes)
+        .values({ profileId, kind: "tailored", jobId: job.id, matchScore: 101, content }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+    await expect(
+      db
+        .insert(resumes)
+        .values({ profileId, kind: "tailored", jobId: job.id, matchScore: -1, content }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+
+    await db.delete(resumes).where(eq(resumes.id, ready[0].id));
+
+    const [after] = await db.select().from(applications).where(eq(applications.id, used[0].id));
+    expect(after.resumeId).toBeNull();
+  } finally {
+    await db.$client.end();
+  }
+});
+
 it.skipIf(!url)("stores jobs, suggestions and usage", async () => {
   const db = createClient(url ?? "");
 
@@ -300,7 +352,7 @@ it.skipIf(!url)("stores jobs, suggestions and usage", async () => {
     });
     await seedDatabase(db);
 
-    const [base] = await db.select().from(resumes);
+    const [base] = await db.select().from(resumes).where(eq(resumes.kind, "base"));
     const suggestions = await db.select().from(resumeSuggestions);
     expect(suggestions).toHaveLength(3);
     expect(suggestions.map((item) => item.estimatedGain).sort()).toEqual([3, 4, 4]);
@@ -381,7 +433,7 @@ it.skipIf(!url)("stores one match per profile and job", async () => {
     });
     await seedDatabase(db);
 
-    const [base] = await db.select().from(resumes);
+    const [base] = await db.select().from(resumes).where(eq(resumes.kind, "base"));
 
     const seeded = await db
       .select({ score: jobMatches.score, reasons: jobMatches.reasons, title: jobs.title })
@@ -432,6 +484,7 @@ it.skipIf(!url)("stores one match per profile and job", async () => {
     expect(await db.select().from(jobMatches)).toHaveLength(4);
 
     await db.delete(applications);
+    await db.delete(resumes).where(eq(resumes.kind, "tailored"));
     await db.delete(jobs).where(eq(jobs.id, first.jobId));
     expect(await db.select().from(jobMatches)).toHaveLength(3);
 

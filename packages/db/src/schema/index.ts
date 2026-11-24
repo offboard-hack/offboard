@@ -204,6 +204,7 @@ export const applications = pgTable(
     jobId: uuid("job_id")
       .notNull()
       .references(() => jobs.id, { onDelete: "restrict" }),
+    resumeId: uuid("resume_id").references(() => resumes.id, { onDelete: "set null" }),
     status: applicationStatusEnum("status").notNull().default("sent"),
     furthestStage: applicationStatusEnum("furthest_stage").notNull().default("sent"),
     closedReason: applicationClosedReasonEnum("closed_reason"),
@@ -215,6 +216,7 @@ export const applications = pgTable(
   (table) => [
     uniqueIndex("applications_profile_job_idx").on(table.profileId, table.jobId),
     index("applications_profile_id_idx").on(table.profileId),
+    index("applications_resume_id_idx").on(table.resumeId),
     check(
       "applications_closed_reason",
       sql`(${table.status} = 'closed') = (${table.closedReason} is not null)`,
@@ -467,6 +469,7 @@ export const resumes = pgTable(
     content: jsonb("content").$type<ResumeContent>().notNull(),
     score: integer("score"),
     scoredAt: timestamp("scored_at"),
+    matchScore: integer("match_score"),
     sourceFileKey: varchar("source_file_key", { length: 512 }),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
@@ -481,6 +484,10 @@ export const resumes = pgTable(
     check("resumes_kind_job", sql`(${table.kind} = 'base') = (${table.jobId} is null)`),
     check("resumes_base_ready", sql`${table.kind} <> 'base' or ${table.status} = 'ready'`),
     check("resumes_score_range", sql`${table.score} is null or ${table.score} between 0 and 100`),
+    check(
+      "resumes_match_score_range",
+      sql`${table.matchScore} is null or ${table.matchScore} between 0 and 100`,
+    ),
   ],
 );
 

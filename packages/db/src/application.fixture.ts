@@ -4,6 +4,7 @@ export type SeedApplication = {
   jobIndex: number;
   status: SeedApplicationStatus;
   appliedDaysAgo: number;
+  usesTailoredResume?: boolean;
 };
 
 export type SeedInterview = {
@@ -21,7 +22,7 @@ export const applicationStages: SeedApplicationStatus[] = [
 ];
 
 export const seedApplications: SeedApplication[] = [
-  { jobIndex: 0, status: "interview", appliedDaysAgo: 1 },
+  { jobIndex: 0, status: "interview", appliedDaysAgo: 1, usesTailoredResume: true },
   { jobIndex: 1, status: "interview", appliedDaysAgo: 6 },
   { jobIndex: 2, status: "sent", appliedDaysAgo: 5 },
   { jobIndex: 3, status: "in_review", appliedDaysAgo: 9 },
