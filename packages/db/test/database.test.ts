@@ -316,7 +316,14 @@ it.skipIf(!url)("stores jobs, suggestions and usage", async () => {
     for (const item of suggestions) {
       expect(item.resumeId).toBe(base.id);
       expect(item.originalText).toBe(nodes.find((node) => node.id === item.targetNodeId)?.text);
+      expect(item.updatedAt).toEqual(item.createdAt);
+
+      for (const figure of item.suggestedText.match(/\d+/g) ?? []) {
+        expect(item.originalText).toContain(figure);
+      }
     }
+
+    expect(new Set(suggestions.map((item) => item.createdAt?.getTime())).size).toBe(3);
 
     const runAfter = new Date();
     await db.insert(backgroundJobs).values({ kind: "score", subject: "a", runAfter });

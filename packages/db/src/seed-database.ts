@@ -172,6 +172,8 @@ export async function seedDatabase(
       seededProfileId ??= inserted.id;
 
       for (const resume of fixtures.resumes.filter((item) => item.caseName === caseName)) {
+        const scoredAt = new Date(Date.now() - resume.scoredDaysAgo * 86_400_000);
+
         const [insertedResume] = await tx
           .insert(resumes)
           .values({
@@ -179,9 +181,9 @@ export async function seedDatabase(
             kind: "base",
             content: resume.content,
             score: resume.score,
-            scoredAt: new Date(Date.now() - resume.scoredDaysAgo * 86_400_000),
+            scoredAt,
           })
-          .returning({ id: resumes.id, content: resumes.content });
+          .returning({ id: resumes.id });
 
         const nodes = [
           resume.content.headline,
@@ -189,17 +191,21 @@ export async function seedDatabase(
           ...resume.content.experiences.flatMap((experience) => experience.bullets),
         ];
 
-        for (const suggestion of resume.suggestions) {
+        for (const [index, suggestion] of resume.suggestions.entries()) {
           const originalText = nodes.find((node) => node.id === suggestion.targetNodeId)?.text;
 
           if (originalText === undefined) {
             throw new Error(`Seed suggestion targets unknown node ${suggestion.targetNodeId}`);
           }
 
+          const createdAt = new Date(scoredAt.getTime() + index * 1_000);
+
           await tx.insert(resumeSuggestions).values({
             resumeId: insertedResume.id,
             originalText,
             ...suggestion,
+            createdAt,
+            updatedAt: createdAt,
           });
         }
       }

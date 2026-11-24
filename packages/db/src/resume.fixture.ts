@@ -22,23 +22,25 @@ export const seedResumes: SeedResume[] = [
       {
         targetNodeId: "5b1f0a10-0000-4000-8000-000000000011",
         suggestedText:
-          "Liderou campanhas de mídia paga com investimento mensal de R$ 250 mil, reduzindo o custo de aquisição em 28% e vendendo todo o estoque do lançamento do segundo semestre.",
-        rationale: "Diga quanto vendeu o lançamento: o número de vendas dá escala ao resultado.",
+          "Liderou campanhas de mídia paga com investimento mensal de R$ 250 mil, reduzindo o custo de aquisição em 28% e gerando [valor] em vendas.",
+        rationale:
+          "Diga quanto as campanhas venderam: troque o trecho entre colchetes pelo valor real, que dá escala ao resultado.",
         estimatedGain: 4,
       },
       {
         targetNodeId: "5b1f0a10-0000-4000-8000-000000000022",
         suggestedText:
-          "Entregou relatórios mensais de desempenho de campanhas à diretoria, apoiando a decisão de realocar 20% do orçamento para os canais mais rentáveis.",
+          "Montou relatórios mensais de desempenho de campanhas para a diretoria, que embasaram [decisão tomada a partir dos relatórios].",
         rationale:
-          "Troque 'responsável por campanhas' pelo resultado: mostre a decisão que o relatório influenciou.",
+          "Mostre o resultado do relatório: troque o trecho entre colchetes pela decisão que ele influenciou.",
         estimatedGain: 4,
       },
       {
         targetNodeId: "5b1f0a10-0000-4000-8000-000000000002",
         suggestedText:
-          "Analista de marketing com 6 anos de experiência em mídia paga, CRM e conteúdo, com domínio de Google Analytics 4 e SQL, focada em crescimento mensurável e campanhas orientadas por dados.",
-        rationale: "Inclua Google Analytics 4 e SQL: são palavras-chave comuns nas vagas da área.",
+          "Analista de marketing com 6 anos de experiência em mídia paga, CRM, SEO e conteúdo, usando HubSpot, focada em crescimento mensurável e campanhas orientadas por dados.",
+        rationale:
+          "Traga para o resumo as competências que você já lista, como SEO e HubSpot: são palavras-chave comuns nas vagas da área.",
         estimatedGain: 3,
       },
     ],
