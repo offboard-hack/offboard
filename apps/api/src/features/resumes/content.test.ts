@@ -37,6 +37,7 @@ describe("resume content", () => {
   it("keeps the schema and the stored column type equal", () => {
     expectTypeOf<z.infer<typeof resumeContentSchema>>().toEqualTypeOf<StoredResumeContent>();
     expectTypeOf<ResumeContent>().toEqualTypeOf<StoredResumeContent>();
+    expectTypeOf(withNodeIds).returns.toEqualTypeOf<StoredResumeContent | "duplicate_ids">();
   });
 
   it("assigns and validates node ids", () => {
@@ -128,5 +129,27 @@ describe("resume content", () => {
   it("accepts input without ids", () => {
     expect(resumeContentInputSchema.parse(input)).toEqual(input);
     expect(resumeContentSchema.safeParse(input).success).toBe(false);
+  });
+
+  it("removes characters the database cannot store", () => {
+    const parsed = resumeContentInputSchema.parse({
+      ...input,
+      headline: { id: "a\u0000b", text: "a\u0000b" },
+      summary: { text: "\ud800x" },
+      skills: [{ name: "x\udc00" }, { name: "😀 ok" }],
+      contact: { ...input.contact, links: ["\u0000\u0000 https://ana.dev"] },
+    });
+
+    expect(parsed.headline).toEqual({ id: "ab", text: "ab" });
+    expect(parsed.summary.text).toBe("\uFFFDx");
+    expect(parsed.skills).toEqual([{ name: "x\uFFFD" }, { name: "😀 ok" }]);
+    expect(parsed.contact.links).toEqual(["https://ana.dev"]);
+    const content = withNodeIds(parsed);
+
+    if (content === "duplicate_ids") throw new Error("expected content");
+
+    expect(
+      resumeContentSchema.safeParse({ ...content, headline: { id: "\u0000", text: "" } }).success,
+    ).toBe(false);
   });
 });

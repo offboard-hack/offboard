@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { zipSync } from "fflate";
 import { z } from "zod";
 import type { GenerateStructured } from "../../shared/ai.js";
 import type { ResumeContentInput } from "./content.js";
+import { readResumeFile } from "./document.js";
 import { extractResume } from "./extract.js";
 
 type Draft = ResumeContentInput & { isResume: boolean };
@@ -184,6 +186,30 @@ describe("extractResume", () => {
     );
 
     expect(content).toMatchObject({ summary: { text: "y".repeat(1_999) } });
+  });
+
+  it("stores clean text when the document carries a NUL", async () => {
+    const xml =
+      "<w:document><w:body><w:p><w:r><w:t>Ana\u0000 Souza</w:t></w:r></w:p></w:body></w:document>";
+
+    const file = readResumeFile(zipSync({ "word/document.xml": new TextEncoder().encode(xml) }));
+
+    if (file === "unsupported" || file === "too_large") throw new Error("expected a docx");
+
+    expect(file).toMatchObject({ kind: "docx", text: "Ana\u0000 Souza" });
+
+    const echo: GenerateStructured = async (request) => {
+      const prompt = request.prompt;
+
+      const text = prompt.slice(
+        prompt.indexOf("<document>\n") + 11,
+        prompt.lastIndexOf("\n</document>"),
+      );
+
+      return request.schema.parse({ ...draft, headline: { text } });
+    };
+
+    expect(await extractResume(echo, file)).toMatchObject({ headline: { text: "Ana Souza" } });
   });
 
   it("fails when the id generator repeats itself", async () => {

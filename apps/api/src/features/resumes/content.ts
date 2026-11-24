@@ -3,8 +3,16 @@ import { z } from "zod";
 
 export type { ResumeContent };
 
-const text = z.string().trim().max(2_000);
-const nodeId = z.string().trim().min(1).max(64);
+const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+const storable = () =>
+  z
+    .string()
+    .overwrite((value) => value.replaceAll("\u0000", "").replace(loneSurrogate, "\uFFFD"))
+    .trim();
+
+const text = storable().max(2_000);
+const nodeId = storable().min(1).max(64);
 
 function contentSchema<Id extends z.ZodType<string | undefined>>(id: Id) {
   return z.object({
@@ -64,7 +72,7 @@ export function withNodeIds(
     return { ...item, id };
   };
 
-  const content = {
+  const content: ResumeContent = {
     headline: node(input.headline),
     summary: node(input.summary),
     experiences: input.experiences.map((experience) => ({
@@ -75,7 +83,7 @@ export function withNodeIds(
     skills: input.skills.map(node),
     languages: input.languages.map(node),
     contact: input.contact,
-  } satisfies ResumeContent;
+  };
 
   return new Set(ids).size === ids.length ? content : ("duplicate_ids" as const);
 }

@@ -7,12 +7,13 @@ export type ResumeFile =
 const documentEntry = "word/document.xml";
 const xmlLimit = 2_000_000;
 const sliceSize = 4_096;
+const entryLimit = 1_000;
 
 const pdfSignature = [0x25, 0x50, 0x44, 0x46, 0x2d];
 const zipSignature = [0x50, 0x4b, 0x03, 0x04];
 
 const markup =
-  /<\/w:p>|<w:p(?:\s[^<>]*)?\/>|<w:tab\/>|<w:br(?:\s[^<>]*)?\/>|<w:t(?:\s[^<>]*)?>([^<]*)<\/w:t>/g;
+  /<\/w:p>|<w:p(?:\s[^<>]*)?\/>|<w:tab\s*\/>|<w:(?:br|cr)(?:\s[^<>]*)?\/>|<w:t(?:\s[^<>]*)?>([^<]*)<\/w:t>/g;
 
 const entity = /&(amp|lt|gt|quot|apos|#\d{1,7}|#x[\da-fA-F]{1,6});/g;
 
@@ -26,6 +27,7 @@ const namedEntities = new Map([
 
 type Inflation = {
   status: "missing" | "reading" | "done" | "too_large" | "invalid";
+  entries: number;
   size: number;
   xml: string;
 };
@@ -55,17 +57,23 @@ function documentText(xml: string) {
   return Array.from(xml.matchAll(markup), ([token, content]) => {
     if (content !== undefined) return decodeEntities(content);
 
-    return token === "<w:tab/>" ? "\t" : "\n";
+    return token.startsWith("<w:tab") ? "\t" : "\n";
   })
     .join("")
     .trim();
 }
 
 function inflateDocument(data: Uint8Array) {
-  const inflation: Inflation = { status: "missing", size: 0, xml: "" };
+  const inflation: Inflation = { status: "missing", entries: 0, size: 0, xml: "" };
   const decoder = new TextDecoder();
 
   const unzip = new Unzip((file) => {
+    inflation.entries += 1;
+
+    if (inflation.entries > entryLimit && inflation.status === "missing") {
+      inflation.status = "invalid";
+    }
+
     if (file.name !== documentEntry || inflation.status !== "missing") return;
 
     inflation.status = "reading";

@@ -51,6 +51,17 @@ function streamedDocx(xml: string) {
   return concat(parts);
 }
 
+function emptyEntries(count: number) {
+  const result = new Uint8Array(count * 31);
+
+  for (let index = 0; index < count; index++) {
+    result.set([0x50, 0x4b, 0x03, 0x04, 20], index * 31);
+    result.set([1, 0, 0, 0, 0x61], index * 31 + 26);
+  }
+
+  return result;
+}
+
 function replaceBytes(data: Uint8Array, from: string, to: string) {
   const search = encoder.encode(from);
   const replacement = encoder.encode(to);
@@ -135,6 +146,27 @@ describe("readResumeFile", () => {
     );
 
     expect(readResumeFile(duplicated)).toMatchObject({ kind: "docx", text: "Primeiro" });
+  });
+
+  it("maps tabs and line breaks with optional spaces", () => {
+    const xml = body(
+      "<w:p><w:r><w:t>a</w:t><w:tab /><w:t>b</w:t><w:cr/><w:t>c</w:t><w:cr /><w:t>d</w:t><w:br /><w:t>e</w:t></w:r></w:p>",
+    );
+
+    expect(readResumeFile(docx(xml))).toMatchObject({ text: "a\tb\nc\nd\ne" });
+  });
+
+  it("rejects archives with too many entries", () => {
+    const started = performance.now();
+
+    expect(readResumeFile(emptyEntries(160_000))).toBe("unsupported");
+    expect(readResumeFile(concat([emptyEntries(160_000), docx(sample)]))).toBe("unsupported");
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(readResumeFile(concat([emptyEntries(999), docx(sample)]))).toMatchObject({
+      kind: "docx",
+      text: sampleText,
+    });
+    expect(readResumeFile(concat([emptyEntries(1_000), docx(sample)]))).toBe("unsupported");
   });
 
   it("caps docx expansion", () => {
