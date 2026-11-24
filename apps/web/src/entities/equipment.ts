@@ -21,3 +21,18 @@ export const equipmentQuery = queryOptions({
   queryFn: listEquipment,
   staleTime: 30_000,
 });
+
+export const equipmentByCaseQuery = (caseId: string) =>
+  queryOptions({
+    queryKey: ["equipment", "by-case", caseId],
+    queryFn: async ({ signal }) => {
+      const { data, error } = await getApiClient().api.equipment["by-case"]({ caseId }).get({
+        fetch: { signal },
+      });
+
+      if (error) throw new Error("Failed to fetch case equipment");
+
+      return data;
+    },
+    staleTime: 30_000,
+  });

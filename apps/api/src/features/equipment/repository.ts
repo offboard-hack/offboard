@@ -24,6 +24,14 @@ export function createEquipmentRepository(db: Database) {
     return rows;
   }
 
+  async function getEquipmentByCase(caseId: string) {
+    return db
+      .select(columns)
+      .from(equipment)
+      .where(eq(equipment.caseId, caseId))
+      .orderBy(asc(equipment.tag));
+  }
+
   async function updateEquipmentStatus(id: string, status: EquipmentStatus) {
     const [updated] = await db
       .update(equipment)
@@ -36,6 +44,7 @@ export function createEquipmentRepository(db: Database) {
 
   return {
     listEquipment,
+    getEquipmentByCase,
     updateEquipmentStatus,
   };
 }

@@ -264,6 +264,21 @@ describe.skipIf(!url)("repositories", () => {
     });
   });
 
+  it("lists equipment for a single case", async () => {
+    const [first] = await repos.equipment.listEquipment();
+    const cases = await repos.offboardings.listOffboardings();
+    const owner = cases.find((item) => item.name === first.person);
+
+    const rows = await repos.equipment.getEquipmentByCase(owner!.id);
+
+    expect(rows.map((row) => row.id)).toContain(first.id);
+    expect(rows[0]).not.toHaveProperty("person");
+
+    expect(
+      await repos.equipment.getEquipmentByCase("00000000-0000-4000-8000-000000000001"),
+    ).toEqual([]);
+  });
+
   it("updates equipment status and returns null for unknown ids", async () => {
     const [first] = await repos.equipment.listEquipment();
 

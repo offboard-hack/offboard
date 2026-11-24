@@ -496,6 +496,20 @@ describe.skipIf(!url)("api", () => {
     });
   });
 
+  it("lists equipment by case", async () => {
+    const [first] = await (await call("/equipment")).json();
+    const cases = await (await call("/offboardings")).json();
+    const owner = cases.find((item: { name: string }) => item.name === first.person);
+    const res = await call(`/equipment/by-case/${owner.id}`);
+    const list = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(list.map((row: { id: string }) => row.id)).toContain(first.id);
+    expect(list[0]).not.toHaveProperty("person");
+    expect(await (await call(`/equipment/by-case/${missingCaseId}`)).json()).toEqual([]);
+    expect((await call("/equipment/by-case/not-a-uuid")).status).toBe(422);
+  });
+
   it("updates an equipment status", async () => {
     const [{ person: _person, ...first }] = await (await call("/equipment")).json();
     const res = await call(`/equipment/${first.id}`, "PUT", { status: "received" });

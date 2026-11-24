@@ -471,7 +471,7 @@ export function CasePage({
               </div>
             </CardContent>
           </Card>
-          {assets && assets.length > 0 && (
+          {assets && (
             <Card size="sm">
               <CardContent className="grid gap-3">
                 <h2 className="border-b pb-2 text-sm font-semibold">
@@ -482,6 +482,9 @@ export function CasePage({
                   />
                   Bens vinculados
                 </h2>
+                {assets.length === 0 && (
+                  <p className="text-sm text-muted-foreground">Nenhum bem vinculado a este caso</p>
+                )}
                 <ul className="grid gap-2">
                   {assets.map((asset) => (
                     <li key={asset.tag} className="flex items-center justify-between gap-2 text-sm">

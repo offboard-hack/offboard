@@ -30,6 +30,11 @@ export function equipmentRoutes(repos: EquipmentRepository, access: PortalAccess
       permit: ["read", "Offboarding"],
       response: t.Array(equipmentListRow),
     })
+    .get("/equipment/by-case/:caseId", ({ params }) => repos.getEquipmentByCase(params.caseId), {
+      permit: ["read", "Offboarding"],
+      params: t.Object({ caseId: t.String({ format: "uuid" }) }),
+      response: t.Array(equipmentRow),
+    })
     .put(
       "/equipment/:id",
       async ({ params, body, status }) => {

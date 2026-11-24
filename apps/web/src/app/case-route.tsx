@@ -2,6 +2,11 @@ import { createPortalAbility } from "@offboard/access";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, notFound } from "@tanstack/react-router";
 import {
+  equipmentByCaseQuery,
+  type EquipmentRow,
+  type EquipmentStatus,
+} from "@/entities/equipment";
+import {
   cycleTaskStatus,
   offboardingQuery,
   offboardingsQuery,
@@ -33,6 +38,7 @@ export function Case() {
   const queryClient = useQueryClient();
   const detailQuery = offboardingQuery(caseId, queryClient);
   const { data: detail } = useSuspenseQuery(detailQuery);
+  const { data: equipment } = useSuspenseQuery(equipmentByCaseQuery(caseId));
 
   async function updateCachedCase(update: (item: OffboardingCase) => OffboardingCase) {
     await queryClient.cancelQueries({ queryKey: offboardingsQuery.queryKey });
@@ -88,7 +94,7 @@ export function Case() {
 
   if (!detail) throw notFound();
 
-  const offboardingCase = enrichCase(detail);
+  const offboardingCase = enrichCase(detail, equipment);
 
   return (
     <CasePage
@@ -138,15 +144,25 @@ export function Case() {
   );
 }
 
-const demoAssets: PersonAsset[] = [
-  { item: "Notebook Dell Latitude 5440", tag: "AUR-0412", status: "scheduled" },
-  { item: "Monitor Dell 27″", tag: "AUR-3104", status: "withPerson" },
-  { item: "Celular Galaxy A55", tag: "AUR-2210", status: "received" },
-];
+const assetStatus: Record<EquipmentStatus, PersonAsset["status"]> = {
+  with_person: "withPerson",
+  scheduled: "scheduled",
+  transit: "transit",
+  received: "received",
+  inventory: "received",
+  failed: "failed",
+};
 
-function enrichCase(offboardingCase: OffboardingCase) {
+function enrichCase(
+  offboardingCase: OffboardingCase,
+  equipment: Pick<EquipmentRow, "item" | "tag" | "status">[],
+) {
   return {
     ...offboardingCase,
-    assets: offboardingCase.assets ?? demoAssets,
+    assets: equipment.map(({ item, tag, status }) => ({
+      item,
+      tag,
+      status: assetStatus[status],
+    })),
   };
 }
