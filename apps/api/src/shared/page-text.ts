@@ -72,14 +72,28 @@ const readCapped = async (body: ReadableStream<Uint8Array>) => {
   return parts.join("");
 };
 
+const discard = async (response: Response) => {
+  await response.body?.cancel().catch(() => undefined);
+};
+
 const readPage = async (url: URL, response: Response) => {
-  if (!response.ok) return "unreachable" satisfies FetchPageResult;
+  if (!response.ok) {
+    await discard(response);
+
+    return "unreachable" satisfies FetchPageResult;
+  }
 
   const mediaType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
 
-  if (mediaType !== "text/html") return "not_html" satisfies FetchPageResult;
+  if (mediaType !== "text/html") {
+    await discard(response);
+
+    return "not_html" satisfies FetchPageResult;
+  }
 
   if (Number(response.headers.get("content-length")) > maxBytes) {
+    await discard(response);
+
     return "too_large" satisfies FetchPageResult;
   }
 
@@ -113,6 +127,8 @@ export const fetchPageText = async (url: URL, fetchImpl: typeof fetch = fetch) =
       const response = await fetchImpl(current, { redirect: "manual", signal });
 
       if (response.status < 300 || response.status >= 400) return await readPage(current, response);
+
+      await discard(response);
 
       const next = nextLocation(response, current);
 

@@ -1,5 +1,6 @@
+import { APICallError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createGenerateStructured, gatewayModel } from "./ai.ts";
 
@@ -30,10 +31,53 @@ describe("createGenerateStructured", () => {
     expect(model.doGenerateCalls).toHaveLength(1);
     const [call] = model.doGenerateCalls;
     expect(call?.providerOptions?.gateway?.zeroDataRetention).toBe(true);
+    expect(call?.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(call?.abortSignal?.aborted).toBe(false);
     expect(call?.prompt).toEqual([
       { role: "system", content: "s" },
       { role: "user", content: [{ type: "text", text: "p" }] },
     ]);
+  });
+
+  it("bounds the call to 60 seconds", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+
+    await createGenerateStructured(jsonModel('{"title":"x"}'))({
+      schema: z.object({ title: z.string() }),
+      system: "s",
+      prompt: "p",
+    });
+
+    expect(timeout).toHaveBeenCalledWith(60_000);
+
+    timeout.mockRestore();
+  });
+
+  it("retries a failed call once", async () => {
+    let attempts = 0;
+
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => {
+        attempts += 1;
+
+        throw new APICallError({
+          message: "overloaded",
+          url: "https://gateway.test",
+          requestBodyValues: {},
+          statusCode: 529,
+          isRetryable: true,
+        });
+      },
+    });
+
+    await expect(
+      createGenerateStructured(model)({
+        schema: z.object({ title: z.string() }),
+        system: "s",
+        prompt: "p",
+      }),
+    ).rejects.toThrow("overloaded");
+    expect(attempts).toBe(2);
   });
 
   it("rejects output that does not match the schema", async () => {

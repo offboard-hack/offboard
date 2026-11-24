@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fetchPageText, parsePublicUrl } from "./page-text.ts";
 
 const recordingFetch = (...responses: Response[]) => {
@@ -23,6 +23,23 @@ const html = (body: BodyInit | null, headers: Record<string, string> = {}) =>
 const redirect = (location: string) => new Response(null, { status: 302, headers: { location } });
 
 const start = new URL("https://jobs.example.com/a");
+
+const trackedBody = (failCancel = false) => {
+  const state = { cancelled: false };
+
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("<p>unread</p>"));
+    },
+    cancel() {
+      state.cancelled = true;
+
+      if (failCancel) throw new Error("cancel failed");
+    },
+  });
+
+  return { body, state };
+};
 
 describe("parsePublicUrl", () => {
   it("accepts a public https url", () => {
@@ -269,5 +286,62 @@ describe("fetchPageText", () => {
     const result = await fetchPageText(start, fetchImpl);
 
     expect(result).toEqual({ url: start, text: "a".repeat(30_000) });
+  });
+
+  it("shares one 10 second signal across every hop", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+
+    const { calls, fetchImpl } = recordingFetch(
+      redirect("https://jobs.example.com/b"),
+      html("<p>ok</p>"),
+    );
+
+    await fetchPageText(start, fetchImpl);
+
+    expect(timeout).toHaveBeenCalledTimes(1);
+    expect(timeout).toHaveBeenCalledWith(10_000);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.init?.signal).toBe(timeout.mock.results[0]?.value);
+    expect(calls[1]?.init?.signal).toBe(calls[0]?.init?.signal);
+
+    timeout.mockRestore();
+  });
+
+  it("cancels the bodies it does not read", async () => {
+    const redirectBody = trackedBody();
+    const errorBody = trackedBody();
+    const pdfBody = trackedBody();
+    const largeBody = trackedBody();
+
+    const { fetchImpl } = recordingFetch(
+      new Response(redirectBody.body, { status: 302, headers: { location: "/b" } }),
+      new Response(errorBody.body, { status: 503, headers: { "content-type": "text/html" } }),
+      new Response(pdfBody.body, { headers: { "content-type": "application/pdf" } }),
+      html(largeBody.body, { "content-length": "3000000" }),
+    );
+
+    expect(await fetchPageText(start, fetchImpl)).toBe("unreachable");
+    expect(await fetchPageText(start, fetchImpl)).toBe("not_html");
+    expect(await fetchPageText(start, fetchImpl)).toBe("too_large");
+    expect(redirectBody.state.cancelled).toBe(true);
+    expect(errorBody.state.cancelled).toBe(true);
+    expect(pdfBody.state.cancelled).toBe(true);
+    expect(largeBody.state.cancelled).toBe(true);
+  });
+
+  it("keeps going when cancelling an unread body fails", async () => {
+    const redirectBody = trackedBody(true);
+
+    const { calls, fetchImpl } = recordingFetch(
+      new Response(redirectBody.body, { status: 302, headers: { location: "/b" } }),
+      html("<p>ok</p>"),
+    );
+
+    expect(await fetchPageText(start, fetchImpl)).toEqual({
+      url: new URL("https://jobs.example.com/b"),
+      text: "ok",
+    });
+    expect(redirectBody.state.cancelled).toBe(true);
+    expect(calls).toHaveLength(2);
   });
 });

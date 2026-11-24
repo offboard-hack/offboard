@@ -15,6 +15,8 @@ export const createGenerateStructured = (model: LanguageModel) => {
       prompt,
       output: Output.object({ schema }),
       providerOptions: { gateway: { zeroDataRetention: true } },
+      abortSignal: AbortSignal.timeout(60_000),
+      maxRetries: 1,
     });
 
     return output;
