@@ -105,7 +105,16 @@ export function createResumesRepository(db: Database) {
     return row;
   }
 
-  return { getBase, replaceBase, updateBaseContent, forScoring };
+  async function contentOf(profileId: string, id: string) {
+    const [row] = await db
+      .select({ content: resumes.content })
+      .from(resumes)
+      .where(and(eq(resumes.id, id), eq(resumes.profileId, profileId)));
+
+    return row?.content;
+  }
+
+  return { getBase, replaceBase, updateBaseContent, forScoring, contentOf };
 }
 
 export type ResumesRepository = ReturnType<typeof createResumesRepository>;

@@ -22,6 +22,7 @@ const runtimeConfig = z.object({
   ABACATEPAY_API_KEY: z.string().min(1).optional(),
   ABACATEPAY_WEBHOOK_SECRET: z.string().min(1).optional(),
   AI_GATEWAY_API_KEY: z.string().min(1).optional(),
+  PUBLIC_PAGE_ORIGIN: z.string().min(1).optional(),
 });
 
 export type WorkerBindings = Partial<z.input<typeof runtimeConfig>> & {
@@ -75,6 +76,7 @@ export function createWorkerApi(
     abacatepayWebhookSecret: config.data.ABACATEPAY_WEBHOOK_SECRET,
     generateStructured: aiKey ? createGenerateStructured(gatewayModel(aiKey)) : undefined,
     storage: bindings.RESUMES && r2Storage(bindings.RESUMES),
+    publicPageOrigin: config.data.PUBLIC_PAGE_ORIGIN,
     runInBackground: (task) => {
       const background = run(task).catch(() => undefined);
 

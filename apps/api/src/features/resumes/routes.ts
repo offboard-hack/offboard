@@ -4,6 +4,7 @@ import type { GenerateStructured } from "../../shared/ai.js";
 import { logFailure } from "../../shared/error-summary.js";
 import type { UsageRepository } from "../../shared/llm-usage.js";
 import type { ObjectStorage } from "../../shared/object-storage.js";
+import { pdfAttachment } from "../../shared/resume-pdf.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
 import { resumeContentInputSchema, withNodeIds, type ResumeContent } from "./content.js";
 import { readResumeFile } from "./document.js";
@@ -47,6 +48,7 @@ export function resumesRoutes(
     versions: VersionsRepository;
     takeLlmCall: UsageRepository["takeLlmCall"];
     fitScore: ((content: ResumeContent, job: TailoringJob) => Promise<number | null>) | undefined;
+    renderPdf: (name: string, content: ResumeContent) => Promise<Uint8Array>;
   },
 ) {
   async function withDiff(profileId: string, version: VersionView) {
@@ -125,6 +127,21 @@ export function resumesRoutes(
       {
         talent: "active",
         response: { 200: resumeResponse, 404: errorResponse },
+      },
+    )
+    .get(
+      "/me/resume/:id/pdf",
+      async ({ me, params, status }) => {
+        const content = await repos.contentOf(me.id, params.id);
+
+        if (!content) return status(404, { error: "Résumé not found" });
+
+        return pdfAttachment(await deps.renderPdf(me.name, content), "curriculo", "no-store");
+      },
+      {
+        talent: "active",
+        params: versionParams,
+        response: { 404: errorResponse },
       },
     )
     .patch(

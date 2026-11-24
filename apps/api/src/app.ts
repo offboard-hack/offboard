@@ -12,6 +12,8 @@ import { exitSurveysRoutes } from "./features/exit-surveys/routes.js";
 import { integrationsRoutes } from "./features/integrations/routes.js";
 import { jobsRoutes } from "./features/jobs/routes.js";
 import { offboardingsRoutes } from "./features/offboardings/routes.js";
+import { toPublicResume } from "./features/pages/public-view.js";
+import { pagesRoutes } from "./features/pages/routes.js";
 import { talentRoutes } from "./features/talent/routes.js";
 import { talentAccess } from "./shared/talent-access.js";
 import { companySponsors } from "./shared/entitlement.js";
@@ -30,6 +32,7 @@ import type { ResumeContent } from "@offboard/db/schema";
 import { portalAccess } from "./shared/access.js";
 import type { GenerateStructured } from "./shared/ai.js";
 import { fetchPageText, type FetchPageResult } from "./shared/page-text.js";
+import { renderResumePdf } from "./shared/resume-pdf.js";
 
 const matchCandidates = 30;
 const matchBatch = 10;
@@ -48,7 +51,17 @@ type AppOptions = {
   fetchPage?: (url: URL) => Promise<FetchPageResult>;
   storage?: ObjectStorage;
   runInBackground?: (task: () => Promise<void>) => void;
+  publicPageOrigin?: string;
 };
+
+function ownResumePdf(name: string, content: ResumeContent) {
+  const view = toPublicResume(name, content);
+
+  return renderResumePdf({
+    ...view,
+    contact: { ...view.contact, phone: content.contact.phone, city: content.contact.city },
+  });
+}
 
 export function createApp(webOrigin: string, repos: Repositories, options: AppOptions) {
   const access = portalAccess(options.auth, webOrigin);
@@ -62,6 +75,14 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     talent: repos.talent,
     companyActive,
   });
+
+  const pageOrigin = (options.publicPageOrigin ?? webOrigin).replace(/\/$/, "");
+
+  async function publicPageUrl(profileId: string, token: string) {
+    const slug = await repos.pages.urlFor(profileId);
+
+    return slug === null ? null : `${pageOrigin}/p/${slug}?a=${token}`;
+  }
 
   const runInBackground =
     options.runInBackground ??
@@ -186,7 +207,14 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         onShared: matchNewJob,
       }),
     )
-    .use(applicationsRoutes(repos.applications, talent))
+    .use(applicationsRoutes(repos.applications, talent, publicPageUrl))
+    .use(
+      pagesRoutes(repos.pages, talent, {
+        auth: options.auth,
+        companyActive,
+        origin: pageOrigin,
+      }),
+    )
     .use(
       resumesRoutes(repos.resumes, talent, {
         generate: options.generateStructured,
@@ -196,6 +224,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         versions: repos.resumeVersions,
         takeLlmCall: repos.llmUsage.takeLlmCall,
         fitScore: options.generateStructured && fitScore(options.generateStructured),
+        renderPdf: ownResumePdf,
       }),
     )
     .use(backgroundRoutes(repos.background, handlers, options.cronSecret))

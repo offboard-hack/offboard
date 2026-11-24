@@ -143,3 +143,13 @@ export async function renderResumePdf(resume: PdfResume) {
 
   return document.save();
 }
+
+export function pdfAttachment(bytes: Uint8Array, filename: string, cacheControl: string) {
+  return new Response(new Uint8Array(bytes), {
+    headers: {
+      "content-type": "application/pdf",
+      "content-disposition": `attachment; filename="${filename}.pdf"`,
+      "cache-control": cacheControl,
+    },
+  });
+}

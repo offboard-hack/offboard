@@ -59,6 +59,7 @@ public health endpoint at `http://127.0.0.1:3001/api/health` returns
 | `OFFBOARD_RESUMES_BUCKET`   | Build-time R2 bucket name. Binds `RESUMES` on the Worker; without it, résumé uploads return 503.                                                                                                    |
 | `ABACATEPAY_API_KEY`        | AbacatePay API key. Without it `POST /api/billing/checkout` returns 503.                                                                                                                            |
 | `ABACATEPAY_WEBHOOK_SECRET` | Secret for `POST /api/billing/webhook`, sent as `?webhookSecret=` or used to verify Standard Webhooks signatures.                                                                                   |
+| `PUBLIC_PAGE_ORIGIN`        | Optional origin for public résumé links (`<origin>/p/<slug>`). Defaults to the portal origin.                                                                                                       |
 
 ## Grant and revoke access
 

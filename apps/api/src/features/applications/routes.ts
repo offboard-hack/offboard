@@ -45,6 +45,7 @@ const interviewResponse = t.Object({
 export function applicationsRoutes(
   repos: ApplicationsRepository,
   talentAccess: TalentAccessPlugin,
+  publicPageUrl: (profileId: string, token: string) => Promise<string | null>,
 ) {
   return new Elysia()
     .use(talentAccess)
@@ -61,14 +62,22 @@ export function applicationsRoutes(
 
         if (result === "already_applied") return status(409, { error: "Already applied" });
 
-        return status(201, { applicationId: result.applicationId, jobUrl: result.jobUrl });
+        return status(201, {
+          applicationId: result.applicationId,
+          jobUrl: result.jobUrl,
+          publicPageUrl: await publicPageUrl(me.id, result.publicToken),
+        });
       },
       {
         talent: "active",
         params: t.Object({ jobId: id }),
         body: t.Object({ resumeId: id }),
         response: {
-          201: t.Object({ applicationId: t.String(), jobUrl: t.String() }),
+          201: t.Object({
+            applicationId: t.String(),
+            jobUrl: t.String(),
+            publicPageUrl: t.Union([t.String(), t.Null()]),
+          }),
           404: errorResponse,
           409: errorResponse,
           422: errorResponse,

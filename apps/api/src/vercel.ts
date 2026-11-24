@@ -61,6 +61,7 @@ function buildApp() {
     storage: process.env.RESUME_STORAGE_DIR
       ? diskStorage(process.env.RESUME_STORAGE_DIR)
       : undefined,
+    publicPageOrigin: process.env.PUBLIC_PAGE_ORIGIN,
   });
 }
 

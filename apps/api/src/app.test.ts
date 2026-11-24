@@ -15,7 +15,9 @@ import {
   jobMatches,
   jobs,
   llmUsage,
+  publicPageDailyViews,
   resumes,
+  talentProfiles,
   tasks,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
@@ -29,6 +31,7 @@ import type { GenerateStructured } from "./shared/ai.js";
 import { diskStorage } from "./shared/disk-storage.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
 import { zipSync } from "fflate";
+import { PDFArray, PDFDocument, PDFRawStream, decodePDFRawStream } from "pdf-lib";
 import type { FetchPageResult } from "./shared/page-text.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 
@@ -100,6 +103,33 @@ const appOptions = {
 
 function leakyError(prompt: string) {
   return Object.assign(new Error("gateway down"), { requestBodyValues: { prompt } });
+}
+
+async function drawnText(bytes: Uint8Array) {
+  const document = await PDFDocument.load(bytes);
+  const decoder = new TextDecoder("windows-1252");
+
+  return document
+    .getPages()
+    .flatMap((page) => {
+      const contents = page.node.Contents();
+
+      return contents instanceof PDFArray ? contents.asArray() : [];
+    })
+    .map((ref) => {
+      const stream = document.context.lookup(ref);
+
+      return stream instanceof PDFRawStream
+        ? decoder.decode(decodePDFRawStream(stream).decode())
+        : "";
+    })
+    .join("");
+}
+
+function hex(text: string) {
+  return Array.from(text, (char) =>
+    char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"),
+  ).join("");
 }
 
 const missingTaskId = "00000000-0000-4000-8000-000000000000";
@@ -830,6 +860,7 @@ describe.skipIf(!url)("api", () => {
         expect(await applied.json()).toEqual({
           applicationId: expect.any(String),
           jobUrl: "https://jobs.example.com/open",
+          publicPageUrl: null,
         });
 
         const again = await send(headers, `/me/jobs/${jobId}/apply`, "POST", body);
@@ -1102,6 +1133,435 @@ describe.skipIf(!url)("api", () => {
         await repos.billing.updateSubscription(subscription.id, { status: "canceled" });
 
         expect((await send(headers, "/me/applications")).status).toBe(402);
+      });
+
+      describe("public pages", () => {
+        const phone = "+55 11 98765-4321";
+        const city = "Campinas";
+        const contactEmail = "ana.contato@example.com";
+
+        type PagePatch = { enabled?: boolean; slug?: string; resumeId?: string | null };
+
+        async function publicProfile(email = personalEmail, caseIndex = 0) {
+          const headers = await talentProfile(email, caseIndex);
+
+          await repos.resumes.updateBaseContent(headers["x-test-talent-id"], {
+            headline: { id: "headline", text: "Engenheira" },
+            summary: { id: "summary", text: "Backend." },
+            experiences: [],
+            education: [],
+            skills: [],
+            languages: [],
+            contact: { email: contactEmail, phone, city, links: ["https://ana.dev"] },
+          });
+
+          return headers;
+        }
+
+        function pageRequest(
+          headers: Record<string, string>,
+          path: string,
+          method = "GET",
+          body?: PagePatch,
+          instance = app,
+        ) {
+          return instance.handle(
+            new Request(`http://localhost/api${path}`, {
+              method,
+              headers: {
+                "x-test-session": "talent",
+                origin: webOrigin,
+                "content-type": "application/json",
+                ...headers,
+              },
+              body: body === undefined ? undefined : JSON.stringify(body),
+            }),
+          );
+        }
+
+        function visit(path: string, session = "anonymous", extra = {}) {
+          return app.handle(
+            new Request(`http://localhost/api${path}`, {
+              headers: { "x-test-session": session, ...extra },
+            }),
+          );
+        }
+
+        async function publish(headers: Record<string, string>, slug: string) {
+          const response = await pageRequest(headers, "/me/page", "PATCH", { enabled: true, slug });
+
+          expect(response.status).toBe(200);
+        }
+
+        function counters() {
+          return db.select().from(publicPageDailyViews);
+        }
+
+        function weekOf(response: Response) {
+          return response
+            .json()
+            .then((page) =>
+              z
+                .object({ week: z.object({ visits: z.number(), recruiterVisits: z.number() }) })
+                .parse(page),
+            );
+        }
+
+        it("publishes the page and counts visits", async () => {
+          const headers = await publicProfile();
+          const profileId = headers["x-test-talent-id"];
+
+          const initial = await pageRequest(headers, "/me/page");
+
+          expect(initial.status).toBe(200);
+          expect(initial.headers.get("cache-control")).toBe("no-store");
+          expect(await initial.json()).toEqual({
+            slug: expect.any(String),
+            enabled: false,
+            resumeId: null,
+            url: expect.stringMatching(new RegExp(`^${webOrigin}/p/[a-z0-9-]+$`)),
+            week: {
+              days: expect.any(Array),
+              visits: 0,
+              recruiterVisits: 0,
+            },
+          });
+          expect(await counters()).toEqual([]);
+
+          const saved = await pageRequest(headers, "/me/page", "PATCH", {
+            enabled: true,
+            slug: "ana-dev",
+          });
+
+          expect(saved.status).toBe(200);
+          expect(await saved.json()).toMatchObject({
+            slug: "ana-dev",
+            enabled: true,
+            resumeId: null,
+            url: `${webOrigin}/p/ana-dev`,
+          });
+
+          const viewed = await visit("/public/pages/ana-dev");
+
+          expect(viewed.status).toBe(200);
+          expect(viewed.headers.get("cache-control")).toBe("private, max-age=60");
+
+          const [profile] = await db
+            .select({ name: talentProfiles.name })
+            .from(talentProfiles)
+            .where(eq(talentProfiles.id, profileId));
+
+          const body = await viewed.json();
+
+          expect(body).toEqual({
+            name: profile.name,
+            headline: "Engenheira",
+            summary: "Backend.",
+            experiences: [],
+            education: [],
+            skills: [],
+            languages: [],
+            contact: { email: contactEmail, links: ["https://ana.dev"] },
+          });
+          expect(JSON.stringify(body)).not.toContain("98765");
+          expect(JSON.stringify(body)).not.toContain(city);
+
+          expect((await visit("/public/pages/ana-dev", "admin")).status).toBe(200);
+          expect((await visit(`/public/pages/ana-dev?a=${"x".repeat(65)}`)).status).toBe(200);
+          expect(
+            (
+              await visit("/public/pages/ana-dev", "talent", {
+                "x-test-talent-id": crypto.randomUUID(),
+              })
+            ).status,
+          ).toBe(200);
+          expect(
+            (await visit("/public/pages/ana-dev", "talent", { "x-test-talent-id": profileId }))
+              .status,
+          ).toBe(200);
+
+          const settings = await pageRequest(headers, "/me/page");
+
+          expect(await weekOf(settings)).toMatchObject({ week: { visits: 4, recruiterVisits: 0 } });
+        });
+
+        it("hides unpublishable pages without counting", async () => {
+          const headers = await publicProfile();
+          const profileId = headers["x-test-talent-id"];
+
+          await publish(headers, "ana-dev");
+
+          expect((await visit("/public/pages/ana-dev/pdf")).status).toBe(200);
+          expect(await counters()).toEqual([]);
+
+          async function expectHidden(slug: string) {
+            for (const path of [`/public/pages/${slug}`, `/public/pages/${slug}/pdf`]) {
+              const hidden = await visit(path);
+
+              expect(hidden.status).toBe(404);
+              expect(hidden.headers.get("content-type")).toContain("application/json");
+              expect(hidden.headers.get("cache-control")).toBe("no-store");
+              expect(await hidden.json()).toEqual({ error: "Page not found" });
+            }
+
+            expect(await counters()).toEqual([]);
+          }
+
+          await expectHidden("nobody-here");
+          await expectHidden("Not_A-Slug!");
+
+          await pageRequest(headers, "/me/page", "PATCH", { enabled: false });
+          await expectHidden("ana-dev");
+
+          await pageRequest(headers, "/me/page", "PATCH", { enabled: true });
+          await db
+            .update(talentProfiles)
+            .set({ sponsoredUntil: "2000-01-01" })
+            .where(eq(talentProfiles.id, profileId));
+          await expectHidden("ana-dev");
+
+          await db
+            .update(talentProfiles)
+            .set({ sponsoredUntil })
+            .where(eq(talentProfiles.id, profileId));
+          expect((await visit("/public/pages/ana-dev")).status).toBe(200);
+          await db.delete(publicPageDailyViews);
+
+          const subscription = await repos.billing.getSubscription();
+
+          if (!subscription) throw new Error("missing subscription");
+
+          await repos.billing.updateSubscription(subscription.id, { status: "canceled" });
+          await expectHidden("ana-dev");
+        });
+
+        it("links applications to the page and counts recruiter visits", async () => {
+          const headers = await publicProfile();
+          const resume = await baseResume(headers);
+
+          const before = await pageRequest(
+            headers,
+            `/me/jobs/${await seedJob("before")}/apply`,
+            "POST",
+            resume,
+          );
+
+          expect(before.status).toBe(201);
+          expect(await before.json()).toMatchObject({ publicPageUrl: null });
+
+          await publish(headers, "ana-dev");
+
+          const after = await pageRequest(
+            headers,
+            `/me/jobs/${await seedJob("after")}/apply`,
+            "POST",
+            resume,
+          );
+
+          const { publicPageUrl } = z
+            .object({ publicPageUrl: z.string() })
+            .parse(await after.json());
+
+          const link = new URL(publicPageUrl);
+
+          expect(`${link.origin}${link.pathname}`).toBe(`${webOrigin}/p/ana-dev`);
+
+          const [application] = await db
+            .select({ token: applications.publicToken })
+            .from(applications)
+            .innerJoin(jobs, eq(jobs.id, applications.jobId))
+            .where(eq(jobs.sourceKey, "after"));
+
+          expect(link.searchParams.get("a")).toBe(application.token);
+
+          expect(
+            (
+              await visit(`/public/pages/ana-dev?a=${application.token}`, "talent", {
+                "x-test-talent-id": headers["x-test-talent-id"],
+              })
+            ).status,
+          ).toBe(200);
+          expect(await counters()).toEqual([]);
+
+          expect((await visit(`/public/pages/ana-dev?a=${application.token}`)).status).toBe(200);
+
+          expect(await weekOf(await pageRequest(headers, "/me/page"))).toMatchObject({
+            week: { visits: 1, recruiterVisits: 1 },
+          });
+
+          await pageRequest(headers, "/me/page", "PATCH", { enabled: false });
+
+          const disabled = await pageRequest(
+            headers,
+            `/me/jobs/${await seedJob("disabled")}/apply`,
+            "POST",
+            resume,
+          );
+
+          expect(await disabled.json()).toMatchObject({ publicPageUrl: null });
+        });
+
+        it("public PDF never contains the phone", async () => {
+          const headers = await publicProfile();
+
+          await publish(headers, "ana-dev");
+
+          const response = await visit("/public/pages/ana-dev/pdf");
+
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-type")).toBe("application/pdf");
+          expect(response.headers.get("content-disposition")).toBe(
+            'attachment; filename="ana-dev.pdf"',
+          );
+          expect(response.headers.get("cache-control")).toBe("private, max-age=300");
+
+          const text = await drawnText(new Uint8Array(await response.arrayBuffer()));
+
+          expect(text).toContain(hex(contactEmail));
+          expect(text).toContain(hex("https://ana.dev"));
+          expect(text).not.toContain(hex("98765"));
+          expect(text).not.toContain(hex(city));
+          expect(await counters()).toEqual([]);
+        });
+
+        it("downloads the person's own résumé PDF with phone and city", async () => {
+          const headers = await publicProfile();
+          const other = await publicProfile("outra@example.com", 1);
+          const { resumeId } = await baseResume(headers);
+
+          const own = await pageRequest(headers, `/me/resume/${resumeId}/pdf`);
+
+          expect(own.status).toBe(200);
+          expect(own.headers.get("content-type")).toBe("application/pdf");
+          expect(own.headers.get("content-disposition")).toBe(
+            'attachment; filename="curriculo.pdf"',
+          );
+          expect(own.headers.get("cache-control")).toBe("no-store");
+
+          const text = await drawnText(new Uint8Array(await own.arrayBuffer()));
+
+          expect(text).toContain(hex(phone));
+          expect(text).toContain(hex(city));
+          expect(text).toContain(hex(contactEmail));
+
+          const jobId = await seedJob("tailored");
+          const base = await repos.resumes.getBase(headers["x-test-talent-id"]);
+
+          if (!base) throw new Error("missing base");
+
+          const draft = await repos.resumeVersions.saveDraft(
+            headers["x-test-talent-id"],
+            jobId,
+            base.content,
+            null,
+            new Date(),
+          );
+
+          if (draft === "used") throw new Error(draft);
+
+          expect((await pageRequest(headers, `/me/resume/${draft.id}/pdf`)).status).toBe(200);
+
+          const foreign = await pageRequest(other, `/me/resume/${resumeId}/pdf`);
+
+          expect(foreign.status).toBe(404);
+          expect(await foreign.json()).toEqual({ error: "Résumé not found" });
+          expect((await pageRequest(headers, `/me/resume/${crypto.randomUUID()}/pdf`)).status).toBe(
+            404,
+          );
+          expect((await pageRequest(headers, "/me/resume/not-a-uuid/pdf")).status).toBe(422);
+          expect((await visit(`/me/resume/${resumeId}/pdf`, "admin")).status).toBe(403);
+        });
+
+        it("validates page settings", async () => {
+          const headers = await publicProfile();
+          const other = await publicProfile("outra@example.com", 1);
+
+          await publish(other, "taken-slug");
+
+          const patch = (body: PagePatch) => pageRequest(headers, "/me/page", "PATCH", body);
+
+          const reserved = await patch({ slug: "admin" });
+
+          expect(reserved.status).toBe(422);
+          expect(await reserved.json()).toEqual({ error: "Invalid slug" });
+
+          const taken = await patch({ slug: "taken-slug" });
+
+          expect(taken.status).toBe(409);
+          expect(await taken.json()).toEqual({ error: "Slug taken" });
+
+          const missing = await patch({ resumeId: crypto.randomUUID() });
+
+          expect(missing.status).toBe(422);
+          expect(await missing.json()).toEqual({ error: "Résumé not ready" });
+
+          expect((await patch({})).status).toBe(422);
+          expect((await patch({ slug: "a".repeat(41) })).status).toBe(422);
+          expect((await patch({ resumeId: "not-a-uuid" })).status).toBe(422);
+
+          const { resumeId } = await baseResume(headers);
+          const chosen = await patch({ resumeId });
+
+          expect(chosen.status).toBe(200);
+          expect(await chosen.json()).toMatchObject({ resumeId, enabled: false });
+
+          const cleared = await patch({ resumeId: null });
+
+          expect(await cleared.json()).toMatchObject({ resumeId: null });
+        });
+
+        it("guards the page settings with active talent access", async () => {
+          await publicProfile();
+
+          expect((await visit("/me/page", "admin")).status).toBe(403);
+          expect((await visit("/me/page")).status).toBe(401);
+          expect(
+            (
+              await app.handle(
+                new Request("http://localhost/api/me/page", {
+                  method: "PATCH",
+                  headers: {
+                    "x-test-session": "admin",
+                    origin: webOrigin,
+                    "content-type": "application/json",
+                  },
+                  body: JSON.stringify({ enabled: true }),
+                }),
+              )
+            ).status,
+          ).toBe(403);
+        });
+
+        it("builds page URLs on the configured origin", async () => {
+          const headers = await publicProfile();
+
+          const instance = createApp(webOrigin, repos, {
+            ...appOptions,
+            publicPageOrigin: "https://cv.example.com/",
+          });
+
+          const saved = await pageRequest(
+            headers,
+            "/me/page",
+            "PATCH",
+            { enabled: true, slug: "ana-dev" },
+            instance,
+          );
+
+          expect(await saved.json()).toMatchObject({ url: "https://cv.example.com/p/ana-dev" });
+
+          const applied = await pageRequest(
+            headers,
+            `/me/jobs/${await seedJob("configured")}/apply`,
+            "POST",
+            await baseResume(headers),
+            instance,
+          );
+
+          expect(await applied.json()).toMatchObject({
+            publicPageUrl: expect.stringMatching(/^https:\/\/cv\.example\.com\/p\/ana-dev\?a=/),
+          });
+        });
       });
     });
 

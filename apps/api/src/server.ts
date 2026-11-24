@@ -45,6 +45,7 @@ createApp(origin, repos, {
     : undefined,
   fetchPage: (url) => fetchPageText(url, guardedFetch),
   storage: process.env.RESUME_STORAGE_DIR ? diskStorage(process.env.RESUME_STORAGE_DIR) : undefined,
+  publicPageOrigin: process.env.PUBLIC_PAGE_ORIGIN,
 }).listen({
   hostname: config.API_HOST,
   reusePort: false,
