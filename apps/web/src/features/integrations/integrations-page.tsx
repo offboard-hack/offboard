@@ -91,7 +91,6 @@ const catalog: Integration[] = [
     category: "accounts",
     logo: "/brands/slack.svg",
     purpose: "Bloqueia acessos e avisa as áreas responsáveis.",
-    comingSoon: true,
   },
   {
     name: "HubSpot",
@@ -105,14 +104,12 @@ const catalog: Integration[] = [
     category: "equipment",
     icon: LaptopIcon,
     purpose: "Lista os bens de cada pessoa e registra a entrada no estoque.",
-    comingSoon: true,
   },
   {
     name: "Transportadora",
     category: "equipment",
     icon: TruckIcon,
     purpose: "Agenda e rastreia a coleta de equipamentos.",
-    comingSoon: true,
     providers: [
       {
         name: "Correios",
