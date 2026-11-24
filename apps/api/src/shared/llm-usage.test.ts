@@ -1,53 +1,44 @@
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
-import { llmUsage, offboardingCases } from "@offboard/db/schema";
+import { llmUsage, talentProfiles } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { asc } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { z } from "zod";
-import { createRepositories } from "../../repositories.js";
+import { createUsageRepository } from "./llm-usage.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 
-const identified = z.object({ id: z.uuid() });
-
 describe.skipIf(!url)("llm usage", () => {
   const db = createClient(url ?? "");
-  const repos = createRepositories(db);
-  const usage = repos.llmUsage;
+  const usage = createUsageRepository(db);
   let profileId: string;
   let otherProfileId: string;
 
   beforeAll(async () => {
     await migrate(db, {
-      migrationsFolder: fileURLToPath(
-        new URL("../../../../../packages/db/drizzle", import.meta.url),
-      ),
+      migrationsFolder: fileURLToPath(new URL("../../../../packages/db/drizzle", import.meta.url)),
     });
   });
 
   beforeEach(async () => {
     await seedDatabase(db, testSeedFixtures);
 
-    const [first, second] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
-
-    profileId = await enable(first.id, "pessoa@exemplo.com");
-    otherProfileId = await enable(second.id, "outra@exemplo.com");
+    profileId = await enable("pessoa@exemplo.com");
+    otherProfileId = await enable("outra@exemplo.com");
   });
 
   afterAll(async () => {
     await db.$client.end();
   });
 
-  async function enable(caseId: string, personalEmail: string) {
-    const profile = await repos.talent.enable({
-      caseId,
-      personalEmail,
-      sponsoredUntil: "2026-12-31",
-    });
+  async function enable(personalEmail: string) {
+    const [profile] = await db
+      .insert(talentProfiles)
+      .values({ personalEmail, name: "Pessoa", sponsoredUntil: "2026-12-31" })
+      .returning({ id: talentProfiles.id });
 
-    return identified.parse(profile).id;
+    return profile.id;
   }
 
   function rows() {

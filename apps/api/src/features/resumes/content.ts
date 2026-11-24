@@ -1,24 +1,14 @@
 import type { ResumeContent } from "@offboard/db/schema";
 import { z } from "zod";
+import { sanitizeText } from "../../shared/storable-text.js";
 
 export type { ResumeContent };
 
-const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
-
 const textLimit = 2_000;
 
-const sanitize = (value: string) => value.replaceAll("\u0000", "").replace(loneSurrogate, "\uFFFD");
-
-const storable = () => z.string().overwrite(sanitize).trim();
+const storable = () => z.string().overwrite(sanitizeText).trim();
 
 const text = storable().max(textLimit);
-
-export const storableText = (value: string) =>
-  sanitize(value)
-    .trim()
-    .slice(0, textLimit)
-    .replace(/[\uD800-\uDBFF]$/, "")
-    .trim();
 
 const nodeId = storable().min(1).max(64);
 

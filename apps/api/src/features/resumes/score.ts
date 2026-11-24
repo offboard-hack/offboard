@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { GenerateStructured } from "../../shared/ai.js";
-import { storableText, type ResumeContent } from "./content.js";
+import { bounded } from "../../shared/bounded.js";
+import { clipText, storableText } from "../../shared/storable-text.js";
+import type { ResumeContent } from "./content.js";
 
 export type TextNode = { id: string; kind: "headline" | "summary" | "bullet"; text: string };
 
@@ -83,14 +85,8 @@ function serialize(content: ResumeContent) {
     2,
   );
 
-  return json
-    .replace(/<(?=\/?\s*resume\b)/gi, "\\u003c")
-    .slice(0, promptLimit)
-    .replace(/[\uD800-\uDBFF]$/, "");
+  return clipText(json.replace(/<(?=\/?\s*resume\b)/gi, "\\u003c"), promptLimit);
 }
-
-const bounded = (value: number, min: number, max: number) =>
-  Math.min(max, Math.max(min, Math.round(value) || 0));
 
 export async function scoreResume(generate: GenerateStructured, content: ResumeContent) {
   const output = await generate({

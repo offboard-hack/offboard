@@ -1,11 +1,7 @@
 import { z } from "zod";
 import type { GenerateStructured } from "../../shared/ai.js";
-import {
-  resumeContentInputSchema,
-  storableText,
-  withNodeIds,
-  type ResumeContentInput,
-} from "./content.js";
+import { storableText } from "../../shared/storable-text.js";
+import { resumeContentInputSchema, withNodeIds, type ResumeContentInput } from "./content.js";
 import type { ResumeFile } from "./document.js";
 
 const listLimit = 50;

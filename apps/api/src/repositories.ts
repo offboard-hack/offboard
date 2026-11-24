@@ -11,7 +11,7 @@ import { createJobsRepository } from "./features/jobs/repository.js";
 import { createApplicationsRepository } from "./features/applications/repository.js";
 import { createResumesRepository } from "./features/resumes/repository.js";
 import { createSuggestionsRepository } from "./features/resumes/suggestions.js";
-import { createUsageRepository } from "./features/resumes/usage.js";
+import { createUsageRepository } from "./shared/llm-usage.js";
 import { createAccountRepository } from "./features/account/repository.js";
 import { createBackgroundRepository } from "./features/background/repository.js";
 
