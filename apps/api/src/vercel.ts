@@ -5,6 +5,7 @@ import { createRepositories } from "./repositories.js";
 import { createApp } from "./app.js";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
+import type { WelcomeMessage } from "./features/talent/welcome.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 
 const db = createClient(process.env.POSTGRES_URL ?? "");
@@ -22,7 +23,7 @@ const noopAuth: PortalAuth = {
 function buildApp() {
   let auth: PortalAuth;
   let origin: string;
-  let sendEmail: (message: { to: string; subject: string; text: string }) => Promise<void>;
+  let sendEmail: (message: WelcomeMessage) => Promise<void>;
 
   try {
     const runtime = createRuntimeAuth(db, repos.talent, process.env.WEB_ORIGIN);
