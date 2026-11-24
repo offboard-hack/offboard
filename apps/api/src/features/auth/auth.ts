@@ -74,7 +74,8 @@ const sessionAudience = z.union([
     .transform(({ memberId }) => ({ audience: "member" as const, id: memberId })),
 ]);
 
-const appCallback = z.object({ callbackURL: z.string().startsWith("/app") });
+const appCallback = z.object({ callbackURL: z.string().regex(/^\/app(?:[/?]|$)/) });
+const talentSession = z.object({ talentProfileId: z.string() });
 
 type TalentDirectory = {
   findForSignIn(email: string, id?: string): Promise<{ id: string; name: string } | undefined>;
@@ -191,11 +192,15 @@ export function createAuth({
 
             if (!invitee) return false;
 
-            if (audience === "member") return { data: { memberId: invitee.id } };
+            return {
+              data:
+                audience === "member" ? { memberId: invitee.id } : { talentProfileId: invitee.id },
+            };
+          },
+          async after(session) {
+            const created = talentSession.safeParse(session);
 
-            await talent.markSignedIn(invitee.id);
-
-            return { data: { talentProfileId: invitee.id } };
+            if (created.success) await talent.markSignedIn(created.data.talentProfileId);
           },
         },
       },

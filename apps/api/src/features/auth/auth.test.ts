@@ -267,11 +267,16 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     const unknown = await requestLink(`unknown-${randomUUID()}@offboard.example`, "/app");
     const memberOnly = await requestLink(memberEmail, "/app");
     const talentOnly = await requestLink(talentEmail);
+    const outsideApp = await requestLink(talentEmail, "/apple");
 
-    expect([unknown.status, memberOnly.status, talentOnly.status]).toEqual([200, 200, 200]);
+    expect([unknown.status, memberOnly.status, talentOnly.status, outsideApp.status]).toEqual([
+      200, 200, 200, 200,
+    ]);
+
     const body = await unknown.json();
     expect(await memberOnly.json()).toEqual(body);
     expect(await talentOnly.json()).toEqual(body);
+    expect(await outsideApp.json()).toEqual(body);
 
     const unreadable = await auth.handler(
       new Request(`${origin}/api/auth/sign-in/magic-link`, {

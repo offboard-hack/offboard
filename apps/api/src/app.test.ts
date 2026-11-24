@@ -198,11 +198,13 @@ describe.skipIf(!url)("api", () => {
     const headers = { "x-test-session": session };
     const principal = await app.handle(new Request("http://localhost/api/session", { headers }));
     const cases = await app.handle(new Request("http://localhost/api/offboardings", { headers }));
+    const team = await app.handle(new Request("http://localhost/api/team", { headers }));
 
     const bundled = await app.handle(
       new Request("http://localhost/api/offboardings/with-tasks", { headers }),
     );
 
+    expect(team.status).toBe(expected);
     expect(bundled.status).toBe(expected);
     expect(bundled.headers.get("cache-control")).toBe("no-store");
     expect(principal.status).toBe(expected);
