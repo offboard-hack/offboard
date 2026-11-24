@@ -1,6 +1,8 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
   index,
   integer,
   pgTable,
@@ -8,6 +10,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import { talentProfiles } from "./index.ts";
 
 export const authUser = pgTable("auth_user", {
   id: text("id").primaryKey(),
@@ -27,14 +30,23 @@ export const authSession = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => authUser.id, { onDelete: "cascade" }),
-    memberId: uuid("member_id").notNull(),
+    memberId: uuid("member_id"),
+    talentProfileId: uuid("talent_profile_id").references(() => talentProfiles.id, {
+      onDelete: "cascade",
+    }),
     expiresAt: timestamp("expires_at").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
   },
-  (table) => [index("auth_session_user_id_idx").on(table.userId)],
+  (table) => [
+    index("auth_session_user_id_idx").on(table.userId),
+    check(
+      "auth_session_one_audience",
+      sql`num_nonnulls(${table.memberId}, ${table.talentProfileId}) = 1`,
+    ),
+  ],
 );
 
 export const authAccount = pgTable(

@@ -3,7 +3,9 @@ import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { describe, expect, it } from "vitest";
 import { createClient, createRequestScopedClient } from "../src/client.ts";
-import { offboardingCases, tasks } from "../src/schema/index.ts";
+import { eq } from "drizzle-orm";
+import { seedTalentProfiles } from "../src/talent-profile.fixture.ts";
+import { authSession, offboardingCases, talentProfiles, tasks } from "../src/schema/index.ts";
 import { seedCases, seedDatabase } from "../src/seed-database.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -46,6 +48,60 @@ it.skipIf(!url)("seeds the database with the example cases and tasks", async () 
     await db.$client.end();
   }
 });
+
+it.skipIf(!url)(
+  "detaches talent profiles from deleted cases and enforces one session audience",
+  async () => {
+    const db = createClient(url ?? "");
+
+    try {
+      await migrate(db, {
+        migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
+      });
+      await seedDatabase(db);
+
+      const profiles = await db.select().from(talentProfiles);
+      expect(profiles).toHaveLength(seedTalentProfiles.length);
+
+      const [profile] = profiles;
+      expect(profile.caseId).not.toBeNull();
+
+      const [other] = await db
+        .select()
+        .from(offboardingCases)
+        .where(sql`${offboardingCases.id} <> ${profile.caseId}`);
+
+      await expect(
+        db.insert(talentProfiles).values({
+          caseId: other.id,
+          personalEmail: profile.personalEmail.toUpperCase(),
+          name: "Duplicate",
+          sponsoredUntil: "2027-01-01",
+        }),
+      ).rejects.toMatchObject({ cause: { code: "23505" } });
+
+      await expect(
+        db.insert(authSession).values({
+          id: "session-without-audience",
+          token: "token-without-audience",
+          userId: "missing-user",
+          expiresAt: new Date(),
+        }),
+      ).rejects.toMatchObject({ cause: { code: "23514" } });
+
+      await db.delete(offboardingCases).where(eq(offboardingCases.id, profile.caseId ?? ""));
+
+      const [detached] = await db
+        .select()
+        .from(talentProfiles)
+        .where(eq(talentProfiles.id, profile.id));
+
+      expect(detached.caseId).toBeNull();
+    } finally {
+      await db.$client.end();
+    }
+  },
+);
 
 describe("createClient", () => {
   it("strips sslmode and disables certificate verification for cloud hosts", async () => {

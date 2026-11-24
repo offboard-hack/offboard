@@ -16,16 +16,24 @@ import {
   plans,
   subscriptions,
   subtasks,
+  talentProfiles,
   tasks,
   teamMembers,
 } from "./schema/index.ts";
+import { seedTalentProfiles, type SeedTalentProfile } from "./talent-profile.fixture.ts";
 import { baseSeedTeamMembers, seedTeamMembers } from "./team-member.fixture.ts";
 
-export const testSeedFixtures = { cases: baseSeedCases, members: baseSeedTeamMembers };
+const noTalentProfiles: SeedTalentProfile[] = [];
+
+export const testSeedFixtures = {
+  cases: baseSeedCases,
+  members: baseSeedTeamMembers,
+  talentProfiles: noTalentProfiles,
+};
 
 export async function seedDatabase(
   db: Database,
-  fixtures = { cases: seedCases, members: seedTeamMembers },
+  fixtures = { cases: seedCases, members: seedTeamMembers, talentProfiles: seedTalentProfiles },
 ) {
   await db.transaction(async (tx) => {
     await tx.delete(actionConfigs);
@@ -36,6 +44,7 @@ export async function seedDatabase(
     await tx.delete(exitSurveys);
     await tx.delete(subtasks);
     await tx.delete(tasks);
+    await tx.delete(talentProfiles);
     await tx.delete(offboardingCases);
     await tx.delete(integrations);
     await tx.delete(teamMembers);
@@ -103,6 +112,18 @@ export async function seedDatabase(
         .insert(exitSurveys)
         .values({ caseId, ...survey })
         .onConflictDoUpdate({ target: exitSurveys.caseId, set: survey });
+    }
+
+    for (const { caseName, sponsoredForDays, ...profile } of fixtures.talentProfiles) {
+      const caseId = caseIds.get(caseName);
+
+      if (!caseId) continue;
+
+      const sponsoredUntil = new Date(Date.now() + sponsoredForDays * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+
+      await tx.insert(talentProfiles).values({ caseId, sponsoredUntil, ...profile });
     }
 
     if (seedIntegrations.length > 0) {

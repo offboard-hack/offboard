@@ -90,10 +90,39 @@ export const exitSurveys = pgTable(
   ],
 );
 
+export const talentProfiles = pgTable(
+  "talent_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    caseId: uuid("case_id")
+      .unique()
+      .references(() => offboardingCases.id, { onDelete: "set null" }),
+    personalEmail: varchar("personal_email", { length: 255 }).notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    sponsoredUntil: date("sponsored_until").notNull(),
+    termsAcceptedAt: timestamp("terms_accepted_at"),
+    firstSignedInAt: timestamp("first_signed_in_at"),
+    shareOutcomeWithHr: boolean("share_outcome_with_hr").notNull().default(false),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("talent_profiles_email_lower_idx").on(sql`lower(${table.personalEmail})`),
+  ],
+);
+
 export const offboardingCasesRelations = relations(offboardingCases, ({ many, one }) => ({
   tasks: many(tasks),
   equipment: many(equipment),
   exitSurvey: one(exitSurveys),
+  talentProfile: one(talentProfiles),
+}));
+
+export const talentProfilesRelations = relations(talentProfiles, ({ one }) => ({
+  case: one(offboardingCases, {
+    fields: [talentProfiles.caseId],
+    references: [offboardingCases.id],
+  }),
 }));
 
 export const exitSurveysRelations = relations(exitSurveys, ({ one }) => ({
