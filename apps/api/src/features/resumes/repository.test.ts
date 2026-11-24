@@ -150,8 +150,13 @@ describe.skipIf(!url)("resumes repository", () => {
     expect(await repository.forScoring(resume.id)).toEqual({
       profileId,
       content: content("A"),
+      score: null,
       updatedAt: new Date("2026-11-24T12:00:00.987Z"),
     });
+
+    await db.update(resumes).set({ score: 64 }).where(eq(resumes.id, resume.id));
+
+    expect(await repository.forScoring(resume.id)).toMatchObject({ score: 64 });
     expect(await repository.forScoring(crypto.randomUUID())).toBeUndefined();
   });
 });

@@ -276,6 +276,39 @@ describe.skipIf(!url)("resume suggestions repository", () => {
       expect(after.suggestions.map((item) => item.id)).not.toContain(old.summary);
     });
 
+    it("does not resurface a dismissed suggestion for the same text", async () => {
+      await scoreNow(resumeId, [migration, scored("b2", "Texto antigo", "Velha 2", 1)]);
+
+      const old = await openIds(resumeId);
+
+      await markStatus(old.b1 ?? "", "dismissed");
+      await markStatus(old.b2 ?? "", "dismissed");
+      await scoreNow(resumeId, [
+        scored("b1", "Liderou a migração", "Outra versão da migração", 8),
+        scored("b2", "Cuidou do faturamento", "Faturamento mensal", 2),
+        headline,
+      ]);
+
+      expect((await snapshot(resumeId)).suggestions).toEqual([
+        expect.objectContaining({ targetNodeId: "b2", status: "dismissed" }),
+        expect.objectContaining({
+          targetNodeId: "b2",
+          suggestedText: "Faturamento mensal",
+          status: "open",
+        }),
+        expect.objectContaining({ targetNodeId: "headline", status: "open" }),
+        expect.objectContaining({ targetNodeId: "b1", status: "dismissed" }),
+      ]);
+
+      await scoreNow(resumeId, [scored("b1", "Liderou a migração", "De novo", 5)], 88);
+
+      expect((await snapshot(resumeId)).suggestions).toEqual([
+        expect.objectContaining({ targetNodeId: "b2", status: "dismissed" }),
+        expect.objectContaining({ targetNodeId: "b1", status: "dismissed" }),
+      ]);
+      expect((await snapshot(resumeId)).resume.score).toBe(88);
+    });
+
     it("clears open suggestions when the new score has none", async () => {
       await scoreNow(resumeId, [migration]);
       await scoreNow(resumeId, [], 91);
@@ -340,6 +373,33 @@ describe.skipIf(!url)("resume suggestions repository", () => {
         high,
       ]);
       expect((await repository.listOpen(profileId))[0]?.targetNodeId).toBe("headline");
+    });
+
+    it("hides suggestions whose target text no longer matches, keeping the rows", async () => {
+      await scoreNow(resumeId, [migration, headline]);
+
+      await repos.resumes.updateBaseContent(profileId, content("Editado pela pessoa"));
+
+      const ids = await openIds(resumeId);
+
+      expect((await repository.listOpen(profileId)).map((item) => item.id)).toEqual([ids.headline]);
+
+      await repos.resumes.replaceBase(
+        profileId,
+        {
+          ...content(),
+          headline: { id: "new-headline", text: "Engenheira de Software" },
+          summary: { id: "new-summary", text: "Dez anos de backend." },
+          experiences: [],
+        },
+        "resumes/c.pdf",
+      );
+
+      expect(await repository.listOpen(profileId)).toEqual([]);
+      expect((await snapshot(resumeId)).suggestions).toEqual([
+        expect.objectContaining({ targetNodeId: "headline", status: "open" }),
+        expect.objectContaining({ targetNodeId: "b1", status: "open" }),
+      ]);
     });
 
     it("is empty for a profile without a base résumé", async () => {

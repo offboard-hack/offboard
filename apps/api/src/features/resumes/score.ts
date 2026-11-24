@@ -13,6 +13,7 @@ export type ScoredSuggestion = {
 };
 
 const maxSuggestions = 5;
+const promptLimit = 60_000;
 
 const scoreSchema = z.object({
   score: z.number(),
@@ -82,7 +83,10 @@ function serialize(content: ResumeContent) {
     2,
   );
 
-  return json.replace(/<(?=\/?\s*resume\b)/gi, "\\u003c");
+  return json
+    .replace(/<(?=\/?\s*resume\b)/gi, "\\u003c")
+    .slice(0, promptLimit)
+    .replace(/[\uD800-\uDBFF]$/, "");
 }
 
 const bounded = (value: number, min: number, max: number) =>

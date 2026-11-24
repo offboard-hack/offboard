@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
-import { backgroundJobs, interviews, jobs, tasks } from "@offboard/db/schema";
+import { backgroundJobs, interviews, jobs, llmUsage, tasks } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -1666,6 +1666,11 @@ describe.skipIf(!url)("api", () => {
         });
 
         expect(edited.status).toBe(200);
+        expect(
+          (await (await request(instance, id, "/me/resume/suggestions")).json()).map(
+            (suggestion: { id: string }) => suggestion.id,
+          ),
+        ).toEqual([suggestions[1].id]);
 
         const pending = await scoreJobs();
 
@@ -1766,6 +1771,73 @@ describe.skipIf(!url)("api", () => {
         expect(await scoreJobs()).toMatchObject([
           { status: "pending", attempts: 1, lastError: "Error: AI not configured" },
         ]);
+        expect(await db.select().from(llmUsage).where(eq(llmUsage.profileId, id))).toEqual([]);
+      });
+
+      it("completes an already scored résumé without calling the model", async () => {
+        const { instance, id, created, scoring } = await scoredResume();
+        const usage = () => db.select().from(llmUsage).where(eq(llmUsage.profileId, id));
+        const before = await usage();
+
+        await repos.background.enqueue("score_resume", created.id);
+
+        const drained = await instance.handle(
+          new Request("http://localhost/api/background/drain", {
+            method: "POST",
+            headers: { authorization: `Bearer ${cronSecret}` },
+          }),
+        );
+
+        expect(await drained.json()).toEqual({ processed: 1, failed: 0 });
+        expect(scoring.calls).toBe(1);
+        expect(await usage()).toEqual(before);
+        expect(before).toMatchObject([{ calls: 1 }]);
+        expect(await scoreJobs()).toMatchObject([{ status: "done" }, { status: "done" }]);
+      });
+
+      it("drains at most one job per kick", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        await repos.background.enqueue("score_resume", crypto.randomUUID());
+        await upload(app.instance, id);
+        await app.settle();
+
+        expect((await scoreJobs()).map((job) => job.status).sort()).toEqual(["done", "pending"]);
+      });
+
+      it("keeps a saved résumé when enqueueing its score fails", async () => {
+        const instance = createApp(
+          webOrigin,
+          {
+            ...repos,
+            background: {
+              ...repos.background,
+              enqueue: () => Promise.reject(new Error("queue down")),
+            },
+          },
+          {
+            ...appOptions,
+            generateStructured: async ({ schema }) => schema.parse(draft),
+            storage: {
+              put: async () => undefined,
+              remove: async () => undefined,
+              removePrefix: async () => undefined,
+            },
+            runInBackground: () => {
+              throw new Error("should not kick a drain");
+            },
+          },
+        );
+
+        const id = await profile();
+        const uploaded = await upload(instance, id);
+
+        expect(uploaded.status).toBe(200);
+        expect(await request(instance, id, "/me/resume").then((res) => res.json())).toEqual(
+          await uploaded.json(),
+        );
+        expect(await scoreJobs()).toEqual([]);
       });
 
       it("drains due jobs from the cron route", async () => {
@@ -1836,10 +1908,23 @@ describe.skipIf(!url)("api", () => {
       });
 
       it("exports the person's data", async () => {
-        const { instance } = resumesApp();
+        const { instance, scoring, settle } = resumesApp();
         const id = await profile();
+        const created = await (await upload(instance, id)).json();
 
-        await upload(instance, id);
+        scoring.output = {
+          score: 64,
+          suggestions: [
+            {
+              targetNodeId: created.content.experiences[0].bullets[0].id,
+              suggestedText: "Fez X com impacto",
+              rationale: "Mostra o impacto",
+              estimatedGain: 5,
+            },
+          ],
+        };
+
+        await settle();
 
         const [job] = await db
           .insert(jobs)
@@ -1874,7 +1959,26 @@ describe.skipIf(!url)("api", () => {
           firstSignedInAt: null,
           createdAt: expect.any(String),
         });
-        expect(body.resumes).toHaveLength(1);
+        expect(body.resumes).toEqual([
+          {
+            kind: "base",
+            status: "ready",
+            content: expect.any(Object),
+            score: 64,
+            scoredAt: expect.any(String),
+            updatedAt: expect.any(String),
+            suggestions: [
+              {
+                originalText: "Fez X",
+                suggestedText: "Fez X com impacto",
+                rationale: "Mostra o impacto",
+                estimatedGain: 5,
+                status: "open",
+                createdAt: expect.any(String),
+              },
+            ],
+          },
+        ]);
         expect(body.applications).toHaveLength(1);
         expect(body.applications[0].job.title).toBe("Backend");
         expect((await request(instance, id, "/me/export", { session: "admin" })).status).toBe(403);

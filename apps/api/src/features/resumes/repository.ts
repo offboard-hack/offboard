@@ -96,6 +96,7 @@ export function createResumesRepository(db: Database) {
       .select({
         profileId: resumes.profileId,
         content: resumes.content,
+        score: resumes.score,
         updatedAt: resumeColumns.updatedAt,
       })
       .from(resumes)

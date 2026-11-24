@@ -21,7 +21,19 @@ const exportResponse = t.Object({
       kind: t.String(),
       status: t.String(),
       content: t.Unknown(),
+      score: t.Union([t.Number(), t.Null()]),
+      scoredAt: nullable,
       updatedAt: t.String(),
+      suggestions: t.Array(
+        t.Object({
+          originalText: t.String(),
+          suggestedText: t.String(),
+          rationale: t.String(),
+          estimatedGain: t.Number(),
+          status: t.String(),
+          createdAt: nullable,
+        }),
+      ),
     }),
   ),
   applications: t.Array(

@@ -10,6 +10,7 @@ import {
   jobs,
   offboardingCases,
   resumes,
+  resumeSuggestions,
   talentProfiles,
   teamMembers,
 } from "@offboard/db/schema";
@@ -171,7 +172,15 @@ describe.skipIf(!url)("account repository", () => {
       createdAt: expect.any(String),
     });
     expect(exported?.resumes).toEqual([
-      { kind: "base", status: "ready", content, updatedAt: expect.any(String) },
+      {
+        kind: "base",
+        status: "ready",
+        content,
+        score: null,
+        scoredAt: null,
+        updatedAt: expect.any(String),
+        suggestions: [],
+      },
     ]);
     expect(exported?.applications.map((application) => application.job.title)).toEqual([
       "Vaga newer",
@@ -207,6 +216,77 @@ describe.skipIf(!url)("account repository", () => {
     expect(serialized).not.toContain(profileId);
     expect(serialized).not.toContain(caseId);
     expect(serialized).not.toContain("token-");
+  });
+
+  it("exports each résumé's score and suggestions without ids", async () => {
+    const { resume } = await repos.resumes.replaceBase(profileId, content, "resumes/mine.pdf");
+    const other = await repos.resumes.replaceBase(otherProfileId, content, "resumes/other.pdf");
+
+    await db
+      .update(resumes)
+      .set({ score: 77, scoredAt: new Date("2026-11-20T10:00:00Z") })
+      .where(eq(resumes.id, resume.id));
+
+    const suggestion = {
+      targetNodeId: "headline",
+      originalText: "Engenheira",
+      rationale: "Mostra senioridade.",
+      estimatedGain: 5,
+    };
+
+    await db.insert(resumeSuggestions).values([
+      {
+        ...suggestion,
+        resumeId: resume.id,
+        suggestedText: "Depois",
+        status: "dismissed",
+        createdAt: new Date("2026-11-21T10:00:00Z"),
+      },
+      {
+        ...suggestion,
+        resumeId: resume.id,
+        suggestedText: "Antes",
+        status: "applied",
+        createdAt: new Date("2026-11-20T10:00:00Z"),
+      },
+      { ...suggestion, resumeId: resume.id, suggestedText: "Sem data", createdAt: null },
+      { ...suggestion, resumeId: other.resume.id, suggestedText: "Alheia" },
+    ]);
+
+    const exported = await repository.exportData(profileId);
+
+    const exportedSuggestion = {
+      originalText: "Engenheira",
+      rationale: "Mostra senioridade.",
+      estimatedGain: 5,
+    };
+
+    expect(exported?.resumes).toEqual([
+      {
+        kind: "base",
+        status: "ready",
+        content,
+        score: 77,
+        scoredAt: "2026-11-20T10:00:00.000Z",
+        updatedAt: expect.any(String),
+        suggestions: [
+          {
+            ...exportedSuggestion,
+            suggestedText: "Antes",
+            status: "applied",
+            createdAt: "2026-11-20T10:00:00.000Z",
+          },
+          {
+            ...exportedSuggestion,
+            suggestedText: "Depois",
+            status: "dismissed",
+            createdAt: "2026-11-21T10:00:00.000Z",
+          },
+          { ...exportedSuggestion, suggestedText: "Sem data", status: "open", createdAt: null },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(exported)).not.toContain(resume.id);
   });
 
   it("exports the consent, sign-in and creation timestamps", async () => {

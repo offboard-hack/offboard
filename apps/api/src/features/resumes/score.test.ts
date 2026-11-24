@@ -237,6 +237,32 @@ describe("scoreResume", () => {
     expect(inside).not.toContain("99999");
   });
 
+  it("clips the résumé sent to the model without splitting a surrogate pair", async () => {
+    const lengths: number[] = [];
+
+    for (const padding of ["", "a"]) {
+      const { generate, requests } = fake({ score: 50, suggestions: [] });
+
+      await scoreResume(generate, {
+        ...resume,
+        summary: { id: "summary", text: padding + "😀".repeat(40_000) },
+      });
+
+      const prompt = requests[0]?.prompt ?? "";
+
+      const inside = prompt.slice(
+        prompt.indexOf("<resume>\n") + 9,
+        prompt.lastIndexOf("\n</resume>"),
+      );
+
+      expect(prompt.endsWith("\n</resume>")).toBe(true);
+      expect(inside).not.toMatch(/[\uD800-\uDBFF]$/);
+      lengths.push(inside.length);
+    }
+
+    expect(lengths.sort((a, b) => a - b)).toEqual([59_999, 60_000]);
+  });
+
   it("tells the model when contact details are missing", async () => {
     const { generate, requests } = fake({ score: 40, suggestions: [] });
 

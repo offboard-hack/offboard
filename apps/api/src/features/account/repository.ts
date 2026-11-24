@@ -6,6 +6,7 @@ import {
   interviews,
   jobs,
   resumes,
+  resumeSuggestions,
   talentProfiles,
   teamMembers,
 } from "@offboard/db/schema";
@@ -30,9 +31,12 @@ export function createAccountRepository(db: Database) {
 
     const ownResumes = await db
       .select({
+        id: resumes.id,
         kind: resumes.kind,
         status: resumes.status,
         content: resumes.content,
+        score: resumes.score,
+        scoredAt: resumes.scoredAt,
         updatedAt: sql<Date>`coalesce(${resumes.updatedAt}, ${resumes.createdAt})`.mapWith(
           resumes.updatedAt,
         ),
@@ -40,6 +44,25 @@ export function createAccountRepository(db: Database) {
       .from(resumes)
       .where(eq(resumes.profileId, profileId))
       .orderBy(asc(resumes.createdAt), asc(resumes.id));
+
+    const suggestions = await db
+      .select({
+        resumeId: resumeSuggestions.resumeId,
+        originalText: resumeSuggestions.originalText,
+        suggestedText: resumeSuggestions.suggestedText,
+        rationale: resumeSuggestions.rationale,
+        estimatedGain: resumeSuggestions.estimatedGain,
+        status: resumeSuggestions.status,
+        createdAt: resumeSuggestions.createdAt,
+      })
+      .from(resumeSuggestions)
+      .where(
+        inArray(
+          resumeSuggestions.resumeId,
+          ownResumes.map((resume) => resume.id),
+        ),
+      )
+      .orderBy(asc(resumeSuggestions.createdAt), asc(resumeSuggestions.id));
 
     const ownApplications = await db
       .select({
@@ -93,7 +116,19 @@ export function createAccountRepository(db: Database) {
         kind: resume.kind,
         status: resume.status,
         content: resume.content,
+        score: resume.score,
+        scoredAt: resume.scoredAt?.toISOString() ?? null,
         updatedAt: resume.updatedAt.toISOString(),
+        suggestions: suggestions
+          .filter((suggestion) => suggestion.resumeId === resume.id)
+          .map((suggestion) => ({
+            originalText: suggestion.originalText,
+            suggestedText: suggestion.suggestedText,
+            rationale: suggestion.rationale,
+            estimatedGain: suggestion.estimatedGain,
+            status: suggestion.status,
+            createdAt: suggestion.createdAt?.toISOString() ?? null,
+          })),
       })),
       applications: ownApplications.map(({ id, appliedAt, ...application }) => ({
         ...application,

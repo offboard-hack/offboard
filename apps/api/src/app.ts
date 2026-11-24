@@ -64,13 +64,13 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     score_resume: async (job) => {
       const resume = await repos.resumes.forScoring(job.subject);
 
-      if (!resume) return;
+      if (!resume || resume.score !== null) return;
+
+      if (!options.generateStructured) throw new Error("AI not configured");
 
       const taken = await repos.llmUsage.takeLlmCall(resume.profileId, new Date());
 
       if (taken !== true) return { postponeUntil: taken.retryAt };
-
-      if (!options.generateStructured) throw new Error("AI not configured");
 
       const result = await scoreResume(options.generateStructured, resume.content);
 
@@ -79,10 +79,14 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
   } satisfies Record<string, JobHandler>;
 
   async function rescore(resumeId: string) {
-    await repos.background.enqueue("score_resume", resumeId);
+    try {
+      await repos.background.enqueue("score_resume", resumeId);
+    } catch {
+      return;
+    }
 
     runInBackground(async () => {
-      await drain(repos.background, handlers);
+      await drain(repos.background, handlers, { limit: 1 });
     });
   }
 

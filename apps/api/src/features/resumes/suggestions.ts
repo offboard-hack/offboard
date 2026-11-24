@@ -43,7 +43,7 @@ function rewrite(content: ResumeContent, nodeId: string, text: string) {
 export function createSuggestionsRepository(db: Database) {
   async function listOpen(profileId: string) {
     const rows = await db
-      .select(viewColumns)
+      .select({ ...viewColumns, content: resumes.content })
       .from(resumeSuggestions)
       .innerJoin(resumes, eq(resumes.id, resumeSuggestions.resumeId))
       .where(and(baseOf(profileId), eq(resumeSuggestions.status, "open")))
@@ -53,7 +53,13 @@ export function createSuggestionsRepository(db: Database) {
         asc(resumeSuggestions.id),
       );
 
-    return rows satisfies SuggestionView[];
+    return rows.flatMap(({ content, ...view }) =>
+      textNodes(content).some(
+        (node) => node.id === view.targetNodeId && node.text === view.originalText,
+      )
+        ? [view]
+        : [],
+    ) satisfies SuggestionView[];
   }
 
   async function saveScore(
@@ -80,9 +86,28 @@ export function createSuggestionsRepository(db: Database) {
         .delete(resumeSuggestions)
         .where(and(eq(resumeSuggestions.resumeId, resumeId), eq(resumeSuggestions.status, "open")));
 
-      if (result.suggestions.length > 0) {
+      const dismissed = await tx
+        .select({
+          targetNodeId: resumeSuggestions.targetNodeId,
+          originalText: resumeSuggestions.originalText,
+        })
+        .from(resumeSuggestions)
+        .where(
+          and(eq(resumeSuggestions.resumeId, resumeId), eq(resumeSuggestions.status, "dismissed")),
+        );
+
+      const fresh = result.suggestions.filter(
+        (suggestion) =>
+          !dismissed.some(
+            (row) =>
+              row.targetNodeId === suggestion.targetNodeId &&
+              row.originalText === suggestion.originalText,
+          ),
+      );
+
+      if (fresh.length > 0) {
         await tx.insert(resumeSuggestions).values(
-          result.suggestions.map((suggestion) => ({
+          fresh.map((suggestion) => ({
             ...suggestion,
             resumeId,
             createdAt: now,
