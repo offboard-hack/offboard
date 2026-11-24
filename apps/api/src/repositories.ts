@@ -8,6 +8,7 @@ import { createExitSurveysRepository } from "./features/exit-surveys/repository.
 import { createTeamRepository } from "./features/team/repository.js";
 import { createTalentRepository } from "./features/talent/repository.js";
 import { createJobsRepository } from "./features/jobs/repository.js";
+import { createApplicationsRepository } from "./features/applications/repository.js";
 
 export function createRepositories(db: Database) {
   return {
@@ -20,6 +21,7 @@ export function createRepositories(db: Database) {
     billing: createBillingRepository(db),
     talent: createTalentRepository(db),
     jobs: createJobsRepository(db),
+    applications: createApplicationsRepository(db),
   };
 }
 
