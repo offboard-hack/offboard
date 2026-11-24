@@ -98,7 +98,6 @@ export function talentRoutes(
     .patch(
       "/offboardings/:id/talent-access",
       async ({ params, body, status }) => {
-        const before = await repos.findByCase(params.id);
         const updated = await repos.updateAccess(params.id, body);
 
         if (updated === "not_found") return status(404, { error: "Talent access not found" });
@@ -107,7 +106,7 @@ export function talentRoutes(
           return status(409, { error: conflicts[updated] });
         }
 
-        if (before && before.email.toLowerCase() !== updated.email.toLowerCase()) {
+        if (updated.firstSignedInAt === null) {
           await inviteTalent(updated.email);
         }
 
@@ -116,10 +115,10 @@ export function talentRoutes(
       {
         permit: ["update", "Offboarding"],
         params: caseParams,
-        body: t.Object({
-          personalEmail: t.Optional(personalEmail),
-          sponsoredUntil: t.Optional(sponsoredUntil),
-        }),
+        body: t.Object(
+          { personalEmail: t.Optional(personalEmail), sponsoredUntil: t.Optional(sponsoredUntil) },
+          { minProperties: 1 },
+        ),
         response: { 200: talentAccessResponse, 404: errorResponse, 409: errorResponse },
       },
     )

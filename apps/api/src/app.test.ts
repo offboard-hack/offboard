@@ -21,9 +21,16 @@ const webhookSecret = "test-webhook-secret";
 const slackSigningSecret = "test-slack-secret";
 
 const invitedEmails: string[] = [];
+const inviteFailures = { remaining: 0 };
 
 const auth: PortalAuth = {
   inviteTalent: (email) => {
+    if (inviteFailures.remaining > 0) {
+      inviteFailures.remaining -= 1;
+
+      return Promise.reject(new Error("invite failed"));
+    }
+
     invitedEmails.push(email);
 
     return Promise.resolve();
@@ -170,6 +177,7 @@ describe.skipIf(!url)("api", () => {
 
   beforeEach(async () => {
     invitedEmails.length = 0;
+    inviteFailures.remaining = 0;
     await seedDatabase(db, testSeedFixtures);
   });
 
@@ -280,23 +288,46 @@ describe.skipIf(!url)("api", () => {
       const sameEmail = await asSession("rh", path, "PATCH", { personalEmail: "NOVO@example.com" });
 
       expect(sameEmail.status).toBe(200);
-      expect(invitedEmails).toEqual(["novo@example.com"]);
+      expect(invitedEmails).toEqual(["novo@example.com", "novo@example.com"]);
 
       await repos.talent.markSignedIn(created.id);
 
       const locked = await asSession("rh", path, "PATCH", { personalEmail: "outro@example.com" });
 
       expect(locked.status).toBe(409);
-      expect(invitedEmails).toEqual(["novo@example.com"]);
+      expect(invitedEmails).toEqual(["novo@example.com", "novo@example.com"]);
 
       const extended = await asSession("rh", path, "PATCH", { sponsoredUntil: "2100-01-31" });
 
       expect(extended.status).toBe(200);
+      expect(invitedEmails).toEqual(["novo@example.com", "novo@example.com"]);
       expect(await extended.json()).toEqual({
         personalEmail: "novo@example.com",
         sponsoredUntil: "2100-01-31",
         signedIn: true,
       });
+    });
+
+    it("lets a PATCH resend the invite after a failed one", async () => {
+      const path = `/offboardings/${await firstCaseId()}/talent-access`;
+
+      inviteFailures.remaining = 1;
+
+      const failed = await asSession("rh", path, "POST", { personalEmail, sponsoredUntil });
+
+      expect(failed.status).toBe(500);
+      expect(invitedEmails).toEqual([]);
+
+      const resent = await asSession("rh", path, "PATCH", { personalEmail });
+
+      expect(resent.status).toBe(200);
+      expect(invitedEmails).toEqual([personalEmail]);
+    });
+
+    it("rejects an empty PATCH body", async () => {
+      const path = `/offboardings/${await firstCaseId()}/talent-access`;
+
+      expect((await asSession("rh", path, "PATCH", {})).status).toBe(422);
     });
 
     it("rejects a taken email on update without inviting", async () => {
