@@ -32,7 +32,7 @@ export type Page = {
   type(text: string): Promise<void>;
   press(key: "Enter" | "ArrowDown" | "Tab" | "Escape"): Promise<void>;
   setFiles(selector: string, paths: string[]): Promise<void>;
-  screenshot(): Promise<Uint8Array>;
+  screenshot(options?: { fullPage?: boolean }): Promise<Uint8Array>;
   url(): Promise<string>;
   close(): void;
 };
@@ -99,6 +99,8 @@ const box = z
 
 const screenshot = z.object({ data: z.string() });
 
+const layout = z.object({ cssContentSize: z.object({ width: z.number(), height: z.number() }) });
+
 const keys = {
   Enter: { code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
   ArrowDown: { code: "ArrowDown", windowsVirtualKeyCode: 40 },
@@ -110,7 +112,7 @@ const pollMs = 250;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-type Params = Record<string, string | number | boolean | string[]>;
+type Params = Record<string, string | number | boolean | string[] | Record<string, number>>;
 
 type Pending = {
   resolve(value: z.core.util.JSONType | undefined): void;
@@ -320,8 +322,21 @@ export const connectPage = async (socket: Socket, options: { commandTimeoutMs?: 
       );
     },
 
-    async screenshot() {
-      const { data } = await command("Page.captureScreenshot", { format: "png" }, screenshot);
+    async screenshot(options = {}) {
+      const clip = async () => {
+        const { cssContentSize } = await command("Page.getLayoutMetrics", {}, layout);
+        const width = Math.ceil(cssContentSize.width);
+        const height = Math.ceil(cssContentSize.height);
+
+        return { x: 0, y: 0, width, height, scale: 1 };
+      };
+
+      const capture = (params: Params) =>
+        command("Page.captureScreenshot", { format: "png", ...params }, screenshot);
+
+      const { data } = options.fullPage
+        ? await capture({ captureBeyondViewport: true, clip: await clip() })
+        : await capture({});
 
       return Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
     },
@@ -336,3 +351,8 @@ export const connectPage = async (socket: Socket, options: { commandTimeoutMs?: 
 
   return page;
 };
+
+export const openPage = async (
+  fetchImpl: (input: string, init: RequestInit) => Promise<UpgradeResponse>,
+  url: string,
+) => connectPage(await workerSocket(fetchImpl, url));

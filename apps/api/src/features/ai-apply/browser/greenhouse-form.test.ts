@@ -103,6 +103,7 @@ type Setup = {
   unready?: boolean;
   form?: Partial<FormPage>;
   pages?: OutcomePage[];
+  unguarded?: boolean;
 };
 
 const countries = ["Brasil +55", "Gibraltar +350", "Portugal +351"];
@@ -172,7 +173,7 @@ const fakePage = (setup: Setup = {}) => {
     if (expression.includes("armed = false")) {
       actions.push("lift");
 
-      return true;
+      return !setup.unguarded;
     }
 
     if (expression.includes('querySelectorAll("iframe")')) return pages[at] ?? quiet;
@@ -1127,6 +1128,13 @@ describe("classifies the outcome", () => {
     expect(actions).toEqual(["lift", 'click #application-form button[type="submit"]']);
   });
 
+  it("refuses to click on a page whose guard was never installed", async () => {
+    const { page, actions } = fakePage({ unguarded: true });
+
+    expect(await submitGreenhouse(page)).toBe("not_clicked");
+    expect(actions).toEqual(["lift"]);
+  });
+
   it("refuses to click while errors or a challenge are visible", async () => {
     for (const shown of [errored, challenged]) {
       const { page, actions } = fakePage({ pages: [shown] });
@@ -1208,6 +1216,27 @@ describe("classifies the outcome", () => {
     expect(await awaitOutcome(fakePage({ pages: [challenged] }).page, 30_000)).toBe("blocked");
     expect(await awaitOutcome(fakePage({ pages: [errored] }).page, 30_000)).toBe("invalid");
     expect(await awaitOutcome(fakePage().page, 30_000)).toBe("timeout");
+  });
+
+  it("sleeps between polls while a confirmation container lacks the copy", async () => {
+    const loading = { ...quiet, confirmations: [{ text: "Carregando", visible: true }] };
+    let polls = 0;
+
+    const page: Page = {
+      ...fakePage().page,
+      async waitFor() {
+        polls += 1;
+
+        return true;
+      },
+      async evaluate(_expression, schema) {
+        return schema.parse(loading);
+      },
+    };
+
+    expect(await awaitOutcome(page, 600)).toBe("timeout");
+    expect(polls).toBeGreaterThan(1);
+    expect(polls).toBeLessThanOrEqual(4);
   });
 
   it("stops at the deadline even while a signal without the copy is shown", async () => {

@@ -31,6 +31,7 @@ const suggestionMs = 10_000;
 const coordinatesMs = 5_000;
 const uploadMs = 15_000;
 const revealMs = 3_000;
+const outcomePollMs = 250;
 
 const locationControl = "candidate-location";
 const letterField = "cover_letter_text";
@@ -63,6 +64,8 @@ const loose = (text: string) => normalize(text).normalize("NFD").replace(/\p{M}/
 
 const digits = (text: string) => text.replace(/\D/g, "");
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 const byId = (id: string) => `[id=${JSON.stringify(id)}]`;
 
 const found = (selector: string) => `document.querySelector(${JSON.stringify(selector)})`;
@@ -85,7 +88,7 @@ const confirmationSignal = `location.pathname.includes("/confirmation") || docum
 
 const guardExpression = `(() => { const submits = 'button[type="submit"], input[type="submit"], #application-form button:not([type])'; if (!window.__offboardGuard) { const guard = { armed: true }; window.__offboardGuard = guard; const stop = (event) => { event.preventDefault(); event.stopImmediatePropagation(); }; window.addEventListener("submit", (event) => { if (guard.armed) stop(event); }, true); window.addEventListener("click", (event) => { if (guard.armed && event.target instanceof Element && event.target.closest(submits)) stop(event); }, true); const { submit, requestSubmit } = HTMLFormElement.prototype; HTMLFormElement.prototype.submit = function () { if (!guard.armed) submit.call(this); }; HTMLFormElement.prototype.requestSubmit = function (submitter) { if (!guard.armed) requestSubmit.call(this, submitter); }; } window.__offboardGuard.armed = true; return true; })()`;
 
-const liftExpression = `(() => { if (window.__offboardGuard) window.__offboardGuard.armed = false; return true; })()`;
+const liftExpression = `(() => { if (!window.__offboardGuard) return false; window.__offboardGuard.armed = false; return true; })()`;
 
 const liveQuestion = z.object({
   required: z.boolean(),
@@ -561,7 +564,8 @@ export const submitGreenhouse = async (page: Page) => {
 
   if (challengeVisible(before) || errorsVisible(before)) return "not_clicked";
 
-  await page.evaluate(liftExpression, z.boolean());
+  if (!(await page.evaluate(liftExpression, z.boolean()))) return "not_clicked";
+
   await page.click(submitButton);
 
   return "clicked";
@@ -575,5 +579,7 @@ export const awaitOutcome = async (page: Page, timeoutMs: number) => {
     const outcome = classifyOutcome(await page.evaluate(outcomeExpression, outcomePage));
 
     if (outcome === "confirmed" || !signalled || Date.now() >= deadline) return outcome;
+
+    await sleep(Math.min(outcomePollMs, deadline - Date.now()));
   }
 };

@@ -4,6 +4,7 @@ import {
   CdpError,
   CdpTimeoutError,
   connectPage,
+  openPage,
   workerSocket,
   type Socket,
   type WorkerWebSocket,
@@ -411,6 +412,25 @@ describe("connectPage", () => {
     });
   });
 
+  it("captures the whole page beyond the viewport", async () => {
+    const fake = fakeSocket({
+      "Page.getLayoutMetrics": { cssContentSize: { x: 0, y: 0, width: 1280.4, height: 3012.2 } },
+      "Page.captureScreenshot": { data: btoa("\u0089PNG") },
+    });
+
+    const page = await connectPage(fake.socket);
+
+    const bytes = await page.screenshot({ fullPage: true });
+
+    expect([...bytes]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    expect(fake.named("Page.getLayoutMetrics")).toHaveLength(1);
+    expect(fake.named("Page.captureScreenshot")[0]?.params).toEqual({
+      format: "png",
+      captureBeyondViewport: true,
+      clip: { x: 0, y: 0, width: 1281, height: 3013, scale: 1 },
+    });
+  });
+
   it("reads the current url", async () => {
     const fake = fakeSocket({
       "Runtime.evaluate": evaluated("https://x.test/a"),
@@ -502,5 +522,36 @@ describe("workerSocket", () => {
     const fetchImpl = async () => new Response("", { status: 200 });
 
     await expect(workerSocket(fetchImpl, "wss://connect.test/s1")).rejects.toThrow(CdpError);
+  });
+});
+
+describe("openPage", () => {
+  it("connects a page over the upgraded websocket", async () => {
+    const fake = fakeWorkerWebSocket();
+    const urls: string[] = [];
+
+    const replies = new Map<string, Json>([
+      ["Target.getTargets", { targetInfos: [{ targetId: "t1", type: "page" }] }],
+      ["Target.attachToTarget", { sessionId: "sess" }],
+      ["Runtime.evaluate", evaluated("https://x.test/form")],
+    ]);
+
+    fake.webSocket.send = (data: string) => {
+      const { id, method } = JSON.parse(data);
+
+      queueMicrotask(() => fake.message(JSON.stringify({ id, result: replies.get(method) ?? {} })));
+    };
+
+    const fetchImpl = async (input: string | URL | Request) => {
+      urls.push(String(input));
+
+      return Object.assign(new Response("", { status: 200 }), { webSocket: fake.webSocket });
+    };
+
+    const page = await openPage(fetchImpl, "wss://connect.test/s1");
+
+    await expect(page.url()).resolves.toBe("https://x.test/form");
+    expect(urls).toEqual(["https://connect.test/s1"]);
+    expect(fake.accepted()).toBe(1);
   });
 });
