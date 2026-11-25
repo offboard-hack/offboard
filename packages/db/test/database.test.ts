@@ -14,12 +14,15 @@ import {
 import { seedApplications, seedCohortApplications } from "../src/application.fixture.ts";
 import { seedJobs } from "../src/job.fixture.ts";
 import {
+  answerQuestions,
   applicationEvents,
+  applicationPackages,
   applications,
   authSession,
   backgroundJobs,
   interviews,
   jobMatches,
+  jobRejections,
   jobSources,
   jobs,
   llmUsage,
@@ -28,9 +31,12 @@ import {
   publicPages,
   resumeSuggestions,
   resumes,
+  talentAnswers,
+  talentPreferences,
   talentProfiles,
   tasks,
 } from "../src/schema/index.ts";
+import { normalizeQuestion } from "../src/question.ts";
 import { seedCases, seedDatabase, testSeedFixtures } from "../src/seed-database.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -917,4 +923,187 @@ it.skipIf(!url)("stores job sources and closes shared jobs", async () => {
   } finally {
     await db.$client.end();
   }
+});
+
+it.skipIf(!url)("stores preferences, answers, rejections and packages", async () => {
+  const db = createClient(url ?? "");
+
+  try {
+    await migrate(db, {
+      migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
+    });
+    await seedDatabase(db);
+
+    const profileId = await marinaProfileId(db);
+    const [preferences] = await db.select().from(talentPreferences);
+
+    expect(preferences.profileId).toBe(profileId);
+    expect(preferences.mode).toBe("hybrid");
+    expect(preferences.hybridThreshold).toBe(75);
+    expect(preferences.targetTitles).toEqual([
+      "Analista de Marketing",
+      "Marketing de Produto",
+      "Growth",
+    ]);
+    expect(preferences.jobPreferences).toMatchObject({
+      workModels: ["remote", "hybrid"],
+      locations: [{ city: null, state: "SP" }],
+    });
+    expect(preferences.profileFields.phone).toEqual({ value: "+55 11 91234-5678", share: false });
+    expect(preferences.profileFields.linkedin?.share).toBe(true);
+    expect(preferences.profileFields.portfolio).toEqual({ value: null, share: false });
+
+    const questions = await db.select().from(answerQuestions);
+    expect(questions).toHaveLength(10);
+    expect(questions.every((item) => item.common)).toBe(true);
+    expect(questions.map((item) => item.normalized)).toContain("qual a sua pretensao salarial");
+    expect(await db.select().from(talentAnswers)).toHaveLength(8);
+
+    const unanswered = await db
+      .select({ text: answerQuestions.text })
+      .from(answerQuestions)
+      .leftJoin(
+        talentAnswers,
+        and(
+          eq(talentAnswers.questionId, answerQuestions.id),
+          eq(talentAnswers.profileId, profileId),
+        ),
+      )
+      .where(sql`${talentAnswers.questionId} is null`);
+
+    expect(unanswered).toHaveLength(2);
+
+    const [rejection] = await db
+      .select({
+        reason: jobRejections.reason,
+        title: jobs.title,
+        applied: sql<number>`(select count(*)::int from ${applications} where ${applications.jobId} = ${jobs.id} and ${applications.profileId} = ${profileId})`,
+      })
+      .from(jobRejections)
+      .innerJoin(jobs, eq(jobs.id, jobRejections.jobId));
+
+    expect(rejection).toMatchObject({ reason: "salary", title: "Analista de CRM", applied: 0 });
+
+    const [fresh] = await db
+      .insert(talentProfiles)
+      .values({
+        name: "Nova",
+        personalEmail: "nova@example.com",
+        sponsoredUntil: "2099-01-01",
+      })
+      .returning();
+
+    const [defaults] = await db
+      .insert(talentPreferences)
+      .values({ profileId: fresh.id })
+      .returning();
+
+    expect(defaults).toMatchObject({
+      mode: "review",
+      hybridThreshold: 75,
+      targetTitles: [],
+      jobPreferences: {},
+      profileFields: {},
+    });
+
+    await expect(
+      db
+        .update(talentPreferences)
+        .set({ hybridThreshold: 49 })
+        .where(eq(talentPreferences.profileId, fresh.id)),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+    await expect(
+      db
+        .update(talentPreferences)
+        .set({ hybridThreshold: 101 })
+        .where(eq(talentPreferences.profileId, fresh.id)),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+    await db
+      .update(talentPreferences)
+      .set({ hybridThreshold: 50 })
+      .where(eq(talentPreferences.profileId, fresh.id));
+    await db
+      .update(talentPreferences)
+      .set({ hybridThreshold: 100 })
+      .where(eq(talentPreferences.profileId, fresh.id));
+
+    await expect(
+      db.insert(answerQuestions).values({ normalized: questions[0].normalized, text: "Outra" }),
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
+
+    const [custom] = await db
+      .insert(answerQuestions)
+      .values({ normalized: "tem pet", text: "Tem pet?" })
+      .returning();
+
+    expect(custom.common).toBe(false);
+
+    const [answer] = await db.select().from(talentAnswers);
+    await expect(db.insert(talentAnswers).values(answer)).rejects.toMatchObject({
+      cause: { code: "23505" },
+    });
+
+    const [job] = await db.select({ id: jobs.id }).from(jobs);
+    await db.insert(jobRejections).values({ profileId: fresh.id, jobId: job.id, reason: "other" });
+    await expect(
+      db.insert(jobRejections).values({ profileId: fresh.id, jobId: job.id, reason: "other" }),
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
+    await expect(
+      db.insert(jobRejections).values({
+        profileId: fresh.id,
+        jobId: job.id,
+        reason: sql`'bogus'`,
+      }),
+    ).rejects.toMatchObject({ cause: { code: "22P02" } });
+    await expect(
+      db.insert(jobRejections).values({
+        profileId: (await db.select({ id: jobs.id }).from(jobs))[1].id,
+        jobId: job.id,
+        reason: "other",
+      }),
+    ).rejects.toMatchObject({ cause: { code: "23503" } });
+
+    await db
+      .insert(applicationPackages)
+      .values({ profileId: fresh.id, jobId: job.id, coverLetter: "Olá" });
+    await expect(
+      db
+        .insert(applicationPackages)
+        .values({ profileId: fresh.id, jobId: job.id, coverLetter: "Olá" }),
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
+    await expect(
+      db
+        .insert(applicationPackages)
+        .values({ profileId: fresh.id, jobId: job.id, coverLetter: sql`null` }),
+    ).rejects.toMatchObject({ cause: { code: "23502" } });
+
+    await db.delete(talentProfiles).where(eq(talentProfiles.id, fresh.id));
+    expect(await db.select().from(applicationPackages)).toHaveLength(0);
+    expect(await db.select().from(jobRejections)).toHaveLength(1);
+    expect(await db.select().from(talentPreferences)).toHaveLength(1);
+
+    await db.delete(answerQuestions).where(eq(answerQuestions.id, answer.questionId));
+    expect(await db.select().from(talentAnswers)).toHaveLength(7);
+
+    await db.delete(applications);
+    await db.delete(resumes).where(eq(resumes.kind, "tailored"));
+    await db.delete(jobs);
+    expect(await db.select().from(jobRejections)).toHaveLength(0);
+
+    await db.delete(talentProfiles).where(eq(talentProfiles.id, profileId));
+    expect(await db.select().from(talentAnswers)).toHaveLength(0);
+    expect(await db.select().from(talentPreferences)).toHaveLength(0);
+  } finally {
+    await db.$client.end();
+  }
+});
+
+describe("normalizeQuestion", () => {
+  it("lowercases, strips accents, collapses whitespace and drops trailing punctuation", () => {
+    expect(normalizeQuestion("  Qual a   sua Pretensão Salarial?! ")).toBe(
+      "qual a sua pretensao salarial",
+    );
+    expect(normalizeQuestion("Você possui CNH ?")).toBe("voce possui cnh");
+    expect(normalizeQuestion("Aviso: ")).toBe("aviso");
+  });
 });

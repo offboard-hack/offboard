@@ -46,6 +46,28 @@ export type ResumeContent = {
   };
 };
 
+export type JobPreferences = {
+  workModels?: ("remote" | "hybrid" | "onsite")[];
+  locations?: { city: string | null; state: string }[];
+  relocate?: boolean;
+  salaryFloorCents?: number | null;
+  seniorities?: ("intern" | "junior" | "mid" | "senior" | "lead" | "manager" | "director")[];
+  excludedCompanies?: string[];
+};
+
+export type ProfileField = { value: string | null; share: boolean };
+
+export type ProfileFields = {
+  phone?: ProfileField;
+  city?: ProfileField;
+  linkedin?: ProfileField;
+  portfolio?: ProfileField;
+  workAuthorization?: ProfileField;
+  availability?: ProfileField;
+  noticePeriod?: ProfileField;
+  salaryExpectation?: ProfileField;
+};
+
 export type ConfigValue =
   | boolean
   | number
@@ -643,5 +665,104 @@ export const publicPageDailyViews = pgTable(
       "public_page_daily_views_counts",
       sql`${table.visits} >= 0 and ${table.recruiterVisits} >= 0 and ${table.recruiterVisits} <= ${table.visits}`,
     ),
+  ],
+);
+
+export const applicationModeEnum = pgEnum("application_mode", ["automatic", "hybrid", "review"]);
+
+export const talentPreferences = pgTable(
+  "talent_preferences",
+  {
+    profileId: uuid("profile_id")
+      .primaryKey()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    mode: applicationModeEnum("mode").notNull().default("review"),
+    hybridThreshold: integer("hybrid_threshold").notNull().default(75),
+    targetTitles: jsonb("target_titles").$type<string[]>().notNull().default([]),
+    jobPreferences: jsonb("job_preferences").$type<JobPreferences>().notNull().default({}),
+    profileFields: jsonb("profile_fields").$type<ProfileFields>().notNull().default({}),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    check("talent_preferences_threshold", sql`${table.hybridThreshold} between 50 and 100`),
+  ],
+);
+
+export const answerQuestions = pgTable(
+  "answer_questions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    normalized: varchar("normalized", { length: 500 }).notNull(),
+    text: varchar("text", { length: 500 }).notNull(),
+    common: boolean("common").notNull().default(false),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [uniqueIndex("answer_questions_normalized_idx").on(table.normalized)],
+);
+
+export const talentAnswers = pgTable(
+  "talent_answers",
+  {
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    questionId: uuid("question_id")
+      .notNull()
+      .references(() => answerQuestions.id, { onDelete: "cascade" }),
+    answer: text("answer").notNull(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.profileId, table.questionId] }),
+    index("talent_answers_question_idx").on(table.questionId),
+  ],
+);
+
+export const rejectionReasonEnum = pgEnum("rejection_reason", [
+  "salary",
+  "location",
+  "company",
+  "seniority",
+  "work_model",
+  "not_interested",
+  "other",
+]);
+
+export const jobRejections = pgTable(
+  "job_rejections",
+  {
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    reason: rejectionReasonEnum("reason").notNull(),
+    note: varchar("note", { length: 500 }),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.profileId, table.jobId] }),
+    index("job_rejections_job_idx").on(table.jobId),
+  ],
+);
+
+export const applicationPackages = pgTable(
+  "application_packages",
+  {
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    coverLetter: text("cover_letter").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.profileId, table.jobId] }),
+    index("application_packages_job_idx").on(table.jobId),
   ],
 );

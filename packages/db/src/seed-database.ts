@@ -16,10 +16,22 @@ import { seedExitSurveys } from "./exit-survey.fixture.ts";
 import { seedJobSources, type SeedJobSource } from "./job-source.fixture.ts";
 import { seedJobMatches, type SeedJobMatch } from "./job-match.fixture.ts";
 import { seedJobs, type SeedJob } from "./job.fixture.ts";
+import {
+  seedAnswerQuestions,
+  seedJobRejections,
+  seedTalentAnswers,
+  seedTalentPreferences,
+  type SeedAnswerQuestion,
+  type SeedJobRejection,
+  type SeedTalentAnswer,
+  type SeedTalentPreferences,
+} from "./preferences.fixture.ts";
+import { normalizeQuestion } from "./question.ts";
 import { seedIntegrations } from "./integration.fixture.ts";
 import { baseSeedCases, seedCases } from "./offboarding.fixture.ts";
 import {
   actionConfigs,
+  answerQuestions,
   applicationEvents,
   applications,
   backgroundJobs,
@@ -27,6 +39,7 @@ import {
   exitSurveys,
   integrations,
   interviews,
+  jobRejections,
   invoices,
   jobMatches,
   jobSources,
@@ -39,6 +52,8 @@ import {
   resumes,
   subscriptions,
   subtasks,
+  talentAnswers,
+  talentPreferences,
   talentProfiles,
   tasks,
   teamMembers,
@@ -73,6 +88,10 @@ const noTailoredResumes: SeedTailoredResume[] = [];
 const noJobMatches: SeedJobMatch[] = [];
 const noPublicPages: SeedPublicPage[] = [];
 const noJobSources: SeedJobSource[] = [];
+const noPreferences: SeedTalentPreferences[] = [];
+const noAnswers: SeedTalentAnswer[] = [];
+const noQuestions: SeedAnswerQuestion[] = [];
+const noRejections: SeedJobRejection[] = [];
 
 export const testSeedFixtures = {
   cases: baseSeedCases,
@@ -86,6 +105,10 @@ export const testSeedFixtures = {
   jobMatches: noJobMatches,
   publicPages: noPublicPages,
   jobSources: noJobSources,
+  preferences: noPreferences,
+  questions: noQuestions,
+  answers: noAnswers,
+  rejections: noRejections,
 };
 
 export async function seedDatabase(
@@ -102,10 +125,15 @@ export async function seedDatabase(
     jobMatches: seedJobMatches,
     publicPages: seedPublicPages,
     jobSources: seedJobSources,
+    preferences: seedTalentPreferences,
+    questions: seedAnswerQuestions,
+    answers: seedTalentAnswers,
+    rejections: seedJobRejections,
   },
 ) {
   await db.transaction(async (tx) => {
     await tx.delete(backgroundJobs);
+    await tx.delete(answerQuestions);
     await tx.delete(publicPageDailyViews);
     await tx.delete(publicPages);
     await tx.delete(jobMatches);
@@ -415,6 +443,50 @@ export async function seedDatabase(
 
     if (seedIntegrations.length > 0) {
       await tx.insert(integrations).values(seedIntegrations);
+    }
+
+    for (const { caseName, ...item } of fixtures.preferences) {
+      const profileId = profileIds.get(caseName);
+
+      if (!profileId) {
+        throw new Error(`Seed preferences need a profile for ${caseName}`);
+      }
+
+      await tx.insert(talentPreferences).values({ profileId, ...item });
+    }
+
+    const questionIds = new Map<string, string>();
+
+    for (const question of fixtures.questions) {
+      const [created] = await tx
+        .insert(answerQuestions)
+        .values(question)
+        .returning({ id: answerQuestions.id });
+
+      questionIds.set(question.normalized, created.id);
+    }
+
+    for (const { caseName, question, answer } of fixtures.answers) {
+      const profileId = profileIds.get(caseName);
+      const questionId = questionIds.get(normalizeQuestion(question));
+
+      if (!profileId || !questionId) {
+        throw new Error(`Seed answer needs a profile and question for ${caseName}`);
+      }
+
+      await tx.insert(talentAnswers).values({ profileId, questionId, answer });
+    }
+
+    for (const { caseName, jobIndex, ...rejection } of fixtures.rejections) {
+      const profileId = profileIds.get(caseName);
+
+      if (!profileId) {
+        throw new Error(`Seed rejection needs a profile for ${caseName}`);
+      }
+
+      await tx
+        .insert(jobRejections)
+        .values({ profileId, jobId: insertedJobs[jobIndex].id, ...rejection });
     }
 
     await tx.insert(teamMembers).values(fixtures.members);
