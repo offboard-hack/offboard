@@ -123,7 +123,7 @@ export function offboardingsRoutes(
           role: text,
           department: text,
           deadline: t.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" }),
-          email: t.Optional(t.Union([t.String({ format: "email" }), t.Null()])),
+          email: t.String({ format: "email" }),
         }),
         response: { 201: caseSummary, 409: errorResponse },
       },
