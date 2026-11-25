@@ -249,9 +249,50 @@ describe("connectPage", () => {
     await expect(page.waitFor("ready", 300)).resolves.toBe(false);
   });
 
+  it("stops waiting when the socket closes", async () => {
+    const fake = fakeSocket({ "Runtime.evaluate": "silent" });
+    const page = await connectPage(fake.socket);
+
+    const waiting = page.waitFor("ready", 5000);
+    fake.drop();
+
+    await expect(waiting).rejects.toThrow("socket closed");
+  });
+
+  it("does not overrun the timeout when an evaluation hangs", async () => {
+    const fake = fakeSocket({ "Runtime.evaluate": "silent" });
+    const page = await connectPage(fake.socket);
+    const started = Date.now();
+
+    await expect(page.waitFor("ready", 100)).resolves.toBe(false);
+
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it("refuses to click an element without a box", async () => {
+    const fake = fakeSocket({
+      "Runtime.evaluate": evaluated({ x: 1, y: 1, width: 0, height: 10 }),
+    });
+
+    const page = await connectPage(fake.socket);
+
+    await expect(page.click("#hidden")).rejects.toThrow("not visible: #hidden");
+    expect(fake.named("Input.dispatchMouseEvent")).toHaveLength(0);
+  });
+
+  it("refuses to click an element with zero height", async () => {
+    const fake = fakeSocket({
+      "Runtime.evaluate": evaluated({ x: 1, y: 1, width: 10, height: 0 }),
+    });
+
+    const page = await connectPage(fake.socket);
+
+    await expect(page.click("#flat")).rejects.toThrow("not visible: #flat");
+  });
+
   it("clicks the center of the element box", async () => {
     const fake = fakeSocket({
-      "Runtime.evaluate": evaluated({ x: 110, y: 55 }),
+      "Runtime.evaluate": evaluated({ x: 110, y: 55, width: 20, height: 10 }),
     });
 
     const page = await connectPage(fake.socket);

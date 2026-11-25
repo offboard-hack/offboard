@@ -93,7 +93,10 @@ const evaluation = z.object({
     .optional(),
 });
 
-const point = z.object({ x: z.number(), y: z.number() }).nullable();
+const box = z
+  .object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+  .nullable();
+
 const screenshot = z.object({ data: z.string() });
 
 const keys = {
@@ -152,7 +155,13 @@ export const connectPage = async (socket: Socket, options: { commandTimeoutMs?: 
   });
   socket.onClose(failAll);
 
-  const send = <T>(method: string, params: Params, schema: z.ZodType<T>, sessionId?: string) =>
+  const send = <T>(
+    method: string,
+    params: Params,
+    schema: z.ZodType<T>,
+    sessionId?: string,
+    timeoutMs = commandTimeoutMs,
+  ) =>
     new Promise<T>((resolve, reject) => {
       if (closed) return reject(new CdpError("socket closed", method));
 
@@ -161,8 +170,8 @@ export const connectPage = async (socket: Socket, options: { commandTimeoutMs?: 
 
       const timer = setTimeout(() => {
         pending.delete(id);
-        reject(new CdpTimeoutError(method, commandTimeoutMs));
-      }, commandTimeoutMs);
+        reject(new CdpTimeoutError(method, timeoutMs));
+      }, timeoutMs);
 
       pending.set(id, {
         resolve(value) {
@@ -195,17 +204,18 @@ export const connectPage = async (socket: Socket, options: { commandTimeoutMs?: 
     attached,
   );
 
-  const command = <T>(method: string, params: Params, schema: z.ZodType<T>) =>
-    send(method, params, schema, sessionId);
+  const command = <T>(method: string, params: Params, schema: z.ZodType<T>, timeoutMs?: number) =>
+    send(method, params, schema, sessionId, timeoutMs);
 
   await command("Page.enable", {}, z.unknown());
   await command("DOM.enable", {}, z.unknown());
 
-  const runtime = async (expression: string, byValue: boolean) => {
+  const runtime = async (expression: string, byValue: boolean, timeoutMs?: number) => {
     const response = await command(
       "Runtime.evaluate",
       byValue ? { expression, returnByValue: true, awaitPromise: true } : { expression },
       evaluation,
+      timeoutMs,
     );
 
     if (response.exceptionDetails) {
@@ -217,14 +227,21 @@ export const connectPage = async (socket: Socket, options: { commandTimeoutMs?: 
     return response.result;
   };
 
-  const evaluate = async <T>(expression: string, valueSchema: z.ZodType<T>) => {
-    const result = await runtime(expression, true);
+  const evaluateWithin = async <T>(
+    expression: string,
+    valueSchema: z.ZodType<T>,
+    timeoutMs?: number,
+  ) => {
+    const result = await runtime(expression, true, timeoutMs);
     const parsed = valueSchema.safeParse(result?.value);
 
     if (!parsed.success) throw new CdpError("unexpected value", "Runtime.evaluate");
 
     return parsed.data;
   };
+
+  const evaluate = <T>(expression: string, valueSchema: z.ZodType<T>) =>
+    evaluateWithin(expression, valueSchema);
 
   const mouse = (type: "mousePressed" | "mouseReleased", x: number, y: number) =>
     command("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 }, z.unknown());
@@ -242,7 +259,17 @@ export const connectPage = async (socket: Socket, options: { commandTimeoutMs?: 
       const deadline = Date.now() + timeoutMs;
 
       for (;;) {
-        const truthy = await evaluate(expression, z.unknown()).catch(() => false);
+        const remaining = deadline - Date.now();
+
+        const truthy = await evaluateWithin(
+          expression,
+          z.unknown(),
+          Math.max(1, Math.min(remaining, commandTimeoutMs)),
+        ).catch((error) => {
+          if (closed) throw error;
+
+          return false;
+        });
 
         if (truthy) return true;
 
@@ -256,11 +283,15 @@ export const connectPage = async (socket: Socket, options: { commandTimeoutMs?: 
       const target = JSON.stringify(selector);
 
       const center = await evaluate(
-        `(() => { const el = document.querySelector(${target}); if (!el) return null; el.scrollIntoView({ block: "center", inline: "center" }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`,
-        point,
+        `(() => { const el = document.querySelector(${target}); if (!el) return null; el.scrollIntoView({ block: "center", inline: "center" }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, width: r.width, height: r.height }; })()`,
+        box,
       );
 
       if (center === null) throw new CdpError(`not found: ${selector}`);
+
+      if (center.width <= 0 || center.height <= 0) {
+        throw new CdpError(`not visible: ${selector}`);
+      }
 
       await mouse("mousePressed", center.x, center.y);
       await mouse("mouseReleased", center.x, center.y);
