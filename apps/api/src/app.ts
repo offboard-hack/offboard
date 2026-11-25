@@ -49,7 +49,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       ),
     )
     .use(actionConfigsRoutes(repos.actionConfigs, access))
-    .use(teamRoutes(repos.team, access))
+    .use(teamRoutes(repos.team, access, options.auth))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
     .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret))

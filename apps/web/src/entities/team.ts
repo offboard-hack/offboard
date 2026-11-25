@@ -28,6 +28,14 @@ export async function createTeamMember(member: NewTeamMember) {
   if (error) throw new Error("Failed to create team member");
 }
 
+export async function updateTeamMemberRole(id: string, role: MemberRole) {
+  const { error } = await getApiClient()
+    .api.team({ id: encodeURIComponent(id) })
+    .put({ role });
+
+  if (error) throw new Error("Failed to update team member role");
+}
+
 export async function deleteTeamMember(id: string) {
   const { error } = await getApiClient()
     .api.team({ id: encodeURIComponent(id) })

@@ -4,6 +4,8 @@ import { teamMembers } from "@offboard/db/schema";
 
 type NewTeamMember = Pick<typeof teamMembers.$inferInsert, "name" | "email" | "role">;
 
+type MemberRole = NonNullable<typeof teamMembers.$inferInsert.role>;
+
 export function createTeamRepository(db: Database) {
   const memberColumns = {
     id: teamMembers.id,
@@ -25,6 +27,16 @@ export function createTeamRepository(db: Database) {
     return row;
   }
 
+  async function updateTeamMemberRole(id: string, role: MemberRole) {
+    const [row] = await db
+      .update(teamMembers)
+      .set({ role })
+      .where(eq(teamMembers.id, id))
+      .returning(memberColumns);
+
+    return row ?? null;
+  }
+
   async function deleteTeamMember(id: string) {
     const rows = await db
       .delete(teamMembers)
@@ -37,6 +49,7 @@ export function createTeamRepository(db: Database) {
   return {
     listTeamMembers,
     createTeamMember,
+    updateTeamMemberRole,
     deleteTeamMember,
   };
 }
