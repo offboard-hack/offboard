@@ -4,10 +4,18 @@ import type { FormField, FormQuestion, QuestionKind } from "@offboard/db/schema"
 const sensitiveTerms = [
   "deficiencias?",
   "pcd",
-  "disability",
+  "disabilit\\w*",
   "racas?",
   "cor",
   "etnias?",
+  "etnic\\w*",
+  "racial",
+  "trans",
+  "autodeclar\\w*",
+  "lgbt\\w*",
+  "negr[oa]s?",
+  "indigena",
+  "neurodivergen\\w*",
   "race",
   "ethnicity",
   "generos?",
@@ -37,9 +45,10 @@ const standardKinds = new Map<string, QuestionKind>([
 
 const labelKinds: [RegExp, QuestionKind][] = [
   [/linkedin/, "linkedin"],
+  [/e-?mail/, "custom"],
   [/website|portfolio|portifolio|site pessoal/, "website"],
   [/cpf/, "cpf"],
-  [/data de nascimento|date of birth|nascimento/, "birth_date"],
+  [/data de nascimento|date of birth|dt\.? (?:de )?nascimento/, "birth_date"],
   [/^cep(?:[^a-z0-9]*)$/, "cep"],
   [/endereco|address/, "address"],
 ];

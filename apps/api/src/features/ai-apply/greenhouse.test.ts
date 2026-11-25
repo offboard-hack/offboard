@@ -198,6 +198,7 @@ describe("reads a Greenhouse form", () => {
     expect(questions.map((item) => [item.id, item.kind, item.fields.length])).toEqual([
       ["b", "document", 0],
       ["c", "custom", 1],
+      ["questions:3", "document", 0],
     ]);
   });
 
@@ -222,6 +223,44 @@ describe("reads a Greenhouse form", () => {
     expect(questions.map((item) => [item.id, item.fields[0]?.options])).toEqual([
       ["a", []],
       ["demographic:x", []],
+    ]);
+  });
+
+  it("keeps fieldless required questions per section", async () => {
+    const questions = await read({
+      questions: [question("Opcional", false), question("Obrigatória", true)],
+      location_questions: [question("Local", true)],
+      compliance: [{ questions: [question("Aceite", true)] }],
+    });
+
+    expect(questions.map((item) => [item.id, item.section, item.kind, item.sensitive])).toEqual([
+      ["questions:1", "questions", "document", false],
+      ["location:0", "location", "document", false],
+      ["compliance:0", "compliance", "document", true],
+    ]);
+  });
+
+  it("tightens kind detection", async () => {
+    const questions = await read({
+      questions: [
+        question("Qual seu endereço de e-mail?", true, field("q1", "input_text")),
+        question("Email address", true, field("q2", "input_text")),
+        question("Cidade de nascimento", true, field("q3", "input_text")),
+        question("Ano de nascimento", true, field("q4", "input_text")),
+        question("Dt. de nascimento", true, field("q5", "input_text")),
+        question("Date of birth", true, field("q6", "input_text")),
+        question("Endereço de e-mail", true, field("email", "input_text")),
+      ],
+    });
+
+    expect(questions.map((item) => item.kind)).toEqual([
+      "custom",
+      "custom",
+      "custom",
+      "custom",
+      "birth_date",
+      "birth_date",
+      "email",
     ]);
   });
 
@@ -268,10 +307,18 @@ describe("isSensitive", () => {
     expect(isSensitive("Gender identity", "questions")).toBe(true);
     expect(isSensitive("Do you consent?", "questions")).toBe(true);
     expect(isSensitive("Possui deficiências?", "questions")).toBe(true);
+    expect(isSensitive("Você é uma pessoa trans?", "questions")).toBe(true);
+    expect(isSensitive("Autodeclaração étnico-racial", "questions")).toBe(true);
+    expect(isSensitive("Do you have any disabilities?", "questions")).toBe(true);
+    expect(isSensitive("Você é LGBTQIA+?", "questions")).toBe(true);
+    expect(isSensitive("Pessoa negra ou indígena?", "questions")).toBe(true);
+    expect(isSensitive("Você é neurodivergente?", "questions")).toBe(true);
   });
 
   it("avoids substring false positives", () => {
     expect(isSensitive("Você é corretor de imóveis?", "questions")).toBe(false);
+    expect(isSensitive("Transporte próprio?", "questions")).toBe(false);
+    expect(isSensitive("Aceita transferência?", "questions")).toBe(false);
     expect(isSensitive("Experience with trace logging", "questions")).toBe(false);
     expect(isSensitive("Qual é o seu grau de escolaridade?", "questions")).toBe(false);
   });

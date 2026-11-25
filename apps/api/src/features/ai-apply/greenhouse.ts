@@ -85,11 +85,7 @@ const fromQuestions = (
   questions: z.infer<typeof rawQuestion>[] | null | undefined,
   section: FormQuestion["section"],
 ) =>
-  (questions ?? []).flatMap((item) => {
-    const first = item.fields[0];
-
-    if (first === undefined) return [];
-
+  (questions ?? []).flatMap((item, index) => {
     const raw = item.fields.map(({ name, type, values }) => ({
       name,
       type,
@@ -99,7 +95,13 @@ const fromQuestions = (
       })),
     }));
 
-    return build(first.name, item.label, item.required, section, raw);
+    return build(
+      item.fields[0]?.name ?? `${section}:${index}`,
+      item.label,
+      item.required,
+      section,
+      raw,
+    );
   });
 
 const fromDemographic = (questions: z.infer<typeof rawDemographic>[] | null | undefined) =>
@@ -170,7 +172,10 @@ export const readGreenhouseForm = async (fetchImpl: typeof fetch, board: string,
     questions: [
       ...fromQuestions(data.questions, "questions"),
       ...fromQuestions(data.location_questions, "location"),
-      ...(data.compliance ?? []).flatMap((entry) => fromQuestions(entry.questions, "compliance")),
+      ...fromQuestions(
+        (data.compliance ?? []).flatMap((entry) => entry.questions ?? []),
+        "compliance",
+      ),
       ...fromDemographic(data.demographic_questions?.questions),
     ],
   };
