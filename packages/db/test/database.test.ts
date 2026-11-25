@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { describe, expect, it } from "vitest";
@@ -19,14 +19,13 @@ import {
   authSession,
   backgroundJobs,
   interviews,
-  jobFeeds,
   jobMatches,
+  jobSources,
   jobs,
   llmUsage,
   offboardingCases,
   publicPageDailyViews,
   publicPages,
-  recruiterPartners,
   resumeSuggestions,
   resumes,
   talentProfiles,
@@ -234,7 +233,14 @@ it.skipIf(!url)("stores applications with one per job and a consistent closed re
 
     const [freshJob] = await db
       .insert(jobs)
-      .values({ origin: "hr", source: "t", sourceKey: "t1", title: "t", company: "t", url: "t" })
+      .values({
+        origin: "external",
+        source: "t",
+        sourceKey: "t1",
+        title: "t",
+        company: "t",
+        url: "t",
+      })
       .returning();
 
     const fresh = { profileId: application.profileId, jobId: freshJob.id };
@@ -292,7 +298,14 @@ it.skipIf(!url)("stores one base résumé per profile", async () => {
 
     const [job] = await db
       .insert(jobs)
-      .values({ origin: "hr", source: "r", sourceKey: "r1", title: "t", company: "t", url: "t" })
+      .values({
+        origin: "external",
+        source: "r",
+        sourceKey: "r1",
+        title: "t",
+        company: "t",
+        url: "t",
+      })
       .returning();
 
     await expect(
@@ -384,7 +397,14 @@ it.skipIf(!url)("links applications to the résumé they used", async () => {
 
     const [job] = await db
       .insert(jobs)
-      .values({ origin: "hr", source: "m", sourceKey: "m1", title: "t", company: "t", url: "t" })
+      .values({
+        origin: "external",
+        source: "m",
+        sourceKey: "m1",
+        title: "t",
+        company: "t",
+        url: "t",
+      })
       .returning();
 
     const { profileId, content } = ready[0];
@@ -810,57 +830,90 @@ it.skipIf(!url)("seeds enough people for HR aggregates", async () => {
   }
 });
 
-it.skipIf(!url)("stores job feeds and recruiter partners", async () => {
+it.skipIf(!url)("stores job sources and closes shared jobs", async () => {
   const db = createClient(url ?? "");
+  const migrationsFolder = fileURLToPath(new URL("../drizzle", import.meta.url));
 
   try {
-    await migrate(db, { migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)) });
+    await migrate(db, { migrationsFolder });
     await seedDatabase(db);
 
-    const feeds = await db.select().from(jobFeeds);
+    const sources = await db.select().from(jobSources).orderBy(jobSources.target);
     expect(
-      feeds.map((feed) => [feed.provider, feed.board, feed.companyLabel, feed.enabled]),
-    ).toEqual(
-      expect.arrayContaining([
-        ["greenhouse", "quintoandar", "QuintoAndar", false],
-        ["greenhouse", "stone", "Stone", false],
-      ]),
-    );
-    expect(feeds).toHaveLength(2);
-    expect(feeds[0].lastSyncedAt).toBeNull();
-    expect(feeds[0].lastError).toBeNull();
+      sources.map((source) => [source.kind, source.target, source.label, source.enabled]),
+    ).toEqual([
+      ["greenhouse", "quintoandar", "QuintoAndar", false],
+      ["greenhouse", "stone", "Stone", false],
+    ]);
+    expect(sources.every((source) => source.lastSyncedAt === null)).toBe(true);
+    expect(sources.every((source) => source.lastError === null)).toBe(true);
 
     await expect(
-      db.insert(jobFeeds).values({ provider: "greenhouse", board: "stone" }),
+      db.insert(jobSources).values({ kind: "greenhouse", target: "stone" }),
     ).rejects.toMatchObject({ cause: { code: "23505" } });
     await expect(
-      db.insert(jobFeeds).values({ provider: "lever", board: "Bad Slug" }),
+      db.insert(jobSources).values({ kind: "lever", target: "Bad Slug" }),
     ).rejects.toMatchObject({ cause: { code: "23514" } });
-    await db.insert(jobFeeds).values({ provider: "lever", board: "stone" });
+    await db.insert(jobSources).values({ kind: "lever", target: "stone" });
 
-    const [partner] = await db.select().from(recruiterPartners);
-    expect(partner.name).toBe("Ana Ribeiro — Talentos Parceiros");
-    expect(partner.company).toBe("Talentos Parceiros");
-    expect(partner.revokedAt).toBeNull();
-    expect(partner.tokenHash).toBe(
-      createHash("sha256").update("dev-recruiter-token-offboard-local").digest("hex"),
-    );
+    const seeded = await db.select().from(jobs);
+    expect(seeded).toHaveLength(seedJobs.length);
+    expect(seeded.every((job) => job.origin === "external" && job.lastSeenAt === null)).toBe(true);
 
-    await expect(
-      db
-        .insert(recruiterPartners)
-        .values({ name: "Outra", company: "Outra", tokenHash: partner.tokenHash }),
-    ).rejects.toMatchObject({ cause: { code: "23505" } });
+    const marinaId = await marinaProfileId(db);
+    const closedBefore = new Date("2026-01-01T00:00:00Z");
+    const migration = await readFile(`${migrationsFolder}/0018_add_job_sources.sql`, "utf8");
 
-    const linked = await db.select().from(jobs).where(eq(jobs.recruiterPartnerId, partner.id));
-    expect(linked.length).toBeGreaterThan(0);
-    expect(linked.every((job) => job.origin === "recruiter")).toBe(true);
-    expect(linked[0].lastSeenAt).toBeNull();
+    const replayed = db.transaction(async (tx) => {
+      await tx.execute(sql.raw('DROP TABLE "job_sources"'));
+      await tx.execute(sql.raw('DROP TYPE "public"."job_source_kind"'));
+      await tx.execute(sql.raw('ALTER TABLE "jobs" DROP COLUMN "last_seen_at"'));
 
-    await db.delete(recruiterPartners).where(eq(recruiterPartners.id, partner.id));
+      const opened = (origin: "external" | "hr" | "recruiter", key: string, closedAt?: string) =>
+        tx.execute(
+          sql`insert into jobs (origin, source, source_key, title, company, url, closed_at) values (${origin}, 'legacy', ${key}, ${key}, 'Acme', ${`https://jobs.example.com/${key}`}, ${closedAt ?? null}) returning id`,
+        );
 
-    const after = await db.select().from(jobs).where(eq(jobs.id, linked[0].id));
-    expect(after[0].recruiterPartnerId).toBeNull();
+      const [hr] = (await opened("hr", "hr-open")).rows;
+      await opened("recruiter", "recruiter-open");
+      await opened("hr", "hr-closed", "2026-01-01 00:00:00");
+      await opened("external", "external-open");
+      await tx.execute(
+        sql`insert into applications (profile_id, job_id) values (${marinaId}, ${hr.id})`,
+      );
+
+      for (const statement of migration.split("--> statement-breakpoint")) {
+        await tx.execute(sql.raw(statement));
+      }
+
+      const legacy = await tx
+        .select({ key: jobs.sourceKey, closedAt: jobs.closedAt })
+        .from(jobs)
+        .where(eq(jobs.source, "legacy"))
+        .orderBy(jobs.sourceKey);
+
+      expect(legacy.map((job) => [job.key, job.closedAt === null])).toEqual([
+        ["external-open", true],
+        ["hr-closed", false],
+        ["hr-open", false],
+        ["recruiter-open", false],
+      ]);
+      expect(legacy.find((job) => job.key === "hr-closed")?.closedAt).toEqual(closedBefore);
+
+      const applied = await tx
+        .select({ title: jobs.title, closedAt: jobs.closedAt })
+        .from(applications)
+        .innerJoin(jobs, eq(jobs.id, applications.jobId))
+        .where(and(eq(applications.profileId, marinaId), eq(jobs.source, "legacy")));
+
+      expect(applied).toEqual([{ title: "hr-open", closedAt: expect.any(Date) }]);
+      expect(await tx.select().from(jobSources)).toEqual([]);
+
+      tx.rollback();
+    });
+
+    await expect(replayed).rejects.toThrow("Rollback");
+    expect(await db.select().from(jobSources)).toHaveLength(3);
   } finally {
     await db.$client.end();
   }

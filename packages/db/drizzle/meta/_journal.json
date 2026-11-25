@@ -132,7 +132,7 @@
       "idx": 18,
       "version": "7",
       "when": 1795740000013,
-      "tag": "0018_add_job_feeds_and_recruiters",
+      "tag": "0018_add_job_sources",
       "breakpoints": true
     }
   ]

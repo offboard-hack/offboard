@@ -13,8 +13,7 @@ import { seedPlans, seedSubscription } from "./billing.fixture.ts";
 import { seedEquipment } from "./equipment.fixture.ts";
 import type { Database } from "./client.ts";
 import { seedExitSurveys } from "./exit-survey.fixture.ts";
-import { seedJobFeeds, type SeedJobFeed } from "./job-feed.fixture.ts";
-import { seedRecruiterPartners, type SeedRecruiterPartner } from "./recruiter-partner.fixture.ts";
+import { seedJobSources, type SeedJobSource } from "./job-source.fixture.ts";
 import { seedJobMatches, type SeedJobMatch } from "./job-match.fixture.ts";
 import { seedJobs, type SeedJob } from "./job.fixture.ts";
 import { seedIntegrations } from "./integration.fixture.ts";
@@ -29,14 +28,13 @@ import {
   integrations,
   interviews,
   invoices,
-  jobFeeds,
   jobMatches,
+  jobSources,
   jobs,
   offboardingCases,
   plans,
   publicPageDailyViews,
   publicPages,
-  recruiterPartners,
   resumeSuggestions,
   resumes,
   subscriptions,
@@ -74,8 +72,7 @@ const noResumes: SeedResume[] = [];
 const noTailoredResumes: SeedTailoredResume[] = [];
 const noJobMatches: SeedJobMatch[] = [];
 const noPublicPages: SeedPublicPage[] = [];
-const noJobFeeds: SeedJobFeed[] = [];
-const noRecruiterPartners: SeedRecruiterPartner[] = [];
+const noJobSources: SeedJobSource[] = [];
 
 export const testSeedFixtures = {
   cases: baseSeedCases,
@@ -88,8 +85,7 @@ export const testSeedFixtures = {
   tailoredResumes: noTailoredResumes,
   jobMatches: noJobMatches,
   publicPages: noPublicPages,
-  jobFeeds: noJobFeeds,
-  recruiterPartners: noRecruiterPartners,
+  jobSources: noJobSources,
 };
 
 export async function seedDatabase(
@@ -105,8 +101,7 @@ export async function seedDatabase(
     tailoredResumes: seedTailoredResumes,
     jobMatches: seedJobMatches,
     publicPages: seedPublicPages,
-    jobFeeds: seedJobFeeds,
-    recruiterPartners: seedRecruiterPartners,
+    jobSources: seedJobSources,
   },
 ) {
   await db.transaction(async (tx) => {
@@ -119,8 +114,7 @@ export async function seedDatabase(
     await tx.delete(applicationEvents);
     await tx.delete(applications);
     await tx.delete(jobs);
-    await tx.delete(recruiterPartners);
-    await tx.delete(jobFeeds);
+    await tx.delete(jobSources);
     await tx.delete(actionConfigs);
     await tx.delete(invoices);
     await tx.delete(subscriptions);
@@ -277,30 +271,13 @@ export async function seedDatabase(
       }
     }
 
-    if (fixtures.jobFeeds.length > 0) {
-      await tx.insert(jobFeeds).values(fixtures.jobFeeds);
+    if (fixtures.jobSources.length > 0) {
+      await tx.insert(jobSources).values(fixtures.jobSources);
     }
-
-    const insertedPartners =
-      fixtures.recruiterPartners.length > 0
-        ? await tx
-            .insert(recruiterPartners)
-            .values(fixtures.recruiterPartners)
-            .returning({ id: recruiterPartners.id })
-        : [];
 
     const insertedJobs =
       fixtures.jobs.length > 0
-        ? await tx
-            .insert(jobs)
-            .values(
-              fixtures.jobs.map((job) => ({
-                ...job,
-                recruiterPartnerId:
-                  job.origin === "recruiter" ? (insertedPartners[0]?.id ?? null) : null,
-              })),
-            )
-            .returning({ id: jobs.id })
+        ? await tx.insert(jobs).values(fixtures.jobs).returning({ id: jobs.id })
         : [];
 
     for (const match of fixtures.jobMatches) {

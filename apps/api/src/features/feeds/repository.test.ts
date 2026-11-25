@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
-import { jobFeeds, jobs } from "@offboard/db/schema";
+import { jobSources, jobs } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { asc, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -430,13 +430,13 @@ describe.skipIf(!url)("feeds repository", () => {
     const disabled = await created("lever", "disabled");
 
     await db
-      .update(jobFeeds)
+      .update(jobSources)
       .set({ lastSyncedAt: new Date(start.getTime() - 6 * 60 * 60_000 - 1) })
-      .where(eq(jobFeeds.id, old.id));
+      .where(eq(jobSources.id, old.id));
     await db
-      .update(jobFeeds)
+      .update(jobSources)
       .set({ lastSyncedAt: new Date(start.getTime() - 6 * 60 * 60_000 + 1) })
-      .where(eq(jobFeeds.id, fresh.id));
+      .where(eq(jobSources.id, fresh.id));
     await feeds.update(disabled.id, { enabled: false });
 
     expect((await feeds.dueIds(start)).sort()).toEqual([never.id, old.id].sort());

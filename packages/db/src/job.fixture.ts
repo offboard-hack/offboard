@@ -1,5 +1,5 @@
 export type SeedJob = {
-  origin: "external" | "hr" | "recruiter";
+  origin: "external";
   source: string;
   sourceKey: string;
   title: string;
@@ -35,7 +35,7 @@ export const seedJobs: SeedJob[] = [
     postedAt: daysAgo(1),
   }),
   seedJob({
-    origin: "hr",
+    origin: "external",
     title: "Analista de Growth",
     company: "Ponte Pagamentos",
     workModel: "remote",
@@ -49,7 +49,7 @@ export const seedJobs: SeedJob[] = [
     postedAt: daysAgo(3),
   }),
   seedJob({
-    origin: "recruiter",
+    origin: "external",
     title: "Analista de Marketing Digital",
     company: "Casa Viva",
     workModel: "hybrid",
@@ -77,7 +77,7 @@ export const seedJobs: SeedJob[] = [
     postedAt: daysAgo(10),
   }),
   seedJob({
-    origin: "recruiter",
+    origin: "external",
     title: "Analista de CRM",
     company: "Casa Viva",
     workModel: "hybrid",

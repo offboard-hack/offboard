@@ -13,7 +13,7 @@ import {
   applications,
   backgroundJobs,
   interviews,
-  jobFeeds,
+  jobSources,
   jobMatches,
   jobs,
   llmUsage,
@@ -3907,8 +3907,14 @@ describe.skipIf(!url)("api", () => {
       const disabled = await createdFeed("disabled");
       const sevenHoursAgo = new Date(Date.now() - 7 * 60 * 60_000);
 
-      await db.update(jobFeeds).set({ lastSyncedAt: sevenHoursAgo }).where(eq(jobFeeds.id, due.id));
-      await db.update(jobFeeds).set({ lastSyncedAt: new Date() }).where(eq(jobFeeds.id, fresh.id));
+      await db
+        .update(jobSources)
+        .set({ lastSyncedAt: sevenHoursAgo })
+        .where(eq(jobSources.id, due.id));
+      await db
+        .update(jobSources)
+        .set({ lastSyncedAt: new Date() })
+        .where(eq(jobSources.id, fresh.id));
       await repos.feeds.update(disabled.id, { enabled: false });
 
       expect(await (await app.drainNow("GET")).json()).toEqual({ processed: 1, failed: 0 });

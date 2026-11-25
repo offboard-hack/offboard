@@ -1,10 +1,10 @@
 import type { Database } from "@offboard/db/client";
-import { jobFeeds, jobs } from "@offboard/db/schema";
+import { jobSources, jobs } from "@offboard/db/schema";
 import { and, asc, eq, isNull, lt, or, sql, type SQL } from "drizzle-orm";
 import { uniqueViolation } from "../../shared/http.js";
 import type { FeedJob, FeedResult } from "./sources.js";
 
-type Provider = (typeof jobFeeds.$inferSelect)["provider"];
+type Provider = (typeof jobSources.$inferSelect)["kind"];
 
 export type FeedView = {
   id: string;
@@ -37,13 +37,13 @@ const latestByKey = (feedJobs: FeedJob[]) => [
 ];
 
 const feedColumns = {
-  id: jobFeeds.id,
-  provider: jobFeeds.provider,
-  board: jobFeeds.board,
-  companyLabel: jobFeeds.companyLabel,
-  enabled: jobFeeds.enabled,
-  lastSyncedAt: jobFeeds.lastSyncedAt,
-  lastError: jobFeeds.lastError,
+  id: jobSources.id,
+  provider: jobSources.kind,
+  board: jobSources.target,
+  companyLabel: jobSources.label,
+  enabled: jobSources.enabled,
+  lastSyncedAt: jobSources.lastSyncedAt,
+  lastError: jobSources.lastError,
 };
 
 type FeedRow = Omit<FeedView, "lastSyncedAt" | "openJobs"> & { lastSyncedAt: Date | null };
@@ -57,22 +57,22 @@ const toView = (row: FeedRow, openJobs: number) =>
 
 export function createFeedsRepository(db: Database) {
   const openJobs = sql<number>`(select count(*)::int from ${jobs} where ${and(
-    ownedBy(sql`${jobFeeds.provider}`, sql`${jobFeeds.board}`),
+    ownedBy(sql`${jobSources.kind}`, sql`${jobSources.target}`),
     isNull(jobs.closedAt),
   )})`;
 
   async function views(where?: SQL) {
     const rows = await db
       .select({ ...feedColumns, openJobs })
-      .from(jobFeeds)
+      .from(jobSources)
       .where(where)
-      .orderBy(asc(jobFeeds.board), asc(jobFeeds.provider));
+      .orderBy(asc(jobSources.target), asc(jobSources.kind));
 
     return rows.map(({ openJobs: count, ...row }) => toView(row, count));
   }
 
   async function get(id: string) {
-    const [view] = await views(eq(jobFeeds.id, id));
+    const [view] = await views(eq(jobSources.id, id));
 
     return view;
   }
@@ -80,8 +80,8 @@ export function createFeedsRepository(db: Database) {
   async function create(input: { provider: Provider; board: string; companyLabel: string | null }) {
     try {
       const [{ openJobs: count, ...row }] = await db
-        .insert(jobFeeds)
-        .values(input)
+        .insert(jobSources)
+        .values({ kind: input.provider, target: input.board, label: input.companyLabel })
         .returning({ ...feedColumns, openJobs });
 
       return toView(row, count);
@@ -94,10 +94,10 @@ export function createFeedsRepository(db: Database) {
 
   async function update(id: string, changes: { enabled?: boolean; companyLabel?: string | null }) {
     const [row] = await db
-      .update(jobFeeds)
-      .set({ ...changes, updatedAt: new Date() })
-      .where(eq(jobFeeds.id, id))
-      .returning({ id: jobFeeds.id });
+      .update(jobSources)
+      .set({ enabled: changes.enabled, label: changes.companyLabel, updatedAt: new Date() })
+      .where(eq(jobSources.id, id))
+      .returning({ id: jobSources.id });
 
     return row && get(row.id);
   }
@@ -105,9 +105,9 @@ export function createFeedsRepository(db: Database) {
   function remove(id: string, now: Date) {
     return db.transaction(async (tx) => {
       const [feed] = await tx
-        .delete(jobFeeds)
-        .where(eq(jobFeeds.id, id))
-        .returning({ provider: jobFeeds.provider, board: jobFeeds.board });
+        .delete(jobSources)
+        .where(eq(jobSources.id, id))
+        .returning({ provider: jobSources.kind, board: jobSources.target });
 
       if (!feed) return false;
 
@@ -122,14 +122,14 @@ export function createFeedsRepository(db: Database) {
 
   async function dueIds(now: Date) {
     const rows = await db
-      .select({ id: jobFeeds.id })
-      .from(jobFeeds)
+      .select({ id: jobSources.id })
+      .from(jobSources)
       .where(
         and(
-          eq(jobFeeds.enabled, true),
+          eq(jobSources.enabled, true),
           or(
-            isNull(jobFeeds.lastSyncedAt),
-            lt(jobFeeds.lastSyncedAt, new Date(now.getTime() - dueAfterMs)),
+            isNull(jobSources.lastSyncedAt),
+            lt(jobSources.lastSyncedAt, new Date(now.getTime() - dueAfterMs)),
           ),
         ),
       );
@@ -140,19 +140,19 @@ export function createFeedsRepository(db: Database) {
   async function sync(feedId: string, result: FeedResult, now: Date) {
     if ("error" in result) {
       await db
-        .update(jobFeeds)
+        .update(jobSources)
         .set({ lastSyncedAt: now, lastError: errorCode(result) })
-        .where(eq(jobFeeds.id, feedId));
+        .where(eq(jobSources.id, feedId));
 
       return "failed" as const;
     }
 
     return db.transaction(async (tx) => {
       const [feed] = await tx
-        .update(jobFeeds)
+        .update(jobSources)
         .set({ lastSyncedAt: now, lastError: null })
-        .where(eq(jobFeeds.id, feedId))
-        .returning({ provider: jobFeeds.provider, board: jobFeeds.board });
+        .where(eq(jobSources.id, feedId))
+        .returning({ provider: jobSources.kind, board: jobSources.target });
 
       if (!feed) return "failed" as const;
 
