@@ -235,6 +235,7 @@ describe.skipIf(!url)("api", () => {
           role: "Analyst",
           department: "RH",
           deadline: "2026-12-01",
+          email: `matrix-${role}-${randomUUID()}@offboard.example`,
         }),
       }),
     );
@@ -368,12 +369,29 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("creates an offboarding", async () => {
-    const body = { name: "Ana Souza", role: "Dev", department: "Eng", deadline: "2026-12-01" };
+    const email = `ana-${randomUUID()}@offboard.example`;
+
+    const body = {
+      name: "Ana Souza",
+      role: "Dev",
+      department: "Eng",
+      deadline: "2026-12-01",
+      email,
+    };
+
     const res = await call("/offboardings", "POST", body);
     const created = await res.json();
 
     expect(res.status).toBe(201);
-    expect(created).toEqual({ id: expect.any(String), ...body, completed: 0, total: 0 });
+    expect(created).toEqual({
+      id: expect.any(String),
+      name: body.name,
+      role: body.role,
+      department: body.department,
+      deadline: body.deadline,
+      completed: 0,
+      total: 0,
+    });
     expect((await call(`/offboardings/${created.id}`)).status).toBe(200);
   });
 
@@ -467,6 +485,7 @@ describe.skipIf(!url)("api", () => {
           role: "Dev",
           department: "Eng",
           deadline: "2026-12-01",
+          email: `rethrow-${randomUUID()}@offboard.example`,
         }),
       }),
     );

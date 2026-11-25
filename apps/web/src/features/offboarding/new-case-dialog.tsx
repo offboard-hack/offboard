@@ -25,12 +25,7 @@ const newCaseSchema = z.object({
   role: z.string().trim().min(1, "Informe o cargo."),
   department: z.enum(offboardingDepartments, { error: "Escolha a área." }),
   deadline: z.iso.date({ error: "Informe uma data válida." }),
-  email: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .transform((value) => value || null)
-    .pipe(z.email("Informe um e-mail válido.").nullable()),
+  email: z.string().trim().toLowerCase().pipe(z.email("Informe um e-mail válido.")),
 });
 
 export type NewCase = z.output<typeof newCaseSchema>;
@@ -38,7 +33,7 @@ export type NewCase = z.output<typeof newCaseSchema>;
 const textFields = [
   { name: "name", label: "Nome", type: "text", required: true },
   { name: "role", label: "Cargo", type: "text", required: true },
-  { name: "email", label: "E-mail do colaborador", type: "email", required: false },
+  { name: "email", label: "E-mail", type: "email", required: true },
 ] as const;
 
 export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => Promise<void> }) {
