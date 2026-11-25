@@ -1,4 +1,5 @@
 import type { Database } from "@offboard/db/client";
+import type { Address } from "@offboard/db/schema";
 import {
   applicationPackages,
   applications,
@@ -21,6 +22,18 @@ const fieldOrder = [
   "noticePeriod",
   "salaryExpectation",
 ] as const;
+
+const cpfMask = /^(\d{3})(\d{3})(\d{3})(\d{2})$/;
+
+const formatCpf = (digits: string) => digits.replace(cpfMask, "$1.$2.$3-$4");
+
+const formatBirthDate = (value: string) => value.split("-").reverse().join("/");
+
+function formatAddress(address: Address) {
+  const line = address.complement ? `${address.number} - ${address.complement}` : address.number;
+
+  return `${address.street}, ${line} - ${address.neighborhood}, ${address.city} - ${address.state}, CEP ${address.cep.replace(/^(\d{5})(\d{3})$/, "$1-$2")}`;
+}
 
 export function createPackagesRepository(db: Database) {
   const answers = createAnswersRepository(db);
@@ -127,11 +140,22 @@ export function createPackagesRepository(db: Database) {
 
     return {
       coverLetter: saved?.coverLetter ?? null,
-      profile: fieldOrder.flatMap((field) => {
-        const { value, share } = fields[field];
+      profile: [
+        ...fieldOrder.flatMap((field) => {
+          const { value, share } = fields[field];
 
-        return share && value !== null ? [{ field, value }] : [];
-      }),
+          return share && value !== null ? [{ field, value }] : [];
+        }),
+        ...(fields.cpf.share && fields.cpf.value !== null
+          ? [{ field: "cpf", value: formatCpf(fields.cpf.value) }]
+          : []),
+        ...(fields.birthDate.share && fields.birthDate.value !== null
+          ? [{ field: "birthDate", value: formatBirthDate(fields.birthDate.value) }]
+          : []),
+        ...(fields.address.share && fields.address.value !== null
+          ? [{ field: "address", value: formatAddress(fields.address.value) }]
+          : []),
+      ],
       answers: library.questions.flatMap((item) =>
         item.answer === null ? [] : [{ question: item.text, answer: item.answer }],
       ),

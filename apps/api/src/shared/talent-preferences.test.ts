@@ -26,6 +26,9 @@ describe("talent preferences view", () => {
         availability: empty,
         noticePeriod: empty,
         salaryExpectation: empty,
+        cpf: empty,
+        birthDate: empty,
+        address: empty,
       },
     });
   });
@@ -78,5 +81,33 @@ describe("talent preferences view", () => {
       seniorities: [],
       excludedCompanies: [],
     });
+  });
+
+  it("keeps stored CPF, birth date and address", () => {
+    const address = {
+      cep: "01310100",
+      street: "Avenida Paulista",
+      number: "1000",
+      complement: null,
+      neighborhood: "Bela Vista",
+      city: "São Paulo",
+      state: "SP",
+    };
+
+    const view = toPreferences({
+      mode: "review",
+      hybridThreshold: 75,
+      targetTitles: [],
+      jobPreferences: {},
+      profileFields: {
+        cpf: { value: "52998224725", share: true },
+        birthDate: { value: "1990-05-17", share: false },
+        address: { value: address, share: true },
+      },
+    });
+
+    expect(view.profileFields.cpf).toEqual({ value: "52998224725", share: true });
+    expect(view.profileFields.birthDate).toEqual({ value: "1990-05-17", share: false });
+    expect(view.profileFields.address).toEqual({ value: address, share: true });
   });
 });

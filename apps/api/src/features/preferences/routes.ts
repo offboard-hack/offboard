@@ -31,6 +31,22 @@ const jobPreferences = t.Object({
 
 const profileField = t.Object({ value: nullableString, share: t.Boolean() });
 
+const addressField = t.Object({
+  value: t.Union([
+    t.Object({
+      cep: t.String(),
+      street: t.String(),
+      number: t.String(),
+      complement: nullableString,
+      neighborhood: t.String(),
+      city: t.String(),
+      state: t.String(),
+    }),
+    t.Null(),
+  ]),
+  share: t.Boolean(),
+});
+
 const profileFields = t.Object({
   phone: profileField,
   city: profileField,
@@ -40,6 +56,9 @@ const profileFields = t.Object({
   availability: profileField,
   noticePeriod: profileField,
   salaryExpectation: profileField,
+  cpf: profileField,
+  birthDate: profileField,
+  address: addressField,
 });
 
 const preferencesResponse = t.Object({

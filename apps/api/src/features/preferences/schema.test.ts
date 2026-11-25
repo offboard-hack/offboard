@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { preferencesInputSchema } from "./schema.js";
 
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
@@ -109,5 +109,187 @@ describe("preferences input", () => {
     for (const profileFields of invalid) {
       expect(parse({ profileFields }).success).toBe(false);
     }
+  });
+
+  describe("CPF, birth date and address", () => {
+    const address = {
+      cep: "01310-100",
+      street: " Avenida Paulista ",
+      number: "1000",
+      complement: "",
+      neighborhood: "Bela Vista",
+      city: "São Paulo",
+      state: "SP",
+    };
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-11-25T12:00:00Z"));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const fields = (profileFields: Json) => parse({ profileFields }).data?.profileFields;
+
+    it("stores a masked CPF as digits", () => {
+      expect(fields({ cpf: { value: " 529.982.247-25 ", share: true } })).toEqual({
+        cpf: { value: "52998224725", share: true },
+      });
+      expect(fields({ cpf: { value: "52998224725", share: false } })).toEqual({
+        cpf: { value: "52998224725", share: false },
+      });
+      expect(fields({ cpf: { value: "", share: false } })).toEqual({
+        cpf: { value: null, share: false },
+      });
+      expect(fields({ cpf: { value: null, share: true } })).toEqual({
+        cpf: { value: null, share: true },
+      });
+    });
+
+    it("rejects invalid CPFs", () => {
+      for (const value of [
+        "529.982.247-24",
+        "111.111.111-11",
+        "5299822472",
+        "529 982 247 25",
+        "abc",
+      ]) {
+        expect(parse({ profileFields: { cpf: { value, share: true } } }).success).toBe(false);
+      }
+    });
+
+    it("accepts a birth date from São Paulo age 14 and up", () => {
+      expect(fields({ birthDate: { value: "2012-11-25", share: true } })).toEqual({
+        birthDate: { value: "2012-11-25", share: true },
+      });
+      expect(
+        parse({ profileFields: { birthDate: { value: "2012-11-26", share: true } } }).success,
+      ).toBe(false);
+      expect(fields({ birthDate: { value: "1990-02-28", share: false } })).toBeDefined();
+      expect(fields({ birthDate: { value: null, share: false } })).toEqual({
+        birthDate: { value: null, share: false },
+      });
+      expect(fields({ birthDate: { value: "", share: false } })).toEqual({
+        birthDate: { value: null, share: false },
+      });
+    });
+
+    it("uses the São Paulo date for the age", () => {
+      vi.setSystemTime(new Date("2026-11-26T02:00:00Z"));
+
+      expect(
+        parse({ profileFields: { birthDate: { value: "2012-11-25", share: true } } }).success,
+      ).toBe(true);
+      expect(
+        parse({ profileFields: { birthDate: { value: "2012-11-26", share: true } } }).success,
+      ).toBe(false);
+
+      vi.setSystemTime(new Date("2026-11-26T03:00:00Z"));
+
+      expect(
+        parse({ profileFields: { birthDate: { value: "2012-11-26", share: true } } }).success,
+      ).toBe(true);
+    });
+
+    it("rejects 13-year-olds, impossible and malformed dates", () => {
+      for (const value of [
+        "2013-11-25",
+        "2026-02-30",
+        "2025-02-29",
+        "2000-13-01",
+        "2000-00-10",
+        "2000-01-00",
+        "1899-12-31",
+        "2000-1-1",
+        "25/11/2000",
+        "2000-01-01T00:00:00Z",
+      ]) {
+        expect(parse({ profileFields: { birthDate: { value, share: true } } }).success).toBe(false);
+      }
+    });
+
+    it("accepts a leap day", () => {
+      expect(fields({ birthDate: { value: "2000-02-29", share: true } })).toBeDefined();
+    });
+
+    it("normalizes the address", () => {
+      expect(fields({ address: { value: address, share: true } })).toEqual({
+        address: {
+          value: { ...address, cep: "01310100", street: "Avenida Paulista", complement: null },
+          share: true,
+        },
+      });
+      expect(
+        fields({
+          address: { value: { ...address, cep: "01310100", complement: " Sala 2 " }, share: false },
+        }),
+      ).toEqual({
+        address: {
+          value: { ...address, cep: "01310100", street: "Avenida Paulista", complement: "Sala 2" },
+          share: false,
+        },
+      });
+      expect(
+        fields({ address: { value: { ...address, complement: null }, share: false } })?.address
+          ?.value?.complement,
+      ).toBeNull();
+      expect(fields({ address: { value: null, share: true } })).toEqual({
+        address: { value: null, share: true },
+      });
+    });
+
+    it("sanitizes address text", () => {
+      expect(
+        fields({ address: { value: { ...address, city: "S\u0000ão" }, share: true } })?.address
+          ?.value?.city,
+      ).toBe("São");
+    });
+
+    it("rejects invalid addresses", () => {
+      const invalid: Json[] = [
+        { ...address, state: "XX" },
+        { ...address, state: "sp" },
+        { ...address, cep: "0131010" },
+        { ...address, cep: "0131-0100" },
+        { ...address, cep: "abcdefgh" },
+        { ...address, street: " " },
+        { ...address, street: "x".repeat(201) },
+        { ...address, number: "" },
+        { ...address, number: "x".repeat(21) },
+        { ...address, complement: "x".repeat(101) },
+        { ...address, neighborhood: "" },
+        { ...address, neighborhood: "x".repeat(101) },
+        { ...address, city: "" },
+        { ...address, city: "x".repeat(101) },
+      ];
+
+      for (const value of invalid) {
+        expect(parse({ profileFields: { address: { value, share: true } } }).success).toBe(false);
+      }
+
+      expect(parse({ profileFields: { address: { value: address } } }).success).toBe(false);
+    });
+
+    it("accepts the maximum lengths", () => {
+      expect(
+        parse({
+          profileFields: {
+            address: {
+              value: {
+                ...address,
+                street: "x".repeat(200),
+                number: "x".repeat(20),
+                complement: "x".repeat(100),
+                neighborhood: "x".repeat(100),
+                city: "x".repeat(100),
+              },
+              share: true,
+            },
+          },
+        }).success,
+      ).toBe(true);
+    });
   });
 });

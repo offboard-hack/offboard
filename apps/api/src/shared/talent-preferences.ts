@@ -37,6 +37,9 @@ export function toPreferences(row: StoredPreferences | undefined) {
       availability: field(fields.availability),
       noticePeriod: field(fields.noticePeriod),
       salaryExpectation: field(fields.salaryExpectation),
+      cpf: field(fields.cpf),
+      birthDate: field(fields.birthDate),
+      address: { value: fields.address?.value ?? null, share: fields.address?.share ?? false },
     },
   };
 }

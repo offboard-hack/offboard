@@ -594,6 +594,9 @@ describe.skipIf(!url)("account repository", () => {
         availability: { value: null, share: false },
         noticePeriod: { value: null, share: false },
         salaryExpectation: { value: null, share: false },
+        cpf: { value: null, share: false },
+        birthDate: { value: null, share: false },
+        address: { value: null, share: false },
       },
     });
 

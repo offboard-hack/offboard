@@ -3369,6 +3369,74 @@ describe.skipIf(!url)("api", () => {
             expect(app.calls).toEqual([]);
           });
 
+          it("lists only the shared CPF, birth date and address in the package", async () => {
+            const jobId = await openJob("formulario");
+            const { id, call } = await tailoringApp();
+
+            await db.insert(talentPreferences).values({
+              profileId: id,
+              profileFields: {
+                linkedin: { value: "linkedin.com/in/eu", share: true },
+                cpf: { value: "52998224725", share: true },
+                birthDate: { value: "1990-05-17", share: true },
+                address: {
+                  value: {
+                    cep: "01310100",
+                    street: "Avenida Paulista",
+                    number: "1000",
+                    complement: "Sala 2",
+                    neighborhood: "Bela Vista",
+                    city: "São Paulo",
+                    state: "SP",
+                  },
+                  share: true,
+                },
+              },
+            });
+
+            const shown = await (await call(`/me/jobs/${jobId}/package`)).json();
+
+            expect(shown.profile).toEqual([
+              { field: "linkedin", value: "linkedin.com/in/eu" },
+              { field: "cpf", value: "529.982.247-25" },
+              { field: "birthDate", value: "17/05/1990" },
+              {
+                field: "address",
+                value:
+                  "Avenida Paulista, 1000 - Sala 2 - Bela Vista, São Paulo - SP, CEP 01310-100",
+              },
+            ]);
+
+            await db
+              .update(talentPreferences)
+              .set({
+                profileFields: {
+                  cpf: { value: "52998224725", share: false },
+                  birthDate: { value: null, share: true },
+                  address: {
+                    value: {
+                      cep: "01310100",
+                      street: "Rua A",
+                      number: "5",
+                      complement: null,
+                      neighborhood: "Centro",
+                      city: "Campinas",
+                      state: "SP",
+                    },
+                    share: true,
+                  },
+                },
+              })
+              .where(eq(talentPreferences.profileId, id));
+
+            const partial = await (await call(`/me/jobs/${jobId}/package`)).json();
+
+            expect(partial.profile).toEqual([
+              { field: "address", value: "Rua A, 5 - Centro, Campinas - SP, CEP 01310-100" },
+            ]);
+            expect(JSON.stringify(partial)).not.toContain("529");
+          });
+
           it("writes, stores and replaces the cover letter", async () => {
             const jobId = await openJob("carta");
             const { app, id, call } = await tailoringApp();
@@ -4451,6 +4519,9 @@ describe.skipIf(!url)("api", () => {
             availability: emptyField,
             noticePeriod: emptyField,
             salaryExpectation: emptyField,
+            cpf: emptyField,
+            birthDate: emptyField,
+            address: emptyField,
           },
         };
 
@@ -4524,6 +4595,97 @@ describe.skipIf(!url)("api", () => {
           });
           expect(body.profileFields.phone).toEqual({ value: "11 90000-0000", share: true });
           expect(await (await request(instance, id, "/me/preferences")).json()).toEqual(body);
+        });
+
+        it("validates CPF, birth date and address", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          const address = {
+            cep: "01310-100",
+            street: " Avenida Paulista ",
+            number: "1000",
+            complement: "",
+            neighborhood: "Bela Vista",
+            city: "São Paulo",
+            state: "SP",
+          };
+
+          const birth = (years: number, shift = 0) => {
+            const date = new Date(Date.now() - 3 * 3_600_000);
+
+            return new Date(
+              Date.UTC(
+                date.getUTCFullYear() - years,
+                date.getUTCMonth(),
+                date.getUTCDate() + shift,
+              ),
+            )
+              .toISOString()
+              .slice(0, 10);
+          };
+
+          const saved = await save(instance, id, {
+            profileFields: {
+              cpf: { value: "529.982.247-25", share: true },
+              birthDate: { value: birth(14), share: true },
+              address: { value: address, share: true },
+            },
+          });
+
+          expect(saved.status).toBe(200);
+          expect((await saved.json()).profileFields).toMatchObject({
+            cpf: { value: "52998224725", share: true },
+            birthDate: { value: birth(14), share: true },
+            address: {
+              value: {
+                ...address,
+                cep: "01310100",
+                street: "Avenida Paulista",
+                complement: null,
+              },
+              share: true,
+            },
+          });
+
+          const rejected: PreferencesJson[] = [
+            { cpf: { value: "529.982.247-24", share: true } },
+            { cpf: { value: "111.111.111-11", share: true } },
+            { birthDate: { value: birth(13), share: true } },
+            { birthDate: { value: birth(14, 1), share: true } },
+            { birthDate: { value: "2026-02-30", share: true } },
+            { address: { value: { ...address, state: "XX" }, share: true } },
+          ];
+
+          for (const profileFields of rejected) {
+            const res = await save(instance, id, { profileFields });
+
+            expect(res.status).toBe(422);
+            expect(await res.json()).toEqual({ error: "Invalid preferences" });
+          }
+        });
+
+        it("keeps the other fields when saving the form fields", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          await save(instance, id, {
+            profileFields: {
+              phone: { value: "11 90000-0000", share: true },
+              cpf: { value: "52998224725", share: true },
+            },
+          });
+
+          const res = await save(instance, id, {
+            profileFields: { birthDate: { value: "1990-05-17", share: false } },
+          });
+
+          expect((await res.json()).profileFields).toMatchObject({
+            phone: { value: "11 90000-0000", share: true },
+            cpf: { value: "52998224725", share: true },
+            birthDate: { value: "1990-05-17", share: false },
+            address: { value: null, share: false },
+          });
         });
 
         it("rejects invalid input with one error body", async () => {
