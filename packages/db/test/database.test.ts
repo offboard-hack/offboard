@@ -1316,6 +1316,34 @@ it.skipIf(!url)("stores AI applications", async () => {
   }
 });
 
+it.skipIf(!url)("reseeds over leftover AI applications", async () => {
+  const db = createClient(url ?? "");
+
+  try {
+    await migrate(db, {
+      migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
+    });
+    await seedDatabase(db);
+
+    const profileId = await marinaProfileId(db);
+    const [job] = await db.select({ id: jobs.id }).from(jobs);
+
+    await db.insert(aiApplications).values({
+      profileId,
+      jobId: job.id,
+      form: { questions: [] },
+      draft: [],
+      preparedAt: new Date("2026-11-25T12:00:00Z"),
+    });
+
+    await seedDatabase(db);
+
+    expect(await db.select().from(aiApplications)).toHaveLength(0);
+  } finally {
+    await db.$client.end();
+  }
+});
+
 describe("normalizeQuestion", () => {
   it("lowercases, strips accents, collapses whitespace and drops trailing punctuation", () => {
     expect(normalizeQuestion("  Qual a   sua Pretensão Salarial?! ")).toBe(

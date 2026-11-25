@@ -31,6 +31,7 @@ import { seedIntegrations } from "./integration.fixture.ts";
 import { baseSeedCases, seedCases } from "./offboarding.fixture.ts";
 import {
   actionConfigs,
+  aiApplications,
   answerQuestions,
   applicationEvents,
   applications,
@@ -140,6 +141,7 @@ export async function seedDatabase(
     await tx.delete(resumes);
     await tx.delete(interviews);
     await tx.delete(applicationEvents);
+    await tx.delete(aiApplications);
     await tx.delete(applications);
     await tx.delete(jobs);
     await tx.delete(jobSources);
