@@ -95,6 +95,25 @@ describe("parseLocation", () => {
     });
   });
 
+  it.each([
+    ["Remoto"],
+    ["remota"],
+    ["Híbrido"],
+    ["HIBRIDO"],
+    ["Presencial"],
+    [" - Remoto. "],
+    ["(híbrido)"],
+  ])("counts the work-model location %s as Brazil", (text) => {
+    expect(parseLocation(text)).toEqual({ city: null, state: null, inBrazil: true });
+  });
+
+  it.each([["Remote"], ["Hybrid"], ["Remoto, Lisboa, Portugal"], ["Remotos"]])(
+    "does not count %s as a Brazilian work-model location",
+    (text) => {
+      expect(parseLocation(text)).toEqual({ city: null, state: null, inBrazil: false });
+    },
+  );
+
   it("only trusts a lowercase or unguarded UF when nothing else says Brazil", () => {
     expect(parseLocation("Campinas, SP")).toEqual({ city: null, state: null, inBrazil: false });
     expect(parseLocation("Campinas - sp")).toEqual({ city: null, state: null, inBrazil: false });

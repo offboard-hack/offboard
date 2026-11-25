@@ -116,7 +116,7 @@ describe("fetchFeed", () => {
         }),
         leverPosting("b3", {
           workplaceType: "onsite",
-          country: "US",
+          country: null,
           categories: { location: "New York, NY", allLocations: ["New York, NY", "Recife - PE"] },
         }),
         leverPosting("b4", {
@@ -460,13 +460,13 @@ describe("fetchFeed", () => {
     expect(await fetchFeed(lever, fetchImpl)).toEqual({ error: "invalid_json" });
   });
 
-  it("reports a timed out or failed request as a timeout", async () => {
+  it("reports a timed out or aborted request as a timeout", async () => {
     const timedOut = async () => {
       throw new DOMException("The operation timed out.", "TimeoutError");
     };
 
-    const refused = async () => {
-      throw new TypeError("fetch failed");
+    const aborted = async () => {
+      throw new DOMException("This operation was aborted", "AbortError");
     };
 
     const stalled = new ReadableStream<Uint8Array>({
@@ -479,8 +479,91 @@ describe("fetchFeed", () => {
     const { fetchImpl } = recordingFetch(new Response(stalled));
 
     expect(await fetchFeed(greenhouse, timedOut)).toEqual({ error: "timeout" });
-    expect(await fetchFeed(lever, refused)).toEqual({ error: "timeout" });
+    expect(await fetchFeed(lever, aborted)).toEqual({ error: "timeout" });
     expect(await fetchFeed(lever, fetchImpl)).toEqual({ error: "timeout" });
+  });
+
+  it("reports any other failed request as a network error", async () => {
+    const refused = async () => {
+      throw new TypeError("fetch failed");
+    };
+
+    const broken = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error("socket hang up"));
+      },
+    });
+
+    const thrownString = async () => {
+      throw "boom";
+    };
+
+    const { fetchImpl } = recordingFetch(new Response(broken));
+
+    expect(await fetchFeed(greenhouse, refused)).toEqual({ error: "network" });
+    expect(await fetchFeed(lever, fetchImpl)).toEqual({ error: "network" });
+    expect(await fetchFeed(lever, thrownString)).toEqual({ error: "network" });
+  });
+
+  it("does not follow redirects", async () => {
+    const { calls, fetchImpl } = recordingFetch(
+      new Response(null, { status: 302, headers: { location: "https://169.254.169.254/latest" } }),
+      json([]),
+    );
+
+    expect(await fetchFeed(lever, fetchImpl)).toEqual({ error: "http_error", status: 302 });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.init?.redirect).toBe("manual");
+  });
+
+  it("drops Lever jobs from another country unless the location says Brazil", async () => {
+    const { fetchImpl } = recordingFetch(
+      json([
+        leverPosting("f1", {
+          country: "US",
+          categories: { location: "New York, NY", allLocations: ["New York, NY", "Recife - PE"] },
+        }),
+        leverPosting("f2", { country: "US", categories: { location: "Remoto", allLocations: [] } }),
+        leverPosting("f3", {
+          country: "us",
+          categories: { location: "New York, NY", allLocations: ["Recife - PE, Brasil"] },
+        }),
+        leverPosting("f4", { country: "PT", categories: { location: "Bahia", allLocations: [] } }),
+      ]),
+    );
+
+    const result = await fetchFeed(lever, fetchImpl);
+
+    expect(result).toMatchObject({ skipped: 0 });
+    expect(
+      "jobs" in result && result.jobs.map((job) => [job.sourceKey, job.city, job.state]),
+    ).toEqual([["acme-corp_br:f3", "Recife", "PE"]]);
+  });
+
+  it("counts a Portuguese work-model location as Brazil", async () => {
+    const { fetchImpl } = recordingFetch(
+      json({
+        jobs: [
+          greenhouseJob(1, { location: { name: "Remoto" } }),
+          greenhouseJob(2, { location: { name: "Remote" } }),
+          greenhouseJob(3, { location: { name: " (Híbrido) " } }),
+        ],
+      }),
+      json([leverPosting("p1", { country: null, categories: { location: "Presencial" } })]),
+    );
+
+    const result = await fetchFeed(greenhouse, fetchImpl);
+    const leverResult = await fetchFeed(lever, fetchImpl);
+
+    expect(
+      "jobs" in result && result.jobs.map((job) => [job.sourceKey, job.city, job.state]),
+    ).toEqual([
+      ["acme:1", null, null],
+      ["acme:3", null, null],
+    ]);
+    expect("jobs" in leverResult && leverResult.jobs.map((job) => job.sourceKey)).toEqual([
+      "acme-corp_br:p1",
+    ]);
   });
 
   it("rejects a declared or streamed body over 10 MB", async () => {

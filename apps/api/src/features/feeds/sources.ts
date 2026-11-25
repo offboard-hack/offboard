@@ -3,7 +3,7 @@ import { decodeEntities, htmlToText } from "../../shared/html-text.js";
 import { parsePublicUrl } from "../../shared/page-text.js";
 import { discardBody, readCapped } from "../../shared/response-body.js";
 import { sanitizeText, storableClip } from "../../shared/storable-text.js";
-import { parseLocation, workModelFrom } from "./normalize.js";
+import { mentionsBrazil, parseLocation, workModelFrom } from "./normalize.js";
 
 export type FeedJob = {
   sourceKey: string;
@@ -19,7 +19,7 @@ export type FeedJob = {
 
 export type FeedResult =
   | { jobs: FeedJob[]; skipped: number }
-  | { error: "http_error" | "invalid_json" | "timeout" | "too_large"; status?: number };
+  | { error: "http_error" | "invalid_json" | "timeout" | "network" | "too_large"; status?: number };
 
 type Feed = { provider: "greenhouse" | "lever"; board: string; companyLabel: string | null };
 
@@ -168,12 +168,17 @@ const readLever = (text: string, feed: Feed) => {
 
   return collect(parsed.data, leverPosting, (posting) => {
     const { location, allLocations } = posting.categories;
+    const country = posting.country.trim().toUpperCase();
+    const foreign = country !== "" && country !== "BR";
+    const candidates = [location, ...allLocations];
+
+    const eligible = foreign
+      ? candidates.filter((candidate) => mentionsBrazil(candidate))
+      : candidates;
 
     const place =
-      [location, ...allLocations]
-        .map((candidate) => placeOf(candidate))
-        .find((candidate) => candidate.inBrazil) ??
-      placeOf(posting.country.toUpperCase() === "BR" ? `${location}, Brasil` : "");
+      eligible.map((candidate) => placeOf(candidate)).find((candidate) => candidate.inBrazil) ??
+      placeOf(country === "BR" ? `${location}, Brasil` : "");
 
     if (!place.inBrazil) return null;
 
@@ -209,6 +214,7 @@ const download = async (url: string, fetchImpl: typeof fetch) => {
   try {
     const response = await fetchImpl(url, {
       signal: AbortSignal.timeout(timeoutMs),
+      redirect: "manual",
       headers: { accept: "application/json" },
     });
 
@@ -227,8 +233,11 @@ const download = async (url: string, fetchImpl: typeof fetch) => {
     const text = response.body === null ? "" : await readCapped(response.body, maxBytes);
 
     return text === null ? ({ error: "too_large" } satisfies FeedResult) : { text };
-  } catch {
-    return { error: "timeout" } satisfies FeedResult;
+  } catch (cause) {
+    const timedOut =
+      cause instanceof Error && (cause.name === "TimeoutError" || cause.name === "AbortError");
+
+    return { error: timedOut ? "timeout" : "network" } satisfies FeedResult;
   }
 };
 

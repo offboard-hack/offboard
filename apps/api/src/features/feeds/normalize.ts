@@ -36,7 +36,10 @@ const ufs = new Set<string>(states.map(([uf]) => uf));
 
 const separator = /(\s+[-–]\s+|[,/()])/;
 const brazilMention = /\bbra[sz]il/;
+const workModelOnly = /^(?:remot[oa]|hibrido|presencial)$/;
 const noise = /^(?:bra[sz]il|remot[aoe]|h[iy]brid[oa]?|presencial|on-?site)$/;
+
+export const mentionsBrazil = (text: string) => brazilMention.test(fold(text));
 
 export const brazilState = (text: string) => {
   const trimmed = text.trim();
@@ -49,7 +52,7 @@ const stateOf = (segment: { text: string; dashed: boolean }, inBrazil: boolean) 
 
 const parseGroup = (text: string) => {
   const pieces = text.split(separator);
-  const inBrazil = brazilMention.test(fold(text));
+  const inBrazil = mentionsBrazil(text);
 
   const segments = pieces.flatMap((piece, index) =>
     index % 2 === 0 && piece.trim() !== ""
@@ -71,6 +74,10 @@ const parseGroup = (text: string) => {
 };
 
 export const parseLocation = (text: string) => {
+  if (workModelOnly.test(fold(text).replace(/^[^a-z]+|[^a-z]+$/g, ""))) {
+    return { city: null, state: null, inBrazil: true };
+  }
+
   const places = text.split(/[;|]/).map((group) => parseGroup(group));
 
   return places.find((place) => place.inBrazil) ?? places[0];
