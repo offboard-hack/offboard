@@ -765,6 +765,110 @@ describe.skipIf(!url)("api", () => {
       expect((await stateOf(draft)).state).toBe("cancelled");
     });
 
+    it("prepares an AI Apply draft through the composed app", async () => {
+      const [firstCase] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
+
+      const created = await repos.talent.enable({
+        caseId: firstCase.id,
+        personalEmail,
+        sponsoredUntil,
+      });
+
+      if (
+        created === "case_not_found" ||
+        created === "already_enabled" ||
+        created === "email_taken"
+      ) {
+        throw new Error(created);
+      }
+
+      await repos.talent.acceptTerms(created.id);
+      await repos.talent.setAiApplyConsent(created.id, true, new Date());
+
+      await db.insert(resumes).values({
+        profileId: created.id,
+        kind: "base",
+        content: {
+          headline: { id: "h", text: "Engenheira" },
+          summary: { id: "s", text: "Backend" },
+          experiences: [],
+          education: [],
+          skills: [],
+          languages: [],
+          contact: { email: null, phone: null, city: null, links: [] },
+        },
+      });
+
+      await db.insert(jobs).values({
+        origin: "external",
+        source: "greenhouse",
+        sourceKey: "acme:42",
+        title: "Backend",
+        company: "Acme",
+        url: "https://job-boards.greenhouse.io/acme/jobs/42",
+      });
+
+      const [job] = await db
+        .select({ id: jobs.id })
+        .from(jobs)
+        .where(eq(jobs.sourceKey, "acme:42"));
+
+      const [common] = await db
+        .select({ id: answerQuestions.id, text: answerQuestions.text })
+        .from(answerQuestions)
+        .where(eq(answerQuestions.text, "Como você soube da vaga?"));
+
+      await repos.answers.answer(created.id, common.id, "Resposta pronta", new Date());
+
+      const urls: string[] = [];
+
+      const instance = createApp(webOrigin, repos, {
+        ...appOptions,
+        aiApplyAllowlist: [personalEmail],
+        generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
+        fetchGreenhouseImpl: async (input) => {
+          urls.push(String(input));
+
+          return new Response(
+            JSON.stringify({
+              questions: [
+                {
+                  label: common.text,
+                  required: false,
+                  fields: [{ name: "question_1", type: "input_text", values: [] }],
+                },
+              ],
+            }),
+          );
+        },
+      });
+
+      const res = await instance.handle(
+        new Request(`http://localhost/api/me/jobs/${job.id}/ai-apply`, {
+          method: "POST",
+          headers: {
+            "x-test-session": "talent",
+            "x-test-talent-id": created.id,
+            origin: webOrigin,
+          },
+        }),
+      );
+
+      expect(res.status).toBe(201);
+      expect(urls).toEqual([
+        "https://boards-api.greenhouse.io/v1/boards/acme/jobs/42?questions=true",
+      ]);
+      expect((await res.json()).attempt.answers).toEqual([
+        {
+          questionId: "question_1",
+          value: "Resposta pronta",
+          source: "library",
+          inferred: false,
+          status: "filled",
+        },
+      ]);
+    });
+
     it("denies a talent session whose profile no longer exists", async () => {
       const gone = await asSession("talent", "/me", "GET", undefined, {
         "x-test-talent-id": missingCaseId,

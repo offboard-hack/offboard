@@ -32,6 +32,8 @@ import type { ObjectStorage } from "./shared/object-storage.js";
 import { logFailure } from "./shared/error-summary.js";
 import { rejectionsRoutes } from "./features/preferences/rejections-routes.js";
 import { answersRoutes } from "./features/preferences/answers-routes.js";
+import { readGreenhouseForm } from "./features/ai-apply/greenhouse.js";
+import { aiApplyRoutes } from "./features/ai-apply/routes.js";
 import { packageRoutes } from "./features/preferences/package-routes.js";
 import { preferencesRoutes } from "./features/preferences/routes.js";
 import { teamRoutes } from "./features/team/routes.js";
@@ -57,6 +59,7 @@ type AppOptions = {
   generateStructured?: GenerateStructured;
   catalog?: readonly CatalogSource[];
   fetchFeedImpl?: typeof fetch;
+  fetchGreenhouseImpl?: typeof fetch;
   storage?: ObjectStorage;
   runInBackground?: (task: () => Promise<void>) => void;
   publicPageOrigin?: string;
@@ -84,6 +87,8 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     talent: repos.talent,
     companyActive,
   });
+
+  const fetchGreenhouse = options.fetchGreenhouseImpl ?? fetch;
 
   const pageOrigin = (options.publicPageOrigin || webOrigin).replace(/\/$/, "");
 
@@ -295,6 +300,18 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       packageRoutes(repos.packages, talent, {
         generate: options.generateStructured,
         takeLlmCall: repos.llmUsage.takeLlmCall,
+      }),
+    )
+    .use(
+      aiApplyRoutes(repos.aiApply, talent, {
+        allowlist: options.aiApplyAllowlist ?? [],
+        generate: options.generateStructured,
+        takeLlmCall: repos.llmUsage.takeLlmCall,
+        readForm: (board, posting) => readGreenhouseForm(fetchGreenhouse, board, posting),
+        library: async (profileId) =>
+          (await repos.answers.library(profileId)).questions.flatMap((item) =>
+            item.answer === null ? [] : [{ question: item.text, answer: item.answer }],
+          ),
       }),
     )
     .use(backgroundRoutes(repos.background, handlers, options.cronSecret, scheduleSources))

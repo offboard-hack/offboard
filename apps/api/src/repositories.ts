@@ -18,6 +18,7 @@ import { createAccountRepository } from "./features/account/repository.js";
 import { createBackgroundRepository } from "./features/background/repository.js";
 import { createPagesRepository } from "./features/pages/repository.js";
 import { createInsightsRepository } from "./features/insights/repository.js";
+import { createAiApplyRepository } from "./features/ai-apply/repository.js";
 import { createAnswersRepository } from "./features/preferences/answers.js";
 import { createPackagesRepository } from "./features/preferences/package.js";
 import { createRejectionsRepository } from "./features/preferences/rejections.js";
@@ -50,6 +51,7 @@ export function createRepositories(db: Database) {
     answers: createAnswersRepository(db),
     rejections: createRejectionsRepository(db),
     packages: createPackagesRepository(db),
+    aiApply: createAiApplyRepository(db),
   };
 }
 
