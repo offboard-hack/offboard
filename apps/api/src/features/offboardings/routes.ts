@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
 import { z } from "zod";
 import type { PortalAccessPlugin } from "../../shared/access.js";
-import { errorResponse } from "../../shared/http.js";
+import { errorResponse, uniqueViolation } from "../../shared/http.js";
 import { hasBearer } from "../../shared/machine-auth.js";
 import type { DispatchAction } from "../../shared/action-dispatch.js";
 import { trackPackage } from "./correios.js";
@@ -102,10 +102,19 @@ export function offboardingsRoutes(
     })
     .post(
       "/offboardings",
-      async ({ body, set }) => {
-        set.status = 201;
+      async ({ body, set, status }) => {
+        try {
+          const created = await repos.createOffboarding(body);
+          set.status = 201;
 
-        return repos.createOffboarding(body);
+          return created;
+        } catch (error) {
+          if (uniqueViolation.safeParse(error).success) {
+            return status(409, { error: "Email already in use" });
+          }
+
+          throw error;
+        }
       },
       {
         permit: ["create", "Offboarding"],
@@ -114,8 +123,9 @@ export function offboardingsRoutes(
           role: text,
           department: text,
           deadline: t.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" }),
+          email: t.Optional(t.Union([t.String({ format: "email" }), t.Null()])),
         }),
-        response: { 201: caseSummary },
+        response: { 201: caseSummary, 409: errorResponse },
       },
     )
     .post(

@@ -1,13 +1,14 @@
 import type { Database } from "@offboard/db/client";
 import { and, asc, eq, isNotNull, ne, sql } from "drizzle-orm";
-import { offboardingCases, subtasks, tasks } from "@offboard/db/schema";
+import { employeeAccess, offboardingCases, subtasks, tasks } from "@offboard/db/schema";
+import { emptyEmployeePlan } from "@offboard/employee";
 
 type TaskStatus = (typeof tasks.$inferSelect)["status"];
 
 type NewOffboarding = Pick<
   typeof offboardingCases.$inferInsert,
   "name" | "role" | "department" | "deadline"
->;
+> & { email?: string | null };
 
 type BulkOffboardingRow = Pick<NewOffboarding, "name" | "department">;
 
@@ -101,12 +102,25 @@ export function createOffboardingsRepository(db: Database) {
   }
 
   async function createOffboarding(data: NewOffboarding) {
-    const [inserted] = await db
-      .insert(offboardingCases)
-      .values(data)
-      .returning({ id: offboardingCases.id });
+    const { email, ...caseData } = data;
+    const normalizedEmail = email?.trim().toLowerCase() || null;
 
-    return { id: inserted.id, ...data, completed: 0, total: 0 };
+    return db.transaction(async (tx) => {
+      const [inserted] = await tx
+        .insert(offboardingCases)
+        .values(caseData)
+        .returning({ id: offboardingCases.id });
+
+      if (normalizedEmail) {
+        await tx.insert(employeeAccess).values({
+          caseId: inserted.id,
+          email: normalizedEmail,
+          plan: emptyEmployeePlan,
+        });
+      }
+
+      return { id: inserted.id, ...caseData, completed: 0, total: 0 };
+    });
   }
 
   async function bulkCreateOffboardings(rows: BulkOffboardingRow[]) {
