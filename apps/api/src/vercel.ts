@@ -1,4 +1,5 @@
 import { createClient } from "@offboard/db/client";
+import { defaultOrgId } from "@offboard/db/schema";
 import { node } from "@elysia/node";
 import { sql } from "drizzle-orm";
 import { createRepositories } from "./repositories.js";
@@ -14,7 +15,13 @@ const noopAuth: PortalAuth = {
   resolvePrincipal: () =>
     Promise.resolve({
       kind: "authenticated",
-      principal: { id: "system", name: "System", email: "system@offboard.app", role: "admin" },
+      principal: {
+        id: "system",
+        name: "System",
+        email: "system@offboard.app",
+        role: "admin",
+        orgId: defaultOrgId,
+      },
     }),
 };
 

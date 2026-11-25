@@ -29,15 +29,36 @@ export type ConfigValue =
 
 export const taskStatusEnum = pgEnum("task_status", ["todo", "in_progress", "done"]);
 
-export const offboardingCases = pgTable("offboarding_cases", {
+export const defaultOrgId = "00000000-0000-0000-0000-000000000001";
+
+export const organizations = pgTable("organizations", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: varchar("name", { length: 255 }).notNull(),
-  role: varchar("role", { length: 255 }).notNull(),
-  department: varchar("department", { length: 255 }).notNull(),
-  deadline: date("deadline").notNull(),
+  slug: varchar("slug", { length: 100 }).notNull().unique(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+const orgIdColumn = () =>
+  uuid("org_id")
+    .notNull()
+    .default(defaultOrgId)
+    .references(() => organizations.id);
+
+export const offboardingCases = pgTable(
+  "offboarding_cases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: orgIdColumn(),
+    name: varchar("name", { length: 255 }).notNull(),
+    role: varchar("role", { length: 255 }).notNull(),
+    department: varchar("department", { length: 255 }).notNull(),
+    deadline: date("deadline").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [index("offboarding_cases_org_id_idx").on(table.orgId)],
+);
 
 export const employeeAccess = pgTable(
   "employee_access",
@@ -49,8 +70,12 @@ export const employeeAccess = pgTable(
     plan: jsonb("plan").$type<ConfigValue>().notNull(),
     revision: integer("revision").notNull().default(1),
     grantId: uuid("grant_id").notNull().defaultRandom(),
+    orgId: orgIdColumn(),
   },
-  (table) => [uniqueIndex("employee_access_email_idx").on(sql`lower(${table.email})`)],
+  (table) => [
+    uniqueIndex("employee_access_email_idx").on(sql`lower(${table.email})`),
+    index("employee_access_org_id_idx").on(table.orgId),
+  ],
 );
 
 export const employeeStateKind = pgEnum("employee_state_kind", [
@@ -71,31 +96,41 @@ export const employeeStates = pgTable(
     key: employeeStateKind("key").notNull(),
     revision: integer("revision").notNull(),
     value: jsonb("value").$type<ConfigValue>().notNull(),
+    orgId: orgIdColumn(),
   },
-  (table) => [primaryKey({ columns: [table.caseId, table.userId, table.key] })],
+  (table) => [
+    primaryKey({ columns: [table.caseId, table.userId, table.key] }),
+    index("employee_states_org_id_idx").on(table.orgId),
+  ],
 );
 
-export const tasks = pgTable("tasks", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  caseId: uuid("case_id")
-    .notNull()
-    .references(() => offboardingCases.id, { onDelete: "cascade" }),
-  title: varchar("title", { length: 500 }).notNull(),
-  team: varchar("team", { length: 255 }).notNull(),
-  status: taskStatusEnum("status").notNull().default("todo"),
-  description: text("description"),
-  dueDate: date("due_date"),
-  position: integer("position").notNull(),
-  phase: varchar("phase", { length: 50 }),
-  trackingCode: varchar("tracking_code", { length: 30 }),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
+export const tasks = pgTable(
+  "tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: orgIdColumn(),
+    caseId: uuid("case_id")
+      .notNull()
+      .references(() => offboardingCases.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 500 }).notNull(),
+    team: varchar("team", { length: 255 }).notNull(),
+    status: taskStatusEnum("status").notNull().default("todo"),
+    description: text("description"),
+    dueDate: date("due_date"),
+    position: integer("position").notNull(),
+    phase: varchar("phase", { length: 50 }),
+    trackingCode: varchar("tracking_code", { length: 30 }),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [index("tasks_org_id_idx").on(table.orgId)],
+);
 
 export const subtasks = pgTable(
   "subtasks",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    orgId: orgIdColumn(),
     taskId: uuid("task_id")
       .notNull()
       .references(() => tasks.id, { onDelete: "cascade" }),
@@ -105,13 +140,17 @@ export const subtasks = pgTable(
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
-  (table) => [index("subtasks_task_id_idx").on(table.taskId)],
+  (table) => [
+    index("subtasks_task_id_idx").on(table.taskId),
+    index("subtasks_org_id_idx").on(table.orgId),
+  ],
 );
 
 export const exitSurveys = pgTable(
   "exit_surveys",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    orgId: orgIdColumn(),
     caseId: uuid("case_id")
       .notNull()
       .references(() => offboardingCases.id, { onDelete: "cascade" }),
@@ -124,6 +163,7 @@ export const exitSurveys = pgTable(
   },
   (table) => [
     uniqueIndex("exit_surveys_case_id_idx").on(table.caseId),
+    index("exit_surveys_org_id_idx").on(table.orgId),
     check("exit_surveys_nps_score_range", sql`${table.npsScore} between 0 and 10`),
   ],
 );
@@ -132,9 +172,17 @@ export const offboardingCasesRelations = relations(offboardingCases, ({ many, on
   tasks: many(tasks),
   equipment: many(equipment),
   exitSurvey: one(exitSurveys),
+  organization: one(organizations, {
+    fields: [offboardingCases.orgId],
+    references: [organizations.id],
+  }),
 }));
 
 export const exitSurveysRelations = relations(exitSurveys, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [exitSurveys.orgId],
+    references: [organizations.id],
+  }),
   case: one(offboardingCases, {
     fields: [exitSurveys.caseId],
     references: [offboardingCases.id],
@@ -147,9 +195,17 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
     references: [offboardingCases.id],
   }),
   subtasks: many(subtasks),
+  organization: one(organizations, {
+    fields: [tasks.orgId],
+    references: [organizations.id],
+  }),
 }));
 
 export const subtasksRelations = relations(subtasks, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [subtasks.orgId],
+    references: [organizations.id],
+  }),
   task: one(tasks, {
     fields: [subtasks.taskId],
     references: [tasks.id],
@@ -171,21 +227,30 @@ export const equipment = pgTable(
   "equipment",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    orgId: orgIdColumn(),
     caseId: uuid("case_id")
       .notNull()
       .references(() => offboardingCases.id, { onDelete: "cascade" }),
     item: varchar("item", { length: 255 }).notNull(),
-    tag: varchar("tag", { length: 50 }).notNull().unique(),
+    tag: varchar("tag", { length: 50 }).notNull(),
     returnMethod: equipmentReturnMethodEnum("return_method").notNull(),
     scheduledDate: date("scheduled_date"),
     status: equipmentStatusEnum("status").notNull(),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
-  (table) => [index("equipment_case_id_idx").on(table.caseId)],
+  (table) => [
+    index("equipment_case_id_idx").on(table.caseId),
+    index("equipment_org_id_idx").on(table.orgId),
+    uniqueIndex("equipment_org_tag_idx").on(table.orgId, table.tag),
+  ],
 );
 
 export const equipmentRelations = relations(equipment, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [equipment.orgId],
+    references: [organizations.id],
+  }),
   case: one(offboardingCases, {
     fields: [equipment.caseId],
     references: [offboardingCases.id],
@@ -202,12 +267,17 @@ export const integrations = pgTable(
   "integrations",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    orgId: orgIdColumn(),
     name: varchar("name", { length: 255 }).notNull(),
     status: connectionStatusEnum("status").notNull().default("disconnected"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
-  (table) => [uniqueIndex("integrations_name_idx").on(table.name)],
+  (table) => [
+    uniqueIndex("integrations_name_idx").on(table.name),
+    uniqueIndex("integrations_org_name_idx").on(table.orgId, table.name),
+    index("integrations_org_id_idx").on(table.orgId),
+  ],
 );
 
 export const memberRoleEnum = pgEnum("member_role", ["admin", "rh", "gestor", "visualizador"]);
@@ -216,19 +286,24 @@ export const teamMembers = pgTable(
   "team_members",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    orgId: orgIdColumn(),
     name: varchar("name", { length: 255 }).notNull(),
     email: varchar("email", { length: 255 }).notNull().unique(),
     role: memberRoleEnum("role").notNull(),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
-  (table) => [uniqueIndex("team_members_email_lower_idx").on(sql`lower(${table.email})`)],
+  (table) => [
+    uniqueIndex("team_members_email_lower_idx").on(sql`lower(${table.email})`),
+    index("team_members_org_id_idx").on(table.orgId),
+  ],
 );
 
 export const actionConfigs = pgTable(
   "action_configs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    orgId: orgIdColumn(),
     actionId: varchar("action_id", { length: 100 }).notNull(),
     enabled: boolean("enabled").notNull().default(true),
     config: jsonb("config").$type<Record<string, ConfigValue>>().notNull().default({}),
@@ -236,7 +311,11 @@ export const actionConfigs = pgTable(
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
-  (table) => [uniqueIndex("action_configs_action_id_idx").on(table.actionId)],
+  (table) => [
+    uniqueIndex("action_configs_action_id_idx").on(table.actionId),
+    uniqueIndex("action_configs_org_action_id_idx").on(table.orgId, table.actionId),
+    index("action_configs_org_id_idx").on(table.orgId),
+  ],
 );
 
 export const subscriptionStatusEnum = pgEnum("subscription_status", [
@@ -264,22 +343,28 @@ export const plans = pgTable("plans", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const subscriptions = pgTable("subscriptions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  planId: uuid("plan_id")
-    .notNull()
-    .references(() => plans.id),
-  status: subscriptionStatusEnum("status").notNull().default("active"),
-  currentPeriodStart: date("current_period_start").notNull(),
-  currentPeriodEnd: date("current_period_end").notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
+export const subscriptions = pgTable(
+  "subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: orgIdColumn(),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => plans.id),
+    status: subscriptionStatusEnum("status").notNull().default("active"),
+    currentPeriodStart: date("current_period_start").notNull(),
+    currentPeriodEnd: date("current_period_end").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [index("subscriptions_org_id_idx").on(table.orgId)],
+);
 
 export const invoices = pgTable(
   "invoices",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    orgId: orgIdColumn(),
     subscriptionId: uuid("subscription_id")
       .notNull()
       .references(() => subscriptions.id, { onDelete: "cascade" }),
@@ -293,6 +378,7 @@ export const invoices = pgTable(
   },
   (table) => [
     index("invoices_subscription_id_idx").on(table.subscriptionId),
+    index("invoices_org_id_idx").on(table.orgId),
     index("invoices_abacatepay_billing_id_idx").on(table.abacatepayBillingId),
   ],
 );
@@ -302,13 +388,39 @@ export const plansRelations = relations(plans, ({ many }) => ({
 }));
 
 export const subscriptionsRelations = relations(subscriptions, ({ one, many }) => ({
-  plan: one(plans, { fields: [subscriptions.planId], references: [plans.id] }),
+  plan: one(plans, {
+    fields: [subscriptions.planId],
+    references: [plans.id],
+  }),
   invoices: many(invoices),
+  organization: one(organizations, {
+    fields: [subscriptions.orgId],
+    references: [organizations.id],
+  }),
 }));
 
 export const invoicesRelations = relations(invoices, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [invoices.orgId],
+    references: [organizations.id],
+  }),
   subscription: one(subscriptions, {
     fields: [invoices.subscriptionId],
     references: [subscriptions.id],
   }),
+}));
+
+export const organizationsRelations = relations(organizations, ({ many }) => ({
+  cases: many(offboardingCases),
+  tasks: many(tasks),
+  subtasks: many(subtasks),
+  exitSurveys: many(exitSurveys),
+  equipment: many(equipment),
+  teamMembers: many(teamMembers),
+  integrations: many(integrations),
+  actionConfigs: many(actionConfigs),
+  subscriptions: many(subscriptions),
+  invoices: many(invoices),
+  employeeAccess: many(employeeAccess),
+  employeeStates: many(employeeStates),
 }));

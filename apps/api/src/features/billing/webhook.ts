@@ -60,12 +60,17 @@ function addOneMonth(date: string) {
 
 type SubscriptionEvent = NonNullable<ReturnType<typeof parseWebhookEvent>>;
 
-async function openInvoice(repos: BillingRepository, subscriptionId: string, amount: number) {
-  const open = await repos.findOpenInvoice(subscriptionId);
+async function openInvoice(
+  repos: BillingRepository,
+  orgId: string,
+  subscriptionId: string,
+  amount: number,
+) {
+  const open = await repos.findOpenInvoice(orgId, subscriptionId);
 
   if (open) return open;
 
-  return repos.createInvoice(subscriptionId, amount, new Date().toISOString().slice(0, 10));
+  return repos.createInvoice(orgId, subscriptionId, amount, new Date().toISOString().slice(0, 10));
 }
 
 export async function applyWebhookEvent(repos: BillingRepository, event: SubscriptionEvent) {
@@ -78,26 +83,28 @@ export async function applyWebhookEvent(repos: BillingRepository, event: Subscri
 
   if (!subscription) return;
 
+  const { orgId } = subscription;
+
   const amount = event.data.subscription.amount;
 
   if (name === "subscription.trial_started") {
-    await repos.updateSubscription(subscription.id, { status: "trialing" });
+    await repos.updateSubscription(orgId, subscription.id, { status: "trialing" });
   }
 
   if (name === "subscription.cancelled") {
-    await repos.updateSubscription(subscription.id, { status: "canceled" });
+    await repos.updateSubscription(orgId, subscription.id, { status: "canceled" });
   }
 
   if (name === "subscription.completed" || name === "subscription.renewed") {
     const billingId = event.data.payment?.id ?? event.id ?? event.data.subscription.id;
 
-    if (await repos.getInvoiceByBillingId(billingId)) return;
+    if (await repos.getInvoiceByBillingId(orgId, billingId)) return;
 
-    const invoice = await openInvoice(repos, subscription.id, amount);
+    const invoice = await openInvoice(repos, orgId, subscription.id, amount);
     const today = new Date().toISOString().slice(0, 10);
 
-    await repos.updateInvoiceStatus(invoice.id, "paid", billingId, new Date());
-    await repos.updateSubscription(subscription.id, {
+    await repos.updateInvoiceStatus(orgId, invoice.id, "paid", billingId, new Date());
+    await repos.updateSubscription(orgId, subscription.id, {
       status: "active",
       currentPeriodStart: today,
       currentPeriodEnd: addOneMonth(today),
@@ -105,9 +112,9 @@ export async function applyWebhookEvent(repos: BillingRepository, event: Subscri
   }
 
   if (name === "subscription.payment_failed") {
-    const invoice = await openInvoice(repos, subscription.id, amount);
+    const invoice = await openInvoice(repos, orgId, subscription.id, amount);
 
-    await repos.updateInvoiceStatus(invoice.id, "failed");
-    await repos.updateSubscription(subscription.id, { status: "past_due" });
+    await repos.updateInvoiceStatus(orgId, invoice.id, "failed");
+    await repos.updateSubscription(orgId, subscription.id, { status: "past_due" });
   }
 }

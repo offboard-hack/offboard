@@ -45,6 +45,7 @@ const memberFields = {
   name: teamMembers.name,
   email: teamMembers.email,
   role: teamMembers.role,
+  orgId: teamMembers.orgId,
 };
 
 const originSchema = z

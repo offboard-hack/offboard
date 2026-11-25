@@ -8,11 +8,13 @@ import { seedIntegrations } from "./integration.fixture.ts";
 import { baseSeedCases, seedCases } from "./offboarding.fixture.ts";
 import {
   actionConfigs,
+  defaultOrgId,
   equipment,
   exitSurveys,
   integrations,
   invoices,
   offboardingCases,
+  organizations,
   plans,
   subscriptions,
   subtasks,
@@ -21,7 +23,10 @@ import {
 } from "./schema/index.ts";
 import { baseSeedTeamMembers, seedTeamMembers } from "./team-member.fixture.ts";
 
-export const testSeedFixtures = { cases: baseSeedCases, members: baseSeedTeamMembers };
+export const testSeedFixtures = {
+  cases: baseSeedCases,
+  members: baseSeedTeamMembers,
+};
 
 export async function seedDatabase(
   db: Database,
@@ -39,6 +44,11 @@ export async function seedDatabase(
     await tx.delete(offboardingCases);
     await tx.delete(integrations);
     await tx.delete(teamMembers);
+
+    await tx
+      .insert(organizations)
+      .values({ id: defaultOrgId, name: "Default", slug: "default" })
+      .onConflictDoNothing();
 
     const caseIds = new Map<string, string>();
 
@@ -91,7 +101,10 @@ export async function seedDatabase(
       await tx
         .insert(equipment)
         .values(values)
-        .onConflictDoUpdate({ target: equipment.tag, set: { ...values, updatedAt: new Date() } });
+        .onConflictDoUpdate({
+          target: [equipment.orgId, equipment.tag],
+          set: { ...values, updatedAt: new Date() },
+        });
     }
 
     for (const { caseName, ...survey } of seedExitSurveys) {
@@ -137,11 +150,12 @@ export async function seedDatabase(
       .values({ ...subscription, planId: plan.id })
       .returning({ id: subscriptions.id });
 
-    await tx
-      .insert(invoices)
-      .values(
-        seedInvoices.map((invoice) => ({ ...invoice, subscriptionId: createdSubscription.id })),
-      );
+    await tx.insert(invoices).values(
+      seedInvoices.map((invoice) => ({
+        ...invoice,
+        subscriptionId: createdSubscription.id,
+      })),
+    );
   });
 }
 

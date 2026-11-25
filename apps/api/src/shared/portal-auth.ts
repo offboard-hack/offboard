@@ -9,12 +9,17 @@ export const memberRole = t.Union([
   t.Literal("visualizador"),
 ]);
 
-export const portalPrincipalResponse = t.Object({
+export const teamMemberResponse = t.Object({
   id: t.String(),
   name: t.String(),
   email: t.String(),
   role: memberRole,
 });
+
+export const portalPrincipalResponse = t.Composite([
+  teamMemberResponse,
+  t.Object({ orgId: t.String({ format: "uuid" }) }),
+]);
 
 export type PortalAccess =
   | { kind: "anonymous" }

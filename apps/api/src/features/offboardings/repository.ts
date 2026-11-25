@@ -1,14 +1,13 @@
 import type { Database } from "@offboard/db/client";
 import { and, asc, eq, isNotNull, ne, sql } from "drizzle-orm";
-import { employeeAccess, offboardingCases, subtasks, tasks } from "@offboard/db/schema";
-import { emptyEmployeePlan } from "@offboard/employee";
+import { offboardingCases, subtasks, tasks } from "@offboard/db/schema";
 
 type TaskStatus = (typeof tasks.$inferSelect)["status"];
 
 type NewOffboarding = Pick<
   typeof offboardingCases.$inferInsert,
   "name" | "role" | "department" | "deadline"
-> & { email?: string | null };
+>;
 
 type BulkOffboardingRow = Pick<NewOffboarding, "name" | "department">;
 
@@ -20,7 +19,7 @@ function defaultDeadline() {
 }
 
 export function createOffboardingsRepository(db: Database) {
-  async function listOffboardings() {
+  async function listOffboardings(orgId: string) {
     const rows = await db
       .select({
         id: offboardingCases.id,
@@ -33,15 +32,16 @@ export function createOffboardingsRepository(db: Database) {
       })
       .from(offboardingCases)
       .leftJoin(tasks, eq(tasks.caseId, offboardingCases.id))
+      .where(eq(offboardingCases.orgId, orgId))
       .groupBy(offboardingCases.id)
       .orderBy(asc(offboardingCases.deadline), asc(offboardingCases.name));
 
     return rows;
   }
 
-  function fetchOffboarding(id: string) {
+  function fetchOffboarding(orgId: string, id: string) {
     return db.query.offboardingCases.findFirst({
-      where: eq(offboardingCases.id, id),
+      where: and(eq(offboardingCases.id, id), eq(offboardingCases.orgId, orgId)),
       with: {
         tasks: {
           orderBy: asc(tasks.position),
@@ -51,8 +51,8 @@ export function createOffboardingsRepository(db: Database) {
     });
   }
 
-  async function getOffboarding(id: string) {
-    const found = await fetchOffboarding(id);
+  async function getOffboarding(orgId: string, id: string) {
+    const found = await fetchOffboarding(orgId, id);
 
     if (!found) return null;
 
@@ -87,8 +87,9 @@ export function createOffboardingsRepository(db: Database) {
     };
   }
 
-  async function listOffboardingsWithTasks() {
+  async function listOffboardingsWithTasks(orgId: string) {
     const rows = await db.query.offboardingCases.findMany({
+      where: eq(offboardingCases.orgId, orgId),
       orderBy: [asc(offboardingCases.deadline), asc(offboardingCases.name)],
       with: {
         tasks: {
@@ -101,29 +102,16 @@ export function createOffboardingsRepository(db: Database) {
     return rows.map(serializeOffboarding);
   }
 
-  async function createOffboarding(data: NewOffboarding) {
-    const { email, ...caseData } = data;
-    const normalizedEmail = email?.trim().toLowerCase() || null;
+  async function createOffboarding(orgId: string, data: NewOffboarding) {
+    const [inserted] = await db
+      .insert(offboardingCases)
+      .values({ ...data, orgId })
+      .returning({ id: offboardingCases.id });
 
-    return db.transaction(async (tx) => {
-      const [inserted] = await tx
-        .insert(offboardingCases)
-        .values(caseData)
-        .returning({ id: offboardingCases.id });
-
-      if (normalizedEmail) {
-        await tx.insert(employeeAccess).values({
-          caseId: inserted.id,
-          email: normalizedEmail,
-          plan: emptyEmployeePlan,
-        });
-      }
-
-      return { id: inserted.id, ...caseData, completed: 0, total: 0 };
-    });
+    return { id: inserted.id, ...data, completed: 0, total: 0 };
   }
 
-  async function bulkCreateOffboardings(rows: BulkOffboardingRow[]) {
+  async function bulkCreateOffboardings(orgId: string, rows: BulkOffboardingRow[]) {
     if (rows.length === 0) return [];
     const deadline = defaultDeadline();
 
@@ -135,23 +123,26 @@ export function createOffboardingsRepository(db: Database) {
 
     const inserted = await db
       .insert(offboardingCases)
-      .values(values)
+      .values(values.map((value) => ({ ...value, orgId })))
       .returning({ id: offboardingCases.id });
 
     return inserted.map((row, i) => ({ id: row.id, ...values[i], completed: 0, total: 0 }));
   }
 
-  async function getTaskPhase(taskId: string) {
-    const [row] = await db.select({ phase: tasks.phase }).from(tasks).where(eq(tasks.id, taskId));
+  async function getTaskPhase(orgId: string, taskId: string) {
+    const [row] = await db
+      .select({ phase: tasks.phase })
+      .from(tasks)
+      .where(and(eq(tasks.id, taskId), eq(tasks.orgId, orgId)));
 
     return row?.phase ?? null;
   }
 
-  async function updateTaskStatus(taskId: string, status: TaskStatus) {
+  async function updateTaskStatus(orgId: string, taskId: string, status: TaskStatus) {
     const [updated] = await db
       .update(tasks)
       .set({ status, updatedAt: new Date() })
-      .where(eq(tasks.id, taskId))
+      .where(and(eq(tasks.id, taskId), eq(tasks.orgId, orgId)))
       .returning({
         id: tasks.id,
         title: tasks.title,
@@ -173,11 +164,11 @@ export function createOffboardingsRepository(db: Database) {
     return { ...updated, subtasks: subs };
   }
 
-  async function toggleSubtask(subtaskId: string) {
+  async function toggleSubtask(orgId: string, subtaskId: string) {
     const [row] = await db
       .update(subtasks)
       .set({ done: sql`NOT ${subtasks.done}`, updatedAt: new Date() })
-      .where(eq(subtasks.id, subtaskId))
+      .where(and(eq(subtasks.id, subtaskId), eq(subtasks.orgId, orgId)))
       .returning({
         id: subtasks.id,
         title: subtasks.title,
@@ -191,6 +182,7 @@ export function createOffboardingsRepository(db: Database) {
     return db
       .select({
         id: tasks.id,
+        orgId: tasks.orgId,
         title: tasks.title,
         phase: tasks.phase,
         trackingCode: tasks.trackingCode,
@@ -199,23 +191,29 @@ export function createOffboardingsRepository(db: Database) {
       .where(and(isNotNull(tasks.trackingCode), ne(tasks.status, "done")));
   }
 
-  async function setTrackingCode(taskId: string, code: string) {
+  async function setTrackingCode(orgId: string, taskId: string, code: string) {
     const [row] = await db
       .update(tasks)
       .set({ trackingCode: code, updatedAt: new Date() })
-      .where(eq(tasks.id, taskId))
+      .where(and(eq(tasks.id, taskId), eq(tasks.orgId, orgId)))
       .returning({ id: tasks.id, trackingCode: tasks.trackingCode });
 
     return row ?? null;
   }
 
-  async function getTaskTrackingCode(taskId: string) {
+  async function getTaskTrackingCode(orgId: string, taskId: string) {
     const [row] = await db
       .select({ id: tasks.id, trackingCode: tasks.trackingCode, status: tasks.status })
       .from(tasks)
-      .where(eq(tasks.id, taskId));
+      .where(and(eq(tasks.id, taskId), eq(tasks.orgId, orgId)));
 
     return row ?? null;
+  }
+
+  async function getTaskOrgId(taskId: string) {
+    const [row] = await db.select({ orgId: tasks.orgId }).from(tasks).where(eq(tasks.id, taskId));
+
+    return row?.orgId ?? null;
   }
 
   return {
@@ -230,6 +228,7 @@ export function createOffboardingsRepository(db: Database) {
     getTrackedTasks,
     setTrackingCode,
     getTaskTrackingCode,
+    getTaskOrgId,
   };
 }
 

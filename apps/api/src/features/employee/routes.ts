@@ -148,8 +148,9 @@ export function employeeRoutes(
     })
     .get(
       "/employee-access/:caseId",
-      async ({ params, status }) =>
-        (await repo.readSettings(params.caseId)) ?? status(404, { error: "Case not found" }),
+      async ({ params, principal, status }) =>
+        (await repo.readSettings(principal.orgId, params.caseId)) ??
+        status(404, { error: "Case not found" }),
       {
         params: caseParams,
         permit: ["update", "Offboarding"],
@@ -158,8 +159,8 @@ export function employeeRoutes(
     )
     .put(
       "/employee-access/:caseId",
-      async ({ body, params, status }) => {
-        const result = await repo.saveSettings(params.caseId, body);
+      async ({ body, params, principal, status }) => {
+        const result = await repo.saveSettings(principal.orgId, params.caseId, body);
 
         if (result === "missing-case") return status(404, { error: "Case not found" });
 

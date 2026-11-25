@@ -23,12 +23,21 @@ function SignInRoute() {
       revoked={acesso === "revogado"}
       invalidLink={!!error}
       employeeLink={
-        <Link
-          to="/colaborador/entrar"
-          className="font-bold text-primary underline-offset-4 hover:underline"
-        >
-          Acessar minha jornada de colaborador
-        </Link>
+        <>
+          <Link
+            to="/cadastro"
+            className="font-bold text-primary underline-offset-4 hover:underline"
+          >
+            Criar uma organização
+          </Link>
+          {" · "}
+          <Link
+            to="/colaborador/entrar"
+            className="font-bold text-primary underline-offset-4 hover:underline"
+          >
+            Acessar minha jornada de colaborador
+          </Link>
+        </>
       }
     />
   );

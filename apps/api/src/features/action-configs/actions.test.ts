@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
+import { defaultOrgId } from "@offboard/db/schema";
 import { createActionConfigsRepository } from "./repository.js";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -11,6 +12,7 @@ import { fireActions } from "./actions.ts";
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 
 const context: ActionContext = {
+  orgId: defaultOrgId,
   taskId: "task-1",
   taskTitle: "Bloquear acessos",
   status: "done",
@@ -133,7 +135,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("executes a webhook action", async () => {
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "webhook:test-exec",
       phase: "d0",
       config: { url: `${serverUrl}/hook`, method: "POST" },
@@ -147,7 +149,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("reports missing webhook url", async () => {
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "webhook:no-url",
       phase: "d0",
       config: {},
@@ -160,7 +162,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("reports webhook HTTP failure", async () => {
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "webhook:fail-http",
       phase: "d0",
       config: { url: `${serverUrl}/fail`, method: "POST" },
@@ -173,7 +175,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("executes a slack action with template variables", async () => {
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "slack:test-exec",
       phase: "d0",
       config: {
@@ -192,7 +194,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("uses default slack message when none configured", async () => {
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "slack:default-msg",
       phase: "d0",
       config: { webhookUrl: `${serverUrl}/slack-default` },
@@ -210,7 +212,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("reports missing slack webhookUrl or botToken", async () => {
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "slack:no-url",
       phase: "d0",
       config: {},
@@ -227,7 +229,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("reports slack HTTP failure", async () => {
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "slack:fail-http",
       phase: "d0",
       config: { webhookUrl: `${serverUrl}/fail` },
@@ -240,7 +242,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("sends via bot token when config has botToken and channel", async () => {
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "slack:bot-exec",
       phase: "d0",
       config: {
@@ -265,7 +267,7 @@ describe.skipIf(!url)("fireActions", () => {
   it("sends via bot token from env when config lacks botToken", async () => {
     process.env.SLACK_BOT_TOKEN = "xoxb-env-token";
 
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "slack:bot-env",
       phase: "d0",
       config: {
@@ -283,7 +285,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("reports missing channel when using bot token", async () => {
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "slack:bot-no-channel",
       phase: "d0",
       config: { botToken: "xoxb-test-token" },
@@ -302,7 +304,7 @@ describe.skipIf(!url)("fireActions", () => {
   it("catches slack bot API errors", async () => {
     process.env.SLACK_API_URL = `${serverUrl}/slack-error/`;
 
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "slack:bot-api-fail",
       phase: "d0",
       config: {
@@ -319,7 +321,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("prefers webhookUrl over botToken when both present", async () => {
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "slack:both-configs",
       phase: "d0",
       config: {
@@ -339,7 +341,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("reports missing email recipient", async () => {
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "email:no-to",
       phase: "d0",
       config: {},
@@ -356,7 +358,7 @@ describe.skipIf(!url)("fireActions", () => {
     delete process.env.RESEND_API_KEY;
 
     try {
-      await repos.createActionConfig({
+      await repos.createActionConfig(defaultOrgId, {
         actionId: "email:no-key",
         phase: "d0",
         config: { to: "user@example.com", subject: "Test", body: "Hello" },
@@ -382,7 +384,7 @@ describe.skipIf(!url)("fireActions", () => {
     process.env.RESEND_BASE_URL = serverUrl;
 
     try {
-      await repos.createActionConfig({
+      await repos.createActionConfig(defaultOrgId, {
         actionId: "email:template",
         phase: "d0",
         config: {
@@ -418,7 +420,7 @@ describe.skipIf(!url)("fireActions", () => {
     process.env.RESEND_BASE_URL = serverUrl;
 
     try {
-      await repos.createActionConfig({
+      await repos.createActionConfig(defaultOrgId, {
         actionId: "email:defaults",
         phase: "d0",
         config: { to: "dev@example.com" },
@@ -450,7 +452,7 @@ describe.skipIf(!url)("fireActions", () => {
     process.env.RESEND_BASE_URL = serverUrl;
 
     try {
-      await repos.createActionConfig({
+      await repos.createActionConfig(defaultOrgId, {
         actionId: "email:api-fail",
         phase: "d0",
         config: { to: "fail@example.com", subject: "Test", body: "Hello" },
@@ -471,7 +473,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("reports unknown action types", async () => {
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "unknown:thing",
       phase: "d0",
       config: {},
@@ -488,7 +490,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("catches fetch errors for unreachable hosts", async () => {
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "webhook:unreachable",
       phase: "d0",
       config: { url: "http://127.0.0.1:1/unreachable" },
@@ -502,7 +504,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("uses default method for webhook when not specified", async () => {
-    await repos.createActionConfig({
+    await repos.createActionConfig(defaultOrgId, {
       actionId: "webhook:default-method",
       phase: "d0",
       config: { url: `${serverUrl}/default-method` },

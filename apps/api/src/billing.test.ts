@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
-import { invoices, subscriptions } from "@offboard/db/schema";
+import { defaultOrgId, invoices, subscriptions } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -25,7 +25,13 @@ const auth: PortalAuth = {
 
     return Promise.resolve({
       kind: "authenticated",
-      principal: { id: "test-member", name: "Test Member", email: "member@example.com", role },
+      principal: {
+        id: "test-member",
+        name: "Test Member",
+        email: "member@example.com",
+        role,
+        orgId: defaultOrgId,
+      },
     });
   },
 };
@@ -464,14 +470,19 @@ describe.skipIf(!url)("billing", () => {
   });
 
   it("creates invoices and updates their status through the repository", async () => {
-    const created = await repos.billing.createInvoice(subscriptionId, 100, "2027-01-01");
+    const created = await repos.billing.createInvoice(
+      defaultOrgId,
+      subscriptionId,
+      100,
+      "2027-01-01",
+    );
 
     expect(created).toMatchObject({ status: "pending", amountCents: 100, paidAt: null });
 
-    const refunded = await repos.billing.updateInvoiceStatus(created.id, "refunded");
+    const refunded = await repos.billing.updateInvoiceStatus(defaultOrgId, created.id, "refunded");
 
     expect(refunded).toMatchObject({ status: "refunded", abacatepayBillingId: null });
-    expect(await repos.billing.updateInvoiceStatus(missingId, "paid")).toBeNull();
-    expect(await repos.billing.getInvoiceByBillingId("missing")).toBeNull();
+    expect(await repos.billing.updateInvoiceStatus(defaultOrgId, missingId, "paid")).toBeNull();
+    expect(await repos.billing.getInvoiceByBillingId(defaultOrgId, "missing")).toBeNull();
   });
 });

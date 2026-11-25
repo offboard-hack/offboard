@@ -5,7 +5,7 @@ import type { PortalAuth } from "./portal-auth.js";
 export function portalAccess(auth: PortalAuth, webOrigin: string) {
   return new Elysia({ name: "offboard:portal-access" }).macro({
     permit: (permission: PortalPermission) => ({
-      async beforeHandle({ request, set, status }) {
+      async resolve({ request, set, status }) {
         set.headers["cache-control"] = "no-store";
         const access = await auth.resolvePrincipal(request.headers);
 
@@ -22,6 +22,8 @@ export function portalAccess(auth: PortalAuth, webOrigin: string) {
         ) {
           return status(403, { error: "Forbidden" });
         }
+
+        return { principal: access.principal };
       },
     }),
   });

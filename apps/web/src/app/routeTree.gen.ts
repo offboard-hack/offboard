@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PortalRouteImport } from './routes/_portal'
+import { Route as CadastroRouteImport } from './routes/cadastro'
 import { Route as ColaboradorRouteImport } from './routes/colaborador'
 import { Route as EntrarRouteImport } from './routes/entrar'
 import { Route as RecolocacaoRouteImport } from './routes/recolocacao'
@@ -35,6 +36,11 @@ const IndexRoute = IndexRouteImport.update({
 } as any)
 const PortalRoute = PortalRouteImport.update({
   id: '/_portal',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CadastroRoute = CadastroRouteImport.update({
+  id: '/cadastro',
+  path: '/cadastro',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ColaboradorRoute = ColaboradorRouteImport.update({
@@ -125,6 +131,7 @@ const PortalDesligamentosImportarRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/cadastro': typeof CadastroRoute
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
   '/recolocacao': typeof RecolocacaoRoute
@@ -144,6 +151,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/cadastro': typeof CadastroRoute
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
   '/recolocacao': typeof RecolocacaoRoute
@@ -165,6 +173,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_portal': typeof PortalRouteWithChildren
+  '/cadastro': typeof CadastroRoute
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
   '/recolocacao': typeof RecolocacaoRoute
@@ -186,6 +195,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/cadastro'
     | '/colaborador'
     | '/entrar'
     | '/recolocacao'
@@ -205,6 +215,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/cadastro'
     | '/colaborador'
     | '/entrar'
     | '/recolocacao'
@@ -225,6 +236,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_portal'
+    | '/cadastro'
     | '/colaborador'
     | '/entrar'
     | '/recolocacao'
@@ -246,6 +258,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   PortalRoute: typeof PortalRouteWithChildren
+  CadastroRoute: typeof CadastroRoute
   ColaboradorRoute: typeof ColaboradorRoute
   EntrarRoute: typeof EntrarRoute
   RecolocacaoRoute: typeof RecolocacaoRoute
@@ -266,6 +279,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof PortalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cadastro': {
+      id: '/cadastro'
+      path: '/cadastro'
+      fullPath: '/cadastro'
+      preLoaderRoute: typeof CadastroRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/colaborador': {
@@ -419,6 +439,7 @@ const PortalRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   PortalRoute: PortalRouteWithChildren,
+  CadastroRoute: CadastroRoute,
   ColaboradorRoute: ColaboradorRoute,
   EntrarRoute: EntrarRoute,
   RecolocacaoRoute: RecolocacaoRoute,

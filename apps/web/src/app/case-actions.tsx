@@ -18,9 +18,7 @@ export function CaseActions() {
 
   const createCase = useMutation({
     mutationFn: async (record: NewCase) => {
-      const { data, error, status } = await getApiClient().api.offboardings.post(record);
-
-      if (status === 409) throw new Error("email-in-use");
+      const { data, error } = await getApiClient().api.offboardings.post(record);
 
       if (error) throw new Error("Failed to create offboarding");
 

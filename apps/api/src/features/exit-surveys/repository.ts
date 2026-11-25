@@ -1,5 +1,5 @@
 import type { Database } from "@offboard/db/client";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { ConfigValue } from "@offboard/db/schema";
 import { exitSurveys, offboardingCases } from "@offboard/db/schema";
 
@@ -35,15 +35,16 @@ export function createExitSurveysRepository(db: Database) {
     submittedAt: exitSurveys.submittedAt,
   };
 
-  async function listSurveys() {
+  async function listSurveys(orgId: string) {
     return db
       .select(surveyColumns)
       .from(exitSurveys)
       .innerJoin(offboardingCases, eq(exitSurveys.caseId, offboardingCases.id))
+      .where(eq(exitSurveys.orgId, orgId))
       .orderBy(desc(exitSurveys.submittedAt));
   }
 
-  async function getSurveyAggregates() {
+  async function getSurveyAggregates(orgId: string) {
     const [surveys, cases] = await Promise.all([
       db
         .select({
@@ -51,8 +52,12 @@ export function createExitSurveysRepository(db: Database) {
           topics: exitSurveys.topics,
           submittedAt: exitSurveys.submittedAt,
         })
-        .from(exitSurveys),
-      db.select({ id: offboardingCases.id }).from(offboardingCases),
+        .from(exitSurveys)
+        .where(eq(exitSurveys.orgId, orgId)),
+      db
+        .select({ id: offboardingCases.id })
+        .from(offboardingCases)
+        .where(eq(offboardingCases.orgId, orgId)),
     ]);
 
     const totalResponses = surveys.length;
@@ -92,6 +97,7 @@ export function createExitSurveysRepository(db: Database) {
   }
 
   async function submitSurvey(
+    orgId: string,
     caseId: string,
     npsScore: number,
     responses: Record<string, ConfigValue>,
@@ -100,13 +106,13 @@ export function createExitSurveysRepository(db: Database) {
     const [existing] = await db
       .select({ id: offboardingCases.id })
       .from(offboardingCases)
-      .where(eq(offboardingCases.id, caseId));
+      .where(and(eq(offboardingCases.id, caseId), eq(offboardingCases.orgId, orgId)));
 
     if (!existing) return null;
 
     const [row] = await db
       .insert(exitSurveys)
-      .values({ caseId, npsScore, responses, topics })
+      .values({ orgId, caseId, npsScore, responses, topics })
       .onConflictDoUpdate({
         target: exitSurveys.caseId,
         set: { npsScore, responses, topics, submittedAt: new Date(), updatedAt: new Date() },

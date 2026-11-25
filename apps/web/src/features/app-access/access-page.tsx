@@ -6,8 +6,8 @@ import { getRouteApi } from "@tanstack/react-router";
 import {
   createTeamMember,
   deleteTeamMember,
-  updateTeamMemberRole,
   teamQuery,
+  updateTeamMemberRole,
 } from "@/entities/team";
 import type { MemberRole, TeamMember } from "@/entities/team";
 import { listPagination } from "@/shared/lib/list-pagination";
@@ -32,6 +32,10 @@ const roleDetails = {
   gestor: { label: "Gestor", access: "Somente leitura" },
   visualizador: { label: "Visualizador", access: "Somente leitura" },
 } satisfies Record<MemberRole, { label: string; access: string }>;
+
+const memberRoles: MemberRole[] = ["admin", "rh", "gestor", "visualizador"];
+
+const roleItems = memberRoles.map((value) => ({ label: roleDetails[value].label, value }));
 
 const roleByLabel = {
   Admin: "admin",
@@ -77,21 +81,14 @@ const roleCards: {
   },
 ];
 
-const roleItems: { value: MemberRole; label: string }[] = [
-  { value: "admin", label: "Admin" },
-  { value: "rh", label: "RH" },
-  { value: "gestor", label: "Gestor" },
-  { value: "visualizador", label: "Visualizador" },
-];
-
-const route = getRouteApi("/_portal/equipe");
 const portalRoute = getRouteApi("/_portal");
+const route = getRouteApi("/_portal/equipe");
 
 export function AccessPage() {
   const navigate = route.useNavigate();
   const client = useQueryClient();
-  const { data: team } = useSuspenseQuery(teamQuery);
   const { principal } = portalRoute.useRouteContext();
+  const { data: team } = useSuspenseQuery(teamQuery);
 
   const refresh = () => client.invalidateQueries(teamQuery);
 
@@ -117,20 +114,19 @@ export function AccessPage() {
       accessorFn: ({ role }) => roleDetails[role].label,
       header: "Papel",
       cell: ({ row }) => {
-        const member = row.original;
-        const isSelf = member.id === principal.id;
+        const isSelf = row.original.id === principal.id;
 
         return (
           <PortalFilter
-            label={`Papel de ${member.name}`}
-            value={member.role}
+            label={`Papel de ${row.original.name}`}
+            value={row.original.role}
             items={roleItems}
-            onChange={(next) => {
-              const selected = roleItems.find((item) => item.value === next);
-
-              if (selected) updateRole.mutate({ id: member.id, role: selected.value });
-            }}
-            disabled={isSelf || updateRole.isPending}
+            // WARNING: items are built from memberRoles, so every emitted value is a MemberRole.
+            onChange={(role) =>
+              updateRole.mutate({ id: row.original.id, role: role as MemberRole })
+            }
+            disabled={isSelf || updateRole.variables?.id === row.original.id}
+            className="w-40"
           />
         );
       },
