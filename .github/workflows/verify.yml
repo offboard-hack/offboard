@@ -45,7 +45,7 @@ jobs:
       - run: npm run build:vercel -w @offboard/api
 
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.OFFBOARD_EMPLOYEE_SCHEMA_READY == '1' && vars.OFFBOARD_WORKFLOWS_SCHEMA_READY == '1'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.OFFBOARD_EMPLOYEE_SCHEMA_READY == '1'
     needs: verify
     runs-on: ubuntu-latest
     concurrency:

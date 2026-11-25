@@ -1,5 +1,5 @@
 {
-  "ignoreCommand": "if [ \"$VERCEL_ENV\" = preview ] && [ \"$VERCEL_GIT_COMMIT_REF\" != main ]; then exit 1; fi; [ \"$OFFBOARD_EMPLOYEE_SCHEMA_READY\" != 1 ] || [ \"$OFFBOARD_WORKFLOWS_SCHEMA_READY\" != 1 ]",
+  "ignoreCommand": "if [ \"$VERCEL_ENV\" = preview ] && [ \"$VERCEL_GIT_COMMIT_REF\" != main ]; then exit 1; fi; [ \"$OFFBOARD_EMPLOYEE_SCHEMA_READY\" != 1 ]",
   "buildCommand": "npm run build:vercel -w @offboard/api && npm run build -w @offboard/web",
   "installCommand": "npm install",
   "framework": null,
