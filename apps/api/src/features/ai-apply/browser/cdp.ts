@@ -53,6 +53,7 @@ export const workerSocket = async (
 ) => {
   const response = await fetchImpl(url.replace(/^wss:/, "https:"), {
     headers: { Upgrade: "websocket" },
+    signal: AbortSignal.timeout(30_000),
   });
 
   const webSocket = response.webSocket;
@@ -109,6 +110,7 @@ const keys = {
 };
 
 const pollMs = 250;
+const maxCaptureHeight = 10_000;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -326,7 +328,7 @@ export const connectPage = async (socket: Socket, options: { commandTimeoutMs?: 
       const clip = async () => {
         const { cssContentSize } = await command("Page.getLayoutMetrics", {}, layout);
         const width = Math.ceil(cssContentSize.width);
-        const height = Math.ceil(cssContentSize.height);
+        const height = Math.min(Math.ceil(cssContentSize.height), maxCaptureHeight);
 
         return { x: 0, y: 0, width, height, scale: 1 };
       };

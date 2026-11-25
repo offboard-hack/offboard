@@ -12,6 +12,7 @@ export class BrowserbaseError extends Error {
 }
 
 const api = "https://api.browserbase.com/v1";
+const requestMs = 30_000;
 
 type SessionBody = {
   projectId: string;
@@ -34,6 +35,7 @@ export const createBrowserbase = (
       method: "POST",
       headers: { ...keyHeader, "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(requestMs),
     });
 
   return {
@@ -70,6 +72,7 @@ export const createBrowserbase = (
         method: "POST",
         headers: keyHeader,
         body: form,
+        signal: AbortSignal.timeout(requestMs),
       });
 
       await discardBody(response);

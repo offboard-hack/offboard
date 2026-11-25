@@ -1,6 +1,8 @@
 import type { BackgroundJob, BackgroundRepository, ClaimFilter } from "./repository.js";
 
-export type JobHandler = (job: BackgroundJob) => Promise<void | { postponeUntil: Date }>;
+export type JobHandler = (
+  job: BackgroundJob,
+) => Promise<void | { postponeUntil: Date } | { skipped: true }>;
 
 async function run(handlers: Record<string, JobHandler>, job: BackgroundJob) {
   if (!Object.hasOwn(handlers, job.kind))
@@ -21,9 +23,10 @@ export async function drain(
   const { limit = 5, budgetMs = 20_000, now = Date.now, ...filter } = options;
   const startedAt = now();
   let processed = 0;
+  let skipped = 0;
   let failed = 0;
 
-  while (processed + failed < limit && now() - startedAt < budgetMs) {
+  while (processed - skipped + failed < limit && now() - startedAt < budgetMs) {
     const [job] = await repo.claim(1, undefined, filter);
 
     if (!job) break;
@@ -34,8 +37,13 @@ export async function drain(
       await repo.retry(job, result.failure);
       failed += 1;
     } else {
-      if (result.outcome) await repo.postpone(job, result.outcome.postponeUntil);
+      const { outcome } = result;
+
+      if (outcome && "postponeUntil" in outcome) await repo.postpone(job, outcome.postponeUntil);
       else await repo.complete(job);
+
+      if (outcome && "skipped" in outcome) skipped += 1;
+
       processed += 1;
     }
   }

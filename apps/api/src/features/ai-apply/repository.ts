@@ -26,6 +26,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
   lte,
   notExists,
   or,
@@ -57,6 +58,8 @@ type NewAttempt = {
 };
 
 const expiry = 7 * 24 * 60 * 60 * 1000;
+const liveRunMs = 5 * 60_000;
+const stuckMs = 15 * 60_000;
 
 export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
@@ -394,7 +397,9 @@ export function createAiApplyRepository(db: Database) {
           consentAt: talentProfiles.aiApplyConsentAt,
         },
         resume: resumes.content,
+        resumeUpdatedAt: resumes.updatedAt,
         coverLetter: applicationPackages.coverLetter,
+        letterUpdatedAt: applicationPackages.updatedAt,
       })
       .from(aiApplications)
       .innerJoin(jobs, eq(jobs.id, aiApplications.jobId))
@@ -427,7 +432,18 @@ export function createAiApplyRepository(db: Database) {
     const rows = await db
       .update(aiApplications)
       .set({ state: "running", updatedAt: now })
-      .where(and(eq(aiApplications.id, id), inArray(aiApplications.state, ["queued", "running"])))
+      .where(
+        and(
+          eq(aiApplications.id, id),
+          or(
+            eq(aiApplications.state, "queued"),
+            and(
+              eq(aiApplications.state, "running"),
+              lt(aiApplications.updatedAt, new Date(now.getTime() - liveRunMs)),
+            ),
+          ),
+        ),
+      )
       .returning({ id: aiApplications.id });
 
     return rows.length > 0;
@@ -441,6 +457,17 @@ export function createAiApplyRepository(db: Database) {
         and(
           eq(aiApplications.id, id),
           eq(aiApplications.state, "running"),
+          exists(
+            db
+              .select({ id: talentProfiles.id })
+              .from(talentProfiles)
+              .where(
+                and(
+                  eq(talentProfiles.id, aiApplications.profileId),
+                  isNotNull(talentProfiles.aiApplyConsentAt),
+                ),
+              ),
+          ),
           notExists(
             db
               .select({ id: applications.id })
@@ -457,6 +484,20 @@ export function createAiApplyRepository(db: Database) {
       .returning({ id: aiApplications.id });
 
     return rows.length > 0;
+  }
+
+  async function sweepStale(now: Date) {
+    const cutoff = new Date(now.getTime() - stuckMs);
+
+    await db
+      .update(aiApplications)
+      .set({ state: "needs_check", reason: null, finishedAt: null, updatedAt: now })
+      .where(and(eq(aiApplications.state, "submitting"), lt(aiApplications.updatedAt, cutoff)));
+
+    await db
+      .update(aiApplications)
+      .set({ state: "assisted", reason: "error", finishedAt: now, updatedAt: now })
+      .where(and(eq(aiApplications.state, "running"), lt(aiApplications.updatedAt, cutoff)));
   }
 
   async function finish(id: string, from: AttemptState[], outcome: Finish, now: Date) {
@@ -525,6 +566,7 @@ export function createAiApplyRepository(db: Database) {
     attempt,
     runnable,
     queuedIds,
+    sweepStale,
     claimForRun,
     markSubmitting,
     finish,

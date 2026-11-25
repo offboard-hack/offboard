@@ -249,6 +249,35 @@ describe.skipIf(!url)("background drain", () => {
     expect(seen).toEqual(["score_resume", "ai_apply"]);
   });
 
+  it("does not count skipped jobs against the limit", async () => {
+    for (const [index, subject] of ["a", "b", "c", "d"].entries()) {
+      await repository.enqueue("ai_apply", subject, {}, minutesAfter(start, index - 10));
+    }
+
+    const seen: string[] = [];
+
+    const result = await drain(
+      repository,
+      {
+        ai_apply: async (job) => {
+          seen.push(job.subject);
+
+          return job.subject === "c" ? undefined : { skipped: true };
+        },
+      },
+      { kinds: ["ai_apply"], limit: 1 },
+    );
+
+    expect(result).toEqual({ processed: 3, failed: 0 });
+    expect(seen).toEqual(["a", "b", "c"]);
+    expect((await rows()).map((job) => [job.subject, job.status])).toEqual([
+      ["a", "done"],
+      ["b", "done"],
+      ["c", "done"],
+      ["d", "pending"],
+    ]);
+  });
+
   it("processes at most five jobs by default", async () => {
     for (let index = 0; index < 6; index += 1) {
       await repository.enqueue("score_resume", `resume-${index}`, {}, minutesAfter(start, index));

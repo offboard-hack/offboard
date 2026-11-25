@@ -431,6 +431,25 @@ describe("connectPage", () => {
     });
   });
 
+  it("caps a whole-page capture at 10 000 px", async () => {
+    const fake = fakeSocket({
+      "Page.getLayoutMetrics": { cssContentSize: { x: 0, y: 0, width: 1280, height: 48_000 } },
+      "Page.captureScreenshot": { data: btoa("\u0089PNG") },
+    });
+
+    const page = await connectPage(fake.socket);
+
+    await page.screenshot({ fullPage: true });
+
+    expect(fake.named("Page.captureScreenshot")[0]?.params.clip).toEqual({
+      x: 0,
+      y: 0,
+      width: 1280,
+      height: 10_000,
+      scale: 1,
+    });
+  });
+
   it("reads the current url", async () => {
     const fake = fakeSocket({
       "Runtime.evaluate": evaluated("https://x.test/a"),
@@ -504,6 +523,7 @@ describe("workerSocket", () => {
     socket.close();
 
     expect(calls[0]?.url).toBe("https://connect.test/s1?x=1");
+    expect(calls[0]?.init?.signal).toBeInstanceOf(AbortSignal);
     expect(new Headers(calls[0]?.init?.headers).get("upgrade")).toBe("websocket");
     expect(fake.accepted()).toBe(1);
     expect(fake.sent).toEqual(["ping"]);

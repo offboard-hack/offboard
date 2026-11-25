@@ -283,6 +283,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
   }
 
   async function beforeDrain() {
+    await repos.aiApply.sweepStale(new Date()).catch(logFailure("AI application sweep failed"));
     await scheduleSources();
     await repos.aiApply
       .queuedIds()

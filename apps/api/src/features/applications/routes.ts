@@ -63,6 +63,10 @@ export function applicationsRoutes(
 
         if (result === "already_applied") return status(409, { error: "Already applied" });
 
+        if (result === "ai_pending") {
+          return status(409, { error: "AI application pending check" });
+        }
+
         return status(201, {
           applicationId: result.applicationId,
           jobUrl: result.jobUrl,

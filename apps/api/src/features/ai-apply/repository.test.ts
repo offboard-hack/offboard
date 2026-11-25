@@ -7,6 +7,7 @@ import {
   defaultOrgId,
   jobs,
   offboardingCases,
+  talentProfiles,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
@@ -135,7 +136,7 @@ describe.skipIf(!url)("ai apply repository", () => {
     );
   });
 
-  async function seedAttempt(state: "queued" | "running" | "submitting") {
+  async function seedAttempt(state: "queued" | "running" | "submitting", updatedAt = new Date()) {
     const [first] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
 
     const created = await repos.talent.enable({
@@ -175,8 +176,11 @@ describe.skipIf(!url)("ai apply repository", () => {
         draft: [],
         confirmed: [],
         preparedAt: new Date(),
+        updatedAt,
       })
       .returning({ id: aiApplications.id });
+
+    await repos.talent.setAiApplyConsent(created.id, true, new Date());
 
     return { profileId: created.id, jobId: job.id, id: attempt.id };
   }
@@ -200,9 +204,70 @@ describe.skipIf(!url)("ai apply repository", () => {
 
     await db.delete(applications);
 
+    await db
+      .update(talentProfiles)
+      .set({ aiApplyConsentAt: null })
+      .where(eq(talentProfiles.id, queued.profileId));
+
+    expect(await repos.aiApply.markSubmitting(queued.id, now)).toBe(false);
+
+    await repos.talent.setAiApplyConsent(queued.profileId, true, new Date());
+
     expect(await repos.aiApply.markSubmitting(queued.id, now)).toBe(true);
     expect(await stateOf(queued.id)).toMatchObject({ state: "submitting", updatedAt: now });
     expect(await repos.aiApply.claimForRun(queued.id, now)).toBe(false);
+  });
+
+  it("reclaims a running attempt only once its last update is five minutes old", async () => {
+    const now = new Date("2026-11-25T12:00:00.000Z");
+    const { id } = await seedAttempt("running", new Date(now.getTime() - 5 * 60_000));
+
+    expect(await repos.aiApply.claimForRun(id, now)).toBe(false);
+    expect(await repos.aiApply.claimForRun(id, new Date(now.getTime() + 1))).toBe(true);
+    expect(await repos.aiApply.claimForRun(id, new Date(now.getTime() + 2))).toBe(false);
+  });
+
+  it("sweeps attempts stuck in submitting or running for fifteen minutes", async () => {
+    const now = new Date("2026-11-25T12:00:00.000Z");
+    const old = new Date(now.getTime() - 15 * 60_000 - 1);
+    const fresh = new Date(now.getTime() - 15 * 60_000);
+    const stuck = await seedAttempt("submitting", old);
+
+    await db
+      .update(aiApplications)
+      .set({ updatedAt: fresh, state: "running" })
+      .where(eq(aiApplications.id, stuck.id));
+
+    expect(await repos.aiApply.sweepStale(now)).toBeUndefined();
+    expect((await stateOf(stuck.id)).state).toBe("running");
+
+    await db.update(aiApplications).set({ updatedAt: old }).where(eq(aiApplications.id, stuck.id));
+    await repos.aiApply.sweepStale(now);
+
+    expect(await stateOf(stuck.id)).toMatchObject({
+      state: "assisted",
+      reason: "error",
+      finishedAt: now,
+      updatedAt: now,
+    });
+
+    await db
+      .update(aiApplications)
+      .set({ state: "submitting", reason: null, finishedAt: null, updatedAt: fresh })
+      .where(eq(aiApplications.id, stuck.id));
+    await repos.aiApply.sweepStale(now);
+
+    expect((await stateOf(stuck.id)).state).toBe("submitting");
+
+    await db.update(aiApplications).set({ updatedAt: old }).where(eq(aiApplications.id, stuck.id));
+    await repos.aiApply.sweepStale(now);
+
+    expect(await stateOf(stuck.id)).toMatchObject({
+      state: "needs_check",
+      reason: null,
+      finishedAt: null,
+      updatedAt: now,
+    });
   });
 
   it("records the submission and its application in one step", async () => {

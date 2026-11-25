@@ -36,6 +36,7 @@ describe("createBrowserbase", () => {
     expect(session).toEqual({ id: "s1", connectUrl: "wss://connect/s1" });
     expect(calls[0]?.url).toBe("https://api.browserbase.com/v1/sessions");
     expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.signal).toBeInstanceOf(AbortSignal);
     expect(new Headers(calls[0]?.init?.headers).get("x-bb-api-key")).toBe("bb-secret-key");
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
       projectId: "proj-1",
@@ -80,6 +81,7 @@ describe("createBrowserbase", () => {
 
     expect(calls[0]?.url).toBe("https://api.browserbase.com/v1/sessions/s1/uploads");
     expect(new Headers(calls[0]?.init?.headers).get("x-bb-api-key")).toBe("bb-secret-key");
+    expect(calls[0]?.init?.signal).toBeInstanceOf(AbortSignal);
     const body = calls[0]?.init?.body;
     expect(body).toBeInstanceOf(FormData);
     const file = body instanceof FormData ? body.get("file") : null;

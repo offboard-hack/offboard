@@ -1757,6 +1757,40 @@ describe.skipIf(!url)("api", () => {
         expect(listed[0]).toMatchObject({ status: "sent", closedReason: null });
       });
 
+      it("refuses a manual application while an AI submission awaits its check", async () => {
+        const headers = await talentProfile(personalEmail, 0);
+        const jobId = await seedJob("pending");
+        const body = await baseResume(headers);
+
+        const [pending] = await db
+          .insert(aiApplications)
+          .values({
+            profileId: headers["x-test-talent-id"],
+            jobId,
+            state: "submitting",
+            form: { questions: [] },
+            draft: [],
+            preparedAt: new Date(),
+          })
+          .returning({ id: aiApplications.id });
+
+        for (const state of ["submitting", "needs_check"] as const) {
+          await db.update(aiApplications).set({ state }).where(eq(aiApplications.id, pending.id));
+
+          const refused = await send(headers, `/me/jobs/${jobId}/apply`, "POST", body);
+
+          expect(refused.status).toBe(409);
+          expect(await refused.json()).toEqual({ error: "AI application pending check" });
+        }
+
+        await db
+          .update(aiApplications)
+          .set({ state: "assisted", reason: "not_sent" })
+          .where(eq(aiApplications.id, pending.id));
+
+        expect((await send(headers, `/me/jobs/${jobId}/apply`, "POST", body)).status).toBe(201);
+      });
+
       it("moves an application through the funnel", async () => {
         const headers = await talentProfile(personalEmail, 0);
         const id = await applyTo(headers, await seedJob("funnel"));

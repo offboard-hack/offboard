@@ -433,6 +433,7 @@ describe.skipIf(!url)("ai apply runner", () => {
     questions?: FormQuestion[];
     confirmed?: ConfirmedAnswer[];
     state?: "queued" | "running" | "submitting" | "rehearsed";
+    updatedAt?: Date;
     letter?: string;
   };
 
@@ -441,7 +442,7 @@ describe.skipIf(!url)("ai apply runner", () => {
 
     const [base] = await db
       .insert(resumes)
-      .values({ profileId, kind: "base", content: resume })
+      .values({ profileId, kind: "base", content: resume, updatedAt: earlier() })
       .returning({ id: resumes.id });
 
     const [job] = await db
@@ -459,7 +460,7 @@ describe.skipIf(!url)("ai apply runner", () => {
     if (setup.letter !== undefined) {
       await db
         .insert(applicationPackages)
-        .values({ profileId, jobId: job.id, coverLetter: setup.letter });
+        .values({ profileId, jobId: job.id, coverLetter: setup.letter, updatedAt: earlier() });
     }
 
     const [row] = await db
@@ -475,11 +476,14 @@ describe.skipIf(!url)("ai apply runner", () => {
         resumeId: base.id,
         preparedAt: new Date(),
         confirmedAt: new Date(),
+        updatedAt: setup.updatedAt ?? new Date(),
       })
       .returning({ id: aiApplications.id });
 
     return { id: row.id, profileId, jobId: job.id, resumeId: base.id };
   }
+
+  const earlier = () => new Date(Date.now() - 60_000);
 
   const stateOf = async (id: string) =>
     (await db.select().from(aiApplications).where(eq(aiApplications.id, id)))[0];
@@ -844,10 +848,16 @@ describe.skipIf(!url)("ai apply runner", () => {
         },
       };
 
+      const logged = vi.spyOn(console, "error");
+
       await runAiApplication(run.deps, id, now);
 
       expect(await stateOf(id)).toMatchObject({ state: "needs_check" });
       expect(await db.select().from(applications)).toHaveLength(1);
+      expect(logged).toHaveBeenCalledWith("AI application result lost", {
+        name: "Error",
+        message: "needs_check",
+      });
     });
 
     it("keeps a confirmed submission when the screenshot fails", async () => {
@@ -906,16 +916,17 @@ describe.skipIf(!url)("ai apply runner", () => {
 
         const run = rig();
 
-        await runAiApplication(run.deps, id, now);
-
+        expect(await runAiApplication(run.deps, id, now)).toEqual({ skipped: true });
         expect((await stateOf(id)).state).toBe(state);
         expect(run.created()).toBe(0);
       }
 
       const run = rig();
 
-      await runAiApplication(run.deps, "not-a-uuid", now);
-      await runAiApplication(run.deps, "00000000-0000-4000-8000-000000000009", now);
+      expect(await runAiApplication(run.deps, "not-a-uuid", now)).toEqual({ skipped: true });
+      expect(await runAiApplication(run.deps, "00000000-0000-4000-8000-000000000009", now)).toEqual(
+        { skipped: true },
+      );
 
       expect(run.created()).toBe(0);
     });
@@ -945,13 +956,175 @@ describe.skipIf(!url)("ai apply runner", () => {
     });
 
     it("resumes an attempt a crash left running, since nothing was clicked", async () => {
+      const { id } = await attempt({
+        state: "running",
+        updatedAt: new Date(clock.getTime() - 6 * 60_000),
+      });
+
+      const run = rig();
+
+      expect(await runAiApplication(run.deps, id, now)).toBeUndefined();
+      expect((await stateOf(id)).state).toBe("submitted");
+      expect(run.submits()).toBe(1);
+    });
+
+    it("never takes over a run that is still live", async () => {
       const { id } = await attempt({ state: "running" });
       const run = rig();
 
+      expect(await runAiApplication(run.deps, id, now)).toEqual({ skipped: true });
+      expect((await stateOf(id)).state).toBe("running");
+      expect(run.created()).toBe(0);
+    });
+
+    it("clicks once when two runs race to the submit step", async () => {
+      const { id } = await attempt();
+      const first = rig();
+      const second = rig();
+      let arrived = 0;
+      let open = () => {};
+
+      const gate = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+
+      const racing = {
+        ...repos.aiApply,
+        claimForRun: async (attemptId: string, at: Date) => {
+          await repos.aiApply.claimForRun(attemptId, at);
+
+          return true;
+        },
+        markSubmitting: async (attemptId: string, at: Date) => {
+          arrived += 1;
+
+          if (arrived === 2) open();
+
+          await gate;
+
+          return repos.aiApply.markSubmitting(attemptId, at);
+        },
+      };
+
+      await Promise.all([
+        runAiApplication({ ...first.deps, repo: racing }, id, now),
+        runAiApplication({ ...second.deps, repo: racing }, id, now),
+      ]);
+
+      expect(arrived).toBe(2);
+      expect(first.submits() + second.submits()).toBe(1);
+      expect([...first.released, ...second.released]).toEqual(["session-1", "session-1"]);
+      expect((await stateOf(id)).state).toBe("submitted");
+      expect(await db.select().from(applications)).toHaveLength(1);
+    });
+
+    it("stops without a click when consent is withdrawn during the fill", async () => {
+      const { id, profileId } = await attempt();
+
+      const run = rig({
+        page: {
+          duringFill: async () => {
+            await db
+              .update(talentProfiles)
+              .set({ aiApplyConsentAt: null })
+              .where(eq(talentProfiles.id, profileId));
+          },
+        },
+      });
+
       await runAiApplication(run.deps, id, now);
 
-      expect((await stateOf(id)).state).toBe("submitted");
-      expect(run.submits()).toBe(1);
+      expect(await stateOf(id)).toMatchObject({ state: "cancelled", reason: "consent_withdrawn" });
+      expect(run.submits()).toBe(0);
+      expect(run.released).toEqual(["session-1"]);
+    });
+
+    it("leaves an attempt cancelled or deleted during the fill alone, without a click", async () => {
+      const { id } = await attempt();
+
+      const cancelled = rig({
+        page: {
+          duringFill: async () => {
+            await db
+              .update(aiApplications)
+              .set({ state: "cancelled", reason: "cancelled_by_person" })
+              .where(eq(aiApplications.id, id));
+          },
+        },
+      });
+
+      await runAiApplication(cancelled.deps, id, now);
+
+      expect(await stateOf(id)).toMatchObject({
+        state: "cancelled",
+        reason: "cancelled_by_person",
+      });
+      expect(cancelled.submits()).toBe(0);
+
+      await seedDatabase(db, testSeedFixtures);
+
+      const other = await attempt();
+
+      const deleted = rig({
+        page: {
+          duringFill: async () => {
+            await db.delete(aiApplications).where(eq(aiApplications.id, other.id));
+          },
+        },
+      });
+
+      await runAiApplication(deleted.deps, other.id, now);
+
+      expect(deleted.submits()).toBe(0);
+      expect(deleted.released).toEqual(["session-1"]);
+    });
+
+    it("stops before a browser when the résumé or the cover letter changed after confirm", async () => {
+      const { id, resumeId } = await attempt();
+
+      await db
+        .update(resumes)
+        .set({ updatedAt: new Date(Date.now() + 60_000) })
+        .where(eq(resumes.id, resumeId));
+
+      const run = rig();
+
+      expect(await runAiApplication(run.deps, id, now)).toEqual({ skipped: true });
+      expect(await stateOf(id)).toMatchObject({ state: "assisted", reason: "files_changed" });
+      expect(run.created()).toBe(0);
+
+      await seedDatabase(db, testSeedFixtures);
+
+      const lettered = await attempt({ letter: "Olá." });
+
+      await db
+        .update(applicationPackages)
+        .set({ updatedAt: new Date(Date.now() + 60_000) })
+        .where(eq(applicationPackages.profileId, lettered.profileId));
+
+      await runAiApplication(run.deps, lettered.id, now);
+
+      expect(await stateOf(lettered.id)).toMatchObject({
+        state: "assisted",
+        reason: "files_changed",
+      });
+      expect(run.created()).toBe(0);
+    });
+
+    it("stops at the run deadline before uploading", async () => {
+      const { id } = await attempt();
+      const run = rig({ deps: { budgetMs: 0 } });
+      const logged = vi.spyOn(console, "error");
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(await stateOf(id)).toMatchObject({ state: "assisted", reason: "error" });
+      expect(run.uploads).toEqual([]);
+      expect(run.released).toEqual(["session-1"]);
+      expect(logged).toHaveBeenCalledWith("AI application run failed", {
+        name: "Error",
+        message: "Run budget exceeded",
+      });
     });
 
     it("stops without a click when a manual application lands during the fill", async () => {
@@ -983,7 +1156,7 @@ describe.skipIf(!url)("ai apply runner", () => {
       expect(run.submits()).toBe(0);
       expect(logged).toHaveBeenCalledWith("AI application run failed", {
         name: "Error",
-        message: "No time left to submit",
+        message: "Run budget exceeded",
       });
     });
   });
@@ -1149,7 +1322,8 @@ describe.skipIf(!url)("ai apply runner", () => {
         vi.spyOn(console, "error");
 
         await change(created);
-        await runAiApplication(run.deps, created.id, now);
+
+        expect(await runAiApplication(run.deps, created.id, now)).toEqual({ skipped: true });
 
         expect(await stateOf(created.id)).toMatchObject({ ...expected, finishedAt: clock });
         expect(run.created()).toBe(0);

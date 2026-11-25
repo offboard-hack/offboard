@@ -67,6 +67,14 @@ const resumeFile = "curriculo.pdf";
 const letterFile = "carta-de-apresentacao.pdf";
 const submitMarginMs = 15_000;
 
+const skipped = { skipped: true } as const;
+
+const withinBudget = (deadline: number, neededMs = 0) => {
+  if (Date.now() + neededMs >= deadline) throw new Error("Run budget exceeded");
+};
+
+const changedAfter = (at: Date | null, confirmedAt: Date) => at !== null && at > confirmedAt;
+
 const assisted = (reason: string) => ({ state: "assisted", reason }) satisfies Ending;
 const cancelled = (reason: string) => ({ state: "cancelled", reason }) satisfies Ending;
 const needsCheck = { state: "needs_check", reason: null } satisfies Ending;
@@ -184,6 +192,8 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
 
   const uploaded: string[] = [];
 
+  withinBudget(deadline);
+
   for (const file of files) {
     try {
       await browserbase.upload(session.id, { ...file, type: "application/pdf" });
@@ -200,6 +210,7 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
 
   progress.page = page;
 
+  withinBudget(deadline);
   await page.navigate(run.job.url);
 
   const live = await readLiveForm(page);
@@ -217,6 +228,8 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
 
   progress.evidence.fields = sentFields(questions, confirmed, account, letter.text);
   progress.evidence.files = uploaded;
+
+  withinBudget(deadline);
 
   const failure = await fillGreenhouse(page, {
     questions,
@@ -241,11 +254,13 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
     return { state: "rehearsed", reason: null } satisfies Ending;
   }
 
-  if (deadline - Date.now() < deps.outcomeMs + submitMarginMs) {
-    throw new Error("No time left to submit");
-  }
+  withinBudget(deadline, deps.outcomeMs + submitMarginMs);
 
-  if (!(await deps.repo.markSubmitting(attemptId, now()))) return cancelled("applied_manually");
+  if (!(await deps.repo.markSubmitting(attemptId, now()))) {
+    const fresh = await deps.repo.runnable(attemptId);
+
+    return (fresh === undefined ? undefined : refusal(fresh, deps.allowlist)) ?? assisted("error");
+  }
 
   progress.submitting = true;
 
@@ -267,7 +282,13 @@ async function record(ready: Run, progress: Progress, outcome: Outcome) {
   const { evidence, screenshotKey } = progress;
 
   if (outcome.state === "submitted") {
-    await deps.repo.submittedWithApplication(attemptId, { evidence, screenshotKey }, now());
+    const result = await deps.repo.submittedWithApplication(
+      attemptId,
+      { evidence, screenshotKey },
+      now(),
+    );
+
+    if (result !== "submitted") logFailure("AI application result lost")(new Error(result));
 
     return;
   }
@@ -277,9 +298,7 @@ async function record(ready: Run, progress: Progress, outcome: Outcome) {
   await deps.repo.finish(attemptId, [from], { ...outcome, evidence, screenshotKey }, now());
 }
 
-async function drive(ready: Run) {
-  const deadline = Date.now() + ready.deps.budgetMs;
-
+async function drive(ready: Run, deadline: number) {
   const progress: Progress = {
     submitting: false,
     sessionId: undefined,
@@ -319,37 +338,49 @@ async function drive(ready: Run) {
 export async function runAiApplication(deps: RunnerDeps, attemptId: string, now: () => Date) {
   const run = await deps.repo.runnable(attemptId);
 
-  if (run === undefined) return;
+  if (run === undefined) return skipped;
 
   const { state, confirmed } = run.attempt;
 
   if (state === "submitting") {
     await deps.repo.finish(attemptId, ["submitting"], needsCheck, now());
 
-    return;
+    return skipped;
   }
 
-  if (state !== "queued" && state !== "running") return;
+  if (state !== "queued" && state !== "running") return skipped;
 
   const refused = refusal(run, deps.allowlist);
 
   if (refused !== undefined) {
     await deps.repo.finish(attemptId, ["queued", "running"], refused, now());
 
-    return;
+    return skipped;
   }
 
   const { browserbase } = deps;
   const { resume } = run;
+  const { confirmedAt } = run.attempt;
 
-  if (browserbase === undefined || resume === null || confirmed === null) {
+  if (browserbase === undefined || resume === null || confirmed === null || confirmedAt === null) {
     logFailure("AI application cannot run")(new Error("Browserbase or the résumé is missing"));
     await deps.repo.finish(attemptId, ["queued", "running"], assisted("error"), now());
 
-    return;
+    return skipped;
   }
 
-  if (!(await deps.repo.claimForRun(attemptId, now()))) return;
+  if (
+    changedAfter(run.resumeUpdatedAt, confirmedAt) ||
+    changedAfter(run.letterUpdatedAt, confirmedAt)
+  ) {
+    await deps.repo.finish(attemptId, ["queued", "running"], assisted("files_changed"), now());
 
-  await drive({ deps, browserbase, run, resume, confirmed, attemptId, now });
+    return skipped;
+  }
+
+  if (!(await deps.repo.claimForRun(attemptId, now()))) return skipped;
+
+  const deadline = Date.now() + deps.budgetMs;
+
+  await drive({ deps, browserbase, run, resume, confirmed, attemptId, now }, deadline);
 }
