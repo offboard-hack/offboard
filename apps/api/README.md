@@ -120,8 +120,10 @@ Worker can reach and add a test administrator to its roster. Set
 `BETTER_AUTH_SECRET`, and `AUTH_EMAIL_FROM` in a private secrets file outside
 the repository. To use Hyperdrive, create a configuration pointing to the
 direct PostgreSQL endpoint, disable query caching, and set
-`OFFBOARD_HYPERDRIVE_ID` when building or deploying the Worker. For a direct
-connection, include `POSTGRES_URL` in the secrets file.
+`OFFBOARD_HYPERDRIVE_ID` when building or deploying the Worker. Set
+`OFFBOARD_HYPERDRIVE_REGION` to the database's cloud region, such as
+`aws:us-east-2` for production, to keep sequential database queries near the
+origin. For a direct connection, include `POSTGRES_URL` in the secrets file.
 
 For Resend, add `RESEND_API_KEY` to the file and use the default provider:
 

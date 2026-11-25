@@ -55,6 +55,7 @@ jobs:
       EMAIL_PROVIDER: cloudflare
       OFFBOARD_API_CONFIGURED: "1"
       OFFBOARD_HYPERDRIVE_ID: ${{ vars.OFFBOARD_HYPERDRIVE_ID }}
+      OFFBOARD_HYPERDRIVE_REGION: "aws:us-east-2"
     steps:
       - uses: actions/checkout@v7
         with:

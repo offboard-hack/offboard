@@ -5,6 +5,7 @@ import * as entrypoint from "./cloudflare.worker.ts" with { type: "cf-worker" };
 const apiConfigured = process.env.OFFBOARD_API_CONFIGURED === "1";
 const cronEnabled = apiConfigured && process.env.OFFBOARD_ENABLE_CRON === "1";
 const hyperdriveId = process.env.OFFBOARD_HYPERDRIVE_ID;
+const hyperdriveRegion = process.env.OFFBOARD_HYPERDRIVE_REGION;
 
 const provider = z
   .enum(["resend", "cloudflare"])
@@ -37,6 +38,7 @@ export default defineConfig({
     entrypoint,
     compatibilityDate: "2026-11-23",
     compatibilityFlags: ["nodejs_compat"],
+    placement: hyperdriveId && hyperdriveRegion ? { region: hyperdriveRegion } : undefined,
     workersDev: true,
     domains: ["app.off-board.xyz"],
     env,
