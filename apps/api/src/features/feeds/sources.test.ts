@@ -193,6 +193,105 @@ describe("fetchFeed", () => {
     });
   });
 
+  it("keeps minimal items whose optional fields are absent", async () => {
+    const { fetchImpl } = recordingFetch(
+      json({
+        jobs: [
+          {
+            id: 7,
+            title: "Analista",
+            absolute_url: "https://job-boards.greenhouse.io/acme/jobs/7",
+            location: { name: "Brasil" },
+          },
+        ],
+      }),
+      json([
+        {
+          id: "m1",
+          text: "Analista",
+          hostedUrl: "https://jobs.lever.co/acme-corp_br/m1",
+          country: "BR",
+        },
+      ]),
+    );
+
+    expect(await fetchFeed(greenhouse, fetchImpl)).toEqual({
+      jobs: [
+        {
+          sourceKey: "acme:7",
+          title: "Analista",
+          company: "Acme",
+          workModel: null,
+          city: null,
+          state: null,
+          url: "https://job-boards.greenhouse.io/acme/jobs/7",
+          description: "",
+          postedAt: null,
+        },
+      ],
+      skipped: 0,
+    });
+    expect(await fetchFeed(lever, fetchImpl)).toEqual({
+      jobs: [
+        {
+          sourceKey: "acme-corp_br:m1",
+          title: "Analista",
+          company: "Acme Corp Br",
+          workModel: null,
+          city: null,
+          state: null,
+          url: "https://jobs.lever.co/acme-corp_br/m1",
+          description: "",
+          postedAt: null,
+        },
+      ],
+      skipped: 0,
+    });
+  });
+
+  it("trusts a Brazilian Lever country for the location and accepts on-site", async () => {
+    const { fetchImpl } = recordingFetch(
+      json([
+        leverPosting("c1", {
+          workplaceType: "on-site",
+          categories: { location: "Curitiba, PR", allLocations: [] },
+        }),
+        leverPosting("c2", {
+          country: "US",
+          categories: { location: "Curitiba, PR", allLocations: [] },
+        }),
+      ]),
+    );
+
+    const result = await fetchFeed(lever, fetchImpl);
+
+    expect("jobs" in result && result.jobs).toEqual([
+      expect.objectContaining({
+        sourceKey: "acme-corp_br:c1",
+        workModel: "onsite",
+        city: "Curitiba",
+        state: "PR",
+      }),
+    ]);
+  });
+
+  it("parses at most 1 000 characters of a location", async () => {
+    const { fetchImpl } = recordingFetch(
+      json({
+        jobs: [
+          greenhouseJob(1, { location: { name: `${"x".repeat(1_000)}, São Paulo` } }),
+          greenhouseJob(2, { location: { name: `Recife - PE${" ".repeat(50_000)}- x` } }),
+        ],
+      }),
+    );
+
+    const result = await fetchFeed(greenhouse, fetchImpl);
+
+    expect("jobs" in result && result.jobs.map((job) => [job.sourceKey, job.city])).toEqual([
+      ["acme:2", "Recife"],
+    ]);
+  });
+
   it("skips invalid items", async () => {
     const { fetchImpl } = recordingFetch(
       json({

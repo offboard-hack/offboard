@@ -77,6 +77,24 @@ describe("parseLocation", () => {
     expect(parseLocation(text)).toEqual({ city: null, state: null, inBrazil: false });
   });
 
+  it("reads the first Brazilian place of a multi-location text", () => {
+    expect(parseLocation("Lisbon, Portugal; São Paulo, Brazil")).toEqual({
+      city: null,
+      state: "SP",
+      inBrazil: true,
+    });
+    expect(parseLocation("Lisbon, Portugal | Recife, Pernambuco")).toEqual({
+      city: "Recife",
+      state: "PE",
+      inBrazil: true,
+    });
+    expect(parseLocation("Lisbon, Portugal; Austin, TX")).toEqual({
+      city: null,
+      state: null,
+      inBrazil: false,
+    });
+  });
+
   it("only trusts a lowercase or unguarded UF when nothing else says Brazil", () => {
     expect(parseLocation("Campinas, SP")).toEqual({ city: null, state: null, inBrazil: false });
     expect(parseLocation("Campinas - sp")).toEqual({ city: null, state: null, inBrazil: false });

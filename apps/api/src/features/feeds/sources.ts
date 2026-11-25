@@ -29,6 +29,7 @@ const maxBytes = 10_000_000;
 const timeoutMs = 15_000;
 const fieldLimit = 255;
 const descriptionLimit = 20_000;
+const locationLimit = 1_000;
 
 const jsonText = z.string().transform((text, context) => {
   try {
@@ -98,7 +99,7 @@ const companyOf = (feed: Feed, named: string) =>
   storableClip(named, fieldLimit) ||
   storableClip(titleCase(feed.board), fieldLimit);
 
-const placeOf = (text: string) => parseLocation(sanitizeText(text));
+const placeOf = (text: string) => parseLocation(sanitizeText(text).slice(0, locationLimit));
 
 const located = (place: Place) => ({
   city: place.city === null ? null : storableClip(place.city, fieldLimit),
@@ -156,7 +157,9 @@ const readGreenhouse = (text: string, feed: Feed) => {
 const leverModel = (workplaceType: string, fallback: string) =>
   workplaceType === "remote" || workplaceType === "hybrid" || workplaceType === "onsite"
     ? workplaceType
-    : workModelFrom(fallback);
+    : workplaceType === "on-site"
+      ? ("onsite" as const)
+      : workModelFrom(fallback);
 
 const readLever = (text: string, feed: Feed) => {
   const parsed = leverFeed.safeParse(text);
@@ -166,13 +169,11 @@ const readLever = (text: string, feed: Feed) => {
   return collect(parsed.data, leverPosting, (posting) => {
     const { location, allLocations } = posting.categories;
 
-    const place = [location, ...allLocations]
-      .map((candidate) => placeOf(candidate))
-      .find((candidate) => candidate.inBrazil) ?? {
-      city: null,
-      state: null,
-      inBrazil: posting.country.toUpperCase() === "BR",
-    };
+    const place =
+      [location, ...allLocations]
+        .map((candidate) => placeOf(candidate))
+        .find((candidate) => candidate.inBrazil) ??
+      placeOf(posting.country.toUpperCase() === "BR" ? `${location}, Brasil` : "");
 
     if (!place.inBrazil) return null;
 

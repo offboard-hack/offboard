@@ -34,7 +34,7 @@ const fold = (text: string) =>
 const ufByName = new Map<string, string>(states.map(([uf, name]) => [fold(name), uf]));
 const ufs = new Set<string>(states.map(([uf]) => uf));
 
-const separator = /(\s+[-–]\s+|[,;/|()])/;
+const separator = /(\s+[-–]\s+|[,/()])/;
 const brazilMention = /\bbra[sz]il/;
 const noise = /^(?:bra[sz]il|remot[aoe]|h[iy]brid[oa]?|presencial|on-?site)$/;
 
@@ -47,7 +47,7 @@ export const brazilState = (text: string) => {
 const stateOf = (segment: { text: string; dashed: boolean }, inBrazil: boolean) =>
   ufs.has(segment.text) && !inBrazil && !segment.dashed ? null : brazilState(segment.text);
 
-export const parseLocation = (text: string) => {
+const parseGroup = (text: string) => {
   const pieces = text.split(separator);
   const inBrazil = brazilMention.test(fold(text));
 
@@ -68,6 +68,12 @@ export const parseLocation = (text: string) => {
     found > 0 && !noise.test(fold(first.text)) && !ufs.has(first.text) ? first.text : null;
 
   return { city, state, inBrazil: inBrazil || state !== null };
+};
+
+export const parseLocation = (text: string) => {
+  const places = text.split(/[;|]/).map((group) => parseGroup(group));
+
+  return places.find((place) => place.inBrazil) ?? places[0];
 };
 
 export const workModelFrom = (text: string) => {
