@@ -3530,6 +3530,66 @@ describe.skipIf(!url)("api", () => {
             expect(await packageRows(id)).toEqual([]);
           });
 
+          it("refuses a cover letter after applying without spending a call", async () => {
+            const jobId = await openJob("carta-aplicada");
+            const { app, id, base, call, apply } = await tailoringApp();
+
+            expect((await apply(jobId, base.id)).status).toBe(201);
+
+            const spent = await usage(id);
+
+            app.calls.length = 0;
+
+            const res = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(res.status).toBe(409);
+            expect(await res.json()).toEqual({ error: "Already applied" });
+            expect(letterCalls(app.calls)).toBe(0);
+            expect(await usage(id)).toEqual(spent);
+            expect(await packageRows(id)).toEqual([]);
+          });
+
+          it("shows the package of a closed job only to someone who applied or has a package", async () => {
+            const applied = await openJob("fechada-aplicada");
+            const stored = await openJob("fechada-pacote");
+            const untouched = await openJob("fechada-nada");
+            const { id, base, call, apply } = await tailoringApp();
+            const other = await tailoringApp("outra.fechada@example.com", 1);
+
+            expect((await apply(applied, base.id)).status).toBe(201);
+            await db.insert(applicationPackages).values({
+              profileId: id,
+              jobId: stored,
+              coverLetter: "Carta guardada.",
+            });
+            await db.update(jobs).set({ closedAt: new Date() });
+
+            const appliedRes = await call(`/me/jobs/${applied}/package`);
+
+            expect(appliedRes.status).toBe(200);
+            expect(await appliedRes.json()).toMatchObject({
+              job: { title: "Backend" },
+              resume: { id: base.id, kind: "base" },
+            });
+
+            const storedRes = await call(`/me/jobs/${stored}/package`);
+
+            expect(storedRes.status).toBe(200);
+            expect((await storedRes.json()).coverLetter).toBe("Carta guardada.");
+
+            for (const jobId of [applied, stored, untouched]) {
+              const denied = jobId === untouched ? call : other.call;
+              const res = await denied(`/me/jobs/${jobId}/package`);
+
+              expect(res.status).toBe(404);
+              expect(await res.json()).toEqual({ error: "Job not found" });
+            }
+
+            const letter = await call(`/me/jobs/${stored}/cover-letter`, { method: "POST" });
+
+            expect(letter.status).toBe(404);
+          });
+
           it("answers 502 when the model fails and logs a summary", async () => {
             const jobId = await openJob("falha-carta");
             const { app, id, call } = await tailoringApp();
@@ -3554,6 +3614,7 @@ describe.skipIf(!url)("api", () => {
             const { app, id, call } = await tailoringApp();
             const unconfigured = resumesApp({ generate: null });
             const bare = await profile("sem.curriculo@example.com", 1);
+            const spent = await usage(id);
 
             for (const missing of [crypto.randomUUID(), closedId, "not-a-uuid"]) {
               for (const [path, method] of [
@@ -3567,12 +3628,18 @@ describe.skipIf(!url)("api", () => {
               }
             }
 
+            expect(await usage(id)).toEqual(spent);
+            expect(letterCalls(app.calls)).toBe(0);
+
+            const bareSpent = await usage(bare);
+
             const noBase = await request(app.instance, bare, `/me/jobs/${jobId}/cover-letter`, {
               method: "POST",
             });
 
             expect(noBase.status).toBe(409);
             expect(await noBase.json()).toEqual({ error: "Upload a résumé first" });
+            expect(await usage(bare)).toEqual(bareSpent);
 
             const bareView = await request(app.instance, bare, `/me/jobs/${jobId}/package`);
 
@@ -4473,6 +4540,7 @@ describe.skipIf(!url)("api", () => {
             { targetTitles: "Backend" },
             { jobPreferences: { locations: [{ city: null, state: "XX" }] } },
             { jobPreferences: { salaryFloorCents: -5 } },
+            { jobPreferences: { salaryFloorCents: 2_147_483_648 } },
             { profileFields: { phone: { value: "x".repeat(501), share: true } } },
             { profileFields: { phone: { value: "1" } } },
           ];

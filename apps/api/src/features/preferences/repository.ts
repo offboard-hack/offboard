@@ -1,6 +1,6 @@
 import type { Database } from "@offboard/db/client";
 import { talentPreferences } from "@offboard/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { toPreferences } from "../../shared/talent-preferences.js";
 import type { PreferencesInput } from "./schema.js";
 
@@ -28,12 +28,23 @@ export function createPreferencesRepository(db: Database) {
   async function save(profileId: string, input: PreferencesInput, now: Date) {
     const before = await stored(profileId);
 
+    const { jobPreferences, profileFields, ...scalars } = input;
+
     const [row] = await db
       .insert(talentPreferences)
       .values({ ...input, profileId, createdAt: now, updatedAt: now })
       .onConflictDoUpdate({
         target: talentPreferences.profileId,
-        set: { ...input, updatedAt: now },
+        set: {
+          ...scalars,
+          ...(jobPreferences && {
+            jobPreferences: sql`${talentPreferences.jobPreferences} || excluded.job_preferences`,
+          }),
+          ...(profileFields && {
+            profileFields: sql`${talentPreferences.profileFields} || excluded.profile_fields`,
+          }),
+          updatedAt: now,
+        },
       })
       .returning();
 

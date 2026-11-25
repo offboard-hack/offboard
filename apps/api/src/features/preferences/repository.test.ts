@@ -76,15 +76,22 @@ describe.skipIf(!url)("preferences repository", () => {
     expect(row.jobPreferences).toEqual({});
   });
 
-  it("updates only the given keys and replaces objects whole", async () => {
+  it("updates only the given keys and merges the nested objects per key", async () => {
     await repository.save(
       profileId,
       {
         mode: "automatic",
         hybridThreshold: 90,
         targetTitles: ["Backend"],
-        jobPreferences: { relocate: true, workModels: ["remote"] },
-        profileFields: { phone: { value: "1", share: true } },
+        jobPreferences: {
+          relocate: true,
+          workModels: ["remote"],
+          locations: [{ city: "Campinas", state: "SP" }],
+        },
+        profileFields: {
+          phone: { value: "1", share: true },
+          linkedin: { value: "in/eu", share: true },
+        },
       },
       first,
     );
@@ -92,8 +99,8 @@ describe.skipIf(!url)("preferences repository", () => {
     const saved = await repository.save(
       profileId,
       {
-        jobPreferences: { excludedCompanies: ["Acme"] },
-        profileFields: { city: { value: "SP", share: false } },
+        jobPreferences: { excludedCompanies: ["Acme"], workModels: ["onsite", "hybrid"] },
+        profileFields: { phone: { value: "2", share: false }, city: { value: "SP", share: false } },
       },
       second,
     );
@@ -102,19 +109,67 @@ describe.skipIf(!url)("preferences repository", () => {
     expect(saved.preferences.hybridThreshold).toBe(90);
     expect(saved.preferences.targetTitles).toEqual(["Backend"]);
     expect(saved.preferences.jobPreferences).toEqual({
-      workModels: [],
-      locations: [],
-      relocate: false,
+      workModels: ["onsite", "hybrid"],
+      locations: [{ city: "Campinas", state: "SP" }],
+      relocate: true,
       salaryFloorCents: null,
       seniorities: [],
       excludedCompanies: ["Acme"],
     });
-    expect(saved.preferences.profileFields.phone).toEqual({ value: null, share: false });
+    expect(saved.preferences.profileFields.phone).toEqual({ value: "2", share: false });
+    expect(saved.preferences.profileFields.linkedin).toEqual({ value: "in/eu", share: true });
     expect(saved.preferences.profileFields.city).toEqual({ value: "SP", share: false });
 
     const [row] = await db.select().from(talentPreferences);
 
     expect(row).toMatchObject({ createdAt: first, updatedAt: second });
+  });
+
+  it("keeps the other profile fields when only one is sent", async () => {
+    await repository.save(
+      profileId,
+      {
+        profileFields: {
+          phone: { value: "1", share: true },
+          linkedin: { value: "in/eu", share: true },
+        },
+      },
+      first,
+    );
+
+    const saved = await repository.save(
+      profileId,
+      { profileFields: { phone: { value: "2", share: true } } },
+      second,
+    );
+
+    expect(saved.preferences.profileFields.linkedin).toEqual({ value: "in/eu", share: true });
+    expect(saved.preferences.profileFields.phone).toEqual({ value: "2", share: true });
+  });
+
+  it("clears a nested key when an empty value is sent", async () => {
+    await repository.save(
+      profileId,
+      {
+        jobPreferences: { locations: [{ city: null, state: "SP" }], relocate: true },
+        profileFields: { phone: { value: "1", share: true }, city: { value: "SP", share: true } },
+      },
+      first,
+    );
+
+    const saved = await repository.save(
+      profileId,
+      {
+        jobPreferences: { locations: [] },
+        profileFields: { phone: { value: null, share: false } },
+      },
+      second,
+    );
+
+    expect(saved.preferences.jobPreferences.locations).toEqual([]);
+    expect(saved.preferences.jobPreferences.relocate).toBe(true);
+    expect(saved.preferences.profileFields.phone).toEqual({ value: null, share: false });
+    expect(saved.preferences.profileFields.city).toEqual({ value: "SP", share: true });
   });
 
   it("flags title changes case-insensitively as sets", async () => {

@@ -27,6 +27,11 @@ describe("resume digits", () => {
     expect(digitRuns(null)).toEqual([]);
   });
 
+  it("lists superscript and other numeric runs", () => {
+    expect(digitRuns("vendas em ⁴⁰% e ½")).toEqual(["⁴⁰", "½"]);
+    expect(resumeDigits(content).has("⁴⁰")).toBe(false);
+  });
+
   it("collects the digit runs of every résumé text but the contact", () => {
     expect(resumeDigits(content)).toEqual(
       new Set(["2015", "30", "99", "2019", "03", "120", "2010", "3", "1"]),

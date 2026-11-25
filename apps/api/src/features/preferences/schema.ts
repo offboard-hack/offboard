@@ -66,7 +66,7 @@ export const preferencesInputSchema = z.object({
         .array(z.object({ city: storable().min(1).max(100).nullable(), state: z.enum(states) }))
         .max(20),
       relocate: z.boolean(),
-      salaryFloorCents: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
+      salaryFloorCents: z.number().int().min(0).max(2_147_483_647).nullable(),
       seniorities: z
         .array(z.enum(["intern", "junior", "mid", "senior", "lead", "manager", "director"]))
         .max(7),

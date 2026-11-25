@@ -67,7 +67,7 @@ export function createAnswersRepository(db: Database) {
     return true;
   }
 
-  async function ensureQuestion(text: string) {
+  async function ensureQuestion(text: string, now: Date) {
     const trimmed = sanitizeText(text).trim();
     const normalized = normalizeQuestion(trimmed);
 
@@ -75,7 +75,7 @@ export function createAnswersRepository(db: Database) {
 
     await db
       .insert(answerQuestions)
-      .values({ normalized, text: trimmed, common: false })
+      .values({ normalized, text: trimmed, common: false, createdAt: now })
       .onConflictDoNothing({ target: answerQuestions.normalized });
 
     const [row] = await db

@@ -1,5 +1,11 @@
 import type { Database } from "@offboard/db/client";
-import { applicationPackages, jobs, resumes, talentPreferences } from "@offboard/db/schema";
+import {
+  applicationPackages,
+  applications,
+  jobs,
+  resumes,
+  talentPreferences,
+} from "@offboard/db/schema";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { toPreferences } from "../../shared/talent-preferences.js";
@@ -34,6 +40,46 @@ export function createPackagesRepository(db: Database) {
       .where(and(eq(jobs.id, jobId), isNull(jobs.closedAt)));
 
     return row;
+  }
+
+  async function hasApplied(profileId: string, jobId: string) {
+    const [application] = await db
+      .select({ id: applications.id })
+      .from(applications)
+      .where(and(eq(applications.profileId, profileId), eq(applications.jobId, jobId)));
+
+    return application !== undefined;
+  }
+
+  async function packageJob(profileId: string, jobId: string) {
+    if (!z.uuid().safeParse(jobId).success) return undefined;
+
+    const [row] = await db
+      .select({
+        id: jobs.id,
+        title: jobs.title,
+        company: jobs.company,
+        url: jobs.url,
+        description: jobs.description,
+        closedAt: jobs.closedAt,
+      })
+      .from(jobs)
+      .where(eq(jobs.id, jobId));
+
+    if (!row) return undefined;
+
+    if (row.closedAt === null) return row;
+
+    if (await hasApplied(profileId, jobId)) return row;
+
+    const [saved] = await db
+      .select({ jobId: applicationPackages.jobId })
+      .from(applicationPackages)
+      .where(
+        and(eq(applicationPackages.profileId, profileId), eq(applicationPackages.jobId, jobId)),
+      );
+
+    return saved ? row : undefined;
   }
 
   async function resumeFor(profileId: string, jobId: string) {
@@ -92,7 +138,7 @@ export function createPackagesRepository(db: Database) {
     };
   }
 
-  return { openJob, resumeFor, saveCoverLetter, assemble };
+  return { openJob, packageJob, hasApplied, resumeFor, saveCoverLetter, assemble };
 }
 
 export type PackagesRepository = ReturnType<typeof createPackagesRepository>;

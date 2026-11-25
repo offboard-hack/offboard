@@ -425,6 +425,14 @@ describe.skipIf(!url)("jobs repository", () => {
         expect(await fits()).toEqual({ high: true, exact: true, low: false, unknown: true });
       });
 
+      it("lists with the largest salary floor the column can hold", async () => {
+        await insert("big", { salaryMaxCents: 2_147_483_647 });
+        await insert("small", { salaryMaxCents: 100 });
+        await prefer({ salaryFloorCents: 2_147_483_647 });
+
+        expect(await fits()).toEqual({ big: true, small: false });
+      });
+
       it("keeps fitting jobs first across pages", async () => {
         await insert("n1", { company: "Bad", postedAt: new Date("2026-05-01T00:00:00Z") });
         await insert("n2", { company: "Bad", postedAt: new Date("2026-04-01T00:00:00Z") });

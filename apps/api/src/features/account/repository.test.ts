@@ -536,14 +536,14 @@ describe.skipIf(!url)("account repository", () => {
   it("exports the answers with their questions ordered by text", async () => {
     expect((await repository.exportData(profileId))?.answers).toEqual([]);
 
-    const late = await repos.answers.ensureQuestion("Zzz última?");
-    const early = await repos.answers.ensureQuestion("Aaa primeira?");
+    const late = await repos.answers.ensureQuestion("Zzz última?", new Date());
+    const early = await repos.answers.ensureQuestion("Aaa primeira?", new Date());
 
     await repos.answers.answer(profileId, late, "Z", new Date("2026-03-01T00:00:00Z"));
     await repos.answers.answer(profileId, early, "A", new Date("2026-03-02T00:00:00Z"));
     await repos.answers.answer(otherProfileId, early, "Alheia", new Date());
 
-    const undated = await repos.answers.ensureQuestion("Mmm sem data?");
+    const undated = await repos.answers.ensureQuestion("Mmm sem data?", new Date());
 
     await db
       .insert(talentAnswers)
@@ -557,7 +557,7 @@ describe.skipIf(!url)("account repository", () => {
   });
 
   it("deletes the answers with the profile and keeps the questions", async () => {
-    const question = await repos.answers.ensureQuestion("Aaa primeira?");
+    const question = await repos.answers.ensureQuestion("Aaa primeira?", new Date());
 
     await repos.answers.answer(profileId, question, "A", new Date());
     await repos.answers.answer(otherProfileId, question, "B", new Date());

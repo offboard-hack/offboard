@@ -43,6 +43,10 @@ export function packageRoutes(
 
         if (!resume) return status(409, { error: "Upload a résumé first" });
 
+        if (await repos.hasApplied(me.id, job.id)) {
+          return status(409, { error: "Already applied" });
+        }
+
         const { generate } = deps;
 
         if (!generate) return status(503, { error: "AI not configured" });
@@ -81,7 +85,7 @@ export function packageRoutes(
     .get(
       "/me/jobs/:jobId/package",
       async ({ me, params, status }) => {
-        const job = await repos.openJob(params.jobId);
+        const job = await repos.packageJob(me.id, params.jobId);
 
         if (!job) return status(404, notFound);
 

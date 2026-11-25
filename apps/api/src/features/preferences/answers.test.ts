@@ -154,10 +154,13 @@ describe.skipIf(!url)("answers repository", () => {
   });
 
   it("collapses questions that differ only by case, accents, spacing and punctuation", async () => {
-    const one = await repository.ensureQuestion("Qual sua pretensão salarial?");
-    const two = await repository.ensureQuestion("  qual sua PRETENSAO salarial ");
+    const one = await repository.ensureQuestion("Qual sua pretensão salarial?", first);
+    const two = await repository.ensureQuestion("  qual sua PRETENSAO salarial ", first);
 
     expect(two).toBe(one);
+    expect(
+      await db.select().from(answerQuestions).where(eq(answerQuestions.id, one)),
+    ).toMatchObject([{ createdAt: first }]);
     expect(
       await db.select().from(answerQuestions).where(eq(answerQuestions.id, one)),
     ).toMatchObject([{ text: "Qual sua pretensão salarial?", common: false }]);
@@ -167,14 +170,14 @@ describe.skipIf(!url)("answers repository", () => {
     const id = await commonId();
     const [before] = await db.select().from(answerQuestions).where(eq(answerQuestions.id, id));
 
-    expect(await repository.ensureQuestion(before.text.toUpperCase())).toBe(id);
+    expect(await repository.ensureQuestion(before.text.toUpperCase(), first)).toBe(id);
     expect(await db.select().from(answerQuestions).where(eq(answerQuestions.id, id))).toEqual([
       before,
     ]);
   });
 
   it("lists a collected question only for the person who answered it", async () => {
-    const id = await repository.ensureQuestion("Qual seu time favorito?");
+    const id = await repository.ensureQuestion("Qual seu time favorito?", first);
 
     expect((await repository.library(profileId)).questions).toHaveLength(10);
 
@@ -194,8 +197,8 @@ describe.skipIf(!url)("answers repository", () => {
   });
 
   it("orders common questions first, then by text", async () => {
-    const early = await repository.ensureQuestion("Aaa primeira?");
-    const late = await repository.ensureQuestion("Zzz última?");
+    const early = await repository.ensureQuestion("Aaa primeira?", first);
+    const late = await repository.ensureQuestion("Zzz última?", first);
 
     await repository.answer(profileId, late, "z", first);
     await repository.answer(profileId, early, "a", first);
@@ -207,10 +210,12 @@ describe.skipIf(!url)("answers repository", () => {
   });
 
   it("rejects empty, blank-after-normalizing and oversized questions", async () => {
-    await expect(repository.ensureQuestion("   ")).rejects.toThrow("Invalid question");
-    await expect(repository.ensureQuestion("???")).rejects.toThrow("Invalid question");
-    await expect(repository.ensureQuestion("a".repeat(501))).rejects.toThrow("Invalid question");
-    await expect(repository.ensureQuestion(`  ${"a".repeat(500)}  `)).resolves.toEqual(
+    await expect(repository.ensureQuestion("   ", first)).rejects.toThrow("Invalid question");
+    await expect(repository.ensureQuestion("???", first)).rejects.toThrow("Invalid question");
+    await expect(repository.ensureQuestion("a".repeat(501), first)).rejects.toThrow(
+      "Invalid question",
+    );
+    await expect(repository.ensureQuestion(`  ${"a".repeat(500)}  `, first)).resolves.toEqual(
       expect.any(String),
     );
   });

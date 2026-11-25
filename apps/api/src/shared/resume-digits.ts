@@ -1,6 +1,6 @@
 import type { ResumeContent } from "@offboard/db/schema";
 
-export const digitRuns = (text: string | null) => text?.match(/\p{Nd}+/gu) ?? [];
+export const digitRuns = (text: string | null) => text?.match(/\p{N}+/gu) ?? [];
 
 export function resumeDigits(content: ResumeContent) {
   const texts = [

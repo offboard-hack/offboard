@@ -60,6 +60,7 @@ describe("preferences input", () => {
       excludedCompanies: ["Acme", "Globex"],
     });
     expect(parse({ jobPreferences: { salaryFloorCents: null } }).success).toBe(true);
+    expect(parse({ jobPreferences: { salaryFloorCents: 2_147_483_647 } }).success).toBe(true);
   });
 
   it("rejects invalid job preferences", () => {
@@ -70,6 +71,7 @@ describe("preferences input", () => {
       { locations: Array.from({ length: 21 }, () => ({ city: null, state: "SP" })) },
       { salaryFloorCents: -1 },
       { salaryFloorCents: 1.5 },
+      { salaryFloorCents: 2_147_483_648 },
       { seniorities: ["god"] },
       { excludedCompanies: Array.from({ length: 51 }, (_, index) => `C${index}`) },
       { excludedCompanies: [" "] },
