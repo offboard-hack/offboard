@@ -4,6 +4,7 @@ import { errorResponse } from "../../shared/http.js";
 import type { Entitlement } from "../../shared/entitlement.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
 import type { TalentProfile } from "../../shared/talent-profile.js";
+import { aiApplyAccess } from "../../shared/ai-apply-access.js";
 import type { TalentRepository } from "./repository.js";
 
 const talentAccessResponse = t.Object({
@@ -18,6 +19,7 @@ const meResponse = t.Object({
   email: t.String(),
   termsAccepted: t.Boolean(),
   shareOutcomeWithHr: t.Boolean(),
+  aiApply: t.Object({ consented: t.Boolean(), available: t.Boolean() }),
   entitlement: t.Object({
     kind: t.Union([t.Literal("sponsored"), t.Literal("lapsed")]),
     until: t.Union([t.String(), t.Null()]),
@@ -36,13 +38,26 @@ function toTalentAccess(profile: TalentProfile) {
   };
 }
 
-function toMe(profile: TalentProfile, entitlement: Entitlement) {
+type AiApply = { allowlist: string[]; configured: boolean };
+
+function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: AiApply) {
+  const consentAt = profile.aiApplyConsentAt === null ? null : new Date(profile.aiApplyConsentAt);
+
+  const access = aiApplyAccess(
+    { personalEmail: profile.email, aiApplyConsentAt: consentAt },
+    aiApply.allowlist,
+  );
+
   return {
     id: profile.id,
     name: profile.name,
     email: profile.email,
     termsAccepted: profile.termsAcceptedAt !== null,
     shareOutcomeWithHr: profile.shareOutcomeWithHr,
+    aiApply: {
+      consented: consentAt !== null,
+      available: access === "allowed" && aiApply.configured,
+    },
     entitlement,
   };
 }
@@ -58,6 +73,7 @@ export function talentRoutes(
   access: PortalAccessPlugin,
   talentAccess: TalentAccessPlugin,
   sendWelcome: (profile: TalentProfile) => Promise<void>,
+  aiApply: AiApply,
 ) {
   return new Elysia()
     .use(access)
@@ -125,13 +141,13 @@ export function talentRoutes(
         response: { 200: talentAccessResponse, 404: errorResponse, 409: errorResponse },
       },
     )
-    .get("/me", ({ me, entitlement }) => toMe(me, entitlement), {
+    .get("/me", ({ me, entitlement }) => toMe(me, entitlement, aiApply), {
       talent: "signed-in",
       response: { 200: meResponse },
     })
     .post(
       "/me/terms",
-      async ({ me, entitlement }) => toMe(await repos.acceptTerms(me.id), entitlement),
+      async ({ me, entitlement }) => toMe(await repos.acceptTerms(me.id), entitlement, aiApply),
       {
         talent: "signed-in",
         response: { 200: meResponse },
@@ -140,10 +156,24 @@ export function talentRoutes(
     .put(
       "/me/consent",
       async ({ me, entitlement, body }) =>
-        toMe(await repos.setConsent(me.id, body.shareOutcomeWithHr, new Date()), entitlement),
+        toMe(
+          await repos.setConsent(me.id, body.shareOutcomeWithHr, new Date()),
+          entitlement,
+          aiApply,
+        ),
       {
         talent: "signed-in",
         body: t.Object({ shareOutcomeWithHr: t.Boolean() }),
+        response: { 200: meResponse },
+      },
+    )
+    .put(
+      "/me/ai-apply/consent",
+      async ({ me, entitlement, body }) =>
+        toMe(await repos.setAiApplyConsent(me.id, body.accept, new Date()), entitlement, aiApply),
+      {
+        talent: "signed-in",
+        body: t.Object({ accept: t.Boolean() }),
         response: { 200: meResponse },
       },
     );

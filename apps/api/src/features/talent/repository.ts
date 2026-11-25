@@ -1,7 +1,8 @@
 import type { Database } from "@offboard/db/client";
-import { offboardingCases, talentProfiles } from "@offboard/db/schema";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { aiApplications, offboardingCases, talentProfiles } from "@offboard/db/schema";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
+import { aiApplyConsentVersion } from "../../shared/ai-apply-access.js";
 import type { TalentProfile } from "../../shared/talent-profile.js";
 
 const caseViolation = z.object({
@@ -34,6 +35,8 @@ function toProfile(row: Row) {
     termsAcceptedAt: row.termsAcceptedAt?.toISOString() ?? null,
     firstSignedInAt: row.firstSignedInAt?.toISOString() ?? null,
     shareOutcomeWithHr: row.shareOutcomeWithHr,
+    aiApplyConsentAt: row.aiApplyConsentAt?.toISOString() ?? null,
+    aiApplyConsentVersion: row.aiApplyConsentVersion,
   } satisfies TalentProfile;
 }
 
@@ -162,6 +165,39 @@ export function createTalentRepository(db: Database) {
     return toProfile(row);
   }
 
+  async function setAiApplyConsent(id: string, accept: boolean, now: Date) {
+    return db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(talentProfiles)
+        .set({
+          aiApplyConsentAt: accept ? now : null,
+          aiApplyConsentVersion: accept ? aiApplyConsentVersion : null,
+          updatedAt: now,
+        })
+        .where(eq(talentProfiles.id, id))
+        .returning();
+
+      if (!accept) {
+        await tx
+          .update(aiApplications)
+          .set({
+            state: "cancelled",
+            reason: "consent_withdrawn",
+            finishedAt: now,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(aiApplications.profileId, id),
+              inArray(aiApplications.state, ["draft", "queued"]),
+            ),
+          );
+      }
+
+      return toProfile(row);
+    });
+  }
+
   return {
     enable,
     findByCase,
@@ -171,6 +207,7 @@ export function createTalentRepository(db: Database) {
     findById,
     acceptTerms,
     setConsent,
+    setAiApplyConsent,
   };
 }
 

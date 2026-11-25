@@ -31,6 +31,8 @@ if (apiConfigured) {
 
   if (process.env.OFFBOARD_AI_CONFIGURED === "1") env.AI_GATEWAY_API_KEY = bindings.secret();
 
+  if (process.env.OFFBOARD_AI_APPLY_CONFIGURED === "1") env.AI_APPLY_ALLOWLIST = bindings.secret();
+
   if (process.env.OFFBOARD_RESUMES_BUCKET) {
     env.RESUMES = bindings.r2({ name: process.env.OFFBOARD_RESUMES_BUCKET });
   }

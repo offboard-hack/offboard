@@ -16,6 +16,8 @@ const profile: TalentProfile = {
   termsAcceptedAt: "2026-06-01T00:00:00.000Z",
   firstSignedInAt: "2026-06-01T00:00:00.000Z",
   shareOutcomeWithHr: false,
+  aiApplyConsentAt: null,
+  aiApplyConsentVersion: null,
 };
 
 function build(options: {

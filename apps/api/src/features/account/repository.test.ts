@@ -177,6 +177,8 @@ describe.skipIf(!url)("account repository", () => {
       sponsoredUntil: "2026-12-31",
       termsAcceptedAt: null,
       shareOutcomeWithHr: false,
+      aiApplyConsentAt: null,
+      aiApplyConsentVersion: null,
       firstSignedInAt: null,
       createdAt: expect.any(String),
     });
@@ -446,6 +448,8 @@ describe.skipIf(!url)("account repository", () => {
         termsAcceptedAt: new Date("2026-11-01T12:00:00Z"),
         firstSignedInAt: new Date("2026-11-02T08:30:00Z"),
         shareOutcomeWithHr: true,
+        aiApplyConsentAt: new Date("2026-11-03T10:00:00Z"),
+        aiApplyConsentVersion: "2026-11-25",
         createdAt: new Date("2026-10-31T09:00:00Z"),
       })
       .where(eq(talentProfiles.id, profileId));
@@ -456,6 +460,8 @@ describe.skipIf(!url)("account repository", () => {
       termsAcceptedAt: "2026-11-01T12:00:00.000Z",
       firstSignedInAt: "2026-11-02T08:30:00.000Z",
       shareOutcomeWithHr: true,
+      aiApplyConsentAt: "2026-11-03T10:00:00.000Z",
+      aiApplyConsentVersion: "2026-11-25",
       createdAt: "2026-10-31T09:00:00.000Z",
     });
   });

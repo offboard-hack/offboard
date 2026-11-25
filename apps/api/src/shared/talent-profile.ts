@@ -7,4 +7,6 @@ export type TalentProfile = {
   termsAcceptedAt: string | null;
   firstSignedInAt: string | null;
   shareOutcomeWithHr: boolean;
+  aiApplyConsentAt: string | null;
+  aiApplyConsentVersion: string | null;
 };

@@ -13,6 +13,8 @@ const exportResponse = t.Object({
     sponsoredUntil: nullable,
     termsAcceptedAt: nullable,
     shareOutcomeWithHr: t.Boolean(),
+    aiApplyConsentAt: nullable,
+    aiApplyConsentVersion: nullable,
     firstSignedInAt: nullable,
     createdAt: nullable,
   }),

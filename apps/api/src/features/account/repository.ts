@@ -34,6 +34,8 @@ export function createAccountRepository(db: Database) {
         sponsoredUntil: talentProfiles.sponsoredUntil,
         termsAcceptedAt: talentProfiles.termsAcceptedAt,
         shareOutcomeWithHr: talentProfiles.shareOutcomeWithHr,
+        aiApplyConsentAt: talentProfiles.aiApplyConsentAt,
+        aiApplyConsentVersion: talentProfiles.aiApplyConsentVersion,
         firstSignedInAt: talentProfiles.firstSignedInAt,
         createdAt: talentProfiles.createdAt,
       })
@@ -207,6 +209,8 @@ export function createAccountRepository(db: Database) {
         sponsoredUntil: profile.sponsoredUntil,
         termsAcceptedAt: profile.termsAcceptedAt?.toISOString() ?? null,
         shareOutcomeWithHr: profile.shareOutcomeWithHr,
+        aiApplyConsentAt: profile.aiApplyConsentAt?.toISOString() ?? null,
+        aiApplyConsentVersion: profile.aiApplyConsentVersion,
         firstSignedInAt: profile.firstSignedInAt?.toISOString() ?? null,
         createdAt: profile.createdAt?.toISOString() ?? null,
       },

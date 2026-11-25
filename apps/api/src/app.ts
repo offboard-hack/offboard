@@ -60,6 +60,7 @@ type AppOptions = {
   storage?: ObjectStorage;
   runInBackground?: (task: () => Promise<void>) => void;
   publicPageOrigin?: string;
+  aiApplyAllowlist?: string[];
 };
 
 function ownResumePdf(name: string, content: ResumeContent) {
@@ -249,8 +250,15 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     .use(teamRoutes(repos.team, access))
     .use(insightsRoutes(repos.insights, access))
     .use(
-      talentRoutes(repos.talent, access, talent, (profile) =>
-        options.sendEmail(welcomeEmail(profile, webOrigin)),
+      talentRoutes(
+        repos.talent,
+        access,
+        talent,
+        (profile) => options.sendEmail(welcomeEmail(profile, webOrigin)),
+        {
+          allowlist: (options.aiApplyAllowlist ?? []).map((email) => email.toLowerCase()),
+          configured: options.generateStructured !== undefined,
+        },
       ),
     )
     .use(jobsRoutes(repos.jobs, talent))

@@ -10,6 +10,7 @@ import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
 import {
+  aiApplications,
   answerQuestions,
   applicationPackages,
   applications,
@@ -465,6 +466,7 @@ describe.skipIf(!url)("api", () => {
         email: personalEmail,
         termsAccepted: false,
         shareOutcomeWithHr: false,
+        aiApply: { consented: false, available: false },
         entitlement: { kind: "sponsored", until: sponsoredUntil },
       });
 
@@ -581,6 +583,178 @@ describe.skipIf(!url)("api", () => {
         (await asSession("talent", "/me/consent", "PUT", { shareOutcomeWithHr: "yes" }, asMine))
           .status,
       ).toBe(422);
+    });
+
+    it("stores AI Apply consent", async () => {
+      const [firstCase, secondCase] = await db
+        .select({ id: offboardingCases.id })
+        .from(offboardingCases);
+
+      const enable = async (caseId: string, email: string) => {
+        const created = await repos.talent.enable({ caseId, personalEmail: email, sponsoredUntil });
+
+        if (
+          created === "case_not_found" ||
+          created === "already_enabled" ||
+          created === "email_taken"
+        ) {
+          throw new Error(created);
+        }
+
+        return created;
+      };
+
+      const mine = await enable(firstCase.id, personalEmail);
+      const other = await enable(secondCase.id, "outra@example.com");
+
+      const gated = createApp(webOrigin, repos, {
+        ...appOptions,
+        aiApplyAllowlist: ["ANA.PESSOAL@example.com", "outra@example.com"],
+        generateStructured: async ({ schema }) => schema.parse({}),
+      });
+
+      const call = (
+        instance: typeof gated,
+        session: string,
+        path: string,
+        method: string,
+        id: string,
+        body?: { accept: boolean | string },
+      ) =>
+        instance.handle(
+          new Request(`http://localhost/api${path}`, {
+            method,
+            headers: {
+              "x-test-session": session,
+              "x-test-talent-id": id,
+              origin: webOrigin,
+              "content-type": "application/json",
+            },
+            body: body === undefined ? undefined : JSON.stringify(body),
+          }),
+        );
+
+      const seedAttempt = async (
+        profileId: string,
+        sourceKey: string,
+        state: (typeof aiApplications.$inferInsert)["state"],
+      ) => {
+        const [job] = await db
+          .insert(jobs)
+          .values({
+            origin: "external",
+            source: "seed",
+            sourceKey,
+            title: sourceKey,
+            company: "Acme",
+            url: `https://jobs.example.com/${sourceKey}`,
+          })
+          .returning({ id: jobs.id });
+
+        const [row] = await db
+          .insert(aiApplications)
+          .values({
+            profileId,
+            jobId: job.id,
+            state,
+            form: { questions: [] },
+            draft: [],
+            preparedAt: new Date("2026-11-01T00:00:00Z"),
+          })
+          .returning({ id: aiApplications.id });
+
+        return row.id;
+      };
+
+      const stateOf = async (id: string) => {
+        const [row] = await db
+          .select({
+            state: aiApplications.state,
+            reason: aiApplications.reason,
+            finishedAt: aiApplications.finishedAt,
+          })
+          .from(aiApplications)
+          .where(eq(aiApplications.id, id));
+
+        return row;
+      };
+
+      const consentOf = async (id: string) => {
+        const [row] = await db
+          .select({
+            at: talentProfiles.aiApplyConsentAt,
+            version: talentProfiles.aiApplyConsentVersion,
+          })
+          .from(talentProfiles)
+          .where(eq(talentProfiles.id, id));
+
+        return row;
+      };
+
+      const put = (instance: typeof gated, session: string, id: string, accept: boolean | string) =>
+        call(instance, session, "/me/ai-apply/consent", "PUT", id, { accept });
+
+      expect((await put(gated, "rh", mine.id, true)).status).toBe(403);
+      expect((await put(gated, "talent", mine.id, "yes")).status).toBe(422);
+
+      expect(await (await call(gated, "talent", "/me", "GET", mine.id)).json()).toMatchObject({
+        aiApply: { consented: false, available: false },
+      });
+
+      const accepted = await put(gated, "talent", mine.id, true);
+
+      expect(accepted.status).toBe(200);
+      expect(await accepted.json()).toMatchObject({
+        id: mine.id,
+        aiApply: { consented: true, available: true },
+      });
+
+      const stored = await consentOf(mine.id);
+
+      expect(stored.at).toBeInstanceOf(Date);
+      expect(stored.version).toBe("2026-11-25");
+      expect(await (await call(app, "talent", "/me", "GET", mine.id)).json()).toMatchObject({
+        aiApply: { consented: true, available: false },
+      });
+
+      const draft = await seedAttempt(mine.id, "ai-draft", "draft");
+      const queued = await seedAttempt(mine.id, "ai-queued", "queued");
+      const submitted = await seedAttempt(mine.id, "ai-submitted", "submitted");
+      const others = await seedAttempt(other.id, "ai-other", "draft");
+
+      await put(gated, "talent", other.id, true);
+      await put(gated, "talent", mine.id, true);
+
+      expect((await consentOf(mine.id)).at?.getTime()).toBeGreaterThanOrEqual(
+        stored.at?.getTime() ?? 0,
+      );
+
+      const withdrawn = await put(gated, "talent", mine.id, false);
+
+      expect(await withdrawn.json()).toMatchObject({
+        aiApply: { consented: false, available: false },
+      });
+      expect(await consentOf(mine.id)).toEqual({ at: null, version: null });
+
+      for (const id of [draft, queued]) {
+        expect(await stateOf(id)).toEqual({
+          state: "cancelled",
+          reason: "consent_withdrawn",
+          finishedAt: expect.any(Date),
+        });
+      }
+
+      expect(await stateOf(submitted)).toEqual({
+        state: "submitted",
+        reason: null,
+        finishedAt: null,
+      });
+      expect(await stateOf(others)).toEqual({ state: "draft", reason: null, finishedAt: null });
+      expect((await consentOf(other.id)).at).toBeInstanceOf(Date);
+
+      await put(gated, "talent", mine.id, true);
+
+      expect((await stateOf(draft)).state).toBe("cancelled");
     });
 
     it("denies a talent session whose profile no longer exists", async () => {
@@ -3955,6 +4129,8 @@ describe.skipIf(!url)("api", () => {
           sponsoredUntil,
           termsAcceptedAt: expect.any(String),
           shareOutcomeWithHr: false,
+          aiApplyConsentAt: null,
+          aiApplyConsentVersion: null,
           firstSignedInAt: null,
           createdAt: expect.any(String),
         });

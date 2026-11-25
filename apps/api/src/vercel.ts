@@ -5,6 +5,7 @@ import { createRepositories } from "./repositories.js";
 import { createApp } from "./app.js";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
+import { parseAllowlist } from "./shared/ai-apply-access.js";
 import { createGenerateStructured, gatewayModel } from "./shared/ai.js";
 import { diskStorage } from "./shared/disk-storage.js";
 import type { WelcomeMessage } from "./features/talent/welcome.js";
@@ -54,6 +55,7 @@ function buildApp() {
       ? diskStorage(process.env.RESUME_STORAGE_DIR)
       : undefined,
     publicPageOrigin: process.env.PUBLIC_PAGE_ORIGIN,
+    aiApplyAllowlist: parseAllowlist(process.env.AI_APPLY_ALLOWLIST),
   });
 }
 
