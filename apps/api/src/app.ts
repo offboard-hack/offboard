@@ -12,6 +12,7 @@ import { exitSurveysRoutes } from "./features/exit-surveys/routes.js";
 import { integrationsRoutes } from "./features/integrations/routes.js";
 import { organizationsRoutes } from "./features/organizations/routes.js";
 import { offboardingsRoutes } from "./features/offboardings/routes.js";
+import type { TrackingConfig } from "./features/offboardings/correios.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
 import type { DispatchAction } from "./shared/action-dispatch.js";
@@ -20,7 +21,7 @@ import { portalAccess } from "./shared/access.js";
 type AppOptions = {
   adapter?: NonNullable<ConstructorParameters<typeof Elysia>[0]>["adapter"];
   auth: PortalAuth;
-  correiosBaseUrl?: string;
+  tracking?: TrackingConfig;
   cronSecret?: string;
   webhookSecret?: string;
   slackSigningSecret?: string;
@@ -63,7 +64,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         repos.actionConfigs.readChecklist,
         options.cronSecret,
         options.webhookSecret,
-        options.correiosBaseUrl,
+        options.tracking,
       ),
     )
     .use(actionConfigsRoutes(repos.actionConfigs, access))

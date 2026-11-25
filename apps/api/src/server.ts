@@ -26,6 +26,14 @@ createApp(origin, createRepositories(db), {
   auth,
   cronSecret: process.env.CRON_SECRET,
   webhookSecret: process.env.WEBHOOK_SECRET,
+  tracking:
+    process.env.TRACKING_USER && process.env.TRACKING_TOKEN
+      ? {
+          baseUrl: process.env.TRACKING_BASE_URL ?? "https://api.linketrack.com",
+          user: process.env.TRACKING_USER,
+          token: process.env.TRACKING_TOKEN,
+        }
+      : undefined,
   slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
   abacatepay: createAbacatePayGateway(process.env.ABACATEPAY_API_KEY),
   abacatepayWebhookSecret: process.env.ABACATEPAY_WEBHOOK_SECRET,

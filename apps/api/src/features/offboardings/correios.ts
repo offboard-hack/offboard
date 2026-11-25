@@ -1,40 +1,39 @@
 import { z } from "zod";
 
-const correiosEvent = z.object({
+const trackingEvent = z.object({
+  data: z.string(),
+  hora: z.string(),
+  local: z.string(),
+  status: z.string(),
+  subStatus: z.array(z.string()).optional(),
+});
+
+const trackingResponse = z.object({
   codigo: z.string(),
-  tipo: z.string(),
-  descricao: z.string(),
-  dtHrCriado: z.string(),
+  eventos: z.array(trackingEvent).optional(),
 });
 
-const correiosObject = z.object({
-  eventos: z.array(correiosEvent).optional(),
-  mensagem: z.string().optional(),
-});
+const DELIVERED_PATTERN = /\bentregue\b/i;
 
-const correiosResponse = z.object({
-  objetos: z.array(correiosObject).optional(),
-});
-
-const DELIVERED_CODES = new Set(["BDE", "BDI", "BDR"]);
-
-function isDelivered(codigo: string, tipo: string) {
-  return DELIVERED_CODES.has(codigo) && tipo === "01";
+export interface TrackingConfig {
+  baseUrl: string;
+  user: string;
+  token: string;
 }
 
-export async function trackPackage(trackingCode: string, baseUrl: string) {
-  const url = `${baseUrl}/v1/sro-rastro/${encodeURIComponent(trackingCode)}`;
+export async function trackPackage(trackingCode: string, config: TrackingConfig) {
+  const params = new URLSearchParams({
+    user: config.user,
+    token: config.token,
+    codigo: trackingCode,
+  });
+
+  const url = `${config.baseUrl}/track/json?${params}`;
 
   let response: Response;
 
   try {
-    response = await fetch(url, {
-      headers: {
-        "app-check-token": "bypass",
-        "user-agent": "Dart/3.6",
-      },
-      signal: AbortSignal.timeout(8_000),
-    });
+    response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
   } catch {
     return { delivered: false, lastEvent: "network error", lastUpdate: "" };
   }
@@ -51,29 +50,23 @@ export async function trackPackage(trackingCode: string, baseUrl: string) {
     return { delivered: false, lastEvent: "invalid response", lastUpdate: "" };
   }
 
-  const parsed = correiosResponse.safeParse(body);
+  const parsed = trackingResponse.safeParse(body);
 
   if (!parsed.success) {
     return { delivered: false, lastEvent: "invalid response", lastUpdate: "" };
   }
 
-  const objetos = parsed.data.objetos;
+  const eventos = parsed.data.eventos;
 
-  if (!objetos || objetos.length === 0) {
+  if (!eventos || eventos.length === 0) {
     return { delivered: false, lastEvent: "no data", lastUpdate: "" };
   }
 
-  const obj = objetos[0];
-
-  if (!obj.eventos || obj.eventos.length === 0) {
-    return { delivered: false, lastEvent: obj.mensagem ?? "no events", lastUpdate: "" };
-  }
-
-  const latest = obj.eventos[0];
+  const latest = eventos[0];
 
   return {
-    delivered: isDelivered(latest.codigo, latest.tipo),
-    lastEvent: latest.descricao,
-    lastUpdate: latest.dtHrCriado,
+    delivered: DELIVERED_PATTERN.test(latest.status),
+    lastEvent: latest.status,
+    lastUpdate: `${latest.data} ${latest.hora}`,
   };
 }
