@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as PortalRouteImport } from './routes/_portal'
 import { Route as ColaboradorRouteImport } from './routes/colaborador'
 import { Route as EntrarRouteImport } from './routes/entrar'
+import { Route as RecolocacaoRouteImport } from './routes/recolocacao'
 import { Route as PortalBensEColetaRouteImport } from './routes/_portal.bens-e-coleta'
 import { Route as PortalCandidaturasAssistidasRouteImport } from './routes/_portal.candidaturas-assistidas'
 import { Route as PortalChecklistAutomaticoRouteImport } from './routes/_portal.checklist-automatico'
@@ -44,6 +45,11 @@ const ColaboradorRoute = ColaboradorRouteImport.update({
 const EntrarRoute = EntrarRouteImport.update({
   id: '/entrar',
   path: '/entrar',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RecolocacaoRoute = RecolocacaoRouteImport.update({
+  id: '/recolocacao',
+  path: '/recolocacao',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PortalBensEColetaRoute = PortalBensEColetaRouteImport.update({
@@ -121,6 +127,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
+  '/recolocacao': typeof RecolocacaoRoute
   '/bens-e-coleta': typeof PortalBensEColetaRoute
   '/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
   '/checklist-automatico': typeof PortalChecklistAutomaticoRoute
@@ -139,6 +146,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
+  '/recolocacao': typeof RecolocacaoRoute
   '/bens-e-coleta': typeof PortalBensEColetaRoute
   '/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
   '/checklist-automatico': typeof PortalChecklistAutomaticoRoute
@@ -159,6 +167,7 @@ export interface FileRoutesById {
   '/_portal': typeof PortalRouteWithChildren
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
+  '/recolocacao': typeof RecolocacaoRoute
   '/_portal/bens-e-coleta': typeof PortalBensEColetaRoute
   '/_portal/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
   '/_portal/checklist-automatico': typeof PortalChecklistAutomaticoRoute
@@ -179,6 +188,7 @@ export interface FileRouteTypes {
     | '/'
     | '/colaborador'
     | '/entrar'
+    | '/recolocacao'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
     | '/checklist-automatico'
@@ -197,6 +207,7 @@ export interface FileRouteTypes {
     | '/'
     | '/colaborador'
     | '/entrar'
+    | '/recolocacao'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
     | '/checklist-automatico'
@@ -216,6 +227,7 @@ export interface FileRouteTypes {
     | '/_portal'
     | '/colaborador'
     | '/entrar'
+    | '/recolocacao'
     | '/_portal/bens-e-coleta'
     | '/_portal/candidaturas-assistidas'
     | '/_portal/checklist-automatico'
@@ -236,6 +248,7 @@ export interface RootRouteChildren {
   PortalRoute: typeof PortalRouteWithChildren
   ColaboradorRoute: typeof ColaboradorRoute
   EntrarRoute: typeof EntrarRoute
+  RecolocacaoRoute: typeof RecolocacaoRoute
   ColaboradorEntrarRoute: typeof ColaboradorEntrarRoute
 }
 
@@ -267,6 +280,13 @@ declare module '@tanstack/react-router' {
       path: '/entrar'
       fullPath: '/entrar'
       preLoaderRoute: typeof EntrarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/recolocacao': {
+      id: '/recolocacao'
+      path: '/recolocacao'
+      fullPath: '/recolocacao'
+      preLoaderRoute: typeof RecolocacaoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_portal/bens-e-coleta': {
@@ -401,6 +421,7 @@ const rootRouteChildren: RootRouteChildren = {
   PortalRoute: PortalRouteWithChildren,
   ColaboradorRoute: ColaboradorRoute,
   EntrarRoute: EntrarRoute,
+  RecolocacaoRoute: RecolocacaoRoute,
   ColaboradorEntrarRoute: ColaboradorEntrarRoute,
 }
 export const routeTree = rootRouteImport

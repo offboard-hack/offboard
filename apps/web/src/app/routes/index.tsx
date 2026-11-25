@@ -1,7 +1,15 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
+import landingHtml from "@/features/landing/recolocacao/index.html?raw";
+
+const page = landingHtml.replaceAll(
+  /href="https:\/\/app\.off-board\.xyz\/(entrar|colaborador\/entrar)"/g,
+  'href="/$1"',
+);
 
 export const Route = createFileRoute("/")({
-  beforeLoad: () => {
-    throw redirect({ to: "/desligamentos", replace: true });
+  server: {
+    handlers: {
+      GET: () => new Response(page, { headers: { "Content-Type": "text/html; charset=utf-8" } }),
+    },
   },
 });
