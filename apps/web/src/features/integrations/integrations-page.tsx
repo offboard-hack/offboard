@@ -272,8 +272,47 @@ export function IntegrationsPage() {
         />
       </div>
       <div className="grid gap-7">
+        {(() => {
+          const active = visible.filter(({ connection }) => connection !== "disconnected");
+
+          return (
+            active.length > 0 && (
+              <section aria-labelledby="integration-active" className="grid gap-3">
+                <h2
+                  id="integration-active"
+                  className="flex items-baseline gap-2 text-sm font-semibold"
+                >
+                  Ativas
+                  <span className="font-normal text-muted-foreground tabular-nums">
+                    ({active.length})
+                  </span>
+                </h2>
+                <ul role="list" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {active.map(({ item, connection }) => (
+                    <li key={item.name}>
+                      <IntegrationCard
+                        item={item}
+                        connection={connection}
+                        statusMap={statusMap}
+                        onChange={updateConnection}
+                        pending={toggle.isPending}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )
+          );
+        })()}
         {Object.entries(categories).map(([category, label]) => {
-          const items = visible.filter(({ item }) => item.category === category);
+          const items = visible
+            .filter(({ item }) => item.category === category)
+            .sort((a, b) => {
+              const aActive = a.connection !== "disconnected" ? 0 : 1;
+              const bActive = b.connection !== "disconnected" ? 0 : 1;
+
+              return aActive - bActive;
+            });
 
           return (
             items.length > 0 && (

@@ -26,7 +26,10 @@ export type WorkerBindings = Partial<z.input<typeof runtimeConfig>> & {
   HYPERDRIVE?: { connectionString: string };
 };
 
-export function createWorkerApi(bindings: WorkerBindings) {
+export function createWorkerApi(
+  bindings: WorkerBindings,
+  deferMagicLinkDelivery: (delivery: Promise<void>) => void,
+) {
   const config = runtimeConfig.safeParse(bindings);
   const hyperdrive = bindings.HYPERDRIVE;
   const directUrl = config.data?.POSTGRES_URL;
@@ -52,6 +55,7 @@ export function createWorkerApi(bindings: WorkerBindings) {
     env: config.data,
     ipAddressHeaders: ["cf-connecting-ip"],
     cloudflareEmail: bindings.EMAIL,
+    deferMagicLinkDelivery,
   });
 
   const app = createApp(origin, createRepositories(db), {

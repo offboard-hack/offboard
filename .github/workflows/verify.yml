@@ -45,7 +45,7 @@ jobs:
       - run: npm run build:vercel -w @offboard/api
 
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.OFFBOARD_EMPLOYEE_SCHEMA_READY == '1'
     needs: verify
     runs-on: ubuntu-latest
     concurrency:
@@ -55,6 +55,7 @@ jobs:
       EMAIL_PROVIDER: cloudflare
       OFFBOARD_API_CONFIGURED: "1"
       OFFBOARD_HYPERDRIVE_ID: ${{ vars.OFFBOARD_HYPERDRIVE_ID }}
+      OFFBOARD_HYPERDRIVE_REGION: "aws:us-east-2"
       OFFBOARD_AI_CONFIGURED: ${{ vars.OFFBOARD_AI_CONFIGURED }}
       OFFBOARD_RESUMES_BUCKET: ${{ vars.OFFBOARD_RESUMES_BUCKET }}
     steps:

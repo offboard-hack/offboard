@@ -30,6 +30,15 @@ From the repository root, run `npm install` and start PostgreSQL with
 `postgresql://offboard:offboard@127.0.0.1:5432/offboard`.
 
 Run `npm run migrate -w @offboard/db` to apply the database migrations.
+
+For the employee rollout, apply `0010_employee_journey` to the production
+database before setting `OFFBOARD_EMPLOYEE_SCHEMA_READY=1` in GitHub Actions
+variables and the Vercel production environment. The migration preserves RH
+sessions and requires collaborators with legacy sessions to sign in again.
+The updated web and mobile clients send the grant identifier with employee
+requests.
+For the checklist and equipment rollout, apply `0012_connect_employee_workflows`
+to production before deploying the code that uses it.
 For a disposable development database, `npm run seed -w @offboard/db` loads
 sample cases and replaces the team roster. Add a team row for an email
 address you control before requesting a link.
@@ -74,6 +83,21 @@ Remove a member in **Equipe** to revoke access. Elysia checks the current
 roster on every protected request. Adding the same email again creates a
 new invitation and requires a fresh link.
 
+## Employee journey
+
+Open a case as an administrator or HR user and use **Área do colaborador**
+to set the email allowed to sign in and the details shown in the journey.
+The employee enters a six-digit code delivered through the configured email
+provider at `/colaborador/entrar` or in the mobile app. Clearing or changing
+the email revokes the old employee sessions.
+
+The Elysia API serves the journey to an authenticated employee. Employees can
+read it before accepting the terms and acknowledging the privacy policy.
+Saving departure or career changes in PostgreSQL requires acceptance. Each
+write includes the revision read by the client. Conflicting writes return 409
+so the client can refresh the current record. A session for the employee area
+cannot access the HR portal.
+
 ## Prepare a Vercel preview
 
 Use a dedicated preview database and apply the checked-in migrations before
@@ -100,8 +124,10 @@ Worker can reach and add a test administrator to its roster. Set
 `BETTER_AUTH_SECRET`, and `AUTH_EMAIL_FROM` in a private secrets file outside
 the repository. To use Hyperdrive, create a configuration pointing to the
 direct PostgreSQL endpoint, disable query caching, and set
-`OFFBOARD_HYPERDRIVE_ID` when building or deploying the Worker. For a direct
-connection, include `POSTGRES_URL` in the secrets file.
+`OFFBOARD_HYPERDRIVE_ID` when building or deploying the Worker. Set
+`OFFBOARD_HYPERDRIVE_REGION` to the database's cloud region, such as
+`aws:us-east-2` for production, to keep sequential database queries near the
+origin. For a direct connection, include `POSTGRES_URL` in the secrets file.
 
 For Resend, add `RESEND_API_KEY` to the file and use the default provider:
 

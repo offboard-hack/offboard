@@ -28,13 +28,19 @@ import {
   formatShortDeadline,
   todayAtWorkspace,
 } from "../../entities/offboarding";
-import type { CaseSummary, OffboardingCase, PersonAsset, Task } from "../../entities/offboarding";
+import type { CaseSummary, OffboardingCase, Task } from "../../entities/offboarding";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
 import { ProgressBar } from "../../shared/ui/progress";
 import { PortalFilter } from "../../shared/ui/select";
 import { portalStyles as s } from "../../shared/ui/surface.styles";
 import { offboardingStyles as local } from "./offboarding.styles";
+
+import {
+  equipmentStatus,
+  getEquipmentStatus,
+  type EquipmentReturn,
+} from "@/entities/equipment-returns";
 
 const caseStatusVariant = {
   overdue: "status-danger",
@@ -49,21 +55,14 @@ const taskStatusStyle = {
   todo: null,
 };
 
-const assetStatusLabel: Record<PersonAsset["status"], string> = {
-  withPerson: "Com a pessoa",
-  scheduled: "Coleta agendada",
-  transit: "Em trânsito",
-  received: "Recebido",
-  failed: "Sem sucesso",
-};
-
-const assetStatusVariant: Record<PersonAsset["status"], ComponentProps<typeof Badge>["variant"]> = {
+const assetStatusVariant = {
   withPerson: "secondary",
   scheduled: "status-warning",
-  transit: "secondary",
   received: "status-success",
+  inventory: "status-success",
+  transit: "secondary",
   failed: "status-danger",
-};
+} satisfies Record<keyof typeof equipmentStatus, ComponentProps<typeof Badge>["variant"]>;
 
 const statusLabel = {
   done: "Concluída",
@@ -373,6 +372,9 @@ export function CasePage({
   onTaskStatusChange,
   onSubtaskToggle,
   breadcrumb,
+  employeeAccess,
+  equipment,
+  checklistAction,
 }: {
   offboardingCase: OffboardingCase;
   taskFilter: "pending" | "done" | "";
@@ -382,8 +384,11 @@ export function CasePage({
   onTaskStatusChange?: (taskId: string, status: Task["status"]) => void;
   onSubtaskToggle?: (subtaskId: string) => void;
   breadcrumb: ReactNode;
+  employeeAccess?: ReactNode;
+  equipment?: EquipmentReturn[];
+  checklistAction?: ReactNode;
 }) {
-  const { name, role, department, deadline, completed, total, tasks, assets } = offboardingCase;
+  const { name, role, department, deadline, completed, total, tasks } = offboardingCase;
   const [today] = useState(todayAtWorkspace);
   const caseStatus = getCaseStatus(offboardingCase, today);
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
@@ -471,7 +476,8 @@ export function CasePage({
               </div>
             </CardContent>
           </Card>
-          {assets && assets.length > 0 && (
+          {employeeAccess}
+          {equipment && equipment.length > 0 && (
             <Card size="sm">
               <CardContent className="grid gap-3">
                 <h2 className="border-b pb-2 text-sm font-semibold">
@@ -483,20 +489,24 @@ export function CasePage({
                   Bens vinculados
                 </h2>
                 <ul className="grid gap-2">
-                  {assets.map((asset) => (
-                    <li key={asset.tag} className="flex items-center justify-between gap-2 text-sm">
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{asset.item}</p>
-                        <p className="text-xs text-muted-foreground">{asset.tag}</p>
-                      </div>
-                      <Badge
-                        variant={assetStatusVariant[asset.status]}
-                        className="shrink-0 text-xs"
+                  {equipment.map((asset) => {
+                    const status = getEquipmentStatus(asset);
+
+                    return (
+                      <li
+                        key={asset.code}
+                        className="flex items-center justify-between gap-2 text-sm"
                       >
-                        {assetStatusLabel[asset.status]}
-                      </Badge>
-                    </li>
-                  ))}
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{asset.title}</p>
+                          <p className="text-xs text-muted-foreground">{asset.code}</p>
+                        </div>
+                        <Badge variant={assetStatusVariant[status]} className="shrink-0 text-xs">
+                          {equipmentStatus[status]}
+                        </Badge>
+                      </li>
+                    );
+                  })}
                 </ul>
               </CardContent>
             </Card>
@@ -519,6 +529,7 @@ export function CasePage({
               </h2>
               <TaskProgress completed={completed} total={total} />
             </div>
+            {checklistAction}
             {tasks.length > 0 && (
               <PortalFilter
                 label="Status das tarefas"

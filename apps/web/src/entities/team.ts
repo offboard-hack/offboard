@@ -35,3 +35,11 @@ export async function deleteTeamMember(id: string) {
 
   if (error) throw new Error("Failed to delete team member");
 }
+
+export async function updateTeamMemberRole(id: string, role: MemberRole) {
+  const { error } = await getApiClient()
+    .api.team({ id: encodeURIComponent(id) })
+    .patch({ role });
+
+  if (error) throw new Error("Failed to update team member role");
+}

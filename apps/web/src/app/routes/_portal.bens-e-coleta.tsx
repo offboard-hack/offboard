@@ -2,9 +2,8 @@ import { EquipmentPending } from "../route-pending";
 import { listSearchSchema } from "@/shared/lib/list-search";
 import { z } from "zod";
 import { createFileRoute, lazyRouteComponent } from "@tanstack/react-router";
-import { equipmentQuery } from "@/entities/equipment";
 import { offboardingsQuery } from "@/entities/offboarding";
-import { equipmentStatus } from "@/features/asset-returns/status";
+import { equipmentReturnsQuery, equipmentStatus } from "@/entities/equipment-returns";
 
 export const Route = createFileRoute("/_portal/bens-e-coleta")({
   validateSearch: listSearchSchema.extend({
@@ -13,7 +12,7 @@ export const Route = createFileRoute("/_portal/bens-e-coleta")({
   loader: async ({ context }) => {
     await Promise.all([
       context.queryClient.ensureQueryData(offboardingsQuery),
-      context.queryClient.ensureQueryData(equipmentQuery),
+      context.queryClient.ensureQueryData(equipmentReturnsQuery),
     ]);
   },
   component: lazyRouteComponent(

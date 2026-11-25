@@ -34,8 +34,8 @@ export function exitSurveysRoutes(repos: ExitSurveysRepository, access: PortalAc
     .use(access)
     .get(
       "/exit-surveys",
-      async () => {
-        const rows = await repos.listSurveys();
+      async ({ principal }) => {
+        const rows = await repos.listSurveys(principal.orgId);
 
         return rows.map((row) => ({ ...row, submittedAt: row.submittedAt.toISOString() }));
       },
@@ -44,14 +44,19 @@ export function exitSurveysRoutes(repos: ExitSurveysRepository, access: PortalAc
         response: t.Array(surveyListRow),
       },
     )
-    .get("/exit-surveys/aggregates", () => repos.getSurveyAggregates(), {
-      permit: ["read", "ExitSurveys"],
-      response: aggregates,
-    })
+    .get(
+      "/exit-surveys/aggregates",
+      ({ principal }) => repos.getSurveyAggregates(principal.orgId),
+      {
+        permit: ["read", "ExitSurveys"],
+        response: aggregates,
+      },
+    )
     .post(
       "/exit-surveys",
-      async ({ body, set, status }) => {
+      async ({ body, principal, set, status }) => {
         const created = await repos.submitSurvey(
+          principal.orgId,
           body.caseId,
           body.npsScore,
           body.responses,

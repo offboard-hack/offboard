@@ -1,5 +1,5 @@
 import type { Database } from "@offboard/db/client";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { equipment, offboardingCases } from "@offboard/db/schema";
 
 type EquipmentStatus = (typeof equipment.$inferSelect)["status"];
@@ -14,21 +14,22 @@ const columns = {
 };
 
 export function createEquipmentRepository(db: Database) {
-  async function listEquipment() {
+  async function listEquipment(orgId: string) {
     const rows = await db
       .select({ ...columns, person: offboardingCases.name })
       .from(equipment)
       .innerJoin(offboardingCases, eq(offboardingCases.id, equipment.caseId))
+      .where(eq(equipment.orgId, orgId))
       .orderBy(asc(equipment.tag));
 
     return rows;
   }
 
-  async function updateEquipmentStatus(id: string, status: EquipmentStatus) {
+  async function updateEquipmentStatus(orgId: string, id: string, status: EquipmentStatus) {
     const [updated] = await db
       .update(equipment)
       .set({ status, updatedAt: new Date() })
-      .where(eq(equipment.id, id))
+      .where(and(eq(equipment.id, id), eq(equipment.orgId, orgId)))
       .returning(columns);
 
     return updated ?? null;

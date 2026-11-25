@@ -26,7 +26,7 @@ async function executeWebhook(url: string, method: string, context: ActionContex
   const response = await fetch(url, {
     method,
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(context),
+    body: JSON.stringify({ ...context, orgId: undefined }),
     signal: AbortSignal.timeout(10_000),
   });
 
@@ -101,7 +101,7 @@ export async function fireActions(
 ) {
   if (!context.phase) return [] satisfies ActionResult[];
 
-  const configs = await repos.getActionConfigsByPhase(context.phase);
+  const configs = await repos.getActionConfigsByPhase(context.orgId, context.phase);
   const results: ActionResult[] = [];
 
   for (const config of configs) {

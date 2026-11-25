@@ -72,7 +72,12 @@ try {
   assert.equal(await page.getByRole("alert").count(), 0);
   assert.equal(await page.getByRole("button", { name: "Desfazer", exact: true }).isDisabled(), true);
 
-  const newTab = await context.newPage();
+  const freshContext = await browser.newContext({
+    viewport: { width, height: 1080 },
+    hasTouch: narrow,
+    storageState: process.env.OFFBOARD_VERIFY_STORAGE_STATE,
+  });
+  const newTab = await freshContext.newPage();
 
   await newTab.goto(new URL("/checklist-automatico", OFFBOARD_VERIFY_URL).href);
   await newTab
@@ -81,7 +86,7 @@ try {
     .waitFor();
 
   assert.equal(await newTab.getByRole("button", { name: "Salvar modelo", exact: true }).isDisabled(), true);
-  console.log("Saved model reopened in a new tab with the changed placement");
+  console.log("Published model reopened in a fresh browser context with the changed placement");
 
   await newTab.screenshot({ path: join(OFFBOARD_VERIFY_EVIDENCE, "checklist-saved.png") });
   await writeFile(
@@ -101,29 +106,26 @@ try {
     .getByRole("button", { name: cardName, exact: true });
 
   await unsavedCard.waitFor();
-  await newTab.evaluate(() => {
-    const setItem = Storage.prototype.setItem;
+  const failSave = (route) =>
+    route.request().method() === "PUT"
+      ? route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
+      : route.continue();
 
-    Storage.prototype.setItem = function (key, value) {
-      if (this === window.localStorage && key === "offboard:checklist-model:v1") {
-        throw new DOMException("Verification storage quota", "QuotaExceededError");
-      }
-
-      setItem.call(this, key, value);
-    };
-  });
+  await newTab.route("**/api/checklist-model", failSave);
   const retryableSave = newTab.getByRole("button", { name: "Salvar modelo", exact: true });
 
   await retryableSave.click();
-  await newTab.getByRole("alert").filter({ hasText: "O navegador não conseguiu salvar o modelo" }).waitFor();
+  await newTab.getByRole("alert").filter({ hasText: "Não foi possível publicar o checklist" }).waitFor();
   assert.equal(await retryableSave.isEnabled(), true);
   assert.equal(await newTab.getByRole("button", { name: "Desfazer", exact: true }).isEnabled(), true);
   await unsavedCard.waitFor();
+  await newTab.unroute("**/api/checklist-model", failSave);
   await newTab.reload();
   await unsavedCard.waitFor();
   await retryableSave.click();
   await retryableSave.and(newTab.locator(":disabled")).waitFor();
-  console.log("Storage failure retained the draft across reload; retry saved.");
+  console.log("A failed server save retained the draft across reload; retry published it.");
+  await freshContext.close();
 } finally {
   try {
     await context.tracing.stop({ path: join(OFFBOARD_VERIFY_EVIDENCE, "checklist-trace.zip") });

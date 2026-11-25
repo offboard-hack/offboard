@@ -1,16 +1,19 @@
 import { createPortalAbility } from "@offboard/access";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, notFound } from "@tanstack/react-router";
 import {
+  applyCaseChecklist,
   cycleTaskStatus,
   offboardingQuery,
   offboardingsQuery,
   toggleSubtask,
   updateTaskStatus,
   type OffboardingCase,
-  type PersonAsset,
   type Task,
 } from "@/entities/offboarding";
+import { caseEquipmentQuery } from "@/entities/equipment-returns";
+import { Button } from "@/shared/ui/shadcn/button";
+import { EmployeeAccessSettings } from "@/features/offboarding/employee-access";
 import { CasePage } from "@/features/offboarding/offboarding-pages";
 import {
   Breadcrumb,
@@ -33,6 +36,12 @@ export function Case() {
   const queryClient = useQueryClient();
   const detailQuery = offboardingQuery(caseId, queryClient);
   const { data: detail } = useSuspenseQuery(detailQuery);
+  const equipment = useQuery(caseEquipmentQuery(caseId));
+
+  const apply = useMutation({
+    mutationFn: () => applyCaseChecklist(caseId),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: offboardingsQuery.queryKey }),
+  });
 
   async function updateCachedCase(update: (item: OffboardingCase) => OffboardingCase) {
     await queryClient.cancelQueries({ queryKey: offboardingsQuery.queryKey });
@@ -88,11 +97,30 @@ export function Case() {
 
   if (!detail) throw notFound();
 
-  const offboardingCase = enrichCase(detail);
-
   return (
     <CasePage
-      offboardingCase={offboardingCase}
+      offboardingCase={detail}
+      equipment={equipment.data}
+      checklistAction={
+        canUpdateCase && detail.total === 0 ? (
+          <div className="space-y-1">
+            <Button variant="outline" disabled={apply.isPending} onClick={() => apply.mutate()}>
+              {apply.isPending ? "Aplicando checklist…" : "Aplicar modelo publicado"}
+            </Button>
+            {apply.isError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {apply.error.message}
+              </p>
+            ) : null}
+            {apply.data?.total === 0 ? (
+              <p role="status" className="text-sm text-muted-foreground">
+                O modelo publicado não tem etapas para este caso.
+              </p>
+            ) : null}
+          </div>
+        ) : null
+      }
+      employeeAccess={canUpdateCase ? <EmployeeAccessSettings caseId={caseId} /> : null}
       taskFilter={tasks ?? ""}
       taskWritePending={statusMutation.isPending || subtaskMutation.isPending}
       taskWriteError={statusMutation.isError || subtaskMutation.isError}
@@ -129,24 +157,11 @@ export function Case() {
             </BreadcrumbItem>
             <BreadcrumbSeparator />
             <BreadcrumbItem>
-              <BreadcrumbPage>{offboardingCase.name}</BreadcrumbPage>
+              <BreadcrumbPage>{detail.name}</BreadcrumbPage>
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
       }
     />
   );
-}
-
-const demoAssets: PersonAsset[] = [
-  { item: "Notebook Dell Latitude 5440", tag: "AUR-0412", status: "scheduled" },
-  { item: "Monitor Dell 27″", tag: "AUR-3104", status: "withPerson" },
-  { item: "Celular Galaxy A55", tag: "AUR-2210", status: "received" },
-];
-
-function enrichCase(offboardingCase: OffboardingCase) {
-  return {
-    ...offboardingCase,
-    assets: offboardingCase.assets ?? demoAssets,
-  };
 }

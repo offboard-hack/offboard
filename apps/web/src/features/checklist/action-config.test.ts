@@ -6,11 +6,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { ChecklistStep } from "./checklist-draft";
 import {
   actionConfigsQuery,
+  checklistActionConfigsQuery,
   applyActionConfigs,
-  clearSyncedRemovals,
-  knownActionRowIds,
   mergeStepSettings,
-  syncActionConfigs as syncConfigs,
+  knownActionRowIds,
   type ActionConfigRow,
 } from "./action-config";
 
@@ -18,7 +17,6 @@ type Received = { method: string; url: string; body: unknown };
 
 const received: Received[] = [];
 let failing = false;
-let failUpdates = false;
 let listBody: ActionConfigRow[] = [];
 
 const server = createServer((req, res) => {
@@ -29,22 +27,15 @@ const server = createServer((req, res) => {
   req.on("end", () => {
     received.push({ method: req.method ?? "", url: req.url ?? "", body: raw && JSON.parse(raw) });
 
-    if (failing || (failUpdates && req.method === "PUT")) {
+    if (failing) {
       res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "Unavailable" }));
 
       return;
     }
 
-    if (req.method === "DELETE") {
-      res.writeHead(204);
-      res.end();
-
-      return;
-    }
-
-    res.writeHead(req.method === "POST" ? 201 : 200, { "content-type": "application/json" });
-    res.end(JSON.stringify(req.method === "GET" ? listBody : row()));
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(listBody));
   });
 });
 
@@ -61,7 +52,6 @@ afterAll(async () => {
 beforeEach(() => {
   received.length = 0;
   failing = false;
-  failUpdates = false;
   listBody = [];
 });
 
@@ -79,17 +69,6 @@ function runInRequest<T>(operation: () => Promise<T>) {
       reject,
     );
   });
-}
-
-function syncActionConfigs(
-  steps: ChecklistStep[],
-  existing: ActionConfigRow[],
-  previousSteps?: ChecklistStep[],
-  knownRowIds?: string[],
-) {
-  return runInRequest(() =>
-    syncConfigs(steps, existing, knownRowIds ?? knownActionRowIds(previousSteps ?? [], existing)),
-  );
 }
 
 const email = { subject: "Assunto", body: "Mensagem" };
@@ -115,11 +94,6 @@ const row = (overrides: Partial<ActionConfigRow> = {}) =>
     ...overrides,
   }) satisfies ActionConfigRow;
 
-const byUrl = (a: Received, b: Received) =>
-  `${a.method}${a.url}${JSON.stringify(a.body)}`.localeCompare(
-    `${b.method}${b.url}${JSON.stringify(b.body)}`,
-  );
-
 describe("actionConfigsQuery", () => {
   const fetchRows = () =>
     runInRequest(() => new QueryClient().fetchQuery({ ...actionConfigsQuery, retry: false }));
@@ -138,147 +112,27 @@ describe("actionConfigsQuery", () => {
   });
 });
 
-describe("syncActionConfigs", () => {
-  it("creates configs missing from existing", async () => {
-    await syncActionConfigs([step({ email, slack, webhook })], []);
+it("scopes the checklist action cache to the organization", () => {
+  expect(checklistActionConfigsQuery("org-a").queryKey).not.toEqual(
+    checklistActionConfigsQuery("org-b").queryKey,
+  );
+});
 
-    expect([...received].sort(byUrl)).toEqual(
-      [
-        {
-          method: "POST",
-          url: "/api/action-configs",
-          body: { actionId: "email:s1", phase: "d0", enabled: true, config: email },
-        },
-        {
-          method: "POST",
-          url: "/api/action-configs",
-          body: { actionId: "slack:s1", phase: "d0", enabled: true, config: slack },
-        },
-        {
-          method: "POST",
-          url: "/api/action-configs",
-          body: { actionId: "webhook:s1", phase: "d0", enabled: true, config: webhook },
-        },
-      ].sort(byUrl),
-    );
-  });
-
-  it("updates configs whose phase changed", async () => {
-    await syncActionConfigs([step({ phase: "pre", email })], [row()]);
-
-    expect(received).toEqual([
-      { method: "PUT", url: "/api/action-configs/r1", body: { phase: "pre", config: email } },
-    ]);
-  });
-
-  it("updates configs whose values changed", async () => {
-    const changed = { ...email, body: "Outra" };
-
-    await syncActionConfigs([step({ email: changed })], [row()]);
-
-    expect(received).toEqual([
-      { method: "PUT", url: "/api/action-configs/r1", body: { phase: "d0", config: changed } },
-    ]);
-  });
-
-  it("deletes configs explicitly removed from a step", async () => {
-    await syncActionConfigs([step({ email: null })], [row()], [step({ email })]);
-
-    expect(received).toEqual([{ method: "DELETE", url: "/api/action-configs/r1", body: "" }]);
-  });
-
-  it("preserves unrelated server rows and configs the draft has never loaded", async () => {
-    await syncActionConfigs(
+it("tracks only rows for steps loaded in the draft", () => {
+  expect(
+    knownActionRowIds(
       [step()],
-      [row(), row({ id: "r-unrelated", actionId: "email:another-step" })],
-    );
-
-    expect(received).toEqual([]);
-  });
-
-  it("ignores existing rows of unknown kinds", async () => {
-    await syncActionConfigs([], [row({ actionId: "other:s1" })]);
-
-    expect(received).toEqual([]);
-  });
-
-  it("skips unchanged configs", async () => {
-    await syncActionConfigs([step({ email })], [row()], [step({ email })]);
-
-    expect(received).toEqual([]);
-  });
-
-  it("makes no calls for empty input", async () => {
-    await syncActionConfigs([], []);
-
-    expect(received).toEqual([]);
-  });
-
-  it("handles create, update and delete together", async () => {
-    await syncActionConfigs(
       [
-        step({ id: "a", email }),
-        step({ id: "b", phase: "pre", slack }),
-        step({ id: "c", webhook }),
+        row(),
+        row({ id: "r2", actionId: "email:other-step" }),
+        row({ id: "r3", actionId: "webhook:s1" }),
       ],
-      [
-        row({ id: "r-a", actionId: "email:a" }),
-        row({ id: "r-b", actionId: "slack:b", config: slack }),
-        row({ id: "r-gone", actionId: "webhook:gone", config: webhook }),
-      ],
-      [step({ id: "gone", webhook })],
-    );
-
-    expect([...received].sort(byUrl)).toEqual(
-      [
-        {
-          method: "POST",
-          url: "/api/action-configs",
-          body: { actionId: "webhook:c", phase: "d0", enabled: true, config: webhook },
-        },
-        { method: "PUT", url: "/api/action-configs/r-b", body: { phase: "pre", config: slack } },
-        { method: "DELETE", url: "/api/action-configs/r-gone", body: "" },
-      ].sort(byUrl),
-    );
-  });
-
-  it("preserves newly recreated actions when a draft retries removal", async () => {
-    const originalRows = ["r1"];
-    const recreatedRows = [row({ id: "r-new" })];
-
-    await syncActionConfigs([step({ email: null })], [row()], [], originalRows);
-    await syncActionConfigs([step({ email: null })], recreatedRows, [], originalRows);
-    await syncActionConfigs([], recreatedRows, [step({ email })], originalRows);
-
-    expect(received).toEqual([{ method: "DELETE", url: "/api/action-configs/r1", body: "" }]);
-  });
-
-  it("reports created rows when another write fails so the draft can remove them", async () => {
-    failUpdates = true;
-    const updateRow = row({ id: "r2", actionId: "email:update" });
-
-    const result = await syncActionConfigs(
-      [step({ email }), step({ id: "update", phase: "pre", email })],
-      [updateRow],
-    );
-
-    expect(result).toEqual({ createdRowIds: ["r1"], failed: true });
-    await syncActionConfigs([], [row()], [], result.createdRowIds);
-    expect(received).toContainEqual({ method: "DELETE", url: "/api/action-configs/r1", body: "" });
-  });
-
-  it("reports failed writes", async () => {
-    failing = true;
-
-    await expect(syncActionConfigs([step({ email })], [])).resolves.toEqual({
-      createdRowIds: [],
-      failed: true,
-    });
-  });
+    ),
+  ).toEqual(["r1", "r3"]);
 });
 
 describe("mergeStepSettings", () => {
-  it("distinguishes a title edit from removing a configured action", async () => {
+  it("distinguishes a title edit from removing a configured action", () => {
     const settings = {
       title: "Nome atualizado",
       deadlineOffset: null,
@@ -290,17 +144,11 @@ describe("mergeStepSettings", () => {
 
     const configured = step({ email });
     const removal = mergeStepSettings(configured, settings);
-    const cleared = clearSyncedRemovals([removal]);
-    const renamed = mergeStepSettings(cleared[0], settings);
+    const renamed = mergeStepSettings(step(), settings);
 
     expect(removal.email).toBeNull();
     expect(renamed.email).toBeUndefined();
     expect(mergeStepSettings(step(), { ...settings, email }).email).toEqual(email);
-
-    await syncActionConfigs([removal], [row()], [configured]);
-    await syncActionConfigs([renamed], [row()]);
-
-    expect(received).toEqual([{ method: "DELETE", url: "/api/action-configs/r1", body: "" }]);
   });
 });
 
@@ -334,16 +182,6 @@ describe("applyActionConfigs", () => {
       email: null,
       slack: null,
       webhook: null,
-    });
-    expect(applyActionConfigs(clearSyncedRemovals(draft), rows)[0]).toMatchObject({
-      email,
-      slack,
-      webhook,
-    });
-    expect(clearSyncedRemovals([step({ email, slack, webhook })])[0]).toMatchObject({
-      email,
-      slack,
-      webhook,
     });
   });
 

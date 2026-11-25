@@ -1,0 +1,15 @@
+{
+  "name": "@offboard/employee",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./career": "./src/career.ts",
+    "./departure": "./src/departure.ts",
+    "./resume-document": "./src/resume-document.ts"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}

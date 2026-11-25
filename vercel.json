@@ -1,4 +1,5 @@
 {
+  "ignoreCommand": "if [ \"$VERCEL_ENV\" = preview ] && [ \"$VERCEL_GIT_COMMIT_REF\" != main ]; then exit 1; fi; [ \"$OFFBOARD_EMPLOYEE_SCHEMA_READY\" != 1 ]",
   "buildCommand": "npm run build:vercel -w @offboard/api && npm run build -w @offboard/web",
   "installCommand": "npm install",
   "framework": null,
@@ -17,7 +18,12 @@
   "rewrites": [
     { "source": "/api/health", "destination": "/api/offboard" },
     { "source": "/api/auth/:path*", "destination": "/api/offboard" },
+    { "source": "/api/checklist-model", "destination": "/api/offboard" },
+    { "source": "/api/equipment-returns", "destination": "/api/offboard" },
+    { "source": "/api/equipment-returns/:path*", "destination": "/api/offboard" },
     { "source": "/api/session", "destination": "/api/offboard" },
+    { "source": "/api/employee/:path*", "destination": "/api/offboard" },
+    { "source": "/api/employee-access/:path*", "destination": "/api/offboard" },
     { "source": "/api/offboardings", "destination": "/api/offboard" },
     { "source": "/api/offboardings/:path*", "destination": "/api/offboard" },
     { "source": "/api/tasks/:path*", "destination": "/api/offboard" },

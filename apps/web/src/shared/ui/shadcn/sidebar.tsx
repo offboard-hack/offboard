@@ -158,11 +158,13 @@ function Sidebar({
   className,
   children,
   dir,
+  mobileDescription = "Navegação do Portal do RH.",
   ...props
 }: ComponentProps<"div"> & {
   side?: "left" | "right";
   variant?: "sidebar" | "floating" | "inset";
   collapsible?: "offcanvas" | "icon" | "none";
+  mobileDescription?: string;
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
 
@@ -199,7 +201,7 @@ function Sidebar({
         >
           <SheetHeader className="sr-only">
             <SheetTitle>Seções do portal</SheetTitle>
-            <SheetDescription>Navegação do Portal do RH.</SheetDescription>
+            <SheetDescription>{mobileDescription}</SheetDescription>
           </SheetHeader>
           <div className="flex h-full w-full flex-col overflow-hidden">{children}</div>
         </SheetContent>

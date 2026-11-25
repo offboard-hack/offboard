@@ -10,24 +10,39 @@ import {
   useLocation,
   useMatches,
   useRouter,
+  useRouterState,
 } from "@tanstack/react-router";
 import { createPortalAbility, type PortalPrincipal } from "@offboard/access";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import type { FileRoutesByTo } from "./routeTree.gen";
-import { useCallback } from "react";
 import type { ReactNode } from "react";
-import { PortalLayout } from "./shell";
-import {
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  useSidebar,
-} from "@/shared/ui/shadcn/sidebar";
+import { flushSync } from "react-dom";
+import { Progress } from "@/shared/ui/shadcn/progress";
+import { PortalLayout, PortalSidebarLink } from "./shell";
+import { PortalSidebarUser } from "./sidebar-user";
+import { SidebarGroup, SidebarGroupLabel, SidebarMenu } from "@/shared/ui/shadcn/sidebar";
 import { portalStyles as s } from "../shared/ui/surface.styles";
 
 const portalRoute = getRouteApi("/_portal");
+
+function NavigationProgress() {
+  const navigating = useRouterState({
+    select: ({ status, location, resolvedLocation }) =>
+      status === "pending" &&
+      resolvedLocation !== undefined &&
+      (location.pathname !== resolvedLocation.pathname ||
+        location.searchStr !== resolvedLocation.searchStr),
+  });
+
+  return navigating ? (
+    <Progress
+      value={null}
+      aria-label="Carregando página"
+      aria-valuetext="Em andamento"
+      className="navigation-progress pointer-events-none fixed inset-x-0 top-0 z-50"
+    />
+  ) : null;
+}
 
 export function Document({ children }: { children: ReactNode }) {
   return (
@@ -36,6 +51,7 @@ export function Document({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body>
+        <NavigationProgress />
         {children}
         <Scripts />
       </body>
@@ -52,77 +68,10 @@ export function Portal() {
   const fullWidth =
     activeRoute.startsWith("/_portal/") && !importActive && activeRoute !== "/_portal/sem-acesso";
 
-  const portalRouter = useRouter();
-
-  const observeMain = useCallback(
-    (main: HTMLElement | null) => {
-      if (!main) {
-        return;
-      }
-
-      let previousHeading: HTMLElement | null = null;
-      let previousHeadingText = "";
-      let focusOnChange = false;
-      let errorTitle = "";
-
-      function updateHeading() {
-        const heading = document.getElementById("titulo-pagina");
-        const title = heading?.textContent ?? "";
-
-        if (!heading || (heading === previousHeading && title === previousHeadingText)) {
-          return;
-        }
-
-        previousHeading = heading;
-        previousHeadingText = title;
-
-        const active = document.activeElement;
-
-        if (errorTitle && (active === document.body || active === main)) {
-          focusOnChange = true;
-        }
-
-        if (heading.hasAttribute("data-error-heading")) {
-          errorTitle = `${title} · Offboard`;
-          document.title = errorTitle;
-        } else if (errorTitle) {
-          if (document.title === errorTitle) {
-            document.title = `${title} · Offboard`;
-          }
-
-          errorTitle = "";
-        }
-
-        if (focusOnChange) {
-          focusOnChange = false;
-          heading.focus({ preventScroll: true });
-        }
-      }
-
-      const stop = portalRouter.subscribe("onBeforeNavigate", ({ fromLocation, pathChanged }) => {
-        if (fromLocation && pathChanged) {
-          focusOnChange = true;
-        }
-      });
-
-      const observer = new MutationObserver(updateHeading);
-
-      observer.observe(main, { childList: true, characterData: true, subtree: true });
-      updateHeading();
-
-      return () => {
-        observer.disconnect();
-        stop();
-      };
-    },
-    [portalRouter],
-  );
-
   return (
     <PortalLayout
       fullWidth={fullWidth}
-      mainRef={observeMain}
-      principal={principal}
+      accountMenu={<PortalSidebarUser principal={principal} />}
       navigation={
         <PortalNavigation principal={principal} detailActive={caseActive || importActive} />
       }
@@ -211,7 +160,6 @@ function PortalNavigation({
   detailActive: boolean;
 }) {
   const pathname = useLocation({ select: (location) => location.pathname });
-  const { setOpenMobile } = useSidebar();
   const ability = createPortalAbility(principal.role);
 
   const groups = navigationGroups.map(({ label, links }) => ({
@@ -231,43 +179,30 @@ function PortalNavigation({
                   const parentActive = to === "/desligamentos" && detailActive;
 
                   return (
-                    <SidebarMenuItem key={to}>
-                      <SidebarMenuButton
-                        isActive={pathname === to || parentActive}
-                        tooltip={label}
-                        render={
-                          <Link
-                            to={to}
-                            aria-label={label}
-                            activeOptions={{ exact: true }}
-                            aria-current={parentActive ? "location" : undefined}
-                            onClick={(event) => {
-                              if (
-                                !event.metaKey &&
-                                !event.ctrlKey &&
-                                !event.shiftKey &&
-                                !event.altKey
-                              ) {
-                                setOpenMobile(false);
-                              }
-                            }}
-                          />
-                        }
+                    <PortalSidebarLink
+                      key={to}
+                      isActive={pathname === to || parentActive}
+                      label={label}
+                      render={
+                        <Link
+                          to={to}
+                          activeOptions={{ exact: true }}
+                          aria-current={parentActive ? "location" : undefined}
+                        />
+                      }
+                    >
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
                       >
-                        <svg
-                          aria-hidden="true"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.6"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d={icon} />
-                        </svg>
-                        <span>{label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                        <path d={icon} />
+                      </svg>
+                    </PortalSidebarLink>
                   );
                 })}
               </SidebarMenu>
@@ -291,24 +226,53 @@ export function NotFoundPage() {
   );
 }
 
-export function RouteError({ reset }: ErrorComponentProps) {
+export function RouteError({
+  reset,
+  title = "Não foi possível carregar a página",
+  description,
+  action,
+  restoreFocus = false,
+}: Pick<ErrorComponentProps, "reset"> & {
+  title?: string;
+  description?: string;
+  action?: ReactNode;
+  restoreFocus?: boolean;
+}) {
   const router = useRouter();
   const queryError = useQueryErrorResetBoundary();
 
   return (
     <section {...classProps(s.panel, s.panelEmpty)} role="alert">
-      <h1 {...classProps(s.heading)} id="titulo-pagina" tabIndex={-1} data-error-heading>
-        Não foi possível carregar a página
-      </h1>
-      <Button
-        type="button"
-        onClick={() => {
-          queryError.reset();
-          void router.invalidate({ sync: true }).then(reset);
-        }}
+      <h1
+        {...classProps(s.heading, description && "w-fit text-foreground")}
+        id="titulo-pagina"
+        tabIndex={-1}
+        data-error-heading
+        ref={restoreFocus ? (heading) => heading?.focus({ preventScroll: true }) : undefined}
       >
-        Tentar novamente
-      </Button>
+        {title}
+      </h1>
+      {description ? <p className={s.description}>{description}</p> : null}
+      <div className={action ? "mt-4 flex flex-wrap items-start gap-2" : undefined}>
+        <Button
+          type="button"
+          variant={action ? "primary" : "secondary"}
+          onClick={() => {
+            queryError.reset();
+            void router.invalidate({ sync: true }).then(() => {
+              if (restoreFocus) {
+                flushSync(reset);
+                document.getElementById("titulo-pagina")?.focus({ preventScroll: true });
+              } else {
+                reset();
+              }
+            });
+          }}
+        >
+          Tentar novamente
+        </Button>
+        {action}
+      </div>
     </section>
   );
 }

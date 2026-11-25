@@ -1,16 +1,32 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
-import { tasks } from "@offboard/db/schema";
+import {
+  authSession,
+  checklistModels,
+  defaultOrgId,
+  employeeAccess,
+  equipment,
+  organizations,
+  tasks,
+} from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
-import { eq } from "drizzle-orm";
+import {
+  emptyEmployeePlan,
+  employeeGrantHeader,
+  employeeStateSchema,
+  type EmployeeState,
+} from "@offboard/employee";
+import { eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createApp } from "./app.ts";
+import { createAuth, createRuntimeAuth } from "./features/auth/auth.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -37,7 +53,13 @@ const auth: PortalAuth = {
 
     return Promise.resolve({
       kind: "authenticated",
-      principal: { id: "test-member", name: "Test Member", email: "member@example.com", role },
+      principal: {
+        id: headers.get("x-test-member-id") ?? "test-member",
+        name: "Test Member",
+        email: "member@example.com",
+        role,
+        orgId: defaultOrgId,
+      },
     });
   },
 };
@@ -93,7 +115,11 @@ describe.skipIf(!url)("api", () => {
     event_time?: number;
   };
 
-  function call(path: string, method = "GET", body?: Payload) {
+  function call(
+    path: string,
+    method = "GET",
+    body?: Payload | Parameters<typeof repos.actionConfigs.saveChecklist>[1],
+  ) {
     const encoded = body === undefined ? undefined : JSON.stringify(body);
     const headers = new Headers({ "content-type": "application/json", origin: webOrigin });
 
@@ -227,6 +253,7 @@ describe.skipIf(!url)("api", () => {
           role: "Analyst",
           department: "RH",
           deadline: "2026-12-01",
+          email: `perm-${role}-${randomUUID()}@example.com`,
         }),
       }),
     );
@@ -360,19 +387,43 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("creates an offboarding", async () => {
-    const body = { name: "Ana Souza", role: "Dev", department: "Eng", deadline: "2026-12-01" };
+    const body = {
+      name: "Ana Souza",
+      role: "Dev",
+      department: "Eng",
+      deadline: "2026-12-01",
+      email: "ana.souza@example.com",
+    };
+
     const res = await call("/offboardings", "POST", body);
     const created = await res.json();
+    const { email: _, ...expected } = body;
 
     expect(res.status).toBe(201);
-    expect(created).toEqual({ id: expect.any(String), ...body, completed: 0, total: 0 });
+    expect(created).toEqual({ id: expect.any(String), ...expected, completed: 0, total: 17 });
     expect((await call(`/offboardings/${created.id}`)).status).toBe(200);
   });
 
+  it("rejects duplicate employee email on create", async () => {
+    const body = {
+      name: "Duplicate Test",
+      role: "Dev",
+      department: "Eng",
+      deadline: "2026-12-01",
+      email: "dup-create@example.com",
+    };
+
+    await call("/offboardings", "POST", body);
+    const res = await call("/offboardings", "POST", { ...body, name: "Another" });
+
+    expect(res.status).toBe(409);
+  });
+
   it.each([
-    { name: "", role: "Dev", department: "Eng", deadline: "2026-12-01" },
-    { name: "Ana", role: "Dev", department: "Eng", deadline: "tomorrow" },
+    { name: "", role: "Dev", department: "Eng", deadline: "2026-12-01", email: "a@b.com" },
+    { name: "Ana", role: "Dev", department: "Eng", deadline: "tomorrow", email: "a@b.com" },
     { name: "Ana" },
+    { name: "Ana", role: "Dev", department: "Eng", deadline: "2026-12-01" },
   ])("rejects an invalid offboarding %j", async (body) => {
     const res = await call("/offboardings", "POST", body);
 
@@ -392,6 +443,165 @@ describe.skipIf(!url)("api", () => {
     expect(created.length).toBe(2);
     expect(created[0]).toMatchObject({ name: "Bia Lima", department: "Ops" });
     expect(created[1]).toMatchObject({ name: "Caio Reis", department: "Ops" });
+  });
+
+  it("publishes a shared checklist and applies ordered matching tasks to new and existing empty cases", async () => {
+    const employeeStep = {
+      id: "onboarding-return",
+      team: "Pessoa desligada",
+      phase: "second-week",
+      title: "Entregar itens",
+      deadlineOffset: 2,
+      rules: [{ id: "area", field: "department", operator: "equals", value: "Operacoes" }],
+    } as const;
+
+    const internalStep = {
+      id: "internal",
+      team: "TI",
+      phase: "pre",
+      title: "Verificar acessos",
+      rules: [{ id: "cargo", field: "role", operator: "notEquals", value: "estagiario" }],
+    } as const;
+
+    const known = await repos.actionConfigs.createActionConfig(defaultOrgId, {
+      actionId: "email:obsolete",
+      phase: "pre",
+      config: {},
+    });
+
+    const unrelated = await repos.actionConfigs.createActionConfig(defaultOrgId, {
+      actionId: "email:independent",
+      phase: "pre",
+      config: {},
+    });
+
+    const unknownKind = await repos.actionConfigs.createActionConfig(defaultOrgId, {
+      actionId: "other:obsolete",
+      phase: "pre",
+      config: {},
+    });
+
+    const body = {
+      revision: 0,
+      steps: [
+        {
+          ...employeeStep,
+          rules: [...employeeStep.rules],
+          email: { subject: "Assunto", body: "Mensagem" },
+        },
+        { ...internalStep, rules: [...internalStep.rules] },
+      ],
+      knownRowIds: [known.id, unknownKind.id],
+    };
+
+    try {
+      const published = await call("/checklist-model", "PUT", body);
+      expect(published.status).toBe(200);
+      const change = await published.json();
+
+      const action = change.actionRows.find(
+        (config: { actionId: string }) => config.actionId === "email:onboarding-return",
+      );
+
+      expect(change).toMatchObject({ revision: 1, steps: [employeeStep, internalStep] });
+      expect(action).toMatchObject({ enabled: true, phase: "second-week" });
+      expect(change.actionRows.map((config: { id: string }) => config.id)).toEqual(
+        expect.arrayContaining([unrelated.id, unknownKind.id]),
+      );
+      expect(await repos.actionConfigs.getActionConfig(defaultOrgId, known.id)).toBeNull();
+      expect((await call("/checklist-model", "PUT", body)).status).toBe(409);
+      expect(await (await call("/checklist-model")).json()).toMatchObject({
+        revision: 1,
+        steps: [employeeStep, internalStep],
+      });
+
+      const created = await (
+        await call("/offboardings", "POST", {
+          name: "Criado com checklist",
+          department: "Operações",
+          role: "Engenheiro",
+          deadline: "2027-01-31",
+          email: "published-checklist@example.com",
+        })
+      ).json();
+
+      expect(created).toMatchObject({ total: 2, completed: 0 });
+      expect(
+        (await repos.offboardings.getOffboarding(defaultOrgId, created.id))?.tasks,
+      ).toMatchObject([
+        { title: "Verificar acessos", dueDate: null },
+        { title: "Entregar itens", dueDate: "2027-02-02" },
+      ]);
+
+      const imported = await (
+        await call("/offboardings/import", "POST", {
+          rows: [{ name: "CSV", department: "Produto" }],
+        })
+      ).json();
+
+      expect(imported[0]).toMatchObject({ total: 1 });
+
+      const empty = await repos.offboardings.createOffboarding(defaultOrgId, {
+        name: "Caso anterior",
+        department: "Operações",
+        role: "Estagiário",
+        deadline: "2027-02-03",
+        email: "existing-checklist@example.com",
+      });
+
+      const applyPath = `/offboardings/${empty.id}/checklist`;
+      const applied = await Promise.all([call(applyPath, "POST"), call(applyPath, "POST")]);
+      expect(applied.map(({ status }) => status).sort()).toEqual([200, 409]);
+      expect(
+        (await repos.offboardings.getOffboarding(defaultOrgId, empty.id))?.tasks,
+      ).toMatchObject([{ title: employeeStep.title }]);
+      expect((await call(`/offboardings/${missingCaseId}/checklist`, "POST")).status).toBe(404);
+
+      const revised = {
+        revision: 1,
+        steps: [
+          { ...body.steps[0], email: null, title: "Entrega revisada" },
+          {
+            ...body.steps[1],
+            slack: { channel: "#equipe", message: "Mensagem" },
+            webhook: { url: "https://offboard.example/tarefa", method: "POST" as const },
+          },
+        ],
+        knownRowIds: [action.id, unknownKind.id],
+      };
+
+      expect((await call("/checklist-model", "PUT", revised)).status).toBe(200);
+      expect((await call("/checklist-model", "PUT", revised)).status).toBe(409);
+      expect(await repos.actionConfigs.getActionConfig(defaultOrgId, action.id)).toBeNull();
+      expect(
+        await repos.actionConfigs.getActionConfigsByStep(defaultOrgId, "internal"),
+      ).toMatchObject([{ actionId: "slack:internal" }, { actionId: "webhook:internal" }]);
+      expect(
+        (await repos.offboardings.getOffboarding(defaultOrgId, created.id))?.tasks[1]?.title,
+      ).toBe(employeeStep.title);
+
+      const revisedAgain = {
+        ...revised,
+        revision: 2,
+        steps: body.steps,
+        knownRowIds: (
+          await repos.actionConfigs.getActionConfigsByStep(defaultOrgId, "internal")
+        ).map(({ id }) => id),
+      };
+
+      expect((await call("/checklist-model", "PUT", revisedAgain)).status).toBe(200);
+      expect(
+        (
+          await call("/checklist-model", "PUT", {
+            ...revisedAgain,
+            revision: 3,
+            steps: [body.steps[0], body.steps[0]],
+          })
+        ).status,
+      ).toBe(422);
+    } finally {
+      await db.delete(checklistModels).where(eq(checklistModels.orgId, defaultOrgId));
+    }
   });
 
   it("rejects an invalid import", async () => {
@@ -797,12 +1007,85 @@ describe.skipIf(!url)("api", () => {
     expect(res.status).toBe(404);
   });
 
+  it("updates a team member's role", async () => {
+    const [, camila] = await (await call("/team")).json();
+
+    const res = await call(`/team/${camila.id}`, "PATCH", { role: "gestor" });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ...camila, role: "gestor" });
+  });
+
+  it("rejects demoting the last admin", async () => {
+    const [admin] = await (await call("/team")).json();
+
+    const res = await call(`/team/${admin.id}`, "PATCH", { role: "rh" });
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "Cannot demote the last admin" });
+  });
+
+  it("rejects changing one's own role", async () => {
+    const [, camila] = await (await call("/team")).json();
+
+    const res = await app.handle(
+      new Request(`http://localhost/api/team/${camila.id}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          origin: webOrigin,
+          "x-test-member-id": camila.id,
+        },
+        body: JSON.stringify({ role: "gestor" }),
+      }),
+    );
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "Cannot change own role" });
+  });
+
+  it("returns 404 when updating unknown team member", async () => {
+    const res = await call(`/team/${missingCaseId}`, "PATCH", { role: "rh" });
+
+    expect(res.status).toBe(404);
+  });
+
   it("rejects invalid action config", async () => {
     const noAction = await call("/action-configs", "POST", { phase: "d0" });
     const noPhase = await call("/action-configs", "POST", { actionId: "test::x" });
 
     expect(noAction.status).toBe(422);
     expect(noPhase.status).toBe(422);
+  });
+
+  it("rethrows non-unique-violation errors from createOffboarding", async () => {
+    const failing = createApp(
+      webOrigin,
+      {
+        ...repos,
+        offboardings: {
+          ...repos.offboardings,
+          createOffboarding: () => Promise.reject(new Error("unexpected")),
+        },
+      },
+      appOptions,
+    );
+
+    const res = await failing.handle(
+      new Request("http://localhost/api/offboardings", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: webOrigin },
+        body: JSON.stringify({
+          name: "Rethrow",
+          role: "Dev",
+          department: "Eng",
+          deadline: "2026-12-01",
+          email: "rethrow@example.com",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(500);
   });
 
   it("rethrows unexpected create errors", async () => {
@@ -922,6 +1205,34 @@ describe.skipIf(!url)("api", () => {
     const res = await call(`/webhooks/inbound/${missingTaskId}`, "POST", {
       event: "delivered",
     });
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 when the task disappears between owner lookup and update", async () => {
+    const stubbed = createApp(
+      webOrigin,
+      {
+        ...repos,
+        offboardings: {
+          ...repos.offboardings,
+          getTaskOrgId: () => Promise.resolve(defaultOrgId),
+          updateTaskStatus: () => Promise.resolve(null),
+        },
+      },
+      appOptions,
+    );
+
+    const res = await stubbed.handle(
+      new Request(`http://localhost/api/webhooks/inbound/${missingTaskId}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${webhookSecret}`,
+        },
+        body: JSON.stringify({ event: "delivered" }),
+      }),
+    );
 
     expect(res.status).toBe(404);
   });
@@ -1140,7 +1451,14 @@ describe.skipIf(!url)("api", () => {
           ...repos.offboardings,
           getTrackedTasks: () =>
             Promise.resolve([
-              { id: missingTaskId, title: "Gone", phase: "d0", trackingCode: "ZZ999999999BR" },
+              {
+                id: missingTaskId,
+                orgId: defaultOrgId,
+                title: "Gone",
+                phase: "d0",
+                stepId: null,
+                trackingCode: "ZZ999999999BR",
+              },
             ]),
         },
       },
@@ -1192,5 +1510,1264 @@ describe.skipIf(!url)("api", () => {
     );
 
     expect(res.status).toBe(500);
+  });
+});
+
+describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => {
+  const db = createClient(url ?? "");
+  const repos = createRepositories(db);
+  const codes = new Map<string, string>();
+  const links = new Map<string, string>();
+  const grants = new Map<string, string>();
+  let requests = 0;
+
+  const employeeAuth = createAuth({
+    db,
+    origin: webOrigin,
+    secret: randomUUID() + randomUUID(),
+    ipAddressHeaders: ["x-test-employee-ip"],
+    sendLink: async ({ email, url }) => {
+      links.set(email, url);
+    },
+    sendCode: async ({ email, code }) => {
+      codes.set(email, code);
+    },
+  });
+
+  const app = createApp(webOrigin, repos, { auth: employeeAuth });
+
+  type EmployeeSettings = Parameters<typeof repos.employee.saveSettings>[2];
+
+  function request(
+    path: string,
+    method = "GET",
+    cookie?: string,
+    body?:
+      | { email: string; type: "sign-in" }
+      | { email: string; otp: string }
+      | { email: string }
+      | EmployeeState
+      | EmployeeSettings
+      | { done: boolean }
+      | { code: string; received: boolean },
+    origin = webOrigin,
+    nativeOrigin?: string,
+    grantId = cookie ? grants.get(cookie) : undefined,
+  ) {
+    requests += 1;
+    const headers = new Headers({ "x-test-employee-ip": `192.0.2.${requests}` });
+
+    if (nativeOrigin) headers.set("expo-origin", nativeOrigin);
+    else headers.set("origin", origin);
+
+    if (cookie) headers.set("cookie", cookie);
+
+    if (grantId) headers.set(employeeGrantHeader, grantId);
+
+    if (body) headers.set("content-type", "application/json");
+
+    return app.handle(
+      new Request(webOrigin + "/api" + path, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+    );
+  }
+
+  async function sendCode(email: string) {
+    return request("/auth/email-otp/send-verification-otp", "POST", undefined, {
+      email,
+      type: "sign-in",
+    });
+  }
+
+  async function signIn(email: string, code: string, nativeOrigin?: string) {
+    return request(
+      "/auth/sign-in/email-otp",
+      "POST",
+      undefined,
+      { email, otp: code },
+      webOrigin,
+      nativeOrigin,
+    );
+  }
+
+  async function rememberGrant(cookie: string) {
+    const session = await request("/employee/session", "GET", cookie);
+    expect(session.status).toBe(200);
+    const grantId = z.object({ grantId: z.uuid() }).parse(await session.json()).grantId;
+    grants.set(cookie, grantId);
+
+    return grantId;
+  }
+
+  async function authenticate(email: string) {
+    expect((await sendCode(email)).status).toBe(200);
+    const code = codes.get(email);
+
+    if (!code) throw new Error("No code delivered");
+
+    const response = await signIn(email, code);
+    expect(response.status).toBe(200);
+
+    const session = response.headers
+      .getSetCookie()
+      .find((value) => value.includes("session_token="));
+
+    expect(session).toContain("HttpOnly");
+
+    const cookie = session?.split(";")[0] ?? "";
+    await rememberGrant(cookie);
+
+    return cookie;
+  }
+
+  beforeAll(() =>
+    migrate(db, {
+      migrationsFolder: fileURLToPath(new URL("../../../packages/db/drizzle", import.meta.url)),
+    }),
+  );
+  afterAll(() => db.$client.end());
+
+  it("does not expose employee access settings through fallback portal authentication", async () => {
+    const fallbackApp = createApp(webOrigin, repos, { auth });
+    const target = webOrigin + "/api/employee-access/" + missingCaseId;
+    expect((await fallbackApp.handle(new Request(target))).status).toBe(503);
+    expect(
+      (
+        await fallbackApp.handle(
+          new Request(target, {
+            method: "PUT",
+            headers: { origin: webOrigin, "content-type": "application/json" },
+            body: JSON.stringify({ email: null, plan: emptyEmployeePlan, revision: 0 }),
+          }),
+        )
+      ).status,
+    ).toBe(503);
+  });
+
+  it("shares the employee checklist, booking and per-item receipts with the HR case", async () => {
+    const email = `workflow-${randomUUID()}@offboard.example`;
+    const layout = (await repos.actionConfigs.readChecklist(defaultOrgId)).steps;
+
+    const person = {
+      name: "Pessoa do fluxo",
+      role: "Analista",
+      department: "TI",
+      deadline: "2027-03-03",
+      email,
+    };
+
+    const record = await repos.offboardings.createOffboarding(defaultOrgId, person, [
+      ...layout,
+      { id: "form", title: "Conferir dados", team: "Pessoa desligada", phase: "d0" },
+    ]);
+
+    const foreign = await repos.offboardings.createOffboarding(
+      defaultOrgId,
+      { ...person, email: `foreign-${randomUUID()}@offboard.example` },
+      layout,
+    );
+
+    const detail = await repos.offboardings.getOffboarding(defaultOrgId, record.id);
+    const manual = detail?.tasks.find((task) => task.title === "Conferir dados");
+
+    const confirm = detail?.tasks.find(
+      (task) => task.title === "Confirmar os itens para devolução",
+    );
+
+    const internal = detail?.tasks.find((task) => task.title === "Bloquear acessos");
+
+    const foreignTask = (await repos.offboardings.getOffboarding(defaultOrgId, foreign.id))
+      ?.tasks[0];
+
+    if (!manual || !confirm || !internal || !foreignTask)
+      throw new Error("Checklist not generated");
+
+    const plan = {
+      ...emptyEmployeePlan,
+      bookingDays: ["2027-03-01", "2027-03-02"],
+      officeAddress: "Escritório da equipe",
+      equipment: [
+        { title: "Notebook", code: "QA-1", model: "" },
+        { title: "Monitor", code: "QA-2", model: "" },
+      ],
+    };
+
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, record.id, { email, plan, revision: 1 }),
+    ).toBe("saved");
+
+    const hr = createApp(webOrigin, repos, {
+      ...appOptions,
+      auth: { ...auth, resolveEmployee: employeeAuth.resolveEmployee },
+    });
+
+    function portal(
+      path: string,
+      method = "GET",
+      body?: { code: string; received: boolean } | EmployeeSettings,
+      role = "rh",
+    ) {
+      return hr.handle(
+        new Request(webOrigin + "/api" + path, {
+          method,
+          headers: {
+            "content-type": "application/json",
+            origin: webOrigin,
+            "x-test-session": role,
+          },
+          body: body && JSON.stringify(body),
+        }),
+      );
+    }
+
+    const inventory = "/equipment-returns/" + record.id;
+    expect((await portal("/equipment-returns")).status).toBe(200);
+    expect(await (await portal(inventory + "/address")).json()).toEqual({ address: null });
+    expect((await portal("/equipment-returns/" + missingCaseId + "/address")).status).toBe(404);
+    expect(await (await portal(inventory)).json()).toMatchObject([
+      { code: "QA-1", received: false, schedule: null },
+      { code: "QA-2", received: false, schedule: null },
+    ]);
+
+    await db.insert(equipment).values({
+      orgId: defaultOrgId,
+      caseId: foreign.id,
+      tag: "INVENTARIO-ANTIGO",
+      item: "Bens do inventário",
+      returnMethod: "pickup",
+      status: "with_person",
+    });
+    const independent = "/equipment-returns/" + foreign.id;
+    expect(await (await portal(independent)).json()).toMatchObject([
+      { code: "INVENTARIO-ANTIGO", model: "" },
+    ]);
+    expect(
+      (
+        await portal(independent + "/receipt", "PATCH", {
+          code: "INVENTARIO-ANTIGO",
+          received: true,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await portal(independent + "/receipt", "PATCH", {
+          code: "INVENTARIO-ANTIGO",
+          received: false,
+        })
+      ).status,
+    ).toBe(200);
+    expect(await (await portal(independent)).json()).toMatchObject([{ status: "with_person" }]);
+
+    const orgId = randomUUID();
+    await db.insert(organizations).values({ id: orgId, slug: orgId, name: "Outra organização" });
+
+    try {
+      const other = await repos.actionConfigs.saveChecklist(orgId, {
+        revision: 0,
+        steps: [],
+        knownRowIds: [],
+      });
+
+      expect(other?.steps).toEqual([]);
+      expect((await repos.actionConfigs.readChecklist(defaultOrgId)).steps).toEqual(layout);
+      expect(await repos.employee.listEquipmentReturns(orgId, record.id)).toEqual([]);
+      expect(await repos.employee.readCollectionBooking(orgId, record.id)).toBeNull();
+      expect(await repos.employee.updateReceipt(orgId, record.id, "QA-1", true)).toBeNull();
+      expect(await repos.offboardings.applyChecklist(orgId, record.id, layout)).toBeNull();
+      expect(
+        (await portal("/employee-access/" + foreign.id, "PUT", { email: null, plan, revision: 1 }))
+          .status,
+      ).toBe(409);
+    } finally {
+      await db.delete(checklistModels).where(eq(checklistModels.orgId, orgId));
+      await db.delete(organizations).where(eq(organizations.id, orgId));
+    }
+
+    const cookie = await authenticate(email);
+    codes.delete(email);
+    const taskPath = "/employee/checklist/";
+    expect((await request(taskPath + manual.id, "PATCH", cookie, { done: true })).status).toBe(403);
+    expect(
+      (
+        await request("/employee/state", "PUT", cookie, {
+          key: "consent",
+          revision: 0,
+          value: { accepted: true },
+        })
+      ).status,
+    ).toBe(200);
+    const staleConsent: EmployeeState = { key: "consent", revision: 0, value: { accepted: false } };
+    expect((await request("/employee/state", "PUT", cookie, staleConsent)).status).toBe(409);
+
+    const journey = await (await request("/employee/journey", "GET", cookie)).json();
+    expect(journey.checklist).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: manual.id, action: "check", status: "todo" }),
+        expect.objectContaining({ id: confirm.id, action: "equipment" }),
+        expect.objectContaining({ action: "feedback" }),
+      ]),
+    );
+    expect(journey.checklist.map((task: { id: string }) => task.id)).not.toContain(internal.id);
+
+    for (const task of [internal, foreignTask, confirm]) {
+      expect((await request(taskPath + task.id, "PATCH", cookie, { done: true })).status).toBe(404);
+    }
+
+    for (const done of [true, true, false, true]) {
+      expect(await (await request(taskPath + manual.id, "PATCH", cookie, { done })).json()).toEqual(
+        {
+          id: manual.id,
+          status: done ? "done" : "todo",
+        },
+      );
+    }
+
+    const booking = {
+      method: "pickup",
+      address: "Rua do Teste, 45, São Paulo",
+      day: "2027-03-01",
+      slot: "morning",
+    } as const;
+
+    const departure = {
+      key: "departure-v1",
+      revision: 0,
+      value: {
+        booking,
+        feedback: {
+          anonymous: true,
+          assessment: 5,
+          clarity: null,
+          respect: null,
+          comment: "",
+          recommendation: null,
+        },
+        examAttended: false,
+        handoffCompleted: [],
+      },
+    } satisfies EmployeeState;
+
+    expect((await request("/employee/state", "PUT", cookie, departure)).status).toBe(200);
+    expect((await request("/employee/state", "PUT", cookie, departure)).status).toBe(200);
+    const scheduled = await (await portal(inventory)).json();
+    expect(scheduled[0]).toMatchObject({
+      code: "QA-1",
+      schedule: { method: "pickup", day: booking.day, slot: booking.slot },
+    });
+    expect(scheduled[0].schedule).not.toHaveProperty("address");
+    expect(await (await portal(inventory + "/address")).json()).toEqual({
+      address: booking.address,
+    });
+    expect((await portal(inventory + "/address", "GET", undefined, "visualizador")).status).toBe(
+      403,
+    );
+    expect(
+      (await request(inventory + "/receipt", "PATCH", cookie, { code: "QA-1", received: true }))
+        .status,
+    ).toBe(403);
+
+    const receipt = (code: string, received: boolean) =>
+      portal(inventory + "/receipt", "PATCH", { code, received });
+
+    expect((await receipt("outro", true)).status).toBe(404);
+    expect(
+      (
+        await portal("/equipment-returns/" + missingCaseId + "/receipt", "PATCH", {
+          code: "QA-1",
+          received: true,
+        })
+      ).status,
+    ).toBe(404);
+
+    for (const [code, received] of [
+      ["QA-1", true],
+      ["QA-1", true],
+      ["QA-2", true],
+    ] as const) {
+      expect(await (await receipt(code, received)).json()).toEqual({ received });
+    }
+
+    const closed = await (await request("/employee/journey", "GET", cookie)).json();
+    expect(closed.equipment).toMatchObject([{ received: true }, { received: true }]);
+    expect(closed.checklist.every((task: { status: string }) => task.status === "done")).toBe(true);
+    const returned = await repos.offboardings.getOffboarding(defaultOrgId, record.id);
+    expect(
+      returned?.tasks.find((task) => task.title === "Conferir os bens devolvidos")?.status,
+    ).toBe("done");
+    expect(
+      returned?.tasks.find((task) => task.title === "Agendar a coleta de equipamentos")?.status,
+    ).toBe("done");
+
+    const changeBooking = {
+      ...departure,
+      revision: 1,
+      value: { ...departure.value, booking: { ...booking, day: "2027-03-02" } },
+    };
+
+    expect((await request("/employee/state", "PUT", cookie, changeBooking)).status).toBe(422);
+    expect(await (await receipt("QA-2", false)).json()).toEqual({ received: false });
+    expect((await request("/employee/state", "PUT", cookie, changeBooking)).status).toBe(200);
+    expect(
+      (await repos.offboardings.getOffboarding(defaultOrgId, record.id))?.tasks.find(
+        (task) => task.title === "Conferir os bens devolvidos",
+      )?.status,
+    ).toBe("todo");
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, record.id, {
+        email,
+        plan: { ...plan, equipment: plan.equipment.slice(0, 1) },
+        revision: 2,
+      }),
+    ).toBe("saved");
+    expect(
+      (await repos.offboardings.getOffboarding(defaultOrgId, record.id))?.tasks.find(
+        (task) => task.title === "Conferir os bens devolvidos",
+      )?.status,
+    ).toBe("done");
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, record.id, { email, plan, revision: 3 }),
+    ).toBe("saved");
+    expect(
+      (await repos.offboardings.getOffboarding(defaultOrgId, record.id))?.tasks.find(
+        (task) => task.title === "Conferir os bens devolvidos",
+      )?.status,
+    ).toBe("todo");
+
+    const office = {
+      ...departure,
+      revision: 2,
+      value: {
+        ...departure.value,
+        feedback: null,
+        booking: { method: "office", day: "2027-03-02", slot: "afternoon" } as const,
+      },
+    };
+
+    expect((await request("/employee/state", "PUT", cookie, office)).status).toBe(200);
+    expect(await (await portal(inventory + "/address")).json()).toEqual({
+      address: plan.officeAddress,
+    });
+
+    const racingApp = createApp(webOrigin, repos, {
+      auth: {
+        ...employeeAuth,
+        async resolveEmployee(headers) {
+          const principal = await employeeAuth.resolveEmployee(headers);
+
+          if (principal)
+            await repos.employee.saveSettings(defaultOrgId, record.id, {
+              email: null,
+              plan,
+              revision: 4,
+            });
+
+          return principal;
+        },
+      },
+    });
+
+    const raced = await racingApp.handle(
+      new Request(webOrigin + "/api" + taskPath + manual.id, {
+        method: "PATCH",
+        headers: {
+          origin: webOrigin,
+          cookie,
+          [employeeGrantHeader]: grants.get(cookie) ?? "",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ done: false }),
+      }),
+    );
+
+    expect(raced.status).toBe(401);
+    expect(
+      (await repos.offboardings.getOffboarding(defaultOrgId, record.id))?.tasks.find(
+        (task) => task.id === confirm.id,
+      )?.status,
+    ).toBe("todo");
+    expect(await (await portal(inventory + "/address")).json()).toEqual({ address: null });
+  });
+
+  it("separates employee sessions from HR and shares confirmed, revisioned progress only with the owner", async () => {
+    const email = `employee-${randomUUID()}@offboard.example`;
+    const secondEmail = `employee-${randomUUID()}@offboard.example`;
+
+    const first = await repos.offboardings.createOffboarding(defaultOrgId, {
+      name: "Primeira Pessoa",
+      role: "Analista",
+      department: "RH",
+      deadline: "2027-02-01",
+      email,
+    });
+
+    const second = await repos.offboardings.createOffboarding(defaultOrgId, {
+      name: "Segunda Pessoa",
+      role: "Analista",
+      department: "TI",
+      deadline: "2027-02-02",
+      email: secondEmail,
+    });
+
+    const plan = {
+      ...emptyEmployeePlan,
+      bookingDays: ["2027-01-25"],
+      equipment: [{ title: "Notebook", code: "123", model: "" }],
+    };
+
+    await repos.team.createTeamMember(defaultOrgId, {
+      email,
+      name: "RH com o mesmo e-mail",
+      role: "admin",
+    });
+    await repos.employee.saveSettings(defaultOrgId, first.id, { email, plan, revision: 1 });
+    await repos.employee.saveSettings(defaultOrgId, second.id, {
+      email: secondEmail,
+      plan: emptyEmployeePlan,
+      revision: 1,
+    });
+
+    const anonymous = await sendCode(`unknown-${randomUUID()}@offboard.example`);
+    expect(anonymous.status).toBe(200);
+    expect(codes.size).toBe(0);
+    expect((await request("/employee/session")).status).toBe(401);
+    expect(
+      (
+        await request(
+          "/auth/email-otp/send-verification-otp",
+          "POST",
+          undefined,
+          { email, type: "sign-in" },
+          "https://foreign.example",
+        )
+      ).status,
+    ).toBe(403);
+
+    const cookie = await authenticate(email);
+    const secondCookie = await authenticate(secondEmail);
+    expect((await signIn(email, codes.get(email) ?? "")).status).toBe(400);
+    expect((await request("/session", "GET", cookie)).status).toBe(403);
+    expect((await request(`/employee-access/${second.id}`, "GET", cookie)).status).toBe(403);
+    const journeyBeforeConsent = await request("/employee/journey", "GET", cookie);
+    expect(journeyBeforeConsent.status).toBe(200);
+    expect(journeyBeforeConsent.headers.get("cache-control")).toBe("private, no-store");
+    expect(await journeyBeforeConsent.json()).toMatchObject({ deadline: first.deadline, plan });
+
+    const initialConsent = await request("/employee/state/consent", "GET", cookie);
+    expect(await initialConsent.json()).toEqual({
+      key: "consent",
+      revision: 0,
+      value: { accepted: false },
+    });
+    const careerBeforeConsent = await request("/employee/state/career", "GET", cookie);
+    expect(careerBeforeConsent.status).toBe(200);
+    expect(await careerBeforeConsent.json()).toMatchObject({
+      key: "career",
+      revision: 0,
+      value: { base: { name: first.name }, versions: [], applications: [] },
+    });
+
+    const blockedDeparture: EmployeeState = {
+      key: "departure-v1",
+      revision: 0,
+      value: {
+        booking: null,
+        handoffCompleted: [],
+        examAttended: false,
+        feedback: null,
+      },
+    };
+
+    expect((await request("/employee/state", "PUT", cookie, blockedDeparture)).status).toBe(403);
+
+    const consent = { key: "consent", revision: 0, value: { accepted: true } } as const;
+    expect(
+      (await request("/employee/state", "PUT", cookie, consent, "https://foreign.example")).status,
+    ).toBe(403);
+    expect((await request("/employee/state", "PUT", cookie, consent)).status).toBe(200);
+    expect((await request("/employee/state", "PUT", secondCookie, consent)).status).toBe(200);
+    const firstGrant = grants.get(cookie);
+    expect(
+      (
+        await request(
+          "/employee/journey",
+          "GET",
+          secondCookie,
+          undefined,
+          webOrigin,
+          undefined,
+          firstGrant,
+        )
+      ).status,
+    ).toBe(412);
+    expect(
+      (
+        await request(
+          "/employee/state",
+          "PUT",
+          secondCookie,
+          blockedDeparture,
+          webOrigin,
+          undefined,
+          firstGrant,
+        )
+      ).status,
+    ).toBe(412);
+
+    const firstJourney = await request("/employee/journey", "GET", cookie);
+    expect(firstJourney.headers.get("cache-control")).toBe("private, no-store");
+    expect(await firstJourney.json()).toMatchObject({ deadline: first.deadline, plan });
+    expect(await (await request("/employee/journey", "GET", secondCookie)).json()).toMatchObject({
+      plan: emptyEmployeePlan,
+    });
+
+    expect(await (await request("/employee/state/career", "GET", cookie)).json()).toMatchObject({
+      key: "career",
+      revision: 0,
+      value: { base: { name: first.name }, versions: [], applications: [] },
+    });
+
+    const current = employeeStateSchema.parse(
+      await (await request("/employee/state/departure-v1", "GET", cookie)).json(),
+    );
+
+    if (current.key !== "departure-v1") throw new Error("Unexpected journey state kind");
+
+    const booking = {
+      method: "pickup",
+      day: "2027-01-25",
+      slot: "morning",
+      address: "Rua Brasileira, 123, São Paulo",
+    } as const;
+
+    expect(
+      (
+        await request("/employee/state", "PUT", cookie, {
+          ...current,
+          value: {
+            ...current.value,
+            booking: { method: "office", day: booking.day, slot: booking.slot },
+          },
+        })
+      ).status,
+    ).toBe(422);
+
+    expect(
+      (
+        await request("/employee/state", "PUT", cookie, {
+          ...current,
+          value: { ...current.value, examAttended: true },
+        })
+      ).status,
+    ).toBe(422);
+    expect(
+      (
+        await request("/employee/state", "PUT", cookie, {
+          ...current,
+          value: { ...current.value, handoffCompleted: ["unknown"] },
+        })
+      ).status,
+    ).toBe(422);
+
+    const draft = { ...current, value: { ...current.value, booking } };
+    const saved = await request("/employee/state", "PUT", cookie, draft);
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({ revision: 1, value: { booking } });
+    expect((await request("/employee/state", "PUT", cookie, draft)).status).toBe(200);
+
+    const different = {
+      ...draft,
+      value: { ...draft.value, booking: { ...booking, slot: "afternoon" as const } },
+    };
+
+    expect((await request("/employee/state", "PUT", cookie, different)).status).toBe(409);
+    expect(
+      await (await request("/employee/state/departure-v1", "GET", secondCookie)).json(),
+    ).toMatchObject({ revision: 0, value: { booking: null } });
+
+    const next = { ...draft, revision: 1, value: { ...draft.value, booking: null } };
+    expect(await (await request("/employee/state", "PUT", cookie, next)).json()).toMatchObject({
+      revision: 2,
+      value: { booking: null },
+    });
+    expect((await request("/employee/state", "PUT", cookie, different)).status).toBe(409);
+
+    await repos.employee.saveSettings(defaultOrgId, first.id, { email: null, plan, revision: 2 });
+    expect((await request("/employee/session", "GET", cookie)).status).toBe(401);
+    await repos.employee.saveSettings(defaultOrgId, first.id, { email, plan, revision: 3 });
+    expect((await request("/employee/session", "GET", cookie)).status).toBe(401);
+    expect((await request("/employee/session", "GET", secondCookie)).status).toBe(200);
+  });
+
+  it("lets HR provision a case and accepts only the supported native origins", async () => {
+    const email = `native-${randomUUID()}@offboard.example`;
+    const admin = `admin-${randomUUID()}@offboard.example`;
+
+    const first = await repos.offboardings.createOffboarding(defaultOrgId, {
+      name: "Pessoa no app",
+      role: "Analista",
+      department: "Produto",
+      deadline: "2027-02-01",
+      email,
+    });
+
+    const second = await repos.offboardings.createOffboarding(defaultOrgId, {
+      name: "Outro caso",
+      role: "Analista",
+      department: "TI",
+      deadline: "2027-02-02",
+      email: `other-${randomUUID()}@offboard.example`,
+    });
+
+    await repos.team.createTeamMember(defaultOrgId, { email: admin, name: "RH", role: "admin" });
+
+    expect(
+      (await request("/auth/sign-in/magic-link", "POST", undefined, { email: admin })).status,
+    ).toBe(200);
+    const link = links.get(admin);
+
+    if (!link) throw new Error("No HR link delivered");
+
+    const verified = await app.handle(new Request(link));
+
+    const hrCookie = verified.headers
+      .getSetCookie()
+      .find((value) => value.includes("session_token="))
+      ?.split(";")[0];
+
+    expect(hrCookie).toBeTruthy();
+    expect((await request("/employee/session", "GET", hrCookie)).status).toBe(401);
+
+    const target = `/employee-access/${first.id}`;
+
+    const plan = {
+      ...emptyEmployeePlan,
+      exam: { day: "2027-01-26", time: "10:00", clinic: "Clínica", address: "Rua da Clínica" },
+    };
+
+    expect(await (await request(target, "GET", hrCookie)).json()).toEqual({
+      email,
+      plan: emptyEmployeePlan,
+      revision: 1,
+    });
+    expect((await request(`/employee-access/${missingCaseId}`, "GET", hrCookie)).status).toBe(404);
+    expect(
+      (
+        await request(`/employee-access/${missingCaseId}`, "PUT", hrCookie, {
+          email,
+          plan,
+          revision: 0,
+        })
+      ).status,
+    ).toBe(404);
+    expect((await request(target, "PUT", hrCookie, { email, plan, revision: 1 })).status).toBe(200);
+    expect(await (await request(target, "GET", hrCookie)).json()).toEqual({
+      email,
+      plan,
+      revision: 2,
+    });
+    expect((await request(target, "PUT", hrCookie, { email, plan, revision: 1 })).status).toBe(409);
+    const firstVersion = { email, plan, revision: 2 };
+    expect((await request(target, "PUT", hrCookie, { ...firstVersion, email: null })).status).toBe(
+      200,
+    );
+    const conflict = await request(target, "PUT", hrCookie, firstVersion);
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ code: "settings-changed" });
+    expect(await (await request(target, "GET", hrCookie)).json()).toMatchObject({
+      email: null,
+      revision: 3,
+    });
+    expect((await request(target, "PUT", hrCookie, { ...firstVersion, revision: 3 })).status).toBe(
+      200,
+    );
+    expect(
+      (
+        await request(`/employee-access/${second.id}`, "PUT", hrCookie, {
+          email,
+          plan,
+          revision: 0,
+        })
+      ).status,
+    ).toBe(409);
+
+    const emailInUse = await request(`/employee-access/${second.id}`, "PUT", hrCookie, {
+      email,
+      plan,
+      revision: 1,
+    });
+
+    expect(emailInUse.status).toBe(409);
+    expect(await emailInUse.json()).toMatchObject({ code: "email-in-use" });
+
+    await expect(
+      repos.employee.saveSettings(defaultOrgId, "invalid-case-id", { email, plan, revision: 0 }),
+    ).rejects.toThrow();
+
+    const otpRequest = { email, type: "sign-in" } as const;
+
+    const requestedFrom = (origin: string) =>
+      request(
+        "/auth/email-otp/send-verification-otp",
+        "POST",
+        undefined,
+        otpRequest,
+        webOrigin,
+        origin,
+      );
+
+    expect((await requestedFrom("https://foreign.example")).status).toBe(403);
+    expect(
+      (
+        await employeeAuth.handler(
+          new Request(webOrigin + "/api/auth/email-otp/send-verification-otp", {
+            method: "POST",
+            body: JSON.stringify(otpRequest),
+            headers: { "content-type": "application/json" },
+          }),
+        )
+      ).status,
+    ).toBe(403);
+    expect((await requestedFrom("exp://127.0.0.1:8103/--/")).status).toBe(200);
+    const code = codes.get(email);
+
+    if (!code) throw new Error("No native code delivered");
+
+    const response = await signIn(email, code, "offboard://");
+    expect(response.status).toBe(200);
+
+    const cookie = response.headers
+      .getSetCookie()
+      .find((value) => value.includes("session_token="))
+      ?.split(";")[0];
+
+    expect(cookie).toBeTruthy();
+    await rememberGrant(cookie ?? "");
+    expect(
+      (
+        await request(
+          "/employee/state",
+          "PUT",
+          cookie,
+          { key: "consent", revision: 0, value: { accepted: true } },
+          webOrigin,
+          "offboard:///",
+        )
+      ).status,
+    ).toBe(200);
+
+    const initial: EmployeeState = {
+      key: "departure-v1",
+      revision: 0,
+      value: { handoffCompleted: [], examAttended: true, feedback: null, booking: null },
+    };
+
+    expect((await request("/employee/state", "PUT", cookie, initial)).status).toBe(200);
+    expect(
+      (await request("/employee/state", "PUT", cookie, { ...initial, revision: 1 })).status,
+    ).toBe(200);
+
+    expect((await request(target, "PUT", hrCookie, { email, plan, revision: 4 })).status).toBe(200);
+    expect((await request("/employee/session", "GET", cookie)).status).toBe(200);
+
+    await db.delete(employeeAccess).where(eq(employeeAccess.caseId, first.id));
+    expect((await request("/employee/session", "GET", cookie)).status).toBe(401);
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, first.id, { email, plan, revision: 1 }),
+    ).toBe("changed");
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, missingCaseId, { email, plan, revision: 1 }),
+    ).toBe("missing-case");
+  });
+
+  it("returns email-in-use when updating employee access to a taken email", async () => {
+    const emailA = `taken-a-${randomUUID()}@offboard.example`;
+    const emailB = `taken-b-${randomUUID()}@offboard.example`;
+
+    await repos.offboardings.createOffboarding(defaultOrgId, {
+      name: "Taken A",
+      role: "Dev",
+      department: "Eng",
+      deadline: "2027-01-01",
+      email: emailA,
+    });
+
+    const caseB = await repos.offboardings.createOffboarding(defaultOrgId, {
+      name: "Taken B",
+      role: "Dev",
+      department: "Eng",
+      deadline: "2027-01-01",
+      email: emailB,
+    });
+
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, caseB.id, {
+        email: emailA,
+        plan: emptyEmployeePlan,
+        revision: 1,
+      }),
+    ).toBe("email-in-use");
+  });
+
+  it("rejects a previously delivered code if the case is revoked before verification", async () => {
+    const email = `revoked-new-${randomUUID()}@offboard.example`;
+
+    const first = await repos.offboardings.createOffboarding(defaultOrgId, {
+      name: "Pessoa removida",
+      role: "Analista",
+      department: "Produto",
+      deadline: "2027-02-01",
+      email,
+    });
+
+    await repos.employee.saveSettings(defaultOrgId, first.id, {
+      email,
+      plan: emptyEmployeePlan,
+      revision: 0,
+    });
+    expect((await sendCode(email)).status).toBe(200);
+    const code = codes.get(email);
+
+    if (!code) throw new Error("No code delivered");
+
+    await repos.employee.saveSettings(defaultOrgId, first.id, {
+      email: null,
+      plan: emptyEmployeePlan,
+      revision: 1,
+    });
+    expect((await signIn(email, code)).headers.getSetCookie()).toHaveLength(0);
+
+    await repos.employee.saveSettings(defaultOrgId, first.id, {
+      email,
+      plan: emptyEmployeePlan,
+      revision: 2,
+    });
+    await authenticate(email);
+    expect((await sendCode(email)).status).toBe(200);
+    const subsequentCode = codes.get(email);
+
+    if (!subsequentCode) throw new Error("No code delivered");
+
+    await repos.employee.saveSettings(defaultOrgId, first.id, {
+      email: null,
+      plan: emptyEmployeePlan,
+      revision: 3,
+    });
+    expect((await signIn(email, subsequentCode)).headers.getSetCookie()).toHaveLength(0);
+  });
+
+  it("binds a pending code to the grant that issued it", async () => {
+    const email = "reassigned-" + randomUUID() + "@offboard.example";
+
+    const person = {
+      name: "Pessoa realocada",
+      role: "Analista",
+      department: "Produto",
+      deadline: "2027-02-01",
+      email,
+    };
+
+    const first = await repos.offboardings.createOffboarding(defaultOrgId, person);
+
+    const second = await repos.offboardings.createOffboarding(defaultOrgId, {
+      ...person,
+      email: `reassigned2-${randomUUID()}@offboard.example`,
+    });
+
+    const plan = emptyEmployeePlan;
+
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, first.id, { email, plan, revision: 0 }),
+    ).toBe("changed");
+    expect((await sendCode(email)).status).toBe(200);
+    const priorCode = codes.get(email);
+
+    if (!priorCode) throw new Error("No code delivered");
+
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, first.id, { email: null, plan, revision: 1 }),
+    ).toBe("saved");
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, second.id, { email, plan, revision: 1 }),
+    ).toBe("saved");
+    expect((await signIn(email, priorCode)).status).toBe(400);
+
+    await db
+      .update(employeeAccess)
+      .set({ email: email.toUpperCase() })
+      .where(eq(employeeAccess.caseId, second.id));
+
+    const cookie = await authenticate(email);
+    expect(await (await request("/employee/session", "GET", cookie)).json()).toMatchObject({
+      caseId: second.id,
+    });
+  });
+
+  it("clears a session if the grant is revoked while Better Auth is creating it", async () => {
+    const email = "revoked-at-issue-" + randomUUID() + "@offboard.example";
+
+    const record = await repos.offboardings.createOffboarding(defaultOrgId, {
+      name: "Pessoa com acesso removido no login",
+      role: "Analista",
+      department: "Produto",
+      deadline: "2027-02-01",
+      email,
+    });
+
+    expect((await sendCode(email)).status).toBe(200);
+    const code = codes.get(email);
+
+    if (!code) throw new Error("No code delivered");
+
+    await db.execute(sql`
+      CREATE FUNCTION offboard_test_revoke_grant() RETURNS trigger AS $$
+      BEGIN
+        UPDATE employee_access SET email = NULL, grant_id = gen_random_uuid(), revision = revision + 1
+        WHERE case_id = NEW.employee_case_id;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+    `);
+
+    try {
+      await db.execute(sql`
+        CREATE TRIGGER offboard_test_revoke_grant AFTER INSERT ON auth_session
+        FOR EACH ROW WHEN (NEW.employee_case_id IS NOT NULL)
+        EXECUTE FUNCTION offboard_test_revoke_grant()
+      `);
+      const result = await signIn(email, code);
+      expect(result.status).toBe(400);
+      expect(result.headers.getSetCookie()).toEqual([]);
+      expect(
+        await db.select().from(authSession).where(eq(authSession.employeeCaseId, record.id)),
+      ).toEqual([]);
+    } finally {
+      await db.execute(sql`DROP FUNCTION offboard_test_revoke_grant() CASCADE`);
+    }
+  });
+
+  it("rechecks the grant inside the transaction for reads and writes already authorized by the guard", async () => {
+    const email = "revocation-" + randomUUID() + "@offboard.example";
+
+    const record = await repos.offboardings.createOffboarding(defaultOrgId, {
+      name: "Pessoa com acesso removido",
+      role: "Analista",
+      department: "Produto",
+      deadline: "2027-02-01",
+      email,
+    });
+
+    const plan = emptyEmployeePlan;
+
+    const cookie = await authenticate(email);
+    const consent: EmployeeState = { key: "consent", revision: 0, value: { accepted: true } };
+    expect((await request("/employee/state", "PUT", cookie, consent)).status).toBe(200);
+
+    const atGuard: (() => void)[] = [];
+    const resumeGuard = new Set<() => void>();
+
+    const started = Array.from(
+      { length: 3 },
+      () => new Promise<void>((resolve) => atGuard.push(resolve)),
+    );
+
+    const delayedApp = createApp(webOrigin, repos, {
+      auth: {
+        ...employeeAuth,
+        async resolveEmployee(headers) {
+          const principal = await employeeAuth.resolveEmployee(headers);
+
+          await new Promise<void>((resume) => {
+            resumeGuard.add(resume);
+            atGuard.shift()?.();
+          });
+
+          return principal;
+        },
+      },
+    });
+
+    const boundHeaders = {
+      cookie,
+      origin: webOrigin,
+      "content-type": "application/json",
+      [employeeGrantHeader]: grants.get(cookie) ?? "",
+    };
+
+    const pending = [
+      delayedApp.handle(
+        new Request(webOrigin + "/api/employee/journey", { headers: boundHeaders }),
+      ),
+      delayedApp.handle(
+        new Request(webOrigin + "/api/employee/state/consent", { headers: boundHeaders }),
+      ),
+      delayedApp.handle(
+        new Request(webOrigin + "/api/employee/state", {
+          method: "PUT",
+          headers: boundHeaders,
+          body: JSON.stringify({ ...consent, revision: 1, value: { accepted: false } }),
+        }),
+      ),
+    ];
+
+    try {
+      await Promise.all(started);
+      expect(
+        await repos.employee.saveSettings(defaultOrgId, record.id, {
+          email: null,
+          plan,
+          revision: 1,
+        }),
+      ).toBe("saved");
+    } finally {
+      resumeGuard.forEach((resume) => resume());
+    }
+
+    expect((await Promise.all(pending)).map((response) => response.status)).toEqual([
+      401, 401, 401,
+    ]);
+    await repos.employee.saveSettings(defaultOrgId, record.id, { email, plan, revision: 2 });
+    const freshCookie = await authenticate(email);
+    expect(await (await request("/employee/state/consent", "GET", freshCookie)).json()).toEqual({
+      key: "consent",
+      revision: 1,
+      value: { accepted: true },
+    });
+  });
+
+  it("sends code mail through the configured provider and never trusts Expo Go origins in production", async () => {
+    const email = `runtime-${randomUUID()}@offboard.example`;
+
+    const record = await repos.offboardings.createOffboarding(defaultOrgId, {
+      name: "Pessoa na produção",
+      role: "Analista",
+      department: "Produto",
+      deadline: "2027-02-01",
+      email,
+    });
+
+    await repos.employee.saveSettings(defaultOrgId, record.id, {
+      email,
+      plan: emptyEmployeePlan,
+      revision: 0,
+    });
+    const delivered: string[] = [];
+
+    const { auth: production } = createRuntimeAuth(db, undefined, {
+      env: {
+        BETTER_AUTH_URL: "https://offboard.example",
+        BETTER_AUTH_SECRET: randomUUID() + randomUUID(),
+        EMAIL_PROVIDER: "cloudflare",
+        AUTH_EMAIL_FROM: "login@offboard.example",
+      },
+      cloudflareEmail: {
+        async send(message) {
+          expect(message.to).toBe(email);
+          expect(message.subject).toBe("Seu código de acesso ao Offboard");
+          delivered.push(message.text);
+
+          return { messageId: "test-email" };
+        },
+      },
+    });
+
+    function send(origin: Record<string, string>) {
+      return production.handler(
+        new Request("https://offboard.example/api/auth/email-otp/send-verification-otp", {
+          method: "POST",
+          headers: { ...origin, "content-type": "application/json" },
+          body: JSON.stringify({ email, type: "sign-in" }),
+        }),
+      );
+    }
+
+    expect((await send({ "expo-origin": "exp://localhost:8103/--/" })).status).toBe(403);
+    expect((await send({ "expo-origin": "offboard:///" })).status).toBe(200);
+    expect(delivered[0]).toMatch(/\b\d{6}\b/);
+  });
+
+  describe("signup", () => {
+    type Signup = { orgName?: string; slug?: string; adminName?: string; adminEmail?: string };
+
+    function signup(body: Signup) {
+      return app.handle(
+        new Request("http://localhost/api/signup", {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: webOrigin },
+          body: JSON.stringify(body),
+        }),
+      );
+    }
+
+    it("creates an organization without authentication", async () => {
+      const slug = `acme-${randomUUID()}`;
+
+      const response = await signup({
+        orgName: "Acme",
+        slug,
+        adminName: "Ada",
+        adminEmail: `${randomUUID()}@example.com`,
+      });
+
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({ orgId: expect.any(String), slug });
+    });
+
+    it("rejects a duplicate slug and an existing email", async () => {
+      const slug = `acme-${randomUUID()}`;
+      const adminEmail = `${randomUUID()}@example.com`;
+      await signup({ orgName: "Acme", slug, adminName: "Ada", adminEmail });
+
+      const slugTaken = await signup({
+        orgName: "Acme",
+        slug,
+        adminName: "Bob",
+        adminEmail: `${randomUUID()}@example.com`,
+      });
+
+      const emailTaken = await signup({
+        orgName: "Acme",
+        slug: `acme-${randomUUID()}`,
+        adminName: "Bob",
+        adminEmail,
+      });
+
+      expect(slugTaken.status).toBe(409);
+      expect(await slugTaken.json()).toEqual({ error: "Slug already in use", code: "slug-taken" });
+      expect(emailTaken.status).toBe(409);
+      expect(await emailTaken.json()).toEqual({
+        error: "Email already in use",
+        code: "email-in-use",
+      });
+    });
+
+    it("rejects a reserved slug", async () => {
+      const response = await signup({
+        orgName: "Acme",
+        slug: "admin",
+        adminName: "Ada",
+        adminEmail: `${randomUUID()}@example.com`,
+      });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: "Slug already in use", code: "slug-taken" });
+    });
+
+    it("rejects an invalid slug and missing fields", async () => {
+      const invalid = await signup({
+        orgName: "Acme",
+        slug: "Not A Slug",
+        adminName: "Ada",
+        adminEmail: "ada@example.com",
+      });
+
+      const missing = await signup({ orgName: "Acme" });
+
+      expect(invalid.status).toBe(422);
+      expect(missing.status).toBe(422);
+    });
   });
 });

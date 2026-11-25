@@ -1,5 +1,6 @@
 import type { PortalPrincipal } from "@offboard/access";
 import { t } from "elysia";
+import type { EmployeePrincipal } from "./employee-auth.js";
 
 export const memberRole = t.Union([
   t.Literal("admin"),
@@ -8,12 +9,17 @@ export const memberRole = t.Union([
   t.Literal("visualizador"),
 ]);
 
-export const portalPrincipalResponse = t.Object({
+export const teamMemberResponse = t.Object({
   id: t.String(),
   name: t.String(),
   email: t.String(),
   role: memberRole,
 });
+
+export const portalPrincipalResponse = t.Composite([
+  teamMemberResponse,
+  t.Object({ orgId: t.String({ format: "uuid" }) }),
+]);
 
 export type PortalAccess =
   | { kind: "anonymous" }
@@ -23,4 +29,5 @@ export type PortalAccess =
 export type PortalAuth = {
   handler: (request: Request) => Promise<Response>;
   resolvePrincipal: (headers: Headers) => Promise<PortalAccess>;
+  resolveEmployee?: (headers: Headers) => Promise<EmployeePrincipal | null>;
 };

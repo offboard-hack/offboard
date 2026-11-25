@@ -1,7 +1,1 @@
-import { clsx } from "clsx";
-import type { ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
-
-export function cn(...values: ClassValue[]) {
-  return twMerge(clsx(values));
-}
+export { cn } from "@offboard/ui/web/cn";

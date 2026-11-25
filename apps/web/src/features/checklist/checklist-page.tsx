@@ -12,16 +12,14 @@ import {
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useHydrated } from "@tanstack/react-router";
+import { getRouteApi, useHydrated } from "@tanstack/react-router";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState, type KeyboardEvent } from "react";
 import {
-  actionConfigsQuery,
+  checklistActionConfigsQuery,
   applyActionConfigs,
-  clearSyncedRemovals,
   knownActionRowIds,
   mergeStepSettings,
-  syncActionConfigs,
   type ActionConfigRow,
 } from "./action-config";
 import { cn } from "@/shared/lib/utils";
@@ -31,19 +29,21 @@ import { Button } from "@/shared/ui/shadcn/button";
 import {
   clearDraftSteps,
   getPhase,
-  initialSteps,
   moveStep,
   phases,
   readDraftSnapshot,
-  readLegacyDraftSteps,
-  readSavedModel,
   saveDraftSnapshot,
-  saveModel,
   teams,
   type ChecklistStep,
   type Destination,
   type Placement,
 } from "./checklist-draft";
+import {
+  checklistModelQuery,
+  saveChecklistModel,
+  ChecklistChanged,
+  type ChecklistModel,
+} from "./checklist-model";
 import { DeleteStepDialog, StepDialog } from "./step-dialog";
 import { sameStepSettings, type StepSettings } from "./step-settings";
 
@@ -325,46 +325,60 @@ function completeStepSettings(step: ChecklistStep) {
   };
 }
 
+const route = getRouteApi("/_portal/checklist-automatico");
+
 export function ChecklistRulesPage() {
+  const {
+    principal: { orgId },
+  } = route.useRouteContext();
+
   const hydrated = useHydrated();
-  const { data } = useSuspenseQuery(actionConfigsQuery);
+  const { data: actionRows } = useSuspenseQuery(checklistActionConfigsQuery(orgId));
+  const { data: model } = useSuspenseQuery(checklistModelQuery(orgId));
 
   if (!hydrated) return <ChecklistPending />;
 
-  return <ChecklistEditor actionRows={data} />;
+  return <ChecklistEditor key={orgId} orgId={orgId} actionRows={actionRows} model={model} />;
 }
 
-function ChecklistEditor({ actionRows }: { actionRows: ActionConfigRow[] }) {
+function ChecklistEditor({
+  orgId,
+  actionRows,
+  model,
+}: {
+  orgId: string;
+  actionRows: ActionConfigRow[];
+  model: ChecklistModel;
+}) {
   const client = useQueryClient();
+  const [restoredDraft] = useState(() => readDraftSnapshot(orgId));
 
-  const [saved, setSaved] = useState<ChecklistStep[]>(() =>
-    applyActionConfigs(clearSyncedRemovals(readSavedModel() ?? initialSteps), actionRows),
-  );
+  const [published, setPublished] = useState(() => ({
+    revision: model.revision,
+    steps: applyActionConfigs(model.steps, actionRows),
+  }));
 
-  const [restoredDraft] = useState(readDraftSnapshot);
+  const [revision, setRevision] = useState(restoredDraft?.revision ?? published.revision);
 
   const [knownRowIds, setKnownRowIds] = useState(
-    () => restoredDraft?.knownRowIds ?? knownActionRowIds(saved, actionRows),
+    () => restoredDraft?.knownRowIds ?? knownActionRowIds(published.steps, actionRows),
   );
 
-  const [needsSave, setNeedsSave] = useState(restoredDraft?.needsSave ?? false);
   const [draftStorageError, setDraftStorageError] = useState(false);
 
-  const [{ steps, history, message }, setDraft] = useState<Draft>(() => ({
-    steps: applyActionConfigs(restoredDraft?.steps ?? readLegacyDraftSteps(saved), actionRows),
-    history: [],
-    message: "",
-  }));
+  const [{ steps, history, message }, setDraft] = useState<Draft>(() => {
+    const initialDraft = restoredDraft?.steps ?? published.steps;
+
+    return { steps: applyActionConfigs(initialDraft, actionRows), history: [], message: "" };
+  });
 
   const [dialog, setDialog] = useState<ChecklistDialog | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [keyboardDrag, setKeyboardDrag] = useState<KeyboardDrag | null>(null);
-  const [saveError, setSaveError] = useState(false);
-
-  const baseline = saved ?? initialSteps;
+  const baseline = published.steps;
 
   const isSaved =
-    !needsSave &&
+    revision === published.revision &&
     baseline.length === steps.length &&
     steps.every((step, index) => {
       const original = baseline[index];
@@ -388,14 +402,12 @@ function ChecklistEditor({ actionRows }: { actionRows: ActionConfigRow[] }) {
     setDialogOpen(true);
   }
 
-  function persistDraft(next: ChecklistStep[], rowIds: string[], pendingSave: boolean) {
-    setDraftStorageError(
-      !saveDraftSnapshot({ steps: next, knownRowIds: rowIds, needsSave: pendingSave }),
-    );
+  function persistDraft(next: ChecklistStep[]) {
+    setDraftStorageError(!saveDraftSnapshot(orgId, { steps: next, knownRowIds, revision }));
   }
 
   function commit(next: ChecklistStep[], message: string, undoMessage: string) {
-    persistDraft(next, knownRowIds, needsSave);
+    persistDraft(next);
     setDraft({ steps: next, history: [...history, { steps, undoMessage }], message });
   }
 
@@ -502,42 +514,43 @@ function ChecklistEditor({ actionRows }: { actionRows: ActionConfigRow[] }) {
     setDialogOpen(false);
   }
 
+  function loadPublishedModel(next: ChecklistModel, rows: ActionConfigRow[], message: string) {
+    const saved = applyActionConfigs(next.steps, rows);
+
+    clearDraftSteps(orgId);
+    setKnownRowIds(knownActionRowIds(saved, rows));
+    setRevision(next.revision);
+    setPublished({ revision: next.revision, steps: saved });
+    setDraftStorageError(false);
+    setDraft({ steps: saved, history: [], message });
+  }
+
   const saveMutation = useMutation({
-    onMutate: () => setSaveError(false),
     mutationFn: async () => {
-      const existing = await client.fetchQuery({ ...actionConfigsQuery, staleTime: 0 });
+      persistDraft(steps);
 
-      const { createdRowIds, failed } = await syncActionConfigs(steps, existing, knownRowIds);
-      const nextRowIds = [...knownRowIds, ...createdRowIds];
-
-      setKnownRowIds(nextRowIds);
-      setNeedsSave(true);
-      persistDraft(steps, nextRowIds, true);
-      await client.invalidateQueries(actionConfigsQuery);
-
-      if (failed) throw new Error("Failed to save action config");
-
-      return nextRowIds;
+      return saveChecklistModel({ revision, steps, knownRowIds });
     },
-    onSuccess: (rowIds) => {
-      const synced = clearSyncedRemovals(steps);
-
-      if (!saveModel(synced)) {
-        setSaveError(true);
-
-        return;
-      }
-
-      clearDraftSteps();
-      const currentRows = client.getQueryData(actionConfigsQuery.queryKey) ?? actionRows;
-
-      setKnownRowIds([...new Set([...rowIds, ...knownActionRowIds(synced, currentRows)])]);
-      setNeedsSave(false);
-      setDraftStorageError(false);
-      setSaved(synced);
-      setDraft({ steps: synced, history: [], message: "Modelo salvo neste navegador." });
+    onSuccess: ({ actionRows: rows, ...next }) => {
+      client.setQueryData(checklistModelQuery(orgId).queryKey, next);
+      client.setQueryData(checklistActionConfigsQuery(orgId).queryKey, rows);
+      loadPublishedModel(next, rows, "Modelo publicado.");
     },
   });
+
+  const restoreMutation = useMutation({
+    mutationFn: () =>
+      Promise.all([
+        client.fetchQuery({ ...checklistModelQuery(orgId), staleTime: 0 }),
+        client.fetchQuery({ ...checklistActionConfigsQuery(orgId), staleTime: 0 }),
+      ]),
+    onSuccess: ([next, rows]) => {
+      loadPublishedModel(next, rows, "Modelo publicado carregado.");
+      saveMutation.reset();
+    },
+  });
+
+  const conflict = saveMutation.error instanceof ChecklistChanged;
 
   function deleteStep(step: ChecklistStep) {
     commit(
@@ -553,7 +566,7 @@ function ChecklistEditor({ actionRows }: { actionRows: ActionConfigRow[] }) {
 
     if (!previous) return;
 
-    persistDraft(previous.steps, knownRowIds, needsSave);
+    persistDraft(previous.steps);
     setDraft({
       steps: previous.steps,
       history: history.slice(0, -1),
@@ -587,7 +600,8 @@ function ChecklistEditor({ actionRows }: { actionRows: ActionConfigRow[] }) {
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground">
-              Clique na etapa para editar ou use a alça para mover entre equipes e fases.
+              O modelo publicado é aplicado aos novos desligamentos. Clique na etapa para editar ou
+              use a alça para mover.
               <span className="block lg:hidden">Deslize a matriz para ver as outras fases.</span>
             </p>
           </div>
@@ -602,25 +616,36 @@ function ChecklistEditor({ actionRows }: { actionRows: ActionConfigRow[] }) {
             </Button>
             <Button
               onClick={() => saveMutation.mutate()}
-              disabled={isSaved || saveMutation.isPending}
+              disabled={isSaved || saveMutation.isPending || restoreMutation.isPending || conflict}
             >
               <HugeiconsIcon icon={Tick02Icon} aria-hidden="true" />
               {saveMutation.isPending ? "Salvando modelo…" : "Salvar modelo"}
             </Button>
           </div>
           {saveMutation.isError && (
-            <p role="alert" className="basis-full text-sm text-destructive">
-              Não foi possível salvar as ações no servidor. Tente novamente.
-            </p>
+            <div className="basis-full space-y-2">
+              <p role="alert" className="text-sm text-destructive">
+                {saveMutation.error.message}
+              </p>
+              {conflict ? (
+                <Button
+                  variant="outline"
+                  disabled={restoreMutation.isPending}
+                  onClick={() => restoreMutation.mutate()}
+                >
+                  Descartar rascunho e carregar modelo publicado
+                </Button>
+              ) : null}
+              {restoreMutation.isError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  Não foi possível carregar o modelo publicado. Tente novamente.
+                </p>
+              ) : null}
+            </div>
           )}
           {draftStorageError && (
             <p role="alert" className="basis-full text-sm text-destructive">
               O navegador não conseguiu guardar o rascunho. Mantenha esta aba aberta até salvar.
-            </p>
-          )}
-          {saveError && (
-            <p role="alert" className="basis-full text-sm text-destructive">
-              O navegador não conseguiu salvar o modelo. Tente novamente.
             </p>
           )}
         </header>
@@ -645,7 +670,7 @@ function ChecklistEditor({ actionRows }: { actionRows: ActionConfigRow[] }) {
           <div
             role="region"
             aria-label="Matriz de etapas por equipe e fase"
-            inert={saveMutation.isPending}
+            inert={saveMutation.isPending || restoreMutation.isPending}
             tabIndex={0}
             className="min-w-0 overflow-x-auto overscroll-x-contain rounded-b-2xl border-t outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
           >

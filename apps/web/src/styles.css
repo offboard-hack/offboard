@@ -3,6 +3,8 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/nunito-sans";
 
+@source "../../../packages/ui/src/web";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -136,4 +138,22 @@
     color-mix(in oklch, var(--primary) 17%, transparent),
     transparent 67%
   );
+}
+
+@utility navigation-progress {
+  & [data-slot="progress-track"] {
+    @apply h-1 rounded-none bg-primary/15;
+  }
+  & [data-slot="progress-indicator"] {
+    @apply w-1/3;
+    @media (prefers-reduced-motion: no-preference) {
+      animation: navigation-sweep 1.2s ease-in-out infinite alternate;
+    }
+  }
+}
+
+@keyframes navigation-sweep {
+  to {
+    transform: translateX(200%);
+  }
 }

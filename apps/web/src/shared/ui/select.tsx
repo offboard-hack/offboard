@@ -5,6 +5,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 
 type FilterProps = {
   label: string;
+  id?: string;
+  disabled?: boolean;
   className?: string;
   invalid?: boolean;
   describedBy?: string;
@@ -15,6 +17,8 @@ type FilterProps = {
 
 export function PortalFilter({
   label,
+  id,
+  disabled,
   value,
   items,
   onChange,
@@ -27,12 +31,14 @@ export function PortalFilter({
   return (
     <Select
       value={value}
+      disabled={disabled}
       items={items}
       onValueChange={(next) => {
         if (next !== null) onChange(next);
       }}
     >
       <SelectTrigger
+        id={id}
         aria-label={label}
         aria-invalid={invalid}
         aria-describedby={describedBy}
