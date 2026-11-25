@@ -18,7 +18,7 @@ import { createAccountRepository } from "./features/account/repository.js";
 import { createBackgroundRepository } from "./features/background/repository.js";
 import { createPagesRepository } from "./features/pages/repository.js";
 import { createInsightsRepository } from "./features/insights/repository.js";
-import { createFeedsRepository } from "./features/feeds/repository.js";
+import { createSourcesRepository } from "./features/sources/repository.js";
 
 export function createRepositories(db: Database) {
   return {
@@ -41,7 +41,7 @@ export function createRepositories(db: Database) {
     background: createBackgroundRepository(db),
     pages: createPagesRepository(db),
     insights: createInsightsRepository(db),
-    feeds: createFeedsRepository(db),
+    sources: createSourcesRepository(db),
   };
 }
 

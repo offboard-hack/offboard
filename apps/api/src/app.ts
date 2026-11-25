@@ -8,8 +8,8 @@ import { authRoutes } from "./features/auth/routes.js";
 import { createAbacatePayGateway, type AbacatePayGateway } from "./features/billing/abacatepay.js";
 import { billingRoutes } from "./features/billing/routes.js";
 import { equipmentRoutes } from "./features/equipment/routes.js";
-import { fetchFeed } from "./features/feeds/sources.js";
-import { feedsRoutes } from "./features/feeds/routes.js";
+import { catalogSources, type CatalogSource } from "./features/sources/catalog.js";
+import { fetchFeed } from "./features/sources/sources.js";
 import { exitSurveysRoutes } from "./features/exit-surveys/routes.js";
 import { insightsRoutes } from "./features/insights/routes.js";
 import { integrationsRoutes } from "./features/integrations/routes.js";
@@ -51,6 +51,7 @@ type AppOptions = {
   abacatepay?: AbacatePayGateway;
   abacatepayWebhookSecret?: string;
   generateStructured?: GenerateStructured;
+  catalog?: readonly CatalogSource[];
   fetchFeedImpl?: typeof fetch;
   storage?: ObjectStorage;
   runInBackground?: (task: () => Promise<void>) => void;
@@ -95,15 +96,19 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
   const handlers = {
     ingest_jobs: async (job) => {
-      const feed = await repos.feeds.get(job.subject);
+      const source = await repos.sources.get(job.subject);
 
-      if (!feed?.enabled) return;
+      if (!source?.enabled) return;
 
-      const result = await fetchFeed(feed, options.fetchFeedImpl);
-      const synced = await repos.feeds.sync(feed.id, result, new Date());
+      const result = await fetchFeed(
+        { provider: source.kind, board: source.target, companyLabel: source.label },
+        options.fetchFeedImpl,
+      );
+
+      const synced = await repos.sources.sync(source.id, result, new Date());
 
       if (synced !== "failed" && synced.created > 0) {
-        await matchNewJob().catch(logFailure("feed match fan-out failed"));
+        await matchNewJob().catch(logFailure("source match fan-out failed"));
       }
     },
     score_resume: async (job) => {
@@ -190,22 +195,16 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     );
   }
 
-  async function ingestFeed(feedId: string) {
-    if (!(await enqueued("ingest_jobs", feedId))) return;
+  const catalog = options.catalog ?? catalogSources;
 
-    runInBackground(async () => {
-      await drain(repos.background, handlers, {
-        limit: 1,
-        target: { kind: "ingest_jobs", subject: feedId },
-      });
-    });
-  }
+  async function scheduleSources() {
+    const now = new Date();
 
-  async function scheduleFeeds() {
-    await repos.feeds
-      .dueIds(new Date())
+    await repos.sources
+      .syncCatalog(catalog, now)
+      .then(() => repos.sources.dueIds(now))
       .then((due) => repos.background.enqueueMany("ingest_jobs", due))
-      .catch(logFailure("feed scheduling failed"));
+      .catch(logFailure("source scheduling failed"));
   }
 
   return new Elysia({ adapter: options.adapter, prefix: "/api" })
@@ -255,12 +254,11 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         renderPdf: ownResumePdf,
       }),
     )
-    .use(backgroundRoutes(repos.background, handlers, options.cronSecret, scheduleFeeds))
+    .use(backgroundRoutes(repos.background, handlers, options.cronSecret, scheduleSources))
     .use(accountRoutes(repos.account, talent, options.storage))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
     .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret))
-    .use(feedsRoutes(repos.feeds, access, ingestFeed))
     .use(
       billingRoutes(
         repos.billing,

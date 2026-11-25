@@ -30,6 +30,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.ts";
+import type { CatalogSource } from "./features/sources/catalog.js";
 import type { GenerateStructured } from "./shared/ai.js";
 import { diskStorage } from "./shared/disk-storage.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
@@ -100,6 +101,7 @@ const appOptions = {
   cronSecret,
   webhookSecret,
   slackSigningSecret,
+  catalog: [],
   runInBackground: () => undefined,
 };
 
@@ -3620,14 +3622,7 @@ describe.skipIf(!url)("api", () => {
     });
   });
 
-  describe("job feeds", () => {
-    type FeedBody = {
-      provider?: string;
-      board?: string;
-      companyLabel?: string | null;
-      enabled?: boolean;
-    };
-
+  describe("job sources", () => {
     const greenhouseBody = (ids: number[]) =>
       Response.json({
         jobs: ids.map((id) => ({
@@ -3641,15 +3636,20 @@ describe.skipIf(!url)("api", () => {
         })),
       });
 
-    function feedsApp(overrides: Partial<typeof repos> = {}, ids = [1, 2]) {
+    const acme = { kind: "greenhouse", target: "acme", label: null } satisfies CatalogSource;
+
+    function sourcesApp(
+      catalog: readonly CatalogSource[] | undefined,
+      overrides: Partial<typeof repos> = {},
+    ) {
       const fetched: string[] = [];
-      const background: (() => Promise<void>)[] = [];
 
       const instance = createApp(
         webOrigin,
         { ...repos, ...overrides },
         {
           ...appOptions,
+          catalog,
           fetchFeedImpl: async (input) => {
             const target = String(input);
 
@@ -3657,52 +3657,33 @@ describe.skipIf(!url)("api", () => {
 
             return target.includes("broken")
               ? new Response("missing", { status: 404 })
-              : greenhouseBody(ids);
-          },
-          runInBackground: (task) => {
-            background.push(task);
+              : greenhouseBody([1, 2]);
           },
         },
       );
 
-      const send = (path: string, method = "GET", body?: FeedBody, session = "admin") =>
+      const drainNow = async (method = "POST") =>
+        (
+          await instance.handle(
+            new Request("http://localhost/api/background/drain", {
+              method,
+              headers: { authorization: `Bearer ${cronSecret}` },
+            }),
+          )
+        ).json();
+
+      const asTalent = (profileId: string, path: string) =>
         instance.handle(
           new Request(`http://localhost/api${path}`, {
-            method,
             headers: {
-              "x-test-session": session,
+              "x-test-session": "talent",
+              "x-test-talent-id": profileId,
               origin: webOrigin,
-              "content-type": "application/json",
             },
-            body: body === undefined ? undefined : JSON.stringify(body),
           }),
         );
 
-      const drainNow = (method = "POST") =>
-        instance.handle(
-          new Request("http://localhost/api/background/drain", {
-            method,
-            headers: { authorization: `Bearer ${cronSecret}` },
-          }),
-        );
-
-      async function kicks() {
-        const tasks = background.splice(0);
-
-        await Promise.all(tasks.map((task) => task()));
-
-        return tasks.length;
-      }
-
-      return { instance, fetched, send, drainNow, kicks };
-    }
-
-    async function createdFeed(board: string, provider: "greenhouse" | "lever" = "greenhouse") {
-      const feed = await repos.feeds.create({ provider, board, companyLabel: null });
-
-      if (feed === "exists") throw new Error("feed exists");
-
-      return feed;
+      return { fetched, drainNow, asTalent };
     }
 
     function queued(kind: string) {
@@ -3712,12 +3693,39 @@ describe.skipIf(!url)("api", () => {
         .where(eq(backgroundJobs.kind, kind));
     }
 
+    function registry() {
+      return db
+        .select({
+          id: jobSources.id,
+          target: jobSources.target,
+          enabled: jobSources.enabled,
+          lastError: jobSources.lastError,
+          updatedAt: jobSources.updatedAt,
+        })
+        .from(jobSources)
+        .orderBy(jobSources.target);
+    }
+
+    function importedJobs() {
+      return db
+        .select({
+          id: jobs.id,
+          sourceKey: jobs.sourceKey,
+          origin: jobs.origin,
+          company: jobs.company,
+          closedAt: jobs.closedAt,
+        })
+        .from(jobs)
+        .where(eq(jobs.source, "greenhouse"))
+        .orderBy(jobs.sourceKey);
+    }
+
     async function matchingProfile() {
       const cases: { id: string }[] = await (await call("/offboardings")).json();
 
       const created = await repos.talent.enable({
         caseId: cases[0].id,
-        personalEmail: "feeds.pessoal@example.com",
+        personalEmail: "fontes.pessoal@example.com",
         sponsoredUntil: "2099-12-31",
       });
 
@@ -3747,248 +3755,143 @@ describe.skipIf(!url)("api", () => {
       return created.id;
     }
 
-    it("lets only admins manage job feeds", async () => {
-      const { send } = feedsApp();
-      const feed = await createdFeed("acme");
+    it("syncs the catalog and imports due sources from the cron", async () => {
+      const app = sourcesApp([acme]);
 
-      for (const [path, method, body] of [
-        ["/job-feeds", "GET", undefined],
-        ["/job-feeds", "POST", { provider: "lever", board: "outra" }],
-        [`/job-feeds/${feed.id}`, "PATCH", { enabled: false }],
-        [`/job-feeds/${feed.id}`, "DELETE", undefined],
-      ] as const) {
-        expect((await send(path, method, body, "rh")).status).toBe(403);
-      }
-
-      expect(await repos.feeds.list()).toEqual([feed]);
-    });
-
-    it("creates, lists, updates and removes job feeds", async () => {
-      const { send } = feedsApp();
-
-      expect(await (await send("/job-feeds")).json()).toEqual([]);
-
-      const created = await send("/job-feeds", "POST", {
-        provider: "lever",
-        board: "acme_br-1",
-        companyLabel: "  Acme  ",
-      });
-
-      expect(created.status).toBe(201);
-
-      const feed = await created.json();
-
-      expect(feed).toEqual({
-        id: expect.any(String),
-        provider: "lever",
-        board: "acme_br-1",
-        companyLabel: "Acme",
-        enabled: true,
-        lastSyncedAt: null,
-        lastError: null,
-        openJobs: 0,
-      });
-
-      const duplicate = await send("/job-feeds", "POST", { provider: "lever", board: "acme_br-1" });
-
-      expect(duplicate.status).toBe(409);
-      expect(await duplicate.json()).toEqual({ error: "Feed already exists" });
-
-      for (const body of [
-        { provider: "lever", board: "Acme" },
-        { provider: "lever", board: "-acme" },
-        { provider: "lever", board: "a".repeat(101) },
-        { provider: "workday", board: "acme" },
-        { provider: "lever", board: "acme", companyLabel: "x".repeat(256) },
-      ]) {
-        expect((await send("/job-feeds", "POST", body)).status).toBe(422);
-      }
-
-      const blank = await send("/job-feeds", "POST", {
-        provider: "greenhouse",
-        board: "acme",
-        companyLabel: "  ",
-      });
-
-      expect(await blank.json()).toMatchObject({ companyLabel: null });
-
-      const path = `/job-feeds/${feed.id}`;
-
-      expect((await send(path, "PATCH", {})).status).toBe(422);
-      expect((await send(path, "PATCH", { companyLabel: "x".repeat(256) })).status).toBe(422);
-
-      const updated = await send(path, "PATCH", { enabled: false, companyLabel: " Nova " });
-
-      expect(updated.status).toBe(200);
-      expect(await updated.json()).toMatchObject({ enabled: false, companyLabel: "Nova" });
-      expect(await (await send(path, "PATCH", { companyLabel: null })).json()).toMatchObject({
-        companyLabel: null,
-      });
-
-      const missing = `/job-feeds/${crypto.randomUUID()}`;
-
-      expect((await send(missing, "PATCH", { enabled: true })).status).toBe(404);
-      expect((await send(missing, "DELETE")).status).toBe(404);
-      expect((await send("/job-feeds/nope", "DELETE")).status).toBe(422);
-
-      expect(
-        (await (await send("/job-feeds")).json()).map((row: { board: string }) => row.board),
-      ).toEqual(["acme", "acme_br-1"]);
-
-      expect((await send(path, "DELETE")).status).toBe(204);
-      expect(
-        (await (await send("/job-feeds")).json()).map((row: { board: string }) => row.board),
-      ).toEqual(["acme"]);
-    });
-
-    it("imports a new feed in the background and closes its jobs after removing it", async () => {
-      const app = feedsApp();
-
-      const created = await app.send("/job-feeds", "POST", {
-        provider: "greenhouse",
-        board: "acme",
-      });
-
-      const feed = await created.json();
-
-      expect(await queued("ingest_jobs")).toEqual([{ subject: feed.id, status: "pending" }]);
-      expect(app.fetched).toEqual([]);
-      expect(await app.kicks()).toBe(1);
+      expect(await app.drainNow("GET")).toEqual({ processed: 1, failed: 0 });
       expect(app.fetched).toEqual([
         "https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true",
       ]);
-      expect(await queued("ingest_jobs")).toEqual([{ subject: feed.id, status: "done" }]);
-
-      const [listed] = await (await app.send("/job-feeds")).json();
-
-      expect(listed).toMatchObject({ id: feed.id, openJobs: 2, lastError: null });
-      expect(listed.lastSyncedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-      expect(
-        await db
-          .select({ sourceKey: jobs.sourceKey, origin: jobs.origin, company: jobs.company })
-          .from(jobs)
-          .where(eq(jobs.source, "greenhouse"))
-          .orderBy(jobs.sourceKey),
-      ).toEqual([
-        { sourceKey: "acme:1", origin: "external", company: "Acme Pagamentos" },
-        { sourceKey: "acme:2", origin: "external", company: "Acme Pagamentos" },
+      expect(await importedJobs()).toMatchObject([
+        { sourceKey: "acme:1", origin: "external", company: "Acme Pagamentos", closedAt: null },
+        { sourceKey: "acme:2", origin: "external", company: "Acme Pagamentos", closedAt: null },
       ]);
 
-      expect((await app.send(`/job-feeds/${feed.id}`, "DELETE")).status).toBe(204);
+      const [source] = await registry();
 
-      const kept = await db
-        .select({ closedAt: jobs.closedAt })
-        .from(jobs)
-        .where(eq(jobs.source, "greenhouse"));
-
-      expect(kept).toHaveLength(2);
-      expect(kept.every((row) => row.closedAt instanceof Date)).toBe(true);
+      expect(source).toMatchObject({ target: "acme", enabled: true, lastError: null });
+      expect(await queued("ingest_jobs")).toEqual([{ subject: source.id, status: "done" }]);
     });
 
-    it("creates a feed without kicking an import when enqueueing fails", async () => {
-      const app = feedsApp({
-        background: {
-          ...repos.background,
-          enqueue: () => Promise.reject(new Error("queue down")),
-        },
-      });
+    it("schedules nothing new and changes nothing with an unchanged or empty catalog", async () => {
+      const empty = sourcesApp([]);
 
-      const created = await app.send("/job-feeds", "POST", { provider: "lever", board: "acme" });
+      expect(await empty.drainNow()).toEqual({ processed: 0, failed: 0 });
+      expect(empty.fetched).toEqual([]);
+      expect(await registry()).toEqual([]);
 
-      expect(created.status).toBe(201);
-      expect(await app.kicks()).toBe(0);
-      expect(await queued("ingest_jobs")).toEqual([]);
+      const app = sourcesApp([acme]);
+
+      await app.drainNow();
+
+      const sources = await registry();
+      const scheduled = await queued("ingest_jobs");
+
+      expect(await app.drainNow()).toEqual({ processed: 0, failed: 0 });
+      expect(app.fetched).toHaveLength(1);
+      expect(await registry()).toEqual(sources);
+      expect(await queued("ingest_jobs")).toEqual(scheduled);
     });
 
-    it("schedules only due enabled feeds before draining", async () => {
-      const app = feedsApp();
-      const due = await createdFeed("due");
-      const fresh = await createdFeed("fresh");
-      const disabled = await createdFeed("disabled");
+    it("syncs the reviewed catalog by default", async () => {
+      const app = sourcesApp(undefined);
+
+      expect(await app.drainNow()).toEqual({ processed: 2, failed: 0 });
+      expect(app.fetched.sort()).toEqual([
+        "https://boards-api.greenhouse.io/v1/boards/quintoandar/jobs?content=true",
+        "https://boards-api.greenhouse.io/v1/boards/stone/jobs?content=true",
+      ]);
+      expect((await registry()).map((source) => [source.target, source.enabled])).toEqual([
+        ["quintoandar", true],
+        ["stone", true],
+      ]);
+    });
+
+    it("schedules only due enabled sources before draining", async () => {
+      const due = { ...acme, target: "due" };
+      const fresh = { ...acme, target: "fresh" };
+      const app = sourcesApp([due, fresh]);
       const sevenHoursAgo = new Date(Date.now() - 7 * 60 * 60_000);
 
+      await repos.sources.syncCatalog([due, fresh], new Date());
+      await db
+        .insert(jobSources)
+        .values({ kind: "greenhouse", target: "disabled", enabled: false });
       await db
         .update(jobSources)
         .set({ lastSyncedAt: sevenHoursAgo })
-        .where(eq(jobSources.id, due.id));
+        .where(eq(jobSources.target, "due"));
       await db
         .update(jobSources)
         .set({ lastSyncedAt: new Date() })
-        .where(eq(jobSources.id, fresh.id));
-      await repos.feeds.update(disabled.id, { enabled: false });
+        .where(eq(jobSources.target, "fresh"));
 
-      expect(await (await app.drainNow("GET")).json()).toEqual({ processed: 1, failed: 0 });
+      expect(await app.drainNow("GET")).toEqual({ processed: 1, failed: 0 });
       expect(app.fetched).toEqual([
         "https://boards-api.greenhouse.io/v1/boards/due/jobs?content=true",
       ]);
 
-      expect(await (await app.drainNow()).json()).toEqual({ processed: 0, failed: 0 });
+      expect(await app.drainNow()).toEqual({ processed: 0, failed: 0 });
       expect(app.fetched).toHaveLength(1);
     });
 
-    it("still drains when scheduling feeds fails", async () => {
+    it("still drains when scheduling sources fails", async () => {
       const logged = vi.spyOn(console, "error");
 
-      const app = feedsApp({
-        feeds: { ...repos.feeds, dueIds: () => Promise.reject(new Error("db down")) },
+      const app = sourcesApp([acme], {
+        sources: { ...repos.sources, dueIds: () => Promise.reject(new Error("db down")) },
       });
 
-      await createdFeed("acme");
       await repos.background.enqueue("ingest_jobs", crypto.randomUUID());
 
-      const drained = await app.drainNow();
-
-      expect(drained.status).toBe(200);
-      expect(await drained.json()).toEqual({ processed: 1, failed: 0 });
+      expect(await app.drainNow()).toEqual({ processed: 1, failed: 0 });
       expect(app.fetched).toEqual([]);
       expect(logged.mock.calls).toEqual([
-        ["feed scheduling failed", { name: "Error", message: "db down" }],
+        ["source scheduling failed", { name: "Error", message: "db down" }],
       ]);
       logged.mockRestore();
     });
 
-    it("completes ingest jobs of missing or disabled feeds without fetching", async () => {
-      const app = feedsApp();
-      const disabled = await createdFeed("disabled");
+    it("completes ingest jobs of missing or disabled sources without fetching", async () => {
+      const app = sourcesApp([]);
 
-      await repos.feeds.update(disabled.id, { enabled: false });
+      const [disabled] = await db
+        .insert(jobSources)
+        .values({ kind: "greenhouse", target: "disabled", enabled: false })
+        .returning({ id: jobSources.id });
+
       await repos.background.enqueue("ingest_jobs", disabled.id);
       await repos.background.enqueue("ingest_jobs", crypto.randomUUID());
 
-      expect(await (await app.drainNow()).json()).toEqual({ processed: 2, failed: 0 });
+      expect(await app.drainNow()).toEqual({ processed: 2, failed: 0 });
       expect(app.fetched).toEqual([]);
       expect(await queued("ingest_jobs")).toMatchObject([{ status: "done" }, { status: "done" }]);
     });
 
     it("records a failed fetch without retrying it", async () => {
-      const app = feedsApp();
-      const feed = await createdFeed("broken", "lever");
+      const app = sourcesApp([{ kind: "lever", target: "broken", label: null }]);
 
-      await repos.background.enqueue("ingest_jobs", feed.id);
-
-      expect(await (await app.drainNow()).json()).toEqual({ processed: 1, failed: 0 });
+      expect(await app.drainNow()).toEqual({ processed: 1, failed: 0 });
       expect(app.fetched).toEqual(["https://api.lever.co/v0/postings/broken?mode=json"]);
-      expect(await repos.feeds.get(feed.id)).toMatchObject({ lastError: "http_404", openJobs: 0 });
+      expect(await registry()).toMatchObject([{ target: "broken", lastError: "http_404" }]);
       expect(await queued("compute_matches")).toEqual([]);
     });
 
     it("fans out matching when a sync creates jobs", async () => {
       const profileId = await matchingProfile();
-      const app = feedsApp();
+      const app = sourcesApp([acme]);
 
-      const feed = await (
-        await app.send("/job-feeds", "POST", { provider: "greenhouse", board: "acme" })
-      ).json();
-
-      await app.kicks();
-
-      expect(await queued("compute_matches")).toEqual([{ subject: profileId, status: "pending" }]);
-
-      await db.delete(backgroundJobs);
-      await repos.background.enqueue("ingest_jobs", feed.id);
       await app.drainNow();
 
-      expect(await queued("ingest_jobs")).toEqual([{ subject: feed.id, status: "done" }]);
+      expect((await queued("compute_matches")).map((row) => row.subject)).toEqual([profileId]);
+
+      const [source] = await registry();
+
+      await db.delete(backgroundJobs);
+      await repos.background.enqueue("ingest_jobs", source.id);
+      await app.drainNow();
+
+      expect(await queued("ingest_jobs")).toEqual([{ subject: source.id, status: "done" }]);
       expect(await queued("compute_matches")).toEqual([]);
     });
 
@@ -4001,13 +3904,10 @@ describe.skipIf(!url)("api", () => {
 
       await repos.billing.updateSubscription(subscription.id, { status: "canceled" });
 
-      const app = feedsApp();
-      const feed = await createdFeed("acme");
+      const app = sourcesApp([acme]);
 
-      await repos.background.enqueue("ingest_jobs", feed.id);
-
-      expect(await (await app.drainNow()).json()).toEqual({ processed: 1, failed: 0 });
-      expect((await repos.feeds.get(feed.id))?.openJobs).toBe(2);
+      expect(await app.drainNow()).toEqual({ processed: 1, failed: 0 });
+      expect(await importedJobs()).toHaveLength(2);
       expect(await queued("compute_matches")).toEqual([]);
     });
 
@@ -4016,9 +3916,7 @@ describe.skipIf(!url)("api", () => {
 
       await matchingProfile();
 
-      const feed = await createdFeed("acme");
-
-      const app = feedsApp({
+      const app = sourcesApp([acme], {
         background: {
           ...repos.background,
           enqueueMany: (kind, subjects) =>
@@ -4028,15 +3926,37 @@ describe.skipIf(!url)("api", () => {
         },
       });
 
-      await repos.background.enqueue("ingest_jobs", feed.id);
-
-      expect(await (await app.drainNow()).json()).toEqual({ processed: 1, failed: 0 });
-      expect((await repos.feeds.get(feed.id))?.openJobs).toBe(2);
+      expect(await app.drainNow()).toEqual({ processed: 1, failed: 0 });
+      expect(await importedJobs()).toHaveLength(2);
       expect(await queued("compute_matches")).toEqual([]);
       expect(logged.mock.calls).toEqual([
-        ["feed match fan-out failed", { name: "Error", message: "queue down" }],
+        ["source match fan-out failed", { name: "Error", message: "queue down" }],
       ]);
       logged.mockRestore();
+    });
+
+    it("disables removed sources and closes their jobs", async () => {
+      const profileId = await matchingProfile();
+
+      await sourcesApp([acme]).drainNow();
+
+      const [first] = await importedJobs();
+
+      await db.insert(applications).values({ profileId, jobId: first.id });
+
+      const app = sourcesApp([]);
+
+      expect(await app.drainNow()).toMatchObject({ failed: 0 });
+      expect(await registry()).toMatchObject([{ target: "acme", enabled: false }]);
+      expect((await importedJobs()).every((job) => job.closedAt instanceof Date)).toBe(true);
+
+      const listed = await app.asTalent(profileId, "/me/applications");
+
+      expect(listed.status).toBe(200);
+      expect(await listed.json()).toMatchObject([{ job: { id: first.id, title: "Engenheira 1" } }]);
+      expect(await (await app.asTalent(profileId, "/me/jobs")).json()).toMatchObject({
+        total: 0,
+      });
     });
   });
 
@@ -4048,12 +3968,16 @@ describe.skipIf(!url)("api", () => {
     await db.$client.end();
   });
 
-  it("serves no route for HR job sharing or partner recruiters", async () => {
+  it("serves no route for HR job sharing, partner recruiters or job feed admin", async () => {
     for (const [path, method] of [
       ["/jobs/share", "POST"],
       ["/recruiters/jobs", "POST"],
       ["/recruiter-partners", "GET"],
       ["/recruiter-partners", "POST"],
+      ["/job-feeds", "GET"],
+      ["/job-feeds", "POST"],
+      [`/job-feeds/${crypto.randomUUID()}`, "PATCH"],
+      [`/job-feeds/${crypto.randomUUID()}`, "DELETE"],
     ] as const) {
       expect((await call(path, method)).status).toBe(404);
     }
