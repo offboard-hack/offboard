@@ -2024,4 +2024,86 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     expect((await send({ "expo-origin": "offboard:///" })).status).toBe(200);
     expect(delivered[0]).toMatch(/\b\d{6}\b/);
   });
+
+  describe("signup", () => {
+    type Signup = { orgName?: string; slug?: string; adminName?: string; adminEmail?: string };
+
+    function signup(body: Signup) {
+      return app.handle(
+        new Request("http://localhost/api/signup", {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: webOrigin },
+          body: JSON.stringify(body),
+        }),
+      );
+    }
+
+    it("creates an organization without authentication", async () => {
+      const slug = `acme-${randomUUID()}`;
+
+      const response = await signup({
+        orgName: "Acme",
+        slug,
+        adminName: "Ada",
+        adminEmail: `${randomUUID()}@example.com`,
+      });
+
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({ orgId: expect.any(String), slug });
+    });
+
+    it("rejects a duplicate slug and an existing email", async () => {
+      const slug = `acme-${randomUUID()}`;
+      const adminEmail = `${randomUUID()}@example.com`;
+      await signup({ orgName: "Acme", slug, adminName: "Ada", adminEmail });
+
+      const slugTaken = await signup({
+        orgName: "Acme",
+        slug,
+        adminName: "Bob",
+        adminEmail: `${randomUUID()}@example.com`,
+      });
+
+      const emailTaken = await signup({
+        orgName: "Acme",
+        slug: `acme-${randomUUID()}`,
+        adminName: "Bob",
+        adminEmail,
+      });
+
+      expect(slugTaken.status).toBe(409);
+      expect(await slugTaken.json()).toEqual({ error: "Slug already in use", code: "slug-taken" });
+      expect(emailTaken.status).toBe(409);
+      expect(await emailTaken.json()).toEqual({
+        error: "Email already in use",
+        code: "email-in-use",
+      });
+    });
+
+    it("rejects a reserved slug", async () => {
+      const response = await signup({
+        orgName: "Acme",
+        slug: "admin",
+        adminName: "Ada",
+        adminEmail: `${randomUUID()}@example.com`,
+      });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: "Slug already in use", code: "slug-taken" });
+    });
+
+    it("rejects an invalid slug and missing fields", async () => {
+      const invalid = await signup({
+        orgName: "Acme",
+        slug: "Not A Slug",
+        adminName: "Ada",
+        adminEmail: "ada@example.com",
+      });
+
+      const missing = await signup({ orgName: "Acme" });
+
+      expect(invalid.status).toBe(422);
+      expect(missing.status).toBe(422);
+    });
+  });
 });

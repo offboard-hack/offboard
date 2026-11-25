@@ -10,6 +10,7 @@ import { billingRoutes } from "./features/billing/routes.js";
 import { equipmentRoutes } from "./features/equipment/routes.js";
 import { exitSurveysRoutes } from "./features/exit-surveys/routes.js";
 import { integrationsRoutes } from "./features/integrations/routes.js";
+import { organizationsRoutes } from "./features/organizations/routes.js";
 import { offboardingsRoutes } from "./features/offboardings/routes.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
@@ -35,6 +36,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       response: t.Object({ status: t.Literal("ok") }),
     })
     .use(authRoutes(options.auth))
+    .use(organizationsRoutes(repos.organizations))
     .use(employeeRoutes(repos.employee, access, options.auth.resolveEmployee, webOrigin))
     .use(
       offboardingsRoutes(
