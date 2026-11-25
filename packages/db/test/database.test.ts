@@ -36,6 +36,7 @@ import {
   talentProfiles,
   tasks,
 } from "../src/schema/index.ts";
+import { commonQuestions } from "../src/preferences.fixture.ts";
 import { normalizeQuestion } from "../src/question.ts";
 import { seedCases, seedDatabase, testSeedFixtures } from "../src/seed-database.ts";
 
@@ -925,6 +926,45 @@ it.skipIf(!url)("stores job sources and closes shared jobs", async () => {
   }
 });
 
+it.skipIf(!url)(
+  "ships the common questions with the migration and keeps them on reseed",
+  async () => {
+    const db = createClient(url ?? "");
+
+    try {
+      await db.execute(sql`drop schema if exists public cascade`);
+      await db.execute(sql`drop schema if exists drizzle cascade`);
+      await db.execute(sql`create schema public`);
+      await migrate(db, {
+        migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
+      });
+
+      const migrated = await db.select().from(answerQuestions);
+
+      expect(migrated).toHaveLength(10);
+      expect(migrated.every((item) => item.common)).toBe(true);
+      expect(migrated.map((item) => item.text).sort()).toEqual([...commonQuestions].sort());
+
+      for (const item of migrated) {
+        expect(item.normalized).toBe(normalizeQuestion(item.text));
+      }
+
+      const ids = migrated.map((item) => item.id).sort();
+
+      await seedDatabase(db);
+      await db.insert(answerQuestions).values({ normalized: "tem pet", text: "Tem pet?" });
+      await seedDatabase(db);
+
+      const reseeded = await db.select().from(answerQuestions);
+
+      expect(reseeded.map((item) => item.id).sort()).toEqual(ids);
+      expect(await db.select().from(talentAnswers)).toHaveLength(8);
+    } finally {
+      await db.$client.end();
+    }
+  },
+);
+
 it.skipIf(!url)("stores preferences, answers, rejections and packages", async () => {
   const db = createClient(url ?? "");
 
@@ -1085,10 +1125,14 @@ it.skipIf(!url)("stores preferences, answers, rejections and packages", async ()
     await db.delete(answerQuestions).where(eq(answerQuestions.id, answer.questionId));
     expect(await db.select().from(talentAnswers)).toHaveLength(7);
 
+    await db.insert(applicationPackages).values({ profileId, jobId: job.id, coverLetter: "Olá" });
+    expect(await db.select().from(applicationPackages)).toHaveLength(1);
+
     await db.delete(applications);
     await db.delete(resumes).where(eq(resumes.kind, "tailored"));
     await db.delete(jobs);
     expect(await db.select().from(jobRejections)).toHaveLength(0);
+    expect(await db.select().from(applicationPackages)).toHaveLength(0);
 
     await db.delete(talentProfiles).where(eq(talentProfiles.id, profileId));
     expect(await db.select().from(talentAnswers)).toHaveLength(0);
@@ -1105,5 +1149,7 @@ describe("normalizeQuestion", () => {
     );
     expect(normalizeQuestion("Você possui CNH ?")).toBe("voce possui cnh");
     expect(normalizeQuestion("Aviso: ")).toBe("aviso");
+    expect(normalizeQuestion("Aviso, ; … ")).toBe("aviso");
+    expect(normalizeQuestion("Você é PcD (pessoa)?")).toBe("voce e pcd (pessoa)");
   });
 });

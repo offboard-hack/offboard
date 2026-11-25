@@ -5,5 +5,4 @@ export const normalizeQuestion = (text: string) =>
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/[?.!:]+$/, "")
-    .trim();
+    .replace(/[[\p{P}--\p{Pe}]\s]+$/v, "");

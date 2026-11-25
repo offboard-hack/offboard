@@ -133,7 +133,7 @@ export async function seedDatabase(
 ) {
   await db.transaction(async (tx) => {
     await tx.delete(backgroundJobs);
-    await tx.delete(answerQuestions);
+    await tx.delete(answerQuestions).where(eq(answerQuestions.common, false));
     await tx.delete(publicPageDailyViews);
     await tx.delete(publicPages);
     await tx.delete(jobMatches);
@@ -455,16 +455,13 @@ export async function seedDatabase(
       await tx.insert(talentPreferences).values({ profileId, ...item });
     }
 
-    const questionIds = new Map<string, string>();
-
-    for (const question of fixtures.questions) {
-      const [created] = await tx
-        .insert(answerQuestions)
-        .values(question)
-        .returning({ id: answerQuestions.id });
-
-      questionIds.set(question.normalized, created.id);
+    if (fixtures.questions.length > 0) {
+      await tx.insert(answerQuestions).values(fixtures.questions).onConflictDoNothing();
     }
+
+    const questionIds = new Map(
+      (await tx.select().from(answerQuestions)).map((item) => [item.normalized, item.id]),
+    );
 
     for (const { caseName, question, answer } of fixtures.answers) {
       const profileId = profileIds.get(caseName);

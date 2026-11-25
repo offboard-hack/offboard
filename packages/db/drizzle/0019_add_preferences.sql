@@ -69,3 +69,16 @@ CREATE INDEX "application_packages_job_idx" ON "application_packages" USING btre
 CREATE INDEX "job_rejections_job_idx" ON "job_rejections" USING btree ("job_id");
 --> statement-breakpoint
 CREATE INDEX "talent_answers_question_idx" ON "talent_answers" USING btree ("question_id");
+--> statement-breakpoint
+INSERT INTO "answer_questions" ("normalized", "text", "common") VALUES
+	('qual a sua pretensao salarial', 'Qual a sua pretensão salarial?', true),
+	('qual a sua disponibilidade para inicio', 'Qual a sua disponibilidade para início?', true),
+	('qual o seu aviso previo', 'Qual o seu aviso prévio?', true),
+	('voce se autodeclara pessoa com deficiencia (pcd)', 'Você se autodeclara pessoa com deficiência (PcD)?', true),
+	('como voce soube da vaga', 'Como você soube da vaga?', true),
+	('voce tem disponibilidade para viagens', 'Você tem disponibilidade para viagens?', true),
+	('voce aceita trabalhar no modelo presencial', 'Você aceita trabalhar no modelo presencial?', true),
+	('voce possui cnh', 'Você possui CNH?', true),
+	('qual o seu nivel de ingles', 'Qual o seu nível de inglês?', true),
+	('qual o link do seu linkedin', 'Qual o link do seu LinkedIn?', true)
+ON CONFLICT ("normalized") DO NOTHING;
