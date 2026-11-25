@@ -4,7 +4,7 @@ import type { PortalAccessPlugin } from "../../shared/access.js";
 import { errorResponse, uniqueViolation } from "../../shared/http.js";
 import { hasBearer } from "../../shared/machine-auth.js";
 import type { DispatchAction } from "../../shared/action-dispatch.js";
-import { trackPackage } from "./correios.js";
+import { trackPackage, type TrackingConfig } from "./correios.js";
 import type { OffboardingsRepository } from "./repository.js";
 
 const caseSummary = t.Object({
@@ -40,15 +40,13 @@ const offboardingCase = t.Composite([caseSummary, t.Object({ tasks: t.Array(task
 
 const text = t.String({ minLength: 1 });
 
-const CORREIOS_DEFAULT_URL = "https://proxyapp.correios.com.br";
-
 export function offboardingsRoutes(
   repos: OffboardingsRepository,
   access: PortalAccessPlugin,
   dispatchAction: DispatchAction,
   cronSecret: string | undefined,
   webhookSecret: string | undefined,
-  correiosBaseUrl = CORREIOS_DEFAULT_URL,
+  tracking?: TrackingConfig,
 ) {
   async function checkTrackedShipments() {
     const tracked = await repos.getTrackedTasks();
@@ -56,8 +54,10 @@ export function offboardingsRoutes(
 
     const results = await Promise.allSettled(
       tracked.map(async (task) => {
+        if (!tracking) return;
+
         // WARNING: getTrackedTasks guarantees non-null trackingCode
-        const result = await trackPackage(task.trackingCode as string, correiosBaseUrl);
+        const result = await trackPackage(task.trackingCode as string, tracking);
 
         if (!result.delivered) return;
 
@@ -272,9 +272,13 @@ export function offboardingsRoutes(
           return { trackingCode: null, tracking: null };
         }
 
-        const tracking = await trackPackage(row.trackingCode, correiosBaseUrl);
+        if (!tracking) {
+          return { trackingCode: row.trackingCode, tracking: null };
+        }
 
-        return { trackingCode: row.trackingCode, tracking };
+        const result = await trackPackage(row.trackingCode, tracking);
+
+        return { trackingCode: row.trackingCode, tracking: result };
       },
       {
         permit: ["read", "Offboarding"],

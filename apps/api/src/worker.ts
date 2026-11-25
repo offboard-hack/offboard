@@ -19,6 +19,9 @@ const runtimeConfig = z.object({
   SLACK_SIGNING_SECRET: z.string().min(1).optional(),
   ABACATEPAY_API_KEY: z.string().min(1).optional(),
   ABACATEPAY_WEBHOOK_SECRET: z.string().min(1).optional(),
+  TRACKING_USER: z.string().min(1).optional(),
+  TRACKING_TOKEN: z.string().min(1).optional(),
+  TRACKING_BASE_URL: z.string().min(1).optional(),
 });
 
 export type WorkerBindings = Partial<z.input<typeof runtimeConfig>> & {
@@ -63,6 +66,14 @@ export function createWorkerApi(
     auth,
     cronSecret: config.data.CRON_SECRET,
     webhookSecret: config.data.WEBHOOK_SECRET,
+    tracking:
+      config.data.TRACKING_USER && config.data.TRACKING_TOKEN
+        ? {
+            baseUrl: config.data.TRACKING_BASE_URL ?? "https://api.linketrack.com",
+            user: config.data.TRACKING_USER,
+            token: config.data.TRACKING_TOKEN,
+          }
+        : undefined,
     slackSigningSecret: config.data.SLACK_SIGNING_SECRET,
     abacatepay: createAbacatePayGateway(config.data.ABACATEPAY_API_KEY),
     abacatepayWebhookSecret: config.data.ABACATEPAY_WEBHOOK_SECRET,
