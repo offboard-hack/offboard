@@ -1,5 +1,4 @@
 import type { Database } from "@offboard/db/client";
-import type { Address } from "@offboard/db/schema";
 import {
   applicationPackages,
   applications,
@@ -9,6 +8,7 @@ import {
 } from "@offboard/db/schema";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { z } from "zod";
+import { formatAddress, formatBirthDate, formatCpf } from "../../shared/profile-formats.js";
 import { toPreferences } from "../../shared/talent-preferences.js";
 import { createAnswersRepository } from "./answers.js";
 
@@ -22,18 +22,6 @@ const fieldOrder = [
   "noticePeriod",
   "salaryExpectation",
 ] as const;
-
-const cpfMask = /^(\d{3})(\d{3})(\d{3})(\d{2})$/;
-
-const formatCpf = (digits: string) => digits.replace(cpfMask, "$1.$2.$3-$4");
-
-const formatBirthDate = (value: string) => value.split("-").reverse().join("/");
-
-function formatAddress(address: Address) {
-  const line = address.complement ? `${address.number} - ${address.complement}` : address.number;
-
-  return `${address.street}, ${line} - ${address.neighborhood}, ${address.city} - ${address.state}, CEP ${address.cep.replace(/^(\d{5})(\d{3})$/, "$1-$2")}`;
-}
 
 export function createPackagesRepository(db: Database) {
   const answers = createAnswersRepository(db);
