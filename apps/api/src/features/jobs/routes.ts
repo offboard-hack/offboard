@@ -1,12 +1,12 @@
 import { Elysia, t } from "elysia";
 import type { PortalAccessPlugin } from "../../shared/access.js";
 import type { GenerateStructured } from "../../shared/ai.js";
-import { errorSummary } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
-import { parsePublicUrl, type FetchPageResult } from "../../shared/page-text.js";
+import { jobShareFailures } from "../../shared/job-share.js";
+import type { FetchPageResult } from "../../shared/page-text.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
-import { extractJob, normalizeJobUrl } from "./extract.js";
 import type { JobsRepository } from "./repository.js";
+import { shareJob } from "./share.js";
 
 const pageSize = 20;
 
@@ -57,47 +57,23 @@ export function jobsRoutes(
     .post(
       "/jobs/share",
       async ({ body, set, status }) => {
-        const parsed = parsePublicUrl(body.url);
+        const outcome = await shareJob(
+          { repos, generate: deps.generate, fetchPage: deps.fetchPage },
+          { url: body.url, origin: "hr" },
+        );
 
-        if (parsed === "invalid_url") return status(422, { error: "Invalid job url" });
+        if (outcome.kind === "existing") return outcome.job;
 
-        const sourceKey = normalizeJobUrl(parsed);
+        if (outcome.kind === "created") {
+          set.status = 201;
+          await deps.onShared?.(outcome.job.id).catch(() => undefined);
 
-        if (sourceKey.length > 2048) return status(422, { error: "Invalid job url" });
-
-        const existing = await repos.findBySource("hr-link", sourceKey);
-
-        if (existing) return existing;
-
-        if (!deps.generate) return status(503, { error: "AI not configured" });
-
-        const page = await deps.fetchPage(parsed);
-
-        if (page === "invalid_url") return status(422, { error: "Invalid job url" });
-
-        if (page === "unreachable" || page === "not_html" || page === "too_large") {
-          return status(502, { error: "Could not read the job page" });
+          return outcome.job;
         }
 
-        let draft;
+        const failure = jobShareFailures[outcome.kind];
 
-        try {
-          draft = await extractJob(deps.generate, page);
-        } catch (error) {
-          console.error("job extraction failed", errorSummary(error));
-
-          return status(502, { error: "Could not extract the job" });
-        }
-
-        if (draft === "not_a_job") return status(422, { error: "Page is not a job posting" });
-
-        const { job, created } = await repos.createShared({ ...draft, url: sourceKey, sourceKey });
-
-        set.status = created ? 201 : 200;
-
-        if (created) await deps.onShared?.(job.id).catch(() => undefined);
-
-        return job;
+        return status(failure.status, { error: failure.error });
       },
       {
         permit: ["create", "Offboarding"],

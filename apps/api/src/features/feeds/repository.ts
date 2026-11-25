@@ -102,13 +102,22 @@ export function createFeedsRepository(db: Database) {
     return row && get(row.id);
   }
 
-  async function remove(id: string) {
-    const rows = await db
-      .delete(jobFeeds)
-      .where(eq(jobFeeds.id, id))
-      .returning({ id: jobFeeds.id });
+  function remove(id: string, now: Date) {
+    return db.transaction(async (tx) => {
+      const [feed] = await tx
+        .delete(jobFeeds)
+        .where(eq(jobFeeds.id, id))
+        .returning({ provider: jobFeeds.provider, board: jobFeeds.board });
 
-    return rows.length > 0;
+      if (!feed) return false;
+
+      await tx
+        .update(jobs)
+        .set({ closedAt: now, updatedAt: now })
+        .where(and(ownedBy(feed.provider, feed.board), isNull(jobs.closedAt)));
+
+      return true;
+    });
   }
 
   async function dueIds(now: Date) {

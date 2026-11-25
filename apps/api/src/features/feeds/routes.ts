@@ -85,7 +85,7 @@ export function feedsRoutes(
     .delete(
       "/job-feeds/:id",
       async ({ params, status }) =>
-        (await repos.remove(params.id))
+        (await repos.remove(params.id, new Date()))
           ? new Response(null, { status: 204 })
           : status(404, { error: "Feed not found" }),
       {

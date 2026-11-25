@@ -112,13 +112,44 @@ describe.skipIf(!url)("feeds repository", () => {
 
     await feeds.sync(feed.id, { jobs: [feedJob("acme:1")], skipped: 0 }, start);
 
-    expect(await feeds.remove(feed.id)).toBe(true);
-    expect(await feeds.remove(feed.id)).toBe(false);
+    expect(await feeds.remove(feed.id, at(1))).toBe(true);
+    expect(await feeds.remove(feed.id, at(2))).toBe(false);
     expect(await feeds.get(feed.id)).toBeUndefined();
+    expect(await jobsOf("lever")).toMatchObject([{ sourceKey: "acme:1", closedAt: at(1) }]);
+
+    const recreated = await created("lever", "acme");
+
+    expect(recreated.openJobs).toBe(0);
+
+    await feeds.sync(recreated.id, { jobs: [feedJob("acme:1")], skipped: 0 }, at(3));
+
     expect(await jobsOf("lever")).toMatchObject([{ sourceKey: "acme:1", closedAt: null }]);
-    expect(
-      await feeds.create({ provider: "lever", board: "acme", companyLabel: null }),
-    ).toMatchObject({ openJobs: 1 });
+  });
+
+  it("closes only the removed feed's open jobs", async () => {
+    const feed = await created("greenhouse", "acme");
+    const sibling = await created("greenhouse", "acme-br");
+
+    await feeds.sync(feed.id, { jobs: [feedJob("acme:1"), feedJob("acme:2")], skipped: 0 }, start);
+    await feeds.sync(sibling.id, { jobs: [feedJob("acme-br:1")], skipped: 0 }, start);
+    await db.update(jobs).set({ closedAt: start }).where(eq(jobs.sourceKey, "acme:2"));
+    await db.insert(jobs).values({
+      origin: "hr",
+      source: "hr-link",
+      sourceKey: "acme:3",
+      title: "HR",
+      company: "Acme",
+      url: "https://jobs.example.com/hr",
+    });
+
+    expect(await feeds.remove(feed.id, at(1))).toBe(true);
+    expect(await jobsOf("greenhouse")).toMatchObject([
+      { sourceKey: "acme-br:1", closedAt: null },
+      { sourceKey: "acme:1", closedAt: at(1) },
+      { sourceKey: "acme:2", closedAt: start },
+    ]);
+    expect(await jobsOf("hr-link")).toMatchObject([{ sourceKey: "acme:3", closedAt: null }]);
+    expect((await feeds.get(sibling.id))?.openJobs).toBe(1);
   });
 
   it("rethrows unexpected errors when creating a feed", async () => {
@@ -383,7 +414,7 @@ describe.skipIf(!url)("feeds repository", () => {
   it("returns failed without writing when the feed is gone", async () => {
     const feed = await created("lever", "acme");
 
-    await feeds.remove(feed.id);
+    await feeds.remove(feed.id, start);
 
     expect(await feeds.sync(feed.id, { jobs: [feedJob("acme:1")], skipped: 0 }, start)).toBe(
       "failed",

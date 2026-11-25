@@ -1,6 +1,6 @@
 import type { Database } from "@offboard/db/client";
 import { applications, jobMatches, jobs, resumes } from "@offboard/db/schema";
-import { and, count, desc, eq, getTableColumns, isNull, sql } from "drizzle-orm";
+import { and, count, desc, eq, getTableColumns, gte, isNull, sql } from "drizzle-orm";
 import type { JobDraft } from "./extract.js";
 
 type WorkModel = "remote" | "hybrid" | "onsite";
@@ -25,6 +25,10 @@ export type TalentJobView = JobView & {
 };
 
 type Row = typeof jobs.$inferSelect;
+
+type ShareOrigin = "hr" | "recruiter";
+
+export const shareSources = { hr: "hr-link", recruiter: "recruiter-link" } as const;
 
 function toJob(row: Row) {
   return {
@@ -52,12 +56,23 @@ export function createJobsRepository(db: Database) {
     return row ? toJob(row) : undefined;
   }
 
-  async function createShared(input: JobDraft & { url: string; sourceKey: string }) {
+  async function createShared(
+    input: JobDraft & {
+      url: string;
+      sourceKey: string;
+      origin?: ShareOrigin;
+      recruiterPartnerId?: string;
+    },
+  ) {
+    const origin = input.origin ?? "hr";
+    const source = shareSources[origin];
+    const now = new Date();
+
     const [row] = await db
       .insert(jobs)
       .values({
-        origin: "hr",
-        source: "hr-link",
+        origin,
+        source,
         sourceKey: input.sourceKey,
         title: input.title,
         company: input.company,
@@ -68,7 +83,10 @@ export function createJobsRepository(db: Database) {
         salaryMaxCents: input.salaryMaxCents,
         url: input.url,
         description: input.description,
-        postedAt: new Date(),
+        recruiterPartnerId: input.recruiterPartnerId ?? null,
+        postedAt: now,
+        createdAt: now,
+        updatedAt: now,
       })
       .onConflictDoNothing({ target: [jobs.source, jobs.sourceKey] })
       .returning();
@@ -78,11 +96,20 @@ export function createJobsRepository(db: Database) {
     const [existing] = await db
       .select()
       .from(jobs)
-      .where(and(eq(jobs.source, "hr-link"), eq(jobs.sourceKey, input.sourceKey)));
+      .where(and(eq(jobs.source, source), eq(jobs.sourceKey, input.sourceKey)));
 
     if (!existing) throw new Error("Shared job vanished after a source conflict");
 
     return { job: toJob(existing), created: false };
+  }
+
+  async function countByPartnerSince(partnerId: string, since: Date) {
+    const [row] = await db
+      .select({ total: count() })
+      .from(jobs)
+      .where(and(eq(jobs.recruiterPartnerId, partnerId), gte(jobs.createdAt, since)));
+
+    return row.total;
   }
 
   async function listForTalent(
@@ -140,7 +167,7 @@ export function createJobsRepository(db: Database) {
     return { items, total: totals.total };
   }
 
-  return { findBySource, createShared, listForTalent };
+  return { findBySource, createShared, countByPartnerSince, listForTalent };
 }
 
 export type JobsRepository = ReturnType<typeof createJobsRepository>;

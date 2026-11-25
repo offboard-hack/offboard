@@ -14,6 +14,9 @@ import { exitSurveysRoutes } from "./features/exit-surveys/routes.js";
 import { insightsRoutes } from "./features/insights/routes.js";
 import { integrationsRoutes } from "./features/integrations/routes.js";
 import { jobsRoutes } from "./features/jobs/routes.js";
+import { shareJob } from "./features/jobs/share.js";
+import { recruitersRoutes } from "./features/recruiters/routes.js";
+import { saoPauloDate } from "./shared/sao-paulo-date.js";
 import { offboardingsRoutes } from "./features/offboardings/routes.js";
 import { toPublicResume } from "./features/pages/public-view.js";
 import { pagesRoutes } from "./features/pages/routes.js";
@@ -104,7 +107,9 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       const result = await fetchFeed(feed, options.fetchFeedImpl);
       const synced = await repos.feeds.sync(feed.id, result, new Date());
 
-      if (synced !== "failed" && synced.created > 0) await matchNewJob().catch(() => undefined);
+      if (synced !== "failed" && synced.created > 0) {
+        await matchNewJob().catch(logFailure("feed match fan-out failed"));
+      }
     },
     score_resume: async (job) => {
       const resume = await repos.resumes.forScoring(job.subject);
@@ -208,6 +213,24 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       .catch(logFailure("feed scheduling failed"));
   }
 
+  const fetchPage = options.fetchPage ?? fetchPageText;
+
+  async function submitRecruiterJob(url: string, partnerId: string) {
+    const outcome = await shareJob(
+      { repos: repos.jobs, generate: options.generateStructured, fetchPage },
+      { url, origin: "recruiter", recruiterPartnerId: partnerId },
+    );
+
+    if (outcome.kind === "created") {
+      await matchNewJob().catch(logFailure("recruiter job fan-out failed"));
+    }
+
+    return outcome;
+  }
+
+  const countRecruiterJobsToday = (partnerId: string, now: Date) =>
+    repos.jobs.countByPartnerSince(partnerId, new Date(`${saoPauloDate(now)}T03:00:00Z`));
+
   return new Elysia({ adapter: options.adapter, prefix: "/api" })
     .use(cors({ origin: webOrigin, credentials: false }))
     .get("/health", () => ({ status: "ok" }) satisfies { status: "ok" }, {
@@ -237,7 +260,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     .use(
       jobsRoutes(repos.jobs, access, talent, {
         generate: options.generateStructured,
-        fetchPage: options.fetchPage ?? fetchPageText,
+        fetchPage,
         onShared: matchNewJob,
       }),
     )
@@ -267,6 +290,13 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     .use(exitSurveysRoutes(repos.exitSurveys, access))
     .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret))
     .use(feedsRoutes(repos.feeds, access, ingestFeed))
+    .use(
+      recruitersRoutes(repos.recruiters, access, {
+        webOrigin,
+        submit: submitRecruiterJob,
+        countToday: countRecruiterJobsToday,
+      }),
+    )
     .use(
       billingRoutes(
         repos.billing,
