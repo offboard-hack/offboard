@@ -142,6 +142,7 @@ export function createPagesRepository(db: Database) {
     const [row] = await db
       .select({
         profileId: publicPages.profileId,
+        orgId: talentProfiles.orgId,
         name: talentProfiles.name,
         sponsoredUntil: talentProfiles.sponsoredUntil,
         content: resumes.content,

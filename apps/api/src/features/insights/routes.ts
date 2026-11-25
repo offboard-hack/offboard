@@ -18,8 +18,10 @@ const talentAggregatesResponse = t.Object({
 });
 
 export function insightsRoutes(repos: InsightsRepository, access: PortalAccessPlugin) {
-  return new Elysia().use(access).get("/talent/aggregates", () => repos.aggregates(), {
-    permit: ["read", "TalentAggregates"],
-    response: talentAggregatesResponse,
-  });
+  return new Elysia()
+    .use(access)
+    .get("/talent/aggregates", ({ principal }) => repos.aggregates(principal.orgId), {
+      permit: ["read", "TalentAggregates"],
+      response: talentAggregatesResponse,
+    });
 }

@@ -1,13 +1,14 @@
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import {
+  type ResumeContent,
+  defaultOrgId,
   jobMatches,
   jobRejections,
   jobs,
   offboardingCases,
   resumes,
   talentPreferences,
-  type ResumeContent,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { asc, eq } from "drizzle-orm";
@@ -61,6 +62,7 @@ describe.skipIf(!url)("matches repository", () => {
 
   async function enable(caseId: string, personalEmail: string) {
     const profile = await repos.talent.enable({
+      orgId: defaultOrgId,
       caseId,
       personalEmail,
       sponsoredUntil: "2026-12-31",
@@ -261,13 +263,17 @@ describe.skipIf(!url)("matches repository", () => {
 
     await repos.talent.acceptTerms(otherProfileId);
 
-    expect(await repository.profilesForMatching(lastDay)).toEqual([otherProfileId]);
+    expect(await repository.profilesForMatching(lastDay)).toEqual([
+      { profileId: otherProfileId, orgId: defaultOrgId },
+    ]);
     expect(await repository.profilesForMatching(lapsed)).toEqual([]);
 
     await repos.talent.acceptTerms(profileId);
     await db.delete(resumes).where(eq(resumes.profileId, otherProfileId));
 
-    expect(await repository.profilesForMatching(lastDay)).toEqual([profileId]);
+    expect(await repository.profilesForMatching(lastDay)).toEqual([
+      { profileId, orgId: defaultOrgId },
+    ]);
   });
 
   it("reads the target titles with defaults", async () => {

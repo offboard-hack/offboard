@@ -6,9 +6,11 @@ import type { TalentProfile } from "./talent-profile.js";
 
 const webOrigin = "https://app.test";
 const now = new Date("2026-06-15T12:00:00Z");
+const sponsorLookups: string[] = [];
 
 const profile: TalentProfile = {
   id: "t1",
+  orgId: "00000000-0000-4000-8000-0000000000a1",
   caseId: "c1",
   name: "Ana",
   email: "ana@example.com",
@@ -41,7 +43,11 @@ function build(options: {
         auth,
         webOrigin,
         talent: { findById: async () => ("found" in options ? options.found : profile) },
-        companyActive: async () => options.companyActive ?? true,
+        companyActive: async (orgId) => {
+          sponsorLookups.push(orgId);
+
+          return options.companyActive ?? true;
+        },
         now: options.realClock ? undefined : () => now,
       }),
     )
@@ -73,6 +79,7 @@ describe("talentAccess", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ id: "t1", kind: "sponsored" });
+    expect(sponsorLookups.at(-1)).toBe(profile.orgId);
   });
 
   it("rejects anonymous with 401 without running the handler", async () => {
@@ -91,7 +98,13 @@ describe("talentAccess", () => {
     { kind: "forbidden" } as const,
     {
       kind: "authenticated",
-      principal: { id: "u", name: "U", email: "u@x.y", role: "admin" },
+      principal: {
+        id: "u",
+        name: "U",
+        email: "u@x.y",
+        role: "admin",
+        orgId: "00000000-0000-4000-8000-0000000000a1",
+      },
     } satisfies PortalAccess,
   ])("rejects non-talent kind %# with 403", async (access) => {
     const handler = vi.fn();

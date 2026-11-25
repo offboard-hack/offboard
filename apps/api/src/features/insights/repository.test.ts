@@ -1,6 +1,12 @@
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
-import { applications, jobs, talentProfiles } from "@offboard/db/schema";
+import {
+  applications,
+  defaultOrgId,
+  jobs,
+  organizations,
+  talentProfiles,
+} from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -8,6 +14,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createInsightsRepository } from "./repository.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+
+const orgB = "00000000-0000-0000-0000-0000000000b2";
 
 const empty = {
   enabled: 0,
@@ -31,6 +39,10 @@ describe.skipIf(!url)("insights repository", () => {
 
   beforeEach(async () => {
     await seedDatabase(db, testSeedFixtures);
+    await db
+      .insert(organizations)
+      .values({ id: orgB, name: "Org B", slug: "org-b" })
+      .onConflictDoNothing();
   });
 
   afterAll(async () => {
@@ -45,6 +57,7 @@ describe.skipIf(!url)("insights repository", () => {
     const [row] = await db
       .insert(talentProfiles)
       .values({
+        orgId: defaultOrgId,
         name: `Pessoa ${sequence}`,
         personalEmail: `pessoa${sequence}@example.com`,
         sponsoredUntil: "2099-12-31",
@@ -102,7 +115,7 @@ describe.skipIf(!url)("insights repository", () => {
   }
 
   it("returns suppressed figures when nobody was offboarded", async () => {
-    expect(await repository.aggregates()).toEqual(empty);
+    expect(await repository.aggregates(defaultOrgId)).toEqual(empty);
   });
 
   it("suppresses figures from fewer than five people", async () => {
@@ -115,7 +128,7 @@ describe.skipIf(!url)("insights repository", () => {
       for (const jobId of [analista, designer, engenheira]) await apply(id, jobId, "offer");
     }
 
-    expect(await repository.aggregates()).toEqual({ ...empty, enabled: 4 });
+    expect(await repository.aggregates(defaultOrgId)).toEqual({ ...empty, enabled: 4 });
 
     const fifth = await person();
     const sixth = await person();
@@ -124,7 +137,7 @@ describe.skipIf(!url)("insights repository", () => {
     await apply(fifth, designer);
     await apply(sixth, designer);
 
-    expect(await repository.aggregates()).toEqual({
+    expect(await repository.aggregates(defaultOrgId)).toEqual({
       ...empty,
       enabled: 6,
       funnel: { sent: 15, responded: 13, interviews: 13, offers: 13 },
@@ -150,7 +163,7 @@ describe.skipIf(!url)("insights repository", () => {
       await close(id, interview, "withdrawn", "interview");
     }
 
-    const result = await repository.aggregates();
+    const result = await repository.aggregates(defaultOrgId);
 
     expect(result.funnel).toEqual({ sent: 25, responded: 15, interviews: 5, offers: null });
     expect(result.topJobs).toEqual(
@@ -173,7 +186,7 @@ describe.skipIf(!url)("insights repository", () => {
       for (const id of applicants) await apply(id, jobId);
     }
 
-    expect((await repository.aggregates()).topJobs).toEqual([
+    expect((await repository.aggregates(defaultOrgId)).topJobs).toEqual([
       { title: "Zeladora", company: "Zeladora SA", applications: 6 },
       { title: "Analista", company: "Analista SA", applications: 5 },
       { title: "Barista", company: "Barista SA", applications: 5 },
@@ -193,32 +206,35 @@ describe.skipIf(!url)("insights repository", () => {
     await close(consenting[0], second, "hired", "offer");
     await close(consenting[1], second, "rejected", "offer");
 
-    expect((await repository.aggregates()).hiresShared).toBe(6);
+    expect((await repository.aggregates(defaultOrgId)).hiresShared).toBe(6);
 
     await db
       .update(talentProfiles)
       .set({ shareOutcomeWithHr: false })
       .where(eq(talentProfiles.id, consenting[4]));
 
-    expect((await repository.aggregates()).hiresShared).toBeNull();
+    expect((await repository.aggregates(defaultOrgId)).hiresShared).toBeNull();
 
     await db
       .update(talentProfiles)
       .set({ shareOutcomeWithHr: true })
       .where(eq(talentProfiles.id, silent[0]));
 
-    expect((await repository.aggregates()).hiresShared).toBe(6);
+    expect((await repository.aggregates(defaultOrgId)).hiresShared).toBe(6);
   });
 
   it("suppresses activation but never the number of people enabled", async () => {
     await people(4, { firstSignedInAt: new Date("2026-11-01T12:00:00Z") });
     await people(3);
 
-    expect(await repository.aggregates()).toMatchObject({ enabled: 7, activated: null });
+    expect(await repository.aggregates(defaultOrgId)).toMatchObject({
+      enabled: 7,
+      activated: null,
+    });
 
     await person({ firstSignedInAt: new Date("2026-11-02T12:00:00Z") });
 
-    expect(await repository.aggregates()).toMatchObject({ enabled: 8, activated: 5 });
+    expect(await repository.aggregates(defaultOrgId)).toMatchObject({ enabled: 8, activated: 5 });
   });
 
   it("exposes no person-level data", async () => {
@@ -231,7 +247,7 @@ describe.skipIf(!url)("insights repository", () => {
 
     for (const id of five) await close(id, hired, "hired", "offer");
 
-    const result = await repository.aggregates();
+    const result = await repository.aggregates(defaultOrgId);
 
     expect(Object.keys(result).sort()).toEqual([
       "activated",
@@ -254,5 +270,35 @@ describe.skipIf(!url)("insights repository", () => {
 
     for (const id of [...five, hired]) expect(serialized).not.toContain(id);
     expect(serialized).not.toMatch(/Pessoa|@example\.com/);
+  });
+
+  it("isolates talent across organizations", async () => {
+    const sponsoredByA = await people(5, { shareOutcomeWithHr: true });
+    const sponsoredByB = await people(4, { orgId: orgB, shareOutcomeWithHr: true });
+    const shared = await job("Analista");
+
+    for (const id of [...sponsoredByA, ...sponsoredByB]) await close(id, shared, "hired", "offer");
+
+    expect(await repository.aggregates(defaultOrgId)).toEqual({
+      ...empty,
+      enabled: 5,
+      funnel: { sent: 5, responded: 5, interviews: 5, offers: 5 },
+      hiresShared: 5,
+      topJobs: [{ title: "Analista", company: "Acme", applications: 5 }],
+    });
+    expect(await repository.aggregates(orgB)).toEqual({ ...empty, enabled: 4 });
+
+    const fifth = await person({ orgId: orgB });
+
+    await apply(fifth, shared);
+
+    expect(await repository.aggregates(orgB)).toEqual({
+      ...empty,
+      enabled: 5,
+      funnel: { sent: 5, responded: null, interviews: null, offers: null },
+      hiresShared: null,
+      topJobs: [{ title: "Analista", company: "Acme", applications: 5 }],
+    });
+    expect((await repository.aggregates(defaultOrgId)).funnel.sent).toBe(5);
   });
 });

@@ -28,6 +28,7 @@ type Row = typeof talentProfiles.$inferSelect;
 function toProfile(row: Row) {
   return {
     id: row.id,
+    orgId: row.orgId,
     caseId: row.caseId,
     name: row.name,
     email: row.personalEmail,
@@ -41,8 +42,11 @@ function toProfile(row: Row) {
 }
 
 export function createTalentRepository(db: Database) {
-  async function findByCase(caseId: string) {
-    const [row] = await db.select().from(talentProfiles).where(eq(talentProfiles.caseId, caseId));
+  async function findByCase(orgId: string, caseId: string) {
+    const [row] = await db
+      .select()
+      .from(talentProfiles)
+      .where(and(eq(talentProfiles.orgId, orgId), eq(talentProfiles.caseId, caseId)));
 
     return row ? toProfile(row) : undefined;
   }
@@ -53,7 +57,12 @@ export function createTalentRepository(db: Database) {
     return row ? toProfile(row) : undefined;
   }
 
-  async function enable(input: { caseId: string; personalEmail: string; sponsoredUntil: string }) {
+  async function enable(input: {
+    orgId: string;
+    caseId: string;
+    personalEmail: string;
+    sponsoredUntil: string;
+  }) {
     try {
       const [row] = await db
         .insert(talentProfiles)
@@ -61,6 +70,7 @@ export function createTalentRepository(db: Database) {
           db
             .select({
               id: sql<string>`gen_random_uuid()`.as("id"),
+              orgId: sql<string>`${offboardingCases.orgId}`.as("org_id"),
               caseId: sql<string>`${offboardingCases.id}`.as("case_id"),
               personalEmail: sql<string>`${normalizeEmail(input.personalEmail)}`.as(
                 "personal_email",
@@ -76,7 +86,9 @@ export function createTalentRepository(db: Database) {
               updatedAt: sql<Date>`now()`.as("updated_at"),
             })
             .from(offboardingCases)
-            .where(eq(offboardingCases.id, input.caseId)),
+            .where(
+              and(eq(offboardingCases.orgId, input.orgId), eq(offboardingCases.id, input.caseId)),
+            ),
         )
         .returning();
 
@@ -91,6 +103,7 @@ export function createTalentRepository(db: Database) {
   }
 
   async function updateAccess(
+    orgId: string,
     caseId: string,
     patch: { personalEmail?: string; sponsoredUntil?: string },
   ) {
@@ -103,6 +116,7 @@ export function createTalentRepository(db: Database) {
         .set({ personalEmail, sponsoredUntil: patch.sponsoredUntil, updatedAt: new Date() })
         .where(
           and(
+            eq(talentProfiles.orgId, orgId),
             eq(talentProfiles.caseId, caseId),
             personalEmail === undefined
               ? undefined
@@ -116,7 +130,7 @@ export function createTalentRepository(db: Database) {
 
       if (row) return toProfile(row);
 
-      return (await findByCase(caseId)) ? ("email_locked" as const) : ("not_found" as const);
+      return (await findByCase(orgId, caseId)) ? ("email_locked" as const) : ("not_found" as const);
     } catch (error) {
       if (emailViolation.safeParse(error).success) return "email_taken" as const;
 

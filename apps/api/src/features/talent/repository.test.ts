@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
-import { offboardingCases, talentProfiles } from "@offboard/db/schema";
+import { defaultOrgId, offboardingCases, organizations, talentProfiles } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -9,6 +9,7 @@ import { createTalentRepository } from "./repository.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const missingId = "00000000-0000-4000-8000-000000000001";
+const otherOrgId = "00000000-0000-0000-0000-0000000000b2";
 
 describe.skipIf(!url)("talent repository", () => {
   const db = createClient(url ?? "");
@@ -39,7 +40,12 @@ describe.skipIf(!url)("talent repository", () => {
   });
 
   function enable(caseId: string, personalEmail = "pessoa@exemplo.com") {
-    return talent.enable({ caseId, personalEmail, sponsoredUntil: "2026-12-31" });
+    return talent.enable({
+      orgId: defaultOrgId,
+      caseId,
+      personalEmail,
+      sponsoredUntil: "2026-12-31",
+    });
   }
 
   it("enables a profile with a normalized email and the case name", async () => {
@@ -53,8 +59,8 @@ describe.skipIf(!url)("talent repository", () => {
       termsAcceptedAt: null,
       firstSignedInAt: null,
     });
-    expect(await talent.findByCase(first.id)).toEqual(profile);
-    expect(await talent.findByCase(second.id)).toBeUndefined();
+    expect(await talent.findByCase(defaultOrgId, first.id)).toEqual(profile);
+    expect(await talent.findByCase(defaultOrgId, second.id)).toBeUndefined();
   });
 
   it("rejects duplicate cases, duplicate emails and unknown cases", async () => {
@@ -74,32 +80,36 @@ describe.skipIf(!url)("talent repository", () => {
     await enable(second.id, "segunda@exemplo.com");
 
     expect(
-      await talent.updateAccess(first.id, { personalEmail: " Nova@Exemplo.com " }),
+      await talent.updateAccess(defaultOrgId, first.id, { personalEmail: " Nova@Exemplo.com " }),
     ).toMatchObject({
       email: "nova@exemplo.com",
     });
-    expect(await talent.updateAccess(first.id, { personalEmail: "segunda@exemplo.com" })).toBe(
-      "email_taken",
-    );
-    expect(await talent.updateAccess(first.id, {})).toMatchObject({ email: "nova@exemplo.com" });
+    expect(
+      await talent.updateAccess(defaultOrgId, first.id, { personalEmail: "segunda@exemplo.com" }),
+    ).toBe("email_taken");
+    expect(await talent.updateAccess(defaultOrgId, first.id, {})).toMatchObject({
+      email: "nova@exemplo.com",
+    });
 
     const found = await talent.findForSignIn("nova@exemplo.com");
     await talent.markSignedIn(found!.id);
 
-    expect(await talent.updateAccess(first.id, { personalEmail: "outra@exemplo.com" })).toBe(
-      "email_locked",
-    );
     expect(
-      await talent.updateAccess(first.id, { personalEmail: "NOVA@exemplo.com" }),
+      await talent.updateAccess(defaultOrgId, first.id, { personalEmail: "outra@exemplo.com" }),
+    ).toBe("email_locked");
+    expect(
+      await talent.updateAccess(defaultOrgId, first.id, { personalEmail: "NOVA@exemplo.com" }),
     ).toMatchObject({
       email: "nova@exemplo.com",
     });
-    expect(await talent.updateAccess(first.id, { sponsoredUntil: "2027-06-30" })).toMatchObject({
+    expect(
+      await talent.updateAccess(defaultOrgId, first.id, { sponsoredUntil: "2027-06-30" }),
+    ).toMatchObject({
       sponsoredUntil: "2027-06-30",
     });
-    expect(await talent.updateAccess(missingId, { sponsoredUntil: "2027-06-30" })).toBe(
-      "not_found",
-    );
+    expect(
+      await talent.updateAccess(defaultOrgId, missingId, { sponsoredUntil: "2027-06-30" }),
+    ).toBe("not_found");
   });
 
   it("enforces the email lock in the update itself and changes nothing when locked", async () => {
@@ -107,12 +117,12 @@ describe.skipIf(!url)("talent repository", () => {
     await db.update(talentProfiles).set({ firstSignedInAt: new Date() });
 
     expect(
-      await talent.updateAccess(first.id, {
+      await talent.updateAccess(defaultOrgId, first.id, {
         personalEmail: "outra@exemplo.com",
         sponsoredUntil: "2030-01-01",
       }),
     ).toBe("email_locked");
-    expect(await talent.findByCase(first.id)).toMatchObject({
+    expect(await talent.findByCase(defaultOrgId, first.id)).toMatchObject({
       email: "pessoa@exemplo.com",
       sponsoredUntil: "2026-12-31",
     });
@@ -122,14 +132,16 @@ describe.skipIf(!url)("talent repository", () => {
     await enable(first.id);
 
     await expect(
-      talent.updateAccess(first.id, { personalEmail: `${"a".repeat(300)}@exemplo.com` }),
+      talent.updateAccess(defaultOrgId, first.id, {
+        personalEmail: `${"a".repeat(300)}@exemplo.com`,
+      }),
     ).rejects.toThrow();
   });
 
   it("keeps the first sign-in and terms timestamps", async () => {
     await enable(first.id);
 
-    const profile = (await talent.findByCase(first.id))!;
+    const profile = (await talent.findByCase(defaultOrgId, first.id))!;
 
     await talent.markSignedIn(profile.id);
     const signedIn = await talent.findById(profile.id);
@@ -150,8 +162,8 @@ describe.skipIf(!url)("talent repository", () => {
     await enable(first.id);
     await enable(second.id, "outra@exemplo.com");
 
-    const mine = (await talent.findByCase(first.id))!;
-    const theirs = (await talent.findByCase(second.id))!;
+    const mine = (await talent.findByCase(defaultOrgId, first.id))!;
+    const theirs = (await talent.findByCase(defaultOrgId, second.id))!;
     const at = new Date("2026-06-15T12:00:00Z");
 
     expect(mine.shareOutcomeWithHr).toBe(false);
@@ -167,7 +179,7 @@ describe.skipIf(!url)("talent repository", () => {
   it("finds sign-in candidates case-insensitively", async () => {
     await enable(first.id);
 
-    const profile = (await talent.findByCase(first.id))!;
+    const profile = (await talent.findByCase(defaultOrgId, first.id))!;
 
     expect(await talent.findForSignIn(" PESSOA@exemplo.com ")).toEqual({
       id: profile.id,
@@ -179,5 +191,58 @@ describe.skipIf(!url)("talent repository", () => {
     });
     expect(await talent.findForSignIn("pessoa@exemplo.com", missingId)).toBeUndefined();
     expect(await talent.findForSignIn("ninguem@exemplo.com")).toBeUndefined();
+  });
+
+  it("isolates talent across organizations", async () => {
+    await db
+      .insert(organizations)
+      .values({ id: otherOrgId, name: "Org B", slug: "org-b" })
+      .onConflictDoNothing();
+
+    const [otherCase] = await db
+      .insert(offboardingCases)
+      .values({
+        orgId: otherOrgId,
+        name: "Pessoa da Org B",
+        role: "Dev",
+        department: "Eng",
+        deadline: "2026-12-01",
+      })
+      .returning({ id: offboardingCases.id });
+
+    const foreign = {
+      caseId: first.id,
+      personalEmail: "b@exemplo.com",
+      sponsoredUntil: "2026-12-31",
+    };
+
+    expect(await talent.enable({ orgId: otherOrgId, ...foreign })).toBe("case_not_found");
+
+    const own = await enable(first.id);
+
+    expect(own).toMatchObject({ orgId: defaultOrgId, caseId: first.id });
+    expect(await talent.findByCase(otherOrgId, first.id)).toBeUndefined();
+    expect(await talent.updateAccess(otherOrgId, first.id, { sponsoredUntil: "2030-01-01" })).toBe(
+      "not_found",
+    );
+    expect(
+      await talent.updateAccess(otherOrgId, first.id, { personalEmail: "b@exemplo.com" }),
+    ).toBe("not_found");
+    expect(await talent.findByCase(defaultOrgId, first.id)).toEqual(own);
+
+    const other = await talent.enable({
+      orgId: otherOrgId,
+      caseId: otherCase.id,
+      personalEmail: "b@exemplo.com",
+      sponsoredUntil: "2026-12-31",
+    });
+
+    expect(other).toMatchObject({
+      orgId: otherOrgId,
+      caseId: otherCase.id,
+      name: "Pessoa da Org B",
+    });
+    expect(await talent.findByCase(defaultOrgId, otherCase.id)).toBeUndefined();
+    expect(await talent.findByCase(otherOrgId, otherCase.id)).toEqual(other);
   });
 });

@@ -57,12 +57,14 @@ const slugParams = t.Object({ slug: t.String() });
 export function pagesRoutes(
   repos: PagesRepository,
   talentAccess: TalentAccessPlugin,
-  deps: { auth: PortalAuth; companyActive: () => Promise<boolean>; origin: string },
+  deps: { auth: PortalAuth; companyActive: (orgId: string) => Promise<boolean>; origin: string },
 ) {
   async function published(slug: string, now: Date) {
-    const [page, companyActive] = await Promise.all([repos.publicPage(slug), deps.companyActive()]);
+    const page = await repos.publicPage(slug);
 
     if (!page) return undefined;
+
+    const companyActive = await deps.companyActive(page.orgId);
 
     const entitlement = entitlementOf({ sponsoredUntil: page.sponsoredUntil, companyActive, now });
 

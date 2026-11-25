@@ -49,14 +49,17 @@ const applicants = sql<number>`count(distinct ${applications.profileId})`;
 const total = sql<number>`count(*)::int`;
 
 export function createInsightsRepository(db: Database) {
-  async function aggregates() {
+  async function aggregates(orgId: string) {
+    const sponsored = eq(talentProfiles.orgId, orgId);
+
     const [[profiles], [figures], top] = await Promise.all([
       db
         .select({
           enabled: total,
           activated: sql<number>`count(*) filter (where ${isNotNull(talentProfiles.firstSignedInAt)})::int`,
         })
-        .from(talentProfiles),
+        .from(talentProfiles)
+        .where(sponsored),
       db
         .select({
           sent: applicationsWhere(sent),
@@ -71,11 +74,14 @@ export function createInsightsRepository(db: Database) {
           hiresSharedPeople: peopleWhere(hiredShared),
         })
         .from(applications)
-        .innerJoin(talentProfiles, eq(talentProfiles.id, applications.profileId)),
+        .innerJoin(talentProfiles, eq(talentProfiles.id, applications.profileId))
+        .where(sponsored),
       db
         .select({ title: jobs.title, company: jobs.company, applications: total })
         .from(applications)
+        .innerJoin(talentProfiles, eq(talentProfiles.id, applications.profileId))
         .innerJoin(jobs, eq(jobs.id, applications.jobId))
+        .where(sponsored)
         .groupBy(jobs.id)
         .having(sql`${applicants} >= ${minimumPeople}`)
         .orderBy(desc(total), asc(jobs.title))

@@ -7,7 +7,7 @@ export function talentAccess(deps: {
   auth: PortalAuth;
   webOrigin: string;
   talent: { findById(id: string): Promise<TalentProfile | undefined> };
-  companyActive: () => Promise<boolean>;
+  companyActive: (orgId: string) => Promise<boolean>;
   now?: () => Date;
 }) {
   const now = deps.now ?? (() => new Date());
@@ -34,7 +34,7 @@ export function talentAccess(deps: {
 
         const entitlement = entitlementOf({
           sponsoredUntil: me.sponsoredUntil,
-          companyActive: await deps.companyActive(),
+          companyActive: await deps.companyActive(me.orgId),
           now: now(),
         });
 

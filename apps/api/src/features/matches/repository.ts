@@ -147,8 +147,8 @@ export function createMatchesRepository(db: Database) {
   async function profilesForMatching(now: Date) {
     const today = new Date(now.getTime() - saoPauloOffsetMs).toISOString().slice(0, 10);
 
-    const rows = await db
-      .select({ profileId: resumes.profileId })
+    return db
+      .select({ profileId: resumes.profileId, orgId: talentProfiles.orgId })
       .from(resumes)
       .innerJoin(talentProfiles, eq(talentProfiles.id, resumes.profileId))
       .where(
@@ -159,8 +159,6 @@ export function createMatchesRepository(db: Database) {
         ),
       )
       .orderBy(asc(resumes.profileId));
-
-    return rows.map((row) => row.profileId);
   }
 
   return { baseResume, targetTitles, candidates, freshJobIds, saveMatches, profilesForMatching };

@@ -78,8 +78,12 @@ export function talentRoutes(
     .use(talentAccess)
     .post(
       "/offboardings/:id/talent-access",
-      async ({ params, body, set, status }) => {
-        const created = await repos.enable({ caseId: params.id, ...body });
+      async ({ principal, params, body, set, status }) => {
+        const created = await repos.enable({
+          orgId: principal.orgId,
+          caseId: params.id,
+          ...body,
+        });
 
         if (created === "case_not_found") return status(404, { error: "Offboarding not found" });
 
@@ -101,8 +105,8 @@ export function talentRoutes(
     )
     .get(
       "/offboardings/:id/talent-access",
-      async ({ params, status }) => {
-        const found = await repos.findByCase(params.id);
+      async ({ principal, params, status }) => {
+        const found = await repos.findByCase(principal.orgId, params.id);
 
         return found ? toTalentAccess(found) : status(404, { error: "Talent access not found" });
       },
@@ -114,8 +118,8 @@ export function talentRoutes(
     )
     .patch(
       "/offboardings/:id/talent-access",
-      async ({ params, body, status }) => {
-        const updated = await repos.updateAccess(params.id, body);
+      async ({ principal, params, body, status }) => {
+        const updated = await repos.updateAccess(principal.orgId, params.id, body);
 
         if (updated === "not_found") return status(404, { error: "Talent access not found" });
 

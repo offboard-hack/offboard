@@ -1,13 +1,14 @@
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import {
+  type ResumeContent,
+  defaultOrgId,
   jobs,
   offboardingCases,
   publicPageDailyViews,
   publicPages,
   resumes,
   talentProfiles,
-  type ResumeContent,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { asc, eq } from "drizzle-orm";
@@ -68,6 +69,7 @@ describe.skipIf(!url)("pages repository", () => {
 
   async function enable(caseId: string, personalEmail: string, name: string) {
     const profile = await repos.talent.enable({
+      orgId: defaultOrgId,
       caseId,
       personalEmail,
       sponsoredUntil: "2026-12-31",
@@ -268,6 +270,7 @@ describe.skipIf(!url)("pages repository", () => {
 
     expect(await repository.publicPage("marina-lopes")).toEqual({
       profileId,
+      orgId: defaultOrgId,
       name: "Marina Lopes",
       sponsoredUntil: "2026-12-31",
       content: content("Base"),

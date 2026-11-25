@@ -1,5 +1,6 @@
 export type TalentProfile = {
   id: string;
+  orgId: string;
   caseId: string | null;
   name: string;
   email: string;
