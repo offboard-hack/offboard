@@ -15,6 +15,7 @@ const profile: TalentProfile = {
   sponsoredUntil: "2026-12-31",
   termsAcceptedAt: "2026-06-01T00:00:00.000Z",
   firstSignedInAt: "2026-06-01T00:00:00.000Z",
+  shareOutcomeWithHr: false,
 };
 
 function build(options: {

@@ -33,6 +33,7 @@ function toProfile(row: Row) {
     sponsoredUntil: row.sponsoredUntil,
     termsAcceptedAt: row.termsAcceptedAt?.toISOString() ?? null,
     firstSignedInAt: row.firstSignedInAt?.toISOString() ?? null,
+    shareOutcomeWithHr: row.shareOutcomeWithHr,
   } satisfies TalentProfile;
 }
 
@@ -149,7 +150,26 @@ export function createTalentRepository(db: Database) {
     return toProfile(row);
   }
 
-  return { enable, findByCase, updateAccess, findForSignIn, markSignedIn, findById, acceptTerms };
+  async function setConsent(id: string, share: boolean, now: Date) {
+    const [row] = await db
+      .update(talentProfiles)
+      .set({ shareOutcomeWithHr: share, updatedAt: now })
+      .where(eq(talentProfiles.id, id))
+      .returning();
+
+    return toProfile(row);
+  }
+
+  return {
+    enable,
+    findByCase,
+    updateAccess,
+    findForSignIn,
+    markSignedIn,
+    findById,
+    acceptTerms,
+    setConsent,
+  };
 }
 
 export type TalentRepository = ReturnType<typeof createTalentRepository>;

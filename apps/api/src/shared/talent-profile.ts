@@ -6,4 +6,5 @@ export type TalentProfile = {
   sponsoredUntil: string;
   termsAcceptedAt: string | null;
   firstSignedInAt: string | null;
+  shareOutcomeWithHr: boolean;
 };

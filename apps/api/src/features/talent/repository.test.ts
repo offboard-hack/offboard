@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { offboardingCases, talentProfiles } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
+import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createTalentRepository } from "./repository.js";
@@ -143,6 +144,24 @@ describe.skipIf(!url)("talent repository", () => {
     expect(accepted.termsAcceptedAt).not.toBeNull();
     expect(again.termsAcceptedAt).toBe(accepted.termsAcceptedAt);
     expect(await talent.findById(missingId)).toBeUndefined();
+  });
+
+  it("stores consent for one profile only", async () => {
+    await enable(first.id);
+    await enable(second.id, "outra@exemplo.com");
+
+    const mine = (await talent.findByCase(first.id))!;
+    const theirs = (await talent.findByCase(second.id))!;
+    const at = new Date("2026-06-15T12:00:00Z");
+
+    expect(mine.shareOutcomeWithHr).toBe(false);
+    expect((await talent.setConsent(mine.id, true, at)).shareOutcomeWithHr).toBe(true);
+    expect((await talent.findById(theirs.id))?.shareOutcomeWithHr).toBe(false);
+    expect((await talent.setConsent(mine.id, false, at)).shareOutcomeWithHr).toBe(false);
+
+    const [row] = await db.select().from(talentProfiles).where(eq(talentProfiles.id, mine.id));
+
+    expect(row.updatedAt).toEqual(at);
   });
 
   it("finds sign-in candidates case-insensitively", async () => {

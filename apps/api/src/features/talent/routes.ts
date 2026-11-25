@@ -17,6 +17,7 @@ const meResponse = t.Object({
   name: t.String(),
   email: t.String(),
   termsAccepted: t.Boolean(),
+  shareOutcomeWithHr: t.Boolean(),
   entitlement: t.Object({
     kind: t.Union([t.Literal("sponsored"), t.Literal("lapsed")]),
     until: t.Union([t.String(), t.Null()]),
@@ -41,6 +42,7 @@ function toMe(profile: TalentProfile, entitlement: Entitlement) {
     name: profile.name,
     email: profile.email,
     termsAccepted: profile.termsAcceptedAt !== null,
+    shareOutcomeWithHr: profile.shareOutcomeWithHr,
     entitlement,
   };
 }
@@ -132,6 +134,16 @@ export function talentRoutes(
       async ({ me, entitlement }) => toMe(await repos.acceptTerms(me.id), entitlement),
       {
         talent: "signed-in",
+        response: { 200: meResponse },
+      },
+    )
+    .put(
+      "/me/consent",
+      async ({ me, entitlement, body }) =>
+        toMe(await repos.setConsent(me.id, body.shareOutcomeWithHr, new Date()), entitlement),
+      {
+        talent: "active",
+        body: t.Object({ shareOutcomeWithHr: t.Boolean() }),
         response: { 200: meResponse },
       },
     );

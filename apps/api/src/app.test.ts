@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createPortalAbility } from "@offboard/access";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
@@ -14,6 +15,7 @@ import {
   interviews,
   jobMatches,
   jobs,
+  offboardingCases,
   llmUsage,
   publicPageDailyViews,
   publicPages,
@@ -169,6 +171,7 @@ describe.skipIf(!url)("api", () => {
     rows?: { name: string; department?: string }[];
     actionId?: string;
     enabled?: boolean;
+    shareOutcomeWithHr?: boolean | string;
     config?: Record<string, ConfigValue>;
     phase?: string;
     event?: string | { type: string; user?: string };
@@ -456,6 +459,7 @@ describe.skipIf(!url)("api", () => {
         name: created.name,
         email: personalEmail,
         termsAccepted: false,
+        shareOutcomeWithHr: false,
         entitlement: { kind: "sponsored", until: sponsoredUntil },
       });
 
@@ -473,6 +477,73 @@ describe.skipIf(!url)("api", () => {
       const lapsed = await asSession("talent", "/me", "GET", undefined, talentHeaders);
 
       expect(await lapsed.json()).toMatchObject({ entitlement: { kind: "lapsed", until: null } });
+    });
+
+    it("grants the aggregates permission to admin and rh only", () => {
+      expect(createPortalAbility("admin").can("read", "TalentAggregates")).toBe(true);
+      expect(createPortalAbility("rh").can("read", "TalentAggregates")).toBe(true);
+      expect(createPortalAbility("gestor").can("read", "TalentAggregates")).toBe(false);
+      expect(createPortalAbility("visualizador").can("read", "TalentAggregates")).toBe(false);
+    });
+
+    it("stores the person's own consent", async () => {
+      const [firstCase, secondCase] = await db
+        .select({ id: offboardingCases.id })
+        .from(offboardingCases);
+
+      const enable = async (caseId: string, email: string) => {
+        const created = await repos.talent.enable({ caseId, personalEmail: email, sponsoredUntil });
+
+        if (
+          created === "case_not_found" ||
+          created === "already_enabled" ||
+          created === "email_taken"
+        ) {
+          throw new Error(created);
+        }
+
+        return created;
+      };
+
+      const mine = await enable(firstCase.id, personalEmail);
+      const other = await enable(secondCase.id, "outra@example.com");
+
+      await repos.talent.acceptTerms(mine.id);
+
+      const asMine = { "x-test-talent-id": mine.id };
+
+      expect(
+        (await asSession("rh", "/me/consent", "PUT", { shareOutcomeWithHr: true })).status,
+      ).toBe(403);
+
+      const shared = await asSession(
+        "talent",
+        "/me/consent",
+        "PUT",
+        { shareOutcomeWithHr: true },
+        asMine,
+      );
+
+      expect(shared.status).toBe(200);
+      expect(await shared.json()).toMatchObject({ id: mine.id, shareOutcomeWithHr: true });
+      expect(
+        await (await asSession("talent", "/me", "GET", undefined, asMine)).json(),
+      ).toMatchObject({ shareOutcomeWithHr: true });
+      expect((await repos.talent.findById(other.id))?.shareOutcomeWithHr).toBe(false);
+
+      const withdrawn = await asSession(
+        "talent",
+        "/me/consent",
+        "PUT",
+        { shareOutcomeWithHr: false },
+        asMine,
+      );
+
+      expect(await withdrawn.json()).toMatchObject({ shareOutcomeWithHr: false });
+      expect(
+        (await asSession("talent", "/me/consent", "PUT", { shareOutcomeWithHr: "yes" }, asMine))
+          .status,
+      ).toBe(422);
     });
 
     it("denies a talent session whose profile no longer exists", async () => {
