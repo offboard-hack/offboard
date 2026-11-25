@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { applications, defaultOrgId, jobSources, jobs, talentProfiles } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { CatalogSource } from "./catalog.js";
@@ -83,7 +83,7 @@ describe.skipIf(!url)("sources repository", () => {
         updatedAt: jobSources.updatedAt,
       })
       .from(jobSources)
-      .orderBy(asc(jobSources.target), asc(jobSources.kind));
+      .orderBy(sql`${jobSources.target} collate "C"`, asc(jobSources.kind));
   }
 
   async function openCount(source: string) {
@@ -116,7 +116,7 @@ describe.skipIf(!url)("sources repository", () => {
       })
       .from(jobs)
       .where(eq(jobs.source, source))
-      .orderBy(asc(jobs.sourceKey));
+      .orderBy(sql`${jobs.sourceKey} collate "C"`);
   }
 
   it("gets a source by id", async () => {
@@ -535,7 +535,7 @@ describe.skipIf(!url)("sources repository", () => {
         closedAt: jobs.closedAt,
       })
       .from(jobs)
-      .orderBy(asc(jobs.source), asc(jobs.sourceKey));
+      .orderBy(asc(jobs.source), sql`${jobs.sourceKey} collate "C"`);
 
     expect(rows).toEqual([
       {
