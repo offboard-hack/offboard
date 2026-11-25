@@ -42,7 +42,7 @@ export function teamRoutes(repos: TeamRepository, access: PortalAccessPlugin, au
       async ({ params, body, request, status }) => {
         const access = await auth.resolvePrincipal(request.headers);
 
-        if (access.kind === "authenticated" && access.principal.id === params.id) {
+        if (access.kind === "authenticated" && access.principal.id === params.id.toLowerCase()) {
           return status(403, { error: "Cannot change your own role" });
         }
 

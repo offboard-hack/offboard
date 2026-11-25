@@ -125,10 +125,10 @@ export function AccessPage() {
             label={`Papel de ${member.name}`}
             value={member.role}
             items={roleItems}
-            onChange={(next: string) => {
-              // WARNING: roleItems constrains next to a valid MemberRole
-              const role = next as MemberRole;
-              updateRole.mutate({ id: member.id, role });
+            onChange={(next) => {
+              const selected = roleItems.find((item) => item.value === next);
+
+              if (selected) updateRole.mutate({ id: member.id, role: selected.value });
             }}
             disabled={isSelf || updateRole.isPending}
           />
