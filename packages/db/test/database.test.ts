@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { describe, expect, it } from "vitest";
@@ -18,12 +19,14 @@ import {
   authSession,
   backgroundJobs,
   interviews,
+  jobFeeds,
   jobMatches,
   jobs,
   llmUsage,
   offboardingCases,
   publicPageDailyViews,
   publicPages,
+  recruiterPartners,
   resumeSuggestions,
   resumes,
   talentProfiles,
@@ -802,6 +805,62 @@ it.skipIf(!url)("seeds enough people for HR aggregates", async () => {
         own.filter((event) => event.status === "closed").map((event) => event.closedReason),
       ).toEqual(item.closedReason ? [item.closedReason] : []);
     }
+  } finally {
+    await db.$client.end();
+  }
+});
+
+it.skipIf(!url)("stores job feeds and recruiter partners", async () => {
+  const db = createClient(url ?? "");
+
+  try {
+    await migrate(db, { migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)) });
+    await seedDatabase(db);
+
+    const feeds = await db.select().from(jobFeeds);
+    expect(
+      feeds.map((feed) => [feed.provider, feed.board, feed.companyLabel, feed.enabled]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["greenhouse", "quintoandar", "QuintoAndar", false],
+        ["greenhouse", "stone", "Stone", false],
+      ]),
+    );
+    expect(feeds).toHaveLength(2);
+    expect(feeds[0].lastSyncedAt).toBeNull();
+    expect(feeds[0].lastError).toBeNull();
+
+    await expect(
+      db.insert(jobFeeds).values({ provider: "greenhouse", board: "stone" }),
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
+    await expect(
+      db.insert(jobFeeds).values({ provider: "lever", board: "Bad Slug" }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
+    await db.insert(jobFeeds).values({ provider: "lever", board: "stone" });
+
+    const [partner] = await db.select().from(recruiterPartners);
+    expect(partner.name).toBe("Ana Ribeiro — Talentos Parceiros");
+    expect(partner.company).toBe("Talentos Parceiros");
+    expect(partner.revokedAt).toBeNull();
+    expect(partner.tokenHash).toBe(
+      createHash("sha256").update("dev-recruiter-token-offboard-local").digest("hex"),
+    );
+
+    await expect(
+      db
+        .insert(recruiterPartners)
+        .values({ name: "Outra", company: "Outra", tokenHash: partner.tokenHash }),
+    ).rejects.toMatchObject({ cause: { code: "23505" } });
+
+    const linked = await db.select().from(jobs).where(eq(jobs.recruiterPartnerId, partner.id));
+    expect(linked.length).toBeGreaterThan(0);
+    expect(linked.every((job) => job.origin === "recruiter")).toBe(true);
+    expect(linked[0].lastSeenAt).toBeNull();
+
+    await db.delete(recruiterPartners).where(eq(recruiterPartners.id, partner.id));
+
+    const after = await db.select().from(jobs).where(eq(jobs.id, linked[0].id));
+    expect(after[0].recruiterPartnerId).toBeNull();
   } finally {
     await db.$client.end();
   }

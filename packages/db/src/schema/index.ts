@@ -1,6 +1,7 @@
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  char,
   check,
   date,
   index,
@@ -144,6 +145,41 @@ export const jobOriginEnum = pgEnum("job_origin", ["external", "hr", "recruiter"
 
 export const jobWorkModelEnum = pgEnum("job_work_model", ["remote", "hybrid", "onsite"]);
 
+export const jobFeedProviderEnum = pgEnum("job_feed_provider", ["greenhouse", "lever"]);
+
+export const jobFeeds = pgTable(
+  "job_feeds",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    provider: jobFeedProviderEnum("provider").notNull(),
+    board: varchar("board", { length: 100 }).notNull(),
+    companyLabel: varchar("company_label", { length: 255 }),
+    enabled: boolean("enabled").notNull().default(true),
+    lastSyncedAt: timestamp("last_synced_at"),
+    lastError: varchar("last_error", { length: 100 }),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("job_feeds_provider_board_idx").on(table.provider, table.board),
+    check("job_feeds_board_format", sql`${table.board} ~ '^[a-z0-9][a-z0-9_-]{0,99}$'`),
+  ],
+);
+
+export const recruiterPartners = pgTable(
+  "recruiter_partners",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 255 }).notNull(),
+    company: varchar("company", { length: 255 }).notNull(),
+    tokenHash: char("token_hash", { length: 64 }).notNull(),
+    revokedAt: timestamp("revoked_at"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [uniqueIndex("recruiter_partners_token_hash_idx").on(table.tokenHash)],
+);
+
 export const jobs = pgTable(
   "jobs",
   {
@@ -162,10 +198,15 @@ export const jobs = pgTable(
     description: text("description").notNull().default(""),
     postedAt: timestamp("posted_at"),
     closedAt: timestamp("closed_at"),
+    recruiterPartnerId: uuid("recruiter_partner_id").references(() => recruiterPartners.id, {
+      onDelete: "set null",
+    }),
+    lastSeenAt: timestamp("last_seen_at"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
+    index("jobs_recruiter_partner_id_idx").on(table.recruiterPartnerId),
     uniqueIndex("jobs_source_key_idx").on(table.source, table.sourceKey),
     check(
       "jobs_salary_range",
