@@ -1,3 +1,5 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { employeeJourneyQueryKey } from "./employee-journey";
 import { employeeGrantHeader, employeeStateSchema, stateKindSchema } from "@offboard/employee";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createContext, type ReactNode, use, useMemo, useState, useSyncExternalStore } from "react";
@@ -29,7 +31,7 @@ class StateConflict extends Error {
   }
 }
 
-function createRemoteStorage(key: string, grantId: string) {
+function createRemoteStorage(key: string, grantId: string, onDepartureSaved: () => void) {
   const kind = stateKindSchema.parse(key);
   let revision = 0;
   let conflicted: StateConflict | null = null;
@@ -72,6 +74,8 @@ function createRemoteStorage(key: string, grantId: string) {
       if (result.error) throw new Error("Não foi possível sincronizar.");
 
       revision = result.data.revision;
+
+      if (kind === "departure-v1") onDepartureSaved();
     },
     discard() {
       conflicted = null;
@@ -210,7 +214,11 @@ function createEntry(key: string, remote?: ReturnType<typeof createRemoteStorage
 
 type StorageEntry = ReturnType<typeof createEntry>;
 
-function createStorage(namespace: string, grantId?: string) {
+function createStorage(
+  namespace: string,
+  grantId: string | undefined,
+  onDepartureSaved: () => void,
+) {
   const entries = new Map<string, StorageEntry>();
 
   return (key: string) => {
@@ -220,7 +228,7 @@ function createStorage(namespace: string, grantId?: string) {
 
     const entry = createEntry(
       `offboard:employee:v1:${namespace}:${key}`,
-      grantId ? createRemoteStorage(key, grantId) : undefined,
+      grantId ? createRemoteStorage(key, grantId, onDepartureSaved) : undefined,
     );
 
     entries.set(key, entry);
@@ -256,7 +264,13 @@ function AccountStorage({
   grantId?: string;
   children: ReactNode;
 }) {
-  const [storage] = useState(() => createStorage(namespace, grantId));
+  const client = useQueryClient();
+
+  const [storage] = useState(() =>
+    createStorage(namespace, grantId, () => {
+      void client.invalidateQueries({ queryKey: [...employeeJourneyQueryKey, namespace] });
+    }),
+  );
 
   return <StorageContext.Provider value={storage}>{children}</StorageContext.Provider>;
 }

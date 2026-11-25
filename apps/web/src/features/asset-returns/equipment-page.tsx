@@ -4,16 +4,41 @@ import { Alert02Icon, Calendar03Icon, Tick02Icon, UserGroupIcon } from "@hugeico
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { classProps } from "../../shared/lib/class-props";
-import { getTrackingStatus, equipmentStatus, trackingStatus } from "./status";
+import { getTrackingStatus, trackingStatus } from "./status";
 import { formatShortDeadline, offboardingsQuery, taskTrackingQuery } from "@/entities/offboarding";
-import { useQueries, useSuspenseQuery } from "@tanstack/react-query";
-import { getRouteApi } from "@tanstack/react-router";
-import { equipmentQuery } from "@/entities/equipment";
-import type { EquipmentReturnMethod, EquipmentStatus } from "@/entities/equipment";
-import { useMemo } from "react";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
+import { getRouteApi, Link } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
 import { portalStyles } from "../../shared/ui/surface.styles";
+
+import { createPortalAbility } from "@offboard/access";
+import { employeeDate } from "@offboard/employee";
+import {
+  collectionAddressQuery,
+  equipmentReturnsQuery,
+  equipmentStatus,
+  getEquipmentStatus,
+  updateEquipmentReceipt,
+  type EquipmentReturn,
+} from "@/entities/equipment-returns";
+import { Button } from "@/shared/ui/shadcn/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/shared/ui/shadcn/dialog";
 
 const styles = {
   section: "rounded-2xl border bg-card p-4 sm:p-5",
@@ -21,8 +46,6 @@ const styles = {
   badge: "text-xs font-medium text-primary",
   badgeNeutral: "text-muted-foreground",
   badgeReady: "text-foreground",
-  badgeTransit: "text-foreground",
-  badgeWarning: "text-destructive",
   trackingNone: "bg-muted text-muted-foreground",
   trackingWaiting: "bg-muted text-muted-foreground",
   trackingTransit: "bg-yellow-100 text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-200",
@@ -31,37 +54,109 @@ const styles = {
   steps: "mt-3 list-decimal space-y-1 pl-5 text-sm",
 };
 
-type Equipment = {
-  item: string;
-  tag: string;
-  person: string;
-  method: string;
-  date: { iso: string; label: string } | null;
-  status: keyof typeof equipmentStatus;
-};
-
-const returnMethodLabels: Record<EquipmentReturnMethod, string> = {
-  pickup: "Coleta em casa",
-  in_person: "Entrega no escritório",
-};
-
-const statusKeys: Record<EquipmentStatus, keyof typeof equipmentStatus> = {
-  with_person: "withPerson",
-  scheduled: "scheduled",
-  transit: "transit",
-  received: "received",
-  inventory: "inventory",
-  failed: "failed",
-};
-
 const assetBadges = {
   scheduled: null,
   received: styles.badgeReady,
-  failed: styles.badgeWarning,
   inventory: styles.badgeReady,
-  transit: styles.badgeTransit,
+  transit: styles.badgeReady,
+  failed: "text-destructive",
   withPerson: styles.badgeNeutral,
 };
+
+const methods = { pickup: "Coleta em casa", office: "Entrega no escritório" };
+const slots = { morning: "9h às 12h", afternoon: "13h às 17h" };
+
+function CollectionAddress({ caseId }: { caseId: string }) {
+  const address = useQuery(collectionAddressQuery(caseId));
+
+  if (address.isPending) return <p role="status">Carregando endereço…</p>;
+
+  if (address.isError)
+    return (
+      <div className="space-y-2">
+        <p role="alert">Não foi possível carregar o endereço.</p>
+        <Button variant="outline" onClick={() => void address.refetch()}>
+          Tentar novamente
+        </Button>
+      </div>
+    );
+
+  return <p className="wrap-anywhere">{address.data.address ?? "Endereço indisponível."}</p>;
+}
+
+function CollectionDetails({ item }: { item: EquipmentReturn }) {
+  const [open, setOpen] = useState(false);
+  const { person, caseId, schedule } = item;
+
+  if (!schedule) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger
+        render={
+          <Button
+            variant="link"
+            size="sm"
+            className="h-auto p-0"
+            aria-label={`Ver agendamento de ${item.code}`}
+          />
+        }
+      >
+        {methods[schedule.method]}
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{methods[schedule.method]}</DialogTitle>
+          <DialogDescription>{person}</DialogDescription>
+        </DialogHeader>
+        <DialogBody className="space-y-2">
+          <p className="font-semibold">
+            {employeeDate(schedule.day, { day: "numeric", month: "long", year: "numeric" })}
+            {" · "}
+            {schedule.slot ? slots[schedule.slot] : null}
+          </p>
+          {open ? <CollectionAddress caseId={caseId} /> : null}
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ReceiptAction({ item }: { item: EquipmentReturn }) {
+  const client = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      updateEquipmentReceipt({ caseId: item.caseId, code: item.code, received: !item.received }),
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: equipmentReturnsQuery.queryKey }),
+        client.invalidateQueries({ queryKey: offboardingsQuery.queryKey }),
+      ]);
+    },
+  });
+
+  const label = item.received ? "Desfazer recebimento" : "Confirmar recebimento";
+
+  return (
+    <div className="space-y-1">
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={mutation.isPending}
+        onClick={() => mutation.mutate()}
+        aria-label={`${label} de ${item.code}`}
+      >
+        {mutation.isPending ? "Salvando…" : label}
+      </Button>
+      {mutation.isError ? (
+        <p role="alert" className="max-w-44 whitespace-normal text-destructive">
+          {mutation.error.message}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 type Shipment = {
   id: string;
@@ -139,52 +234,95 @@ const shipmentColumns: TableColumn<Shipment>[] = [
   },
 ];
 
-const equipmentColumns: TableColumn<Equipment>[] = [
-  {
-    id: "item",
-    accessorFn: ({ item }) => item,
-    header: "Item",
-    enableSorting: true,
-    sortFn: "portugueseText",
-    meta: { cellStyle: portalStyles.tableHeading },
-  },
-  { id: "tag", accessorFn: ({ tag }) => tag, header: "Patrimônio" },
-  {
-    id: "person",
-    accessorFn: ({ person }) => person,
-    header: "Pessoa",
-    enableSorting: true,
-    sortFn: "portugueseText",
-  },
-  { id: "method", accessorFn: ({ method }) => method, header: "Como volta" },
-  {
-    id: "date",
-    header: "Data",
-    cell: ({ row }) => {
-      const { date } = row.original;
-
-      return date ? <time dateTime={date.iso}>{date.label}</time> : "Sem data";
+function equipmentColumns(canUpdate: boolean) {
+  const columns: TableColumn<EquipmentReturn>[] = [
+    {
+      id: "item",
+      accessorFn: ({ title, model }) => [title, model].filter(Boolean).join(" · "),
+      header: "Item",
+      enableSorting: true,
+      sortFn: "portugueseText",
+      meta: { cellStyle: portalStyles.tableHeading },
     },
-  },
-  {
-    id: "status",
-    header: "Situação",
-    cell: ({ row }) => {
-      const { status } = row.original;
-
-      return (
-        <Badge variant="secondary" {...classProps(styles.badge, assetBadges[status])}>
-          {equipmentStatus[status]}
-        </Badge>
-      );
+    { id: "tag", accessorFn: ({ code }) => code, header: "Patrimônio" },
+    {
+      id: "person",
+      accessorFn: ({ person }) => person,
+      header: "Pessoa",
+      enableSorting: true,
+      sortFn: "portugueseText",
+      cell: ({ row: { original } }) => (
+        <Link
+          className="underline-offset-4 hover:underline"
+          to="/desligamentos/$caseId"
+          params={{ caseId: original.caseId }}
+        >
+          {original.person}
+        </Link>
+      ),
     },
-  },
-];
+    {
+      id: "method",
+      header: "Como volta",
+      cell: ({ row: { original } }) =>
+        original.schedule && original.addressAvailable && canUpdate ? (
+          <CollectionDetails item={original} />
+        ) : (
+          methods[original.method]
+        ),
+    },
+    {
+      id: "date",
+      header: "Agendamento",
+      cell: ({
+        row: {
+          original: { schedule },
+        },
+      }) =>
+        schedule ? (
+          <time dateTime={schedule.day}>
+            {formatShortDeadline(schedule.day)}
+            {schedule.slot ? ` · ${slots[schedule.slot]}` : null}
+          </time>
+        ) : (
+          "Sem data"
+        ),
+    },
+    {
+      id: "status",
+      header: "Situação",
+      cell: ({ row }) => {
+        const status = getEquipmentStatus(row.original);
+
+        return (
+          <Badge variant="secondary" {...classProps(styles.badge, assetBadges[status])}>
+            {equipmentStatus[status]}
+          </Badge>
+        );
+      },
+    },
+    ...(canUpdate
+      ? [
+          {
+            id: "receipt",
+            header: "Recebimento",
+            cell: ({ row }) =>
+              row.original.status === "inventory" ? null : <ReceiptAction item={row.original} />,
+          } satisfies TableColumn<EquipmentReturn>,
+        ]
+      : []),
+  ];
+
+  return columns;
+}
 
 const route = getRouteApi("/_portal/bens-e-coleta");
 
 export function EquipmentPage() {
   const navigate = route.useNavigate();
+  const { principal } = route.useRouteContext();
+  const canUpdate = createPortalAbility(principal.role).can("update", "Offboarding");
+  const columns = useMemo(() => equipmentColumns(canUpdate), [canUpdate]);
 
   const urlPagination = listPagination(
     route.useSearch(),
@@ -209,23 +347,7 @@ export function EquipmentPage() {
   }
 
   const { data: cases } = useSuspenseQuery(offboardingsQuery);
-
-  const { data: equipmentRows } = useSuspenseQuery(equipmentQuery);
-
-  const equipment: Equipment[] = useMemo(
-    () =>
-      equipmentRows.map((row) => ({
-        item: row.item,
-        tag: row.tag,
-        person: row.person,
-        method: returnMethodLabels[row.returnMethod],
-        date: row.scheduledDate
-          ? { iso: row.scheduledDate, label: formatShortDeadline(row.scheduledDate) }
-          : null,
-        status: statusKeys[row.status],
-      })),
-    [equipmentRows],
-  );
+  const { data: equipment } = useSuspenseQuery(equipmentReturnsQuery);
 
   const tasks = useMemo(
     () =>
@@ -259,7 +381,7 @@ export function EquipmentPage() {
   });
 
   const visibleEquipment = useMemo(
-    () => (status ? equipment.filter((entry) => entry.status === status) : equipment),
+    () => (status ? equipment.filter((entry) => getEquipmentStatus(entry) === status) : equipment),
     [equipment, status],
   );
 
@@ -276,20 +398,19 @@ export function EquipmentPage() {
         },
         {
           label: "Recebidos",
-          value: equipment.filter(({ status }) => status === "received" || status === "inventory")
-            .length,
+          value: equipment.filter(({ received }) => received).length,
           icon: Tick02Icon,
           tone: "success",
         },
         {
-          label: "Coletas agendadas",
-          value: equipment.filter(({ status }) => status === "scheduled").length,
+          label: "Devoluções agendadas",
+          value: equipment.filter((item) => getEquipmentStatus(item) === "scheduled").length,
           icon: Calendar03Icon,
           tone: "warning",
         },
         {
           label: "Com problema",
-          value: equipment.filter(({ status }) => status === "failed").length,
+          value: equipment.filter((item) => item.status === "failed").length,
           icon: Alert02Icon,
           tone: "danger",
         },
@@ -297,7 +418,7 @@ export function EquipmentPage() {
     >
       <section className="min-w-0" aria-labelledby="equipment-title">
         <h2 className="sr-only" id="equipment-title">
-          Amostra do inventário
+          Inventário de bens
         </h2>
         <DataTable
           urlPagination={urlPagination}
@@ -314,11 +435,15 @@ export function EquipmentPage() {
               ],
             },
           ]}
-          emptyText="Nenhum item neste status."
+          emptyText={
+            status
+              ? "Nenhum item neste status."
+              : "O inventário mostra os bens vinculados aos desligamentos."
+          }
           scrollLabel="Tabela do inventário"
-          columns={equipmentColumns}
+          columns={columns}
           labelledBy="equipment-title"
-          getRowId={(entry) => entry.tag}
+          getRowId={(entry) => entry.id}
           tableStyle={styles.inventory}
         />
       </section>
@@ -341,10 +466,9 @@ export function EquipmentPage() {
           Como a coleta funciona
         </h2>
         <ol {...classProps(styles.steps)}>
-          <li>A pessoa confirma os itens e escolhe o horário no app.</li>
-          <li>A transportadora leva embalagem e etiqueta e retira o equipamento.</li>
-          <li>A equipe de TI confere os itens, apaga os dados e devolve os bens ao estoque.</li>
-          <li>A pessoa recebe o comprovante no app. O RH recebe um aviso.</li>
+          <li>O RH informa os itens e disponibiliza datas na área do colaborador do caso.</li>
+          <li>A pessoa escolhe uma data para coleta em casa ou entrega no escritório.</li>
+          <li>A equipe confere os bens e registra cada recebimento no inventário.</li>
         </ol>
       </section>
     </ListPage>

@@ -1,3 +1,5 @@
+import { equipmentReturnsQuery } from "@/entities/equipment-returns";
+import { offboardingsQuery } from "@/entities/offboarding";
 import { employeeAccessSchema, employeePlanSchema } from "@offboard/employee";
 import { useForm } from "@tanstack/react-form";
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -202,6 +204,8 @@ const lists = [
   },
 ] as const;
 
+const equipmentConflict = z.object({ code: z.literal("equipment-in-use") });
+
 const settingsConflict = z.object({ code: z.literal("settings-changed") });
 
 class EmployeeSettingsChanged extends Error {
@@ -236,6 +240,10 @@ function AccessForm({
           throw new EmployeeSettingsChanged();
         }
 
+        if (equipmentConflict.safeParse(result.error?.value).success) {
+          throw new Error("Um patrimônio já está vinculado a outro desligamento.");
+        }
+
         throw new Error("Este e-mail já está vinculado a outro desligamento.");
       }
 
@@ -247,6 +255,8 @@ function AccessForm({
       queryClient.setQueryData(accessQuery(caseId).queryKey, value);
       setBaseline(value);
       form.reset(form.state.values);
+      void queryClient.invalidateQueries({ queryKey: equipmentReturnsQuery.queryKey });
+      void queryClient.invalidateQueries({ queryKey: offboardingsQuery.queryKey });
     },
   });
 

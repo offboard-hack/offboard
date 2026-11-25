@@ -1,6 +1,7 @@
 import type { ConfigValue } from "@offboard/db/schema";
 import { Elysia, t } from "elysia";
 import type { PortalAccessPlugin } from "../../shared/access.js";
+import { saveChecklistSchema } from "../../shared/checklist.js";
 import { errorResponse, uniqueViolation } from "../../shared/http.js";
 import type { ActionConfigsRepository } from "./repository.js";
 
@@ -25,6 +26,16 @@ const actionConfigRow = t.Object({
 export function actionConfigsRoutes(repos: ActionConfigsRepository, access: PortalAccessPlugin) {
   return new Elysia()
     .use(access)
+    .get("/checklist-model", ({ principal }) => repos.readChecklist(principal.orgId), {
+      permit: ["manage", "Integrations"],
+    })
+    .put(
+      "/checklist-model",
+      async ({ body, principal, status }) =>
+        (await repos.saveChecklist(principal.orgId, body)) ??
+        status(409, { error: "Checklist changed" }),
+      { permit: ["manage", "Integrations"], body: saveChecklistSchema },
+    )
     .get("/action-configs", ({ principal }) => repos.listActionConfigs(principal.orgId), {
       permit: ["read", "Integrations"],
       response: t.Array(actionConfigRow),

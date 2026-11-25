@@ -5,7 +5,15 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
-import { authSession, defaultOrgId, employeeAccess, tasks } from "@offboard/db/schema";
+import {
+  authSession,
+  checklistModels,
+  defaultOrgId,
+  employeeAccess,
+  equipment,
+  organizations,
+  tasks,
+} from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import {
   emptyEmployeePlan,
@@ -107,7 +115,11 @@ describe.skipIf(!url)("api", () => {
     event_time?: number;
   };
 
-  function call(path: string, method = "GET", body?: Payload) {
+  function call(
+    path: string,
+    method = "GET",
+    body?: Payload | Parameters<typeof repos.actionConfigs.saveChecklist>[1],
+  ) {
     const encoded = body === undefined ? undefined : JSON.stringify(body);
     const headers = new Headers({ "content-type": "application/json", origin: webOrigin });
 
@@ -388,7 +400,7 @@ describe.skipIf(!url)("api", () => {
     const { email: _, ...expected } = body;
 
     expect(res.status).toBe(201);
-    expect(created).toEqual({ id: expect.any(String), ...expected, completed: 0, total: 0 });
+    expect(created).toEqual({ id: expect.any(String), ...expected, completed: 0, total: 17 });
     expect((await call(`/offboardings/${created.id}`)).status).toBe(200);
   });
 
@@ -431,6 +443,165 @@ describe.skipIf(!url)("api", () => {
     expect(created.length).toBe(2);
     expect(created[0]).toMatchObject({ name: "Bia Lima", department: "Ops" });
     expect(created[1]).toMatchObject({ name: "Caio Reis", department: "Ops" });
+  });
+
+  it("publishes a shared checklist and applies ordered matching tasks to new and existing empty cases", async () => {
+    const employeeStep = {
+      id: "onboarding-return",
+      team: "Pessoa desligada",
+      phase: "second-week",
+      title: "Entregar itens",
+      deadlineOffset: 2,
+      rules: [{ id: "area", field: "department", operator: "equals", value: "Operacoes" }],
+    } as const;
+
+    const internalStep = {
+      id: "internal",
+      team: "TI",
+      phase: "pre",
+      title: "Verificar acessos",
+      rules: [{ id: "cargo", field: "role", operator: "notEquals", value: "estagiario" }],
+    } as const;
+
+    const known = await repos.actionConfigs.createActionConfig(defaultOrgId, {
+      actionId: "email:obsolete",
+      phase: "pre",
+      config: {},
+    });
+
+    const unrelated = await repos.actionConfigs.createActionConfig(defaultOrgId, {
+      actionId: "email:independent",
+      phase: "pre",
+      config: {},
+    });
+
+    const unknownKind = await repos.actionConfigs.createActionConfig(defaultOrgId, {
+      actionId: "other:obsolete",
+      phase: "pre",
+      config: {},
+    });
+
+    const body = {
+      revision: 0,
+      steps: [
+        {
+          ...employeeStep,
+          rules: [...employeeStep.rules],
+          email: { subject: "Assunto", body: "Mensagem" },
+        },
+        { ...internalStep, rules: [...internalStep.rules] },
+      ],
+      knownRowIds: [known.id, unknownKind.id],
+    };
+
+    try {
+      const published = await call("/checklist-model", "PUT", body);
+      expect(published.status).toBe(200);
+      const change = await published.json();
+
+      const action = change.actionRows.find(
+        (config: { actionId: string }) => config.actionId === "email:onboarding-return",
+      );
+
+      expect(change).toMatchObject({ revision: 1, steps: [employeeStep, internalStep] });
+      expect(action).toMatchObject({ enabled: true, phase: "second-week" });
+      expect(change.actionRows.map((config: { id: string }) => config.id)).toEqual(
+        expect.arrayContaining([unrelated.id, unknownKind.id]),
+      );
+      expect(await repos.actionConfigs.getActionConfig(defaultOrgId, known.id)).toBeNull();
+      expect((await call("/checklist-model", "PUT", body)).status).toBe(409);
+      expect(await (await call("/checklist-model")).json()).toMatchObject({
+        revision: 1,
+        steps: [employeeStep, internalStep],
+      });
+
+      const created = await (
+        await call("/offboardings", "POST", {
+          name: "Criado com checklist",
+          department: "Operações",
+          role: "Engenheiro",
+          deadline: "2027-01-31",
+          email: "published-checklist@example.com",
+        })
+      ).json();
+
+      expect(created).toMatchObject({ total: 2, completed: 0 });
+      expect(
+        (await repos.offboardings.getOffboarding(defaultOrgId, created.id))?.tasks,
+      ).toMatchObject([
+        { title: "Verificar acessos", dueDate: null },
+        { title: "Entregar itens", dueDate: "2027-02-02" },
+      ]);
+
+      const imported = await (
+        await call("/offboardings/import", "POST", {
+          rows: [{ name: "CSV", department: "Produto" }],
+        })
+      ).json();
+
+      expect(imported[0]).toMatchObject({ total: 1 });
+
+      const empty = await repos.offboardings.createOffboarding(defaultOrgId, {
+        name: "Caso anterior",
+        department: "Operações",
+        role: "Estagiário",
+        deadline: "2027-02-03",
+        email: "existing-checklist@example.com",
+      });
+
+      const applyPath = `/offboardings/${empty.id}/checklist`;
+      const applied = await Promise.all([call(applyPath, "POST"), call(applyPath, "POST")]);
+      expect(applied.map(({ status }) => status).sort()).toEqual([200, 409]);
+      expect(
+        (await repos.offboardings.getOffboarding(defaultOrgId, empty.id))?.tasks,
+      ).toMatchObject([{ title: employeeStep.title }]);
+      expect((await call(`/offboardings/${missingCaseId}/checklist`, "POST")).status).toBe(404);
+
+      const revised = {
+        revision: 1,
+        steps: [
+          { ...body.steps[0], email: null, title: "Entrega revisada" },
+          {
+            ...body.steps[1],
+            slack: { channel: "#equipe", message: "Mensagem" },
+            webhook: { url: "https://offboard.example/tarefa", method: "POST" as const },
+          },
+        ],
+        knownRowIds: [action.id, unknownKind.id],
+      };
+
+      expect((await call("/checklist-model", "PUT", revised)).status).toBe(200);
+      expect((await call("/checklist-model", "PUT", revised)).status).toBe(409);
+      expect(await repos.actionConfigs.getActionConfig(defaultOrgId, action.id)).toBeNull();
+      expect(
+        await repos.actionConfigs.getActionConfigsByStep(defaultOrgId, "internal"),
+      ).toMatchObject([{ actionId: "slack:internal" }, { actionId: "webhook:internal" }]);
+      expect(
+        (await repos.offboardings.getOffboarding(defaultOrgId, created.id))?.tasks[1]?.title,
+      ).toBe(employeeStep.title);
+
+      const revisedAgain = {
+        ...revised,
+        revision: 2,
+        steps: body.steps,
+        knownRowIds: (
+          await repos.actionConfigs.getActionConfigsByStep(defaultOrgId, "internal")
+        ).map(({ id }) => id),
+      };
+
+      expect((await call("/checklist-model", "PUT", revisedAgain)).status).toBe(200);
+      expect(
+        (
+          await call("/checklist-model", "PUT", {
+            ...revisedAgain,
+            revision: 3,
+            steps: [body.steps[0], body.steps[0]],
+          })
+        ).status,
+      ).toBe(422);
+    } finally {
+      await db.delete(checklistModels).where(eq(checklistModels.orgId, defaultOrgId));
+    }
   });
 
   it("rejects an invalid import", async () => {
@@ -1285,6 +1456,7 @@ describe.skipIf(!url)("api", () => {
                 orgId: defaultOrgId,
                 title: "Gone",
                 phase: "d0",
+                stepId: null,
                 trackingCode: "ZZ999999999BR",
               },
             ]),
@@ -1375,7 +1547,9 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       | { email: string; otp: string }
       | { email: string }
       | EmployeeState
-      | EmployeeSettings,
+      | EmployeeSettings
+      | { done: boolean }
+      | { code: string; received: boolean },
     origin = webOrigin,
     nativeOrigin?: string,
     grantId = cookie ? grants.get(cookie) : undefined,
@@ -1471,6 +1645,351 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         )
       ).status,
     ).toBe(503);
+  });
+
+  it("shares the employee checklist, booking and per-item receipts with the HR case", async () => {
+    const email = `workflow-${randomUUID()}@offboard.example`;
+    const layout = (await repos.actionConfigs.readChecklist(defaultOrgId)).steps;
+
+    const person = {
+      name: "Pessoa do fluxo",
+      role: "Analista",
+      department: "TI",
+      deadline: "2027-03-03",
+      email,
+    };
+
+    const record = await repos.offboardings.createOffboarding(defaultOrgId, person, [
+      ...layout,
+      { id: "form", title: "Conferir dados", team: "Pessoa desligada", phase: "d0" },
+    ]);
+
+    const foreign = await repos.offboardings.createOffboarding(
+      defaultOrgId,
+      { ...person, email: `foreign-${randomUUID()}@offboard.example` },
+      layout,
+    );
+
+    const detail = await repos.offboardings.getOffboarding(defaultOrgId, record.id);
+    const manual = detail?.tasks.find((task) => task.title === "Conferir dados");
+
+    const confirm = detail?.tasks.find(
+      (task) => task.title === "Confirmar os itens para devolução",
+    );
+
+    const internal = detail?.tasks.find((task) => task.title === "Bloquear acessos");
+
+    const foreignTask = (await repos.offboardings.getOffboarding(defaultOrgId, foreign.id))
+      ?.tasks[0];
+
+    if (!manual || !confirm || !internal || !foreignTask)
+      throw new Error("Checklist not generated");
+
+    const plan = {
+      ...emptyEmployeePlan,
+      bookingDays: ["2027-03-01", "2027-03-02"],
+      officeAddress: "Escritório da equipe",
+      equipment: [
+        { title: "Notebook", code: "QA-1", model: "" },
+        { title: "Monitor", code: "QA-2", model: "" },
+      ],
+    };
+
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, record.id, { email, plan, revision: 1 }),
+    ).toBe("saved");
+
+    const hr = createApp(webOrigin, repos, {
+      ...appOptions,
+      auth: { ...auth, resolveEmployee: employeeAuth.resolveEmployee },
+    });
+
+    function portal(
+      path: string,
+      method = "GET",
+      body?: { code: string; received: boolean } | EmployeeSettings,
+      role = "rh",
+    ) {
+      return hr.handle(
+        new Request(webOrigin + "/api" + path, {
+          method,
+          headers: {
+            "content-type": "application/json",
+            origin: webOrigin,
+            "x-test-session": role,
+          },
+          body: body && JSON.stringify(body),
+        }),
+      );
+    }
+
+    const inventory = "/equipment-returns/" + record.id;
+    expect((await portal("/equipment-returns")).status).toBe(200);
+    expect(await (await portal(inventory + "/address")).json()).toEqual({ address: null });
+    expect((await portal("/equipment-returns/" + missingCaseId + "/address")).status).toBe(404);
+    expect(await (await portal(inventory)).json()).toMatchObject([
+      { code: "QA-1", received: false, schedule: null },
+      { code: "QA-2", received: false, schedule: null },
+    ]);
+
+    await db.insert(equipment).values({
+      orgId: defaultOrgId,
+      caseId: foreign.id,
+      tag: "INVENTARIO-ANTIGO",
+      item: "Bens do inventário",
+      returnMethod: "pickup",
+      status: "with_person",
+    });
+    const independent = "/equipment-returns/" + foreign.id;
+    expect(await (await portal(independent)).json()).toMatchObject([
+      { code: "INVENTARIO-ANTIGO", model: "" },
+    ]);
+    expect(
+      (
+        await portal(independent + "/receipt", "PATCH", {
+          code: "INVENTARIO-ANTIGO",
+          received: true,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await portal(independent + "/receipt", "PATCH", {
+          code: "INVENTARIO-ANTIGO",
+          received: false,
+        })
+      ).status,
+    ).toBe(200);
+    expect(await (await portal(independent)).json()).toMatchObject([{ status: "with_person" }]);
+
+    const orgId = randomUUID();
+    await db.insert(organizations).values({ id: orgId, slug: orgId, name: "Outra organização" });
+
+    try {
+      const other = await repos.actionConfigs.saveChecklist(orgId, {
+        revision: 0,
+        steps: [],
+        knownRowIds: [],
+      });
+
+      expect(other?.steps).toEqual([]);
+      expect((await repos.actionConfigs.readChecklist(defaultOrgId)).steps).toEqual(layout);
+      expect(await repos.employee.listEquipmentReturns(orgId, record.id)).toEqual([]);
+      expect(await repos.employee.readCollectionBooking(orgId, record.id)).toBeNull();
+      expect(await repos.employee.updateReceipt(orgId, record.id, "QA-1", true)).toBeNull();
+      expect(await repos.offboardings.applyChecklist(orgId, record.id, layout)).toBeNull();
+      expect(
+        (await portal("/employee-access/" + foreign.id, "PUT", { email: null, plan, revision: 1 }))
+          .status,
+      ).toBe(409);
+    } finally {
+      await db.delete(checklistModels).where(eq(checklistModels.orgId, orgId));
+      await db.delete(organizations).where(eq(organizations.id, orgId));
+    }
+
+    const cookie = await authenticate(email);
+    codes.delete(email);
+    const taskPath = "/employee/checklist/";
+    expect((await request(taskPath + manual.id, "PATCH", cookie, { done: true })).status).toBe(403);
+    expect(
+      (
+        await request("/employee/state", "PUT", cookie, {
+          key: "consent",
+          revision: 0,
+          value: { accepted: true },
+        })
+      ).status,
+    ).toBe(200);
+    const staleConsent: EmployeeState = { key: "consent", revision: 0, value: { accepted: false } };
+    expect((await request("/employee/state", "PUT", cookie, staleConsent)).status).toBe(409);
+
+    const journey = await (await request("/employee/journey", "GET", cookie)).json();
+    expect(journey.checklist).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: manual.id, action: "check", status: "todo" }),
+        expect.objectContaining({ id: confirm.id, action: "equipment" }),
+        expect.objectContaining({ action: "feedback" }),
+      ]),
+    );
+    expect(journey.checklist.map((task: { id: string }) => task.id)).not.toContain(internal.id);
+
+    for (const task of [internal, foreignTask, confirm]) {
+      expect((await request(taskPath + task.id, "PATCH", cookie, { done: true })).status).toBe(404);
+    }
+
+    for (const done of [true, true, false, true]) {
+      expect(await (await request(taskPath + manual.id, "PATCH", cookie, { done })).json()).toEqual(
+        {
+          id: manual.id,
+          status: done ? "done" : "todo",
+        },
+      );
+    }
+
+    const booking = {
+      method: "pickup",
+      address: "Rua do Teste, 45, São Paulo",
+      day: "2027-03-01",
+      slot: "morning",
+    } as const;
+
+    const departure = {
+      key: "departure-v1",
+      revision: 0,
+      value: {
+        booking,
+        feedback: {
+          anonymous: true,
+          assessment: 5,
+          clarity: null,
+          respect: null,
+          comment: "",
+          recommendation: null,
+        },
+        examAttended: false,
+        handoffCompleted: [],
+      },
+    } satisfies EmployeeState;
+
+    expect((await request("/employee/state", "PUT", cookie, departure)).status).toBe(200);
+    expect((await request("/employee/state", "PUT", cookie, departure)).status).toBe(200);
+    const scheduled = await (await portal(inventory)).json();
+    expect(scheduled[0]).toMatchObject({
+      code: "QA-1",
+      schedule: { method: "pickup", day: booking.day, slot: booking.slot },
+    });
+    expect(scheduled[0].schedule).not.toHaveProperty("address");
+    expect(await (await portal(inventory + "/address")).json()).toEqual({
+      address: booking.address,
+    });
+    expect((await portal(inventory + "/address", "GET", undefined, "visualizador")).status).toBe(
+      403,
+    );
+    expect(
+      (await request(inventory + "/receipt", "PATCH", cookie, { code: "QA-1", received: true }))
+        .status,
+    ).toBe(403);
+
+    const receipt = (code: string, received: boolean) =>
+      portal(inventory + "/receipt", "PATCH", { code, received });
+
+    expect((await receipt("outro", true)).status).toBe(404);
+    expect(
+      (
+        await portal("/equipment-returns/" + missingCaseId + "/receipt", "PATCH", {
+          code: "QA-1",
+          received: true,
+        })
+      ).status,
+    ).toBe(404);
+
+    for (const [code, received] of [
+      ["QA-1", true],
+      ["QA-1", true],
+      ["QA-2", true],
+    ] as const) {
+      expect(await (await receipt(code, received)).json()).toEqual({ received });
+    }
+
+    const closed = await (await request("/employee/journey", "GET", cookie)).json();
+    expect(closed.equipment).toMatchObject([{ received: true }, { received: true }]);
+    expect(closed.checklist.every((task: { status: string }) => task.status === "done")).toBe(true);
+    const returned = await repos.offboardings.getOffboarding(defaultOrgId, record.id);
+    expect(
+      returned?.tasks.find((task) => task.title === "Conferir os bens devolvidos")?.status,
+    ).toBe("done");
+    expect(
+      returned?.tasks.find((task) => task.title === "Agendar a coleta de equipamentos")?.status,
+    ).toBe("done");
+
+    const changeBooking = {
+      ...departure,
+      revision: 1,
+      value: { ...departure.value, booking: { ...booking, day: "2027-03-02" } },
+    };
+
+    expect((await request("/employee/state", "PUT", cookie, changeBooking)).status).toBe(422);
+    expect(await (await receipt("QA-2", false)).json()).toEqual({ received: false });
+    expect((await request("/employee/state", "PUT", cookie, changeBooking)).status).toBe(200);
+    expect(
+      (await repos.offboardings.getOffboarding(defaultOrgId, record.id))?.tasks.find(
+        (task) => task.title === "Conferir os bens devolvidos",
+      )?.status,
+    ).toBe("todo");
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, record.id, {
+        email,
+        plan: { ...plan, equipment: plan.equipment.slice(0, 1) },
+        revision: 2,
+      }),
+    ).toBe("saved");
+    expect(
+      (await repos.offboardings.getOffboarding(defaultOrgId, record.id))?.tasks.find(
+        (task) => task.title === "Conferir os bens devolvidos",
+      )?.status,
+    ).toBe("done");
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, record.id, { email, plan, revision: 3 }),
+    ).toBe("saved");
+    expect(
+      (await repos.offboardings.getOffboarding(defaultOrgId, record.id))?.tasks.find(
+        (task) => task.title === "Conferir os bens devolvidos",
+      )?.status,
+    ).toBe("todo");
+
+    const office = {
+      ...departure,
+      revision: 2,
+      value: {
+        ...departure.value,
+        feedback: null,
+        booking: { method: "office", day: "2027-03-02", slot: "afternoon" } as const,
+      },
+    };
+
+    expect((await request("/employee/state", "PUT", cookie, office)).status).toBe(200);
+    expect(await (await portal(inventory + "/address")).json()).toEqual({
+      address: plan.officeAddress,
+    });
+
+    const racingApp = createApp(webOrigin, repos, {
+      auth: {
+        ...employeeAuth,
+        async resolveEmployee(headers) {
+          const principal = await employeeAuth.resolveEmployee(headers);
+
+          if (principal)
+            await repos.employee.saveSettings(defaultOrgId, record.id, {
+              email: null,
+              plan,
+              revision: 4,
+            });
+
+          return principal;
+        },
+      },
+    });
+
+    const raced = await racingApp.handle(
+      new Request(webOrigin + "/api" + taskPath + manual.id, {
+        method: "PATCH",
+        headers: {
+          origin: webOrigin,
+          cookie,
+          [employeeGrantHeader]: grants.get(cookie) ?? "",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ done: false }),
+      }),
+    );
+
+    expect(raced.status).toBe(401);
+    expect(
+      (await repos.offboardings.getOffboarding(defaultOrgId, record.id))?.tasks.find(
+        (task) => task.id === confirm.id,
+      )?.status,
+    ).toBe("todo");
+    expect(await (await portal(inventory + "/address")).json()).toEqual({ address: null });
   });
 
   it("separates employee sessions from HR and shares confirmed, revisioned progress only with the owner", async () => {

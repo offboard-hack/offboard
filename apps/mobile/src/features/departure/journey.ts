@@ -15,6 +15,7 @@ import {
 export function getJourney(state: Departure, plan: ReturnType<typeof useDeparturePlan>) {
   const { departure, equipment, handoff, demo } = plan;
   const shared = getHandoffCount(state, handoff);
+  const equipmentReceived = equipment.length > 0 && equipment.every((item) => item.received);
 
   const steps = [
     {
@@ -33,13 +34,15 @@ export function getJourney(state: Departure, plan: ReturnType<typeof useDepartur
       href: "/equipamentos",
       icon: Package01Icon,
       title: "Devolver equipamentos",
-      description: state.booking
-        ? `Agendado · ${getBookingDescription(state.booking)}`
-        : equipment.length
-          ? `Escolha como devolver · ${equipment.length} itens`
-          : "Nenhum item informado pelo RH",
-      complete: false,
-      waiting: equipment.length === 0,
+      description: equipmentReceived
+        ? "Recebimento confirmado"
+        : state.booking
+          ? `Agendado · ${getBookingDescription(state.booking)}`
+          : equipment.length
+            ? `Escolha como devolver · ${equipment.length} itens`
+            : "Nenhum item informado pelo RH",
+      complete: equipmentReceived,
+      waiting: equipment.length === 0 || (state.booking !== null && !equipmentReceived),
     },
     {
       href: "/exame",

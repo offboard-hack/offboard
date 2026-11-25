@@ -8,13 +8,7 @@ type CaseDetail = Treaty.Data<ReturnType<ApiClient["api"]["offboardings"]>["get"
 
 export type Task = CaseDetail["tasks"][number];
 
-export type PersonAsset = {
-  item: string;
-  tag: string;
-  status: "withPerson" | "scheduled" | "transit" | "received" | "failed";
-};
-
-export type OffboardingCase = CaseDetail & { assets?: PersonAsset[] };
+export type OffboardingCase = CaseDetail;
 
 export const offboardingDepartments = [
   "Marketing",
@@ -176,4 +170,16 @@ export function taskTrackingQuery(taskId: string) {
     },
     staleTime: 60_000,
   });
+}
+
+export async function applyCaseChecklist(caseId: string) {
+  const { data, error, status } = await getApiClient()
+    .api.offboardings({ id: caseId })
+    .checklist.post();
+
+  if (status === 409) throw new Error("Este desligamento já tem um checklist.");
+
+  if (error) throw new Error("Não foi possível aplicar o checklist. Tente novamente.");
+
+  return data;
 }

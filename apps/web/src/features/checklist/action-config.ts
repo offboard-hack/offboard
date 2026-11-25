@@ -8,8 +8,6 @@ const kinds = ["email", "slack", "webhook"] as const;
 
 export type ActionConfigRow = Treaty.Data<ApiClient["api"]["action-configs"]["get"]>[number];
 
-type NewActionConfig = Parameters<ApiClient["api"]["action-configs"]["post"]>[0];
-
 async function listActionConfigs({ signal }: { signal: AbortSignal }) {
   const { data, error } = await getApiClient().api["action-configs"].get({ fetch: { signal } });
 
@@ -24,84 +22,17 @@ export const actionConfigsQuery = queryOptions({
   staleTime: 30_000,
 });
 
-async function checkWrite(request: Promise<{ error: object | null }>) {
-  const { error } = await request;
-
-  if (error) throw new Error("Failed to save action config");
-}
-
-function desiredConfigs(steps: ChecklistStep[]) {
-  return new Map<string, Pick<NewActionConfig, "phase" | "config">>(
-    steps.flatMap((step) =>
-      kinds.flatMap((kind) => {
-        const config = step[kind];
-
-        return config
-          ? [[`${kind}:${step.id}`, { phase: step.phase, config: { ...config } }] as const]
-          : [];
-      }),
-    ),
-  );
+export function checklistActionConfigsQuery(orgId: string) {
+  return queryOptions({
+    ...actionConfigsQuery,
+    queryKey: [...actionConfigsQuery.queryKey, orgId],
+  });
 }
 
 export function knownActionRowIds(steps: ChecklistStep[], rows: ActionConfigRow[]) {
-  const actions = desiredConfigs(steps);
+  const ids = new Set(steps.flatMap((step) => kinds.map((kind) => `${kind}:${step.id}`)));
 
-  return rows.flatMap(({ id, actionId }) => (actions.has(actionId) ? [id] : []));
-}
-
-export async function syncActionConfigs(
-  steps: ChecklistStep[],
-  existing: ActionConfigRow[],
-  knownRowIds: readonly string[],
-) {
-  const api = getApiClient().api["action-configs"];
-  const desired = desiredConfigs(steps);
-  const current = new Map(existing.map((row) => [row.actionId, row]));
-
-  const stepsById = new Map(steps.map((step) => [step.id, step]));
-  const knownRows = new Set(knownRowIds);
-
-  const removals = existing.flatMap(({ id, actionId }) => {
-    const kind = kinds.find((kind) => actionId.startsWith(`${kind}:`));
-
-    if (!kind || !knownRows.has(id)) return [];
-
-    const step = stepsById.get(actionId.slice(kind.length + 1));
-
-    return !step || step[kind] === null
-      ? [checkWrite(api({ id: encodeURIComponent(id) }).delete())]
-      : [];
-  });
-
-  async function createConfig(body: NewActionConfig) {
-    const { data, error } = await api.post(body);
-
-    if (error) throw new Error("Failed to save action config");
-
-    return data.id;
-  }
-
-  const writes = [...desired].flatMap<Promise<string | void>>(([actionId, { phase, config }]) => {
-    const row = current.get(actionId);
-
-    if (!row) return [createConfig({ actionId, phase, enabled: true, config })];
-
-    const unchanged = row.phase === phase && JSON.stringify(row.config) === JSON.stringify(config);
-
-    return unchanged
-      ? []
-      : [checkWrite(api({ id: encodeURIComponent(row.id) }).put({ phase, config }))];
-  });
-
-  const results = await Promise.allSettled([...removals, ...writes]);
-
-  return {
-    createdRowIds: results.flatMap((result) =>
-      result.status === "fulfilled" && result.value ? [result.value] : [],
-    ),
-    failed: results.some(({ status }) => status === "rejected"),
-  };
+  return rows.flatMap(({ id, actionId }) => (ids.has(actionId) ? [id] : []));
 }
 
 function editedAction<T>(previous: T | null | undefined, next: T | null) {
@@ -116,15 +47,6 @@ export function mergeStepSettings(step: ChecklistStep, settings: StepSettings) {
     slack: editedAction(step.slack, settings.slack),
     webhook: editedAction(step.webhook, settings.webhook),
   } satisfies ChecklistStep;
-}
-
-export function clearSyncedRemovals(steps: ChecklistStep[]) {
-  return steps.map<ChecklistStep>((step) => ({
-    ...step,
-    email: step.email ?? undefined,
-    slack: step.slack ?? undefined,
-    webhook: step.webhook ?? undefined,
-  }));
 }
 
 export function applyActionConfigs(steps: ChecklistStep[], rows: ActionConfigRow[]) {

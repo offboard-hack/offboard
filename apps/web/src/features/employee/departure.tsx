@@ -17,9 +17,15 @@ import {
 import { revalidateLogic, useForm } from "@tanstack/react-form";
 import { Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
-import { type EmployeeAccount, type EmployeeJourney, useEmployeeWrite } from "@/entities/employee";
+import {
+  type EmployeeAccount,
+  type EmployeeJourney,
+  useEmployeeChecklistWrite,
+  useEmployeeWrite,
+} from "@/entities/employee";
 import { todayAtWorkspace } from "@/entities/offboarding";
 import { PortalFilter } from "@/shared/ui/select";
+import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
 import { Checkbox } from "@/shared/ui/shadcn/checkbox";
 import { Input } from "@/shared/ui/shadcn/input";
@@ -55,6 +61,10 @@ export function DepartureOverview({
 }) {
   const { plan } = journey;
   const { booking, handoffCompleted, examAttended, feedback } = state.value;
+
+  const equipmentReceived =
+    journey.equipment.length > 0 && journey.equipment.every((item) => item.received);
+
   const reviewed = plan.handoff.filter(({ id }) => handoffCompleted.includes(id)).length;
   const examCanBeConfirmed = plan.exam && plan.exam.day <= todayAtWorkspace();
 
@@ -77,12 +87,18 @@ export function DepartureOverview({
       to: "equipamentos",
       icon: Package01Icon,
       title: "Devolver equipamentos",
-      status: booking || plan.equipment.length === 0 ? "tracking" : "pending",
-      description: booking
-        ? `Agendado para ${employeeDate(booking.day, dayFormat)}`
-        : plan.equipment.length === 1
-          ? "1 equipamento informado"
-          : `${plan.equipment.length} equipamentos informados`,
+      status: equipmentReceived
+        ? "completed"
+        : booking || journey.equipment.length === 0
+          ? "tracking"
+          : "pending",
+      description: equipmentReceived
+        ? "Recebimento confirmado"
+        : booking
+          ? `Agendado para ${employeeDate(booking.day, dayFormat)}`
+          : journey.equipment.length === 1
+            ? "1 equipamento informado"
+            : `${journey.equipment.length} equipamentos informados`,
     },
     {
       to: "exame",
@@ -152,6 +168,81 @@ export function DepartureOverview({
 
 type DepartureProps = { account: EmployeeAccount; journey: EmployeeJourney; state: DepartureState };
 
+export function EmployeeChecklist({
+  account,
+  journey,
+}: Pick<DepartureProps, "account" | "journey">) {
+  const write = useEmployeeChecklistWrite(account);
+
+  if (journey.checklist.length === 0) return null;
+
+  return (
+    <EmployeePanel title="Checklist do desligamento">
+      <ul className="divide-y">
+        {journey.checklist.map((item) => {
+          const completed = item.status === "done";
+
+          const label = (
+            <span className="min-w-0">
+              <span className="block font-bold wrap-anywhere">{item.title}</span>
+              {item.description ? (
+                <span className="block text-muted-foreground wrap-anywhere">
+                  {item.description}
+                </span>
+              ) : null}
+              {item.dueDate ? (
+                <time className="block text-sm text-muted-foreground" dateTime={item.dueDate}>
+                  Prazo até {employeeDate(item.dueDate, dayFormat)}
+                </time>
+              ) : null}
+            </span>
+          );
+
+          return (
+            <li key={item.id} className="py-2">
+              {item.action === "check" ? (
+                <label className="flex min-h-11 items-center gap-3">
+                  <Checkbox
+                    checked={completed}
+                    disabled={write.isPending}
+                    onCheckedChange={(done) => write.mutate({ taskId: item.id, done })}
+                  />
+                  {label}
+                </label>
+              ) : (
+                <Link
+                  className="flex min-h-11 items-center justify-between gap-3 rounded-md hover:underline"
+                  to="/colaborador"
+                  search={{ tela: item.action === "equipment" ? "equipamentos" : "feedback" }}
+                >
+                  {label}
+                  {completed ? (
+                    <Badge variant="status-success">Concluída</Badge>
+                  ) : (
+                    <HugeiconsIcon
+                      icon={ArrowRight01Icon}
+                      className="size-4 shrink-0"
+                      aria-hidden="true"
+                    />
+                  )}
+                </Link>
+              )}
+              {write.variables?.taskId === item.id ? (
+                <EmployeeError message={write.error?.message} />
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      {write.isPending ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          Salvando…
+        </p>
+      ) : null}
+    </EmployeePanel>
+  );
+}
+
 export function Handoff({ account, journey, state }: DepartureProps) {
   const write = useEmployeeWrite(account);
   const { handoff } = journey.plan;
@@ -215,12 +306,20 @@ export function Handoff({ account, journey, state }: DepartureProps) {
 export function Equipment({ account, journey, state }: DepartureProps) {
   const [editing, setEditing] = useState(false);
   const { booking } = state.value;
-  const { bookingDays, equipment, officeAddress } = journey.plan;
-  const canBook = equipment.length > 0 && bookingDays.length > 0;
+  const { bookingDays, officeAddress } = journey.plan;
+  const { equipment } = journey;
+  const pending = equipment.filter((item) => !item.received).length;
+  const allReceived = equipment.length > 0 && pending === 0;
+  const canBook = pending > 0 && bookingDays.length > 0;
 
   return (
     <div className="space-y-5">
-      {booking && !editing ? (
+      {allReceived ? (
+        <EmployeePanel title="Devolução concluída">
+          <p>A equipe confirmou o recebimento de todos os bens.</p>
+        </EmployeePanel>
+      ) : null}
+      {booking && pending > 0 && (!editing || !canBook) ? (
         <EmployeePanel
           title="Devolução agendada"
           description={booking.method === "pickup" ? "Coleta em casa" : "Entrega no escritório"}
@@ -239,17 +338,24 @@ export function Equipment({ account, journey, state }: DepartureProps) {
           ) : null}
         </EmployeePanel>
       ) : null}
-      <EmployeePanel title={`Itens para devolver (${equipment.length})`}>
+      <EmployeePanel title={`Bens vinculados (${equipment.length})`}>
         {equipment.length === 0 ? (
           <EmployeeEmpty>Nenhum equipamento informado pelo RH.</EmployeeEmpty>
         ) : null}
         <ul className="divide-y">
           {equipment.map((item) => (
-            <li key={item.code} className="py-3">
-              <p className="font-bold">{item.title}</p>
-              <p className="text-sm text-muted-foreground">
-                {[item.model, item.code].filter(Boolean).join(" · ")}
-              </p>
+            <li key={item.code} className="flex items-center justify-between gap-3 py-3">
+              <div className="min-w-0">
+                <p className="font-bold wrap-anywhere">{item.title}</p>
+                <p className="text-sm wrap-anywhere text-muted-foreground">
+                  {[item.model, item.code].filter(Boolean).join(" · ")}
+                </p>
+              </div>
+              {item.received ? (
+                <Badge variant="status-success" className="shrink-0">
+                  Recebido
+                </Badge>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -261,7 +367,7 @@ export function Equipment({ account, journey, state }: DepartureProps) {
           state={state}
           close={() => setEditing(false)}
         />
-      ) : equipment.length > 0 && !canBook ? (
+      ) : pending > 0 && !canBook ? (
         <p className="text-sm text-muted-foreground">
           O RH ainda não disponibilizou datas para devolução.
         </p>

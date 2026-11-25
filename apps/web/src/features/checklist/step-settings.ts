@@ -1,4 +1,4 @@
-import { offboardingDepartments, type CaseSummary } from "@/entities/offboarding";
+import { offboardingDepartments } from "@/entities/offboarding";
 import { z } from "zod";
 
 const stepRuleSchema = z
@@ -39,17 +39,6 @@ export const stepFormSchema = z.object({
 });
 
 export type StepSettings = z.infer<typeof stepFormSchema>;
-
-type Rule = StepSettings["rules"][number];
-
-export function matchesStepRules(rules: Rule[], person: Pick<CaseSummary, "department" | "role">) {
-  return rules.every(({ field, operator, value }) => {
-    const matches =
-      person[field].trim().localeCompare(value.trim(), "pt-BR", { sensitivity: "base" }) === 0;
-
-    return operator === "equals" ? matches : !matches;
-  });
-}
 
 export function sameStepSettings(previous: StepSettings, next: StepSettings) {
   return (

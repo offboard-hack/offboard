@@ -7,6 +7,8 @@ type EmployeeJourney = Treaty.Data<
   ReturnType<typeof getEmployeeApi>["api"]["employee"]["journey"]["get"]
 >;
 
+export const employeeJourneyQueryKey = ["employee-journey"] as const;
+
 const JourneyContext = createContext<EmployeeJourney | null>(null);
 
 export function EmployeeJourneyProvider({

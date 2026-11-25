@@ -3,6 +3,47 @@ import { and, asc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { employeeAccess, offboardingCases, subtasks, tasks } from "@offboard/db/schema";
 import { emptyEmployeePlan } from "@offboard/employee";
 
+import { checklistPhases, type ChecklistLayout } from "../../shared/checklist.js";
+
+function checklistTasks(
+  orgId: string,
+  caseId: string,
+  person: Omit<NewOffboarding, "email">,
+  layout: ChecklistLayout,
+) {
+  const ordered = checklistPhases.flatMap((phase) => layout.filter((step) => step.phase === phase));
+
+  return ordered
+    .filter(
+      (step) =>
+        step.rules?.every(({ field, operator, value }) => {
+          const matches =
+            person[field].trim().localeCompare(value, "pt-BR", { sensitivity: "base" }) === 0;
+
+          return operator === "equals" ? matches : !matches;
+        }) ?? true,
+    )
+    .map(({ id, title, team, phase, deadlineOffset }, position) => {
+      let dueDate: string | null = null;
+
+      if (deadlineOffset != null) {
+        const date = new Date(person.deadline + "T00:00:00Z");
+        date.setUTCDate(date.getUTCDate() + deadlineOffset);
+        dueDate = date.toISOString().slice(0, 10);
+      }
+
+      return { orgId, caseId, title, team, phase, position, dueDate, checklistStepId: id };
+    });
+}
+
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+async function insertTasks(tx: Transaction, caseTasks: ReturnType<typeof checklistTasks>) {
+  for (let index = 0; index < caseTasks.length; index += 1_000) {
+    await tx.insert(tasks).values(caseTasks.slice(index, index + 1_000));
+  }
+}
+
 type TaskStatus = (typeof tasks.$inferSelect)["status"];
 
 type NewOffboarding = Pick<
@@ -103,7 +144,11 @@ export function createOffboardingsRepository(db: Database) {
     return rows.map(serializeOffboarding);
   }
 
-  async function createOffboarding(orgId: string, data: NewOffboarding) {
+  async function createOffboarding(
+    orgId: string,
+    data: NewOffboarding,
+    layout: ChecklistLayout = [],
+  ) {
     const { email, ...caseData } = data;
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -120,11 +165,18 @@ export function createOffboardingsRepository(db: Database) {
         plan: emptyEmployeePlan,
       });
 
-      return { id: inserted.id, ...caseData, completed: 0, total: 0 };
+      const caseTasks = checklistTasks(orgId, inserted.id, caseData, layout);
+      await insertTasks(tx, caseTasks);
+
+      return { id: inserted.id, ...caseData, completed: 0, total: caseTasks.length };
     });
   }
 
-  async function bulkCreateOffboardings(orgId: string, rows: BulkOffboardingRow[]) {
+  async function bulkCreateOffboardings(
+    orgId: string,
+    rows: BulkOffboardingRow[],
+    layout: ChecklistLayout = [],
+  ) {
     if (rows.length === 0) return [];
     const deadline = defaultDeadline();
 
@@ -134,21 +186,63 @@ export function createOffboardingsRepository(db: Database) {
       deadline,
     }));
 
-    const inserted = await db
-      .insert(offboardingCases)
-      .values(values.map((value) => ({ ...value, orgId })))
-      .returning({ id: offboardingCases.id });
+    return db.transaction(async (tx) => {
+      const inserted = await tx
+        .insert(offboardingCases)
+        .values(values.map((value) => ({ ...value, orgId })))
+        .returning({ id: offboardingCases.id });
 
-    return inserted.map((row, i) => ({ id: row.id, ...values[i], completed: 0, total: 0 }));
+      const tasksByCase = inserted.map(({ id }, index) =>
+        checklistTasks(orgId, id, values[index], layout),
+      );
+
+      await insertTasks(tx, tasksByCase.flat());
+
+      return inserted.map(({ id }, index) => ({
+        id,
+        ...values[index],
+        completed: 0,
+        total: tasksByCase[index].length,
+      }));
+    });
+  }
+
+  async function applyChecklist(orgId: string, caseId: string, layout: ChecklistLayout) {
+    return db.transaction(async (tx) => {
+      const [record] = await tx
+        .select()
+        .from(offboardingCases)
+        .where(and(eq(offboardingCases.orgId, orgId), eq(offboardingCases.id, caseId)))
+        .for("update");
+
+      if (!record) return null;
+
+      const [existing] = await tx
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(and(eq(tasks.orgId, orgId), eq(tasks.caseId, caseId)))
+        .limit(1);
+
+      if (existing) return "has-tasks";
+
+      const caseTasks = checklistTasks(orgId, caseId, record, layout);
+      await insertTasks(tx, caseTasks);
+
+      return { total: caseTasks.length };
+    });
   }
 
   async function getTaskPhase(orgId: string, taskId: string) {
-    const [row] = await db
-      .select({ phase: tasks.phase })
-      .from(tasks)
-      .where(and(eq(tasks.id, taskId), eq(tasks.orgId, orgId)));
+    return (await getTaskAction(orgId, taskId))?.phase ?? null;
+  }
 
-    return row?.phase ?? null;
+  async function getTaskAction(orgId: string, taskId: string) {
+    const [row] = await db
+      .select({ phase: tasks.phase, stepId: tasks.checklistStepId })
+      .from(tasks)
+      .where(and(eq(tasks.orgId, orgId), eq(tasks.id, taskId)));
+
+    return row ?? null;
   }
 
   async function updateTaskStatus(orgId: string, taskId: string, status: TaskStatus) {
@@ -198,6 +292,7 @@ export function createOffboardingsRepository(db: Database) {
         orgId: tasks.orgId,
         title: tasks.title,
         phase: tasks.phase,
+        stepId: tasks.checklistStepId,
         trackingCode: tasks.trackingCode,
       })
       .from(tasks)
@@ -235,7 +330,9 @@ export function createOffboardingsRepository(db: Database) {
     getOffboarding,
     createOffboarding,
     bulkCreateOffboardings,
+    applyChecklist,
     getTaskPhase,
+    getTaskAction,
     updateTaskStatus,
     toggleSubtask,
     getTrackedTasks,

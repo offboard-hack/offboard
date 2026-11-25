@@ -37,6 +37,9 @@ variables and the Vercel production environment. The migration preserves RH
 sessions and requires collaborators with legacy sessions to sign in again.
 The updated web and mobile clients send the grant identifier with employee
 requests.
+For the checklist and equipment rollout, apply `0012_connect_employee_workflows`
+to production before setting `OFFBOARD_WORKFLOWS_SCHEMA_READY=1` in GitHub
+Actions variables and the Vercel production environment.
 For a disposable development database, `npm run seed -w @offboard/db` loads
 sample cases and replaces the team roster. Add a team row for an email
 address you control before requesting a link.

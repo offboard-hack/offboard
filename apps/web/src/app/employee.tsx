@@ -22,6 +22,7 @@ import {
 import { Career, ResumePage, ResumePreview } from "@/features/employee/career";
 import {
   DepartureOverview,
+  EmployeeChecklist,
   Equipment,
   Exam,
   Feedback,
@@ -352,7 +353,7 @@ function DepartureContent({
       label: "Bens",
       icon: Package01Icon,
       tone: "primary",
-      value: journey.plan.equipment.length,
+      value: journey.equipment.length,
     },
     {
       label: "Exame demissional",
@@ -381,7 +382,12 @@ function DepartureContent({
       content = <Feedback account={account} state={state} />;
       break;
     default:
-      content = <DepartureOverview journey={journey} state={state} home={screen === "hoje"} />;
+      content = (
+        <>
+          <EmployeeChecklist account={account} journey={journey} />
+          <DepartureOverview journey={journey} state={state} home={screen === "hoje"} />
+        </>
+      );
   }
 
   return (

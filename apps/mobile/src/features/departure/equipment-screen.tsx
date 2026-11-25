@@ -1,3 +1,7 @@
+import { useFocusEffect } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { employeeJourneyQueryKey } from "../../shared/employee-journey";
+import { useCallback } from "react";
 import Building01Icon from "@hugeicons/core-free-icons/Building01Icon";
 import CalendarCheckIn01Icon from "@hugeicons/core-free-icons/CalendarCheckIn01Icon";
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
@@ -60,6 +64,10 @@ export function EquipmentScreen() {
   const [editing, setEditing] = useState(false);
   const [editingDraft, setEditingDraft] = useState<Booking | null>(null);
 
+  const pending = equipment.filter((item) => !item.received).length;
+  const allReceived = equipment.length > 0 && pending === 0;
+  const canBook = pending > 0 && bookingDays.length > 0;
+
   function stopEditing() {
     setEditing(false);
     setEditingDraft(null);
@@ -73,6 +81,14 @@ export function EquipmentScreen() {
     storage.discardFailedWrite();
   }
 
+  const client = useQueryClient();
+
+  useFocusEffect(
+    useCallback(() => {
+      void client.invalidateQueries({ queryKey: employeeJourneyQueryKey });
+    }, [client]),
+  );
+
   return (
     <Screen>
       <View style={departureStyles.stack}>
@@ -80,7 +96,13 @@ export function EquipmentScreen() {
           title="Devolver equipamentos"
           description={`Escolha como devolver os itens da ${departure.company}.`}
         />
-        {state.booking && !editing ? (
+        {allReceived ? (
+          <Card tone="subtle">
+            <Text variant="heading">Devolução concluída</Text>
+            <Text variant="muted">A equipe confirmou o recebimento de todos os bens.</Text>
+          </Card>
+        ) : null}
+        {state.booking && pending > 0 && (!editing || !canBook) ? (
           <Card tone="subtle" style={styles.receipt}>
             <View style={styles.receiptTitle}>
               <IconBadge
@@ -112,18 +134,18 @@ export function EquipmentScreen() {
             <StorageFeedback {...storage} />
             {storage.error === bookingSaveError ? (
               <Button label="Editar agendamento" variant="secondary" onPress={editFailedBooking} />
-            ) : (
+            ) : canBook ? (
               <Button
                 label="Alterar agendamento"
                 variant="outline"
                 disabled={storage.pending || Boolean(storage.error)}
                 onPress={() => setEditing(true)}
               />
-            )}
+            ) : null}
           </Card>
         ) : null}
 
-        <Section title={`Itens para devolver (${equipment.length})`}>
+        <Section title={`Bens vinculados (${equipment.length})`}>
           {equipment.map((item, index) => (
             <View
               key={item.code}
@@ -132,25 +154,24 @@ export function EquipmentScreen() {
               <Icon name={item.icon} size={21} color={colors.primary} />
               <View style={departureStyles.copy}>
                 <Text variant="label">{item.title}</Text>
-                <Text variant="caption">
-                  {item.model} · {item.code}
-                </Text>
+                <Text variant="caption">{[item.model, item.code].filter(Boolean).join(" · ")}</Text>
+                {item.received ? (
+                  <Text variant="caption" style={departureStyles.positiveText}>
+                    Recebido
+                  </Text>
+                ) : null}
               </View>
             </View>
           ))}
         </Section>
 
         {storage.loading || storage.readFailed ? <StorageFeedback {...storage} /> : null}
-        {equipment.length === 0 || bookingDays.length === 0 ? (
+        {!allReceived && !canBook ? (
           <Card tone="subtle">
             <Text variant="muted">O RH ainda não disponibilizou datas para devolução.</Text>
           </Card>
         ) : null}
-        {equipment.length > 0 &&
-        bookingDays.length > 0 &&
-        !storage.loading &&
-        !storage.readFailed &&
-        (!state.booking || editing) ? (
+        {canBook && !storage.loading && !storage.readFailed && (!state.booking || editing) ? (
           <BookingEditor
             booking={editingDraft ?? state.booking}
             storage={storage}

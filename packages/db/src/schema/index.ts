@@ -78,6 +78,14 @@ export const employeeAccess = pgTable(
   ],
 );
 
+export const checklistModels = pgTable("checklist_models", {
+  orgId: uuid("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  revision: integer("revision").notNull(),
+  steps: jsonb("steps").$type<ConfigValue[]>().notNull(),
+});
+
 export const employeeStateKind = pgEnum("employee_state_kind", [
   "consent",
   "departure-v1",
@@ -119,6 +127,7 @@ export const tasks = pgTable(
     dueDate: date("due_date"),
     position: integer("position").notNull(),
     phase: varchar("phase", { length: 50 }),
+    checklistStepId: varchar("checklist_step_id", { length: 90 }),
     trackingCode: varchar("tracking_code", { length: 30 }),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
@@ -232,7 +241,8 @@ export const equipment = pgTable(
       .notNull()
       .references(() => offboardingCases.id, { onDelete: "cascade" }),
     item: varchar("item", { length: 255 }).notNull(),
-    tag: varchar("tag", { length: 50 }).notNull(),
+    tag: varchar("tag", { length: 255 }).notNull(),
+    fromEmployeePlan: boolean("from_employee_plan").notNull().default(false),
     returnMethod: equipmentReturnMethodEnum("return_method").notNull(),
     scheduledDate: date("scheduled_date"),
     status: equipmentStatusEnum("status").notNull(),
@@ -312,7 +322,6 @@ export const actionConfigs = pgTable(
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
-    uniqueIndex("action_configs_action_id_idx").on(table.actionId),
     uniqueIndex("action_configs_org_action_id_idx").on(table.orgId, table.actionId),
     index("action_configs_org_id_idx").on(table.orgId),
   ],

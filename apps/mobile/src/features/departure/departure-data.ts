@@ -118,7 +118,13 @@ export function useDeparturePlan() {
   const journey = useEmployeeJourney();
 
   if (!journey)
-    return { departure, equipment, handoff, bookingDays: bookingDayOptions, demo: true };
+    return {
+      departure,
+      equipment: equipment.map((item) => ({ ...item, received: false })),
+      handoff,
+      bookingDays: bookingDayOptions,
+      demo: true,
+    };
 
   const { plan } = journey;
 
@@ -133,7 +139,7 @@ export function useDeparturePlan() {
     demo: false,
     bookingDays: plan.bookingDays,
     handoff: plan.handoff,
-    equipment: plan.equipment.map((item) => ({ ...item, icon: ComputerIcon })),
+    equipment: journey.equipment.map((item) => ({ ...item, icon: ComputerIcon })),
     departure: {
       company: plan.company ?? "sua empresa",
       currentDay: new Intl.DateTimeFormat("pt-BR", {

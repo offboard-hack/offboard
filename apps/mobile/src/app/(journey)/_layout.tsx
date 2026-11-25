@@ -4,7 +4,7 @@ import Stack from "expo-router/stack";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { getEmployeeApi, useAuth } from "../../features/auth/session";
 import { useConsent } from "../../features/privacy/consent";
-import { EmployeeJourneyProvider } from "../../shared/employee-journey";
+import { employeeJourneyQueryKey, EmployeeJourneyProvider } from "../../shared/employee-journey";
 import { JourneyHeader } from "../../shared/journey-header";
 import { LocalDataProvider } from "../../shared/storage";
 import { colors } from "../../shared/theme";
@@ -43,7 +43,7 @@ function JourneyNavigator({
   const remote = grantId !== undefined;
 
   const journey = useQuery({
-    queryKey: ["employee-journey", namespace],
+    queryKey: [...employeeJourneyQueryKey, namespace],
     enabled: remote && allowed,
     staleTime: 30_000,
     queryFn: async ({ signal }) => {

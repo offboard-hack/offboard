@@ -1,8 +1,13 @@
+import { useFocusEffect } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { employeeJourneyQueryKey } from "../../shared/employee-journey";
+import { useCallback } from "react";
 import TaskDone01Icon from "@hugeicons/core-free-icons/TaskDone01Icon";
 import { StyleSheet, View } from "react-native";
 
 import { colors } from "../../shared/theme";
 import { Card, Screen, Text } from "../../shared/ui";
+import { EmployeeChecklist } from "./checklist";
 import { useDeparturePlan, useDeparture } from "./departure-data";
 import { departureStyles, IconBadge, Section, StepLink, StorageFeedback } from "./departure-ui";
 import { getJourney } from "./journey";
@@ -15,6 +20,14 @@ export function DepartureScreen() {
   const total = journey.total + 1;
   const completed = journey.complete.length + 1;
   const progress = Math.round((100 * completed) / total);
+
+  const client = useQueryClient();
+
+  useFocusEffect(
+    useCallback(() => {
+      void client.invalidateQueries({ queryKey: employeeJourneyQueryKey });
+    }, [client]),
+  );
 
   return (
     <Screen>
@@ -58,6 +71,7 @@ export function DepartureScreen() {
               </View>
             </Card>
 
+            <EmployeeChecklist />
             <Section title="Com você">
               {journey.open.length > 0 ? (
                 journey.open.map((step, index) => (

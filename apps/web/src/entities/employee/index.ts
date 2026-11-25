@@ -126,6 +126,41 @@ export function useEmployeeWrite(account: EmployeeAccount) {
     },
     onSuccess(state) {
       queryClient.setQueryData(employeeStateQuery(account, state.key).queryKey, state);
+
+      if (state.key === "departure-v1")
+        void queryClient.invalidateQueries({ queryKey: employeeJourneyQuery(account).queryKey });
+    },
+  });
+}
+
+export function useEmployeeChecklistWrite(account: EmployeeAccount) {
+  const client = useQueryClient();
+
+  return useMutation({
+    async mutationFn({ taskId, done }: { taskId: string; done: boolean }) {
+      const result = await getApiClient()
+        .api.employee.checklist({ taskId })
+        .patch({ done }, { headers: accessHeaders(account) });
+
+      checkEmployeeAccess(result.status);
+
+      if (result.error) throw new Error("Não foi possível atualizar a etapa. Tente novamente.");
+
+      return result.data;
+    },
+    onSuccess(task) {
+      client.setQueryData(
+        employeeJourneyQuery(account).queryKey,
+        (journey) =>
+          journey && {
+            ...journey,
+            checklist: journey.checklist.map((item) =>
+              item.id === task.id ? { ...item, status: task.status } : item,
+            ),
+          },
+      );
+
+      return client.invalidateQueries({ queryKey: employeeJourneyQuery(account).queryKey });
     },
   });
 }
