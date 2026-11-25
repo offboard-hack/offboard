@@ -3783,6 +3783,7 @@ describe.skipIf(!url)("api", () => {
           );
 
           await reject(instance, id, jobId, { reason: "other", note: "   " });
+          await reject(instance, id, jobId, { reason: "other", note: null });
 
           expect(await db.select().from(jobRejections)).toMatchObject([
             { reason: "other", note: null },
@@ -3849,6 +3850,23 @@ describe.skipIf(!url)("api", () => {
               { reason: "company", count: 1 },
             ],
           });
+        });
+
+        it("returns booleans when the fit is unknown in SQL", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          await openJob("Estranha", { workModel: null, state: "RJ" });
+          await db.insert(talentPreferences).values({
+            profileId: id,
+            jobPreferences: { locations: [{ state: "SP", city: null }] },
+          });
+
+          const body = await (await request(instance, id, "/me/jobs")).json();
+
+          expect(
+            body.items.map((item: { fitsPreferences: boolean }) => item.fitsPreferences),
+          ).toEqual([false]);
         });
 
         it("flags and ranks the jobs that fit the stored preferences", async () => {

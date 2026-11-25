@@ -62,7 +62,7 @@ export function rejectionsRoutes(repos: RejectionsRepository, talentAccess: Tale
       {
         talent: "active",
         params: t.Object({ jobId: t.String() }),
-        body: t.Object({ reason, note: t.Optional(t.String()) }),
+        body: t.Object({ reason, note: t.Optional(t.Union([t.String(), t.Null()])) }),
         response: { 204: t.Void(), 404: errorResponse, 422: errorResponse },
         error: ({ code, status }) => (code === "VALIDATION" ? status(422, invalid) : undefined),
       },

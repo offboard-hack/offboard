@@ -1,13 +1,7 @@
 import type { Database } from "@offboard/db/client";
-import {
-  jobMatches,
-  jobRejections,
-  jobs,
-  resumes,
-  talentPreferences,
-  talentProfiles,
-} from "@offboard/db/schema";
+import { jobMatches, jobs, resumes, talentPreferences, talentProfiles } from "@offboard/db/schema";
 import { and, asc, desc, eq, gte, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
+import { notRejectedBy } from "../../shared/not-rejected.js";
 import { toPreferences } from "../../shared/talent-preferences.js";
 import type { MatchJob, MatchResult } from "./score.js";
 
@@ -32,11 +26,7 @@ const vector = sql`to_tsvector('portuguese', ${jobs.title} || ' ' || ${jobs.desc
 
 const newest = [sql`${jobs.postedAt} desc nulls last`, desc(jobs.createdAt), asc(jobs.id)];
 
-const openFor = (profileId: string) =>
-  and(
-    isNull(jobs.closedAt),
-    sql`not exists (select 1 from ${jobRejections} where ${jobRejections.profileId} = ${profileId} and ${jobRejections.jobId} = ${jobs.id})`,
-  );
+const openFor = (profileId: string) => and(isNull(jobs.closedAt), notRejectedBy(profileId));
 
 const saoPauloOffsetMs = 3 * 60 * 60_000;
 

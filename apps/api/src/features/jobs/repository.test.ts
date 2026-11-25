@@ -368,7 +368,7 @@ describe.skipIf(!url)("jobs repository", () => {
         expect(await fits()).toEqual({
           "sp-city": true,
           "sp-other": false,
-          "sp-nocity": false,
+          "sp-nocity": true,
           rj: false,
           "rj-remote": true,
           nowhere: true,
@@ -385,6 +385,25 @@ describe.skipIf(!url)("jobs repository", () => {
           .set({ jobPreferences: { locations: [{ city: null, state: "SP" }], relocate: true } });
 
         expect(await fits()).toMatchObject({ rj: true });
+      });
+
+      it("returns a real boolean for an unknown work model in an unlisted state", async () => {
+        await insert("odd", { workModel: null, state: "RJ" });
+        await prefer({ locations: [{ state: "SP", city: null }] });
+
+        const result = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
+
+        expect(result.items.map((job) => job.fitsPreferences)).toEqual([false]);
+      });
+
+      it("ignores a stored location without a city", async () => {
+        await insert("sp", { workModel: "onsite", state: "SP", city: "Campinas" });
+        await insert("rj", { workModel: "onsite", state: "RJ" });
+        await db.execute(
+          sql`insert into talent_preferences (profile_id, job_preferences) values (${profileId}, '{"locations":[{"state":"SP"}]}'::jsonb)`,
+        );
+
+        expect(await fits()).toEqual({ sp: true, rj: false });
       });
 
       it("excludes companies case-insensitively", async () => {

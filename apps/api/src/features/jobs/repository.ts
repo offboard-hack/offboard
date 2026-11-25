@@ -1,25 +1,7 @@
 import type { Database } from "@offboard/db/client";
-import {
-  applications,
-  jobMatches,
-  jobRejections,
-  jobs,
-  resumes,
-  talentPreferences,
-} from "@offboard/db/schema";
-import {
-  and,
-  count,
-  desc,
-  eq,
-  getTableColumns,
-  gte,
-  inArray,
-  isNull,
-  notInArray,
-  or,
-  sql,
-} from "drizzle-orm";
+import { applications, jobMatches, jobs, resumes, talentPreferences } from "@offboard/db/schema";
+import { and, count, desc, eq, getTableColumns, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import { notRejectedBy } from "../../shared/not-rejected.js";
 import { toPreferences } from "../../shared/talent-preferences.js";
 
 type WorkModel = "remote" | "hybrid" | "onsite";
@@ -68,12 +50,12 @@ function fitsExpression(preferences: ReturnType<typeof toPreferences>["jobPrefer
   const placesFit = or(
     sql`${jobs.workModel} = 'remote'`,
     isNull(jobs.state),
-    ...locations.map((location) =>
+    ...locations.map(({ state, city }) =>
       and(
-        sql`lower(${jobs.state}) = ${location.state.toLowerCase()}`,
-        location.city === null
+        sql`lower(${jobs.state}) = lower(${state})`,
+        (city ?? null) === null
           ? undefined
-          : sql`lower(trim(coalesce(${jobs.city}, ''))) = ${location.city.trim().toLowerCase()}`,
+          : sql`(${jobs.city} is null or lower(trim(${jobs.city})) = lower(trim(${city})))`,
       ),
     ),
   );
@@ -85,16 +67,16 @@ function fitsExpression(preferences: ReturnType<typeof toPreferences>["jobPrefer
     locations.length === 0 || relocate ? undefined : placesFit,
     excludedCompanies.length === 0
       ? undefined
-      : notInArray(
-          sql`lower(trim(${jobs.company}))`,
-          excludedCompanies.map((company) => company.trim().toLowerCase()),
-        ),
+      : sql`lower(trim(${jobs.company})) not in (${sql.join(
+          excludedCompanies.map((company) => sql`lower(trim(${company}))`),
+          sql`, `,
+        )})`,
     salaryFloorCents === null
       ? undefined
       : or(isNull(jobs.salaryMaxCents), gte(jobs.salaryMaxCents, salaryFloorCents)),
   );
 
-  return sql<boolean>`(${fits ?? sql`true`})`;
+  return sql<boolean>`coalesce((${fits ?? sql`true`}), false)`;
 }
 
 export function createJobsRepository(db: Database) {
@@ -111,7 +93,7 @@ export function createJobsRepository(db: Database) {
 
     const where = and(
       isNull(jobs.closedAt),
-      sql`not exists (select 1 from ${jobRejections} where ${jobRejections.profileId} = ${profileId} and ${jobRejections.jobId} = ${jobs.id})`,
+      notRejectedBy(profileId),
       filter.workModel === undefined ? undefined : eq(jobs.workModel, filter.workModel),
     );
 
@@ -142,7 +124,7 @@ export function createJobsRepository(db: Database) {
         )
         .where(where)
         .orderBy(
-          sql`(${fits}) is true desc`,
+          sql`${fits} desc`,
           sql`(${jobMatches.score} is null)`,
           sql`${jobMatches.score} desc`,
           sql`${jobs.postedAt} desc nulls last`,
