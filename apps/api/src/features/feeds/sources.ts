@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { decodeEntities, htmlToText } from "../../shared/html-text.js";
-import { parsePublicUrl } from "../../shared/page-text.js";
+import { parsePublicUrl } from "./public-url.js";
 import { discardBody, readCapped } from "../../shared/response-body.js";
 import { sanitizeText, storableClip } from "../../shared/storable-text.js";
 import { mentionsBrazil, parseLocation, workModelFrom } from "./normalize.js";

@@ -30,13 +30,11 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.ts";
-import { jobDraftSchema } from "./features/jobs/extract.js";
 import type { GenerateStructured } from "./shared/ai.js";
 import { diskStorage } from "./shared/disk-storage.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
 import { zipSync } from "fflate";
 import { PDFArray, PDFDocument, PDFRawStream, decodePDFRawStream } from "pdf-lib";
-import type { FetchPageResult } from "./shared/page-text.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -588,25 +586,12 @@ describe.skipIf(!url)("api", () => {
     });
 
     it("restricts aggregates to admin and rh", async () => {
-      await db.insert(jobs).values({
-        origin: "hr",
-        source: "hr-link",
-        sourceKey: "https://jobs.example.com/agregados",
-        title: "Analista de Dados",
-        company: "Acme",
-        url: "https://jobs.example.com/agregados",
-        postedAt: new Date("2026-11-20T12:00:00Z"),
-      });
-
       const expected = {
         enabled: 0,
         activated: null,
         funnel: { sent: null, responded: null, interviews: null, offers: null },
         hiresShared: null,
         topJobs: [],
-        sharedJobs: [
-          { title: "Analista de Dados", company: "Acme", sharedAt: "2026-11-20T12:00:00.000Z" },
-        ],
       };
 
       for (const session of ["admin", "rh"]) {
@@ -625,173 +610,6 @@ describe.skipIf(!url)("api", () => {
     });
 
     describe("jobs catalog", () => {
-      const extracted = {
-        isJobPosting: true,
-        title: "Engenheira de Software",
-        company: "Acme",
-        workModel: "remote",
-        city: "São Paulo",
-        state: "SP",
-        salaryMinCents: 800000,
-        salaryMaxCents: 1200000,
-        description: "Descrição da vaga",
-      };
-
-      function jobsApp(
-        overrides: { generate?: GenerateStructured | null; page?: FetchPageResult } = {},
-      ) {
-        const calls = { generate: 0, fetch: 0 };
-
-        const generate: GenerateStructured = async ({ schema }) => {
-          calls.generate += 1;
-
-          return schema.parse(extracted);
-        };
-
-        const fetchPage = async (pageUrl: URL) => {
-          calls.fetch += 1;
-
-          return overrides.page ?? { url: pageUrl, text: "Vaga de engenharia" };
-        };
-
-        const instance = createApp(webOrigin, repos, {
-          ...appOptions,
-          generateStructured:
-            overrides.generate === null ? undefined : (overrides.generate ?? generate),
-          fetchPage,
-        });
-
-        function share(session: string, shareUrl: string) {
-          return instance.handle(
-            new Request("http://localhost/api/jobs/share", {
-              method: "POST",
-              headers: {
-                "x-test-session": session,
-                origin: webOrigin,
-                "content-type": "application/json",
-              },
-              body: JSON.stringify({ url: shareUrl }),
-            }),
-          );
-        }
-
-        return { calls, share };
-      }
-
-      it("shares a job by link", async () => {
-        const { calls, share } = jobsApp();
-        const created = await share("rh", "https://jobs.example.com/vaga-1");
-
-        expect(created.status).toBe(201);
-        expect(await created.json()).toMatchObject({
-          origin: "hr",
-          title: "Engenheira de Software",
-          company: "Acme",
-          workModel: "remote",
-          url: "https://jobs.example.com/vaga-1",
-        });
-        expect(calls).toEqual({ generate: 1, fetch: 1 });
-
-        const again = await share("rh", "https://jobs.example.com/vaga-1?utm_source=x");
-
-        expect(again.status).toBe(200);
-        expect(calls).toEqual({ generate: 1, fetch: 1 });
-        expect((await again.json()).id).toBe(
-          (await (await share("admin", "https://jobs.example.com/vaga-1")).json()).id,
-        );
-        expect((await share("visualizador", "https://jobs.example.com/vaga-2")).status).toBe(403);
-      });
-
-      it("returns the existing job when a concurrent share wins the race", async () => {
-        const { share } = jobsApp({
-          generate: async ({ schema }) => {
-            const { isJobPosting: _ignored, ...draft } = jobDraftSchema.parse(extracted);
-
-            await repos.jobs.createShared({
-              ...draft,
-              url: "https://jobs.example.com/race",
-              sourceKey: "https://jobs.example.com/race",
-            });
-
-            return schema.parse(extracted);
-          },
-        });
-
-        expect((await share("rh", "https://jobs.example.com/race")).status).toBe(200);
-      });
-
-      it("rejects pages that are not job postings", async () => {
-        const { share } = jobsApp({
-          generate: async ({ schema }) => schema.parse({ ...extracted, isJobPosting: false }),
-        });
-
-        const response = await share("rh", "https://blog.example.com/post");
-
-        expect(response.status).toBe(422);
-        expect(await response.json()).toEqual({ error: "Page is not a job posting" });
-        expect(
-          await repos.jobs.findBySource("hr-link", "https://blog.example.com/post"),
-        ).toBeUndefined();
-      });
-
-      it("reports unreadable pages, invalid urls and missing AI", async () => {
-        const unreachable = jobsApp({ page: "unreachable" });
-        const failed = await unreachable.share("rh", "https://jobs.example.com/down");
-
-        expect(failed.status).toBe(502);
-        expect(await failed.json()).toEqual({ error: "Could not read the job page" });
-
-        const invalidPage = jobsApp({ page: "invalid_url" });
-
-        expect((await invalidPage.share("rh", "https://jobs.example.com/redirect")).status).toBe(
-          422,
-        );
-
-        const insecure = jobsApp();
-        const rejected = await insecure.share("rh", "http://jobs.example.com/vaga");
-
-        expect(rejected.status).toBe(422);
-        expect(await rejected.json()).toEqual({ error: "Invalid job url" });
-        expect(insecure.calls.fetch).toBe(0);
-
-        const noAi = jobsApp({ generate: null });
-        const unavailable = await noAi.share("rh", "https://jobs.example.com/no-ai");
-
-        expect(unavailable.status).toBe(503);
-        expect(await unavailable.json()).toEqual({ error: "AI not configured" });
-        expect(noAi.calls.fetch).toBe(0);
-      });
-
-      it("rejects urls whose normalized form is too long before fetching", async () => {
-        const { calls, share } = jobsApp();
-        const longUrl = `https://jobs.example.com/${"ã".repeat(600)}`;
-
-        expect(longUrl.length).toBeLessThanOrEqual(2048);
-
-        const response = await share("rh", longUrl);
-
-        expect(response.status).toBe(422);
-        expect(await response.json()).toEqual({ error: "Invalid job url" });
-        expect(calls).toEqual({ generate: 0, fetch: 0 });
-      });
-
-      it("reports extraction failures as a bad gateway", async () => {
-        const logged = vi.spyOn(console, "error");
-
-        const { share } = jobsApp({
-          generate: ({ prompt }) => Promise.reject(leakyError(prompt)),
-        });
-
-        const response = await share("rh", "https://jobs.example.com/llm-down");
-
-        expect(response.status).toBe(502);
-        expect(await response.json()).toEqual({ error: "Could not extract the job" });
-        expect(logged.mock.calls).toEqual([
-          ["job extraction failed", { name: "Error", message: "gateway down" }],
-        ]);
-        logged.mockRestore();
-      });
-
       it("guards the job list with active talent access", async () => {
         const caseId = await firstCaseId();
         const created = await repos.talent.enable({ caseId, personalEmail, sponsoredUntil });
@@ -3017,147 +2835,6 @@ describe.skipIf(!url)("api", () => {
         expect(await matchJobs()).toMatchObject([{ subject: id, status: "pending" }]);
       });
 
-      const sharedJob = {
-        isJobPosting: true,
-        title: "Engenheira de Software",
-        company: "Acme",
-        workModel: "remote",
-        city: null,
-        state: null,
-        salaryMinCents: null,
-        salaryMaxCents: null,
-        description: "Vaga de engenharia",
-      };
-
-      function shareApp(
-        overrides: Partial<typeof repos> = {},
-        generate: GenerateStructured = async ({ schema }) => schema.parse(sharedJob),
-      ) {
-        const kicked = { count: 0 };
-
-        const instance = createApp(
-          webOrigin,
-          { ...repos, ...overrides },
-          {
-            ...appOptions,
-            generateStructured: generate,
-            fetchPage: async (pageUrl) => ({ url: pageUrl, text: "Vaga de engenharia" }),
-            runInBackground: () => {
-              kicked.count += 1;
-            },
-          },
-        );
-
-        const share = (shareUrl: string) =>
-          instance.handle(
-            new Request("http://localhost/api/jobs/share", {
-              method: "POST",
-              headers: {
-                "x-test-session": "rh",
-                origin: webOrigin,
-                "content-type": "application/json",
-              },
-              body: JSON.stringify({ url: shareUrl }),
-            }),
-          );
-
-        return { share, kicked };
-      }
-
-      it("fans out matching to profiles with a base résumé when HR shares a new job", async () => {
-        const app = resumesApp();
-        const withResume = await profile();
-
-        await profile("outra.pessoal@example.com", 1);
-        await upload(app.instance, withResume);
-        await app.settle();
-        await db.delete(backgroundJobs);
-
-        const { share, kicked } = shareApp();
-
-        expect((await share("https://jobs.example.com/nova")).status).toBe(201);
-        expect(await matchJobs()).toMatchObject([{ subject: withResume, status: "pending" }]);
-
-        await db.delete(backgroundJobs);
-
-        expect((await share("https://jobs.example.com/nova")).status).toBe(200);
-        expect(await matchJobs()).toEqual([]);
-        expect(kicked.count).toBe(0);
-      });
-
-      it("fans out nothing when the company subscription is not active", async () => {
-        const app = resumesApp();
-        const id = await profile();
-
-        await upload(app.instance, id);
-        await app.settle();
-        await db.delete(backgroundJobs);
-
-        const subscription = await repos.billing.getSubscription();
-
-        if (!subscription) throw new Error("missing subscription");
-
-        await repos.billing.updateSubscription(subscription.id, { status: "canceled" });
-
-        const { share } = shareApp();
-
-        expect((await share("https://jobs.example.com/inativa")).status).toBe(201);
-        expect(await matchJobs()).toEqual([]);
-      });
-
-      it("fans out nothing when a concurrent share created the job first", async () => {
-        const app = resumesApp();
-        const id = await profile();
-
-        await upload(app.instance, id);
-        await app.settle();
-        await db.delete(backgroundJobs);
-
-        const { share } = shareApp({}, async ({ schema }) => {
-          const { isJobPosting: _ignored, ...job } = jobDraftSchema.parse(sharedJob);
-
-          await repos.jobs.createShared({
-            ...job,
-            url: "https://jobs.example.com/corrida",
-            sourceKey: "https://jobs.example.com/corrida",
-          });
-
-          return schema.parse(sharedJob);
-        });
-
-        expect((await share("https://jobs.example.com/corrida")).status).toBe(200);
-        expect(await matchJobs()).toEqual([]);
-      });
-
-      it("keeps a shared job when fanning out matching fails", async () => {
-        const app = resumesApp();
-        const id = await profile();
-
-        await upload(app.instance, id);
-        await app.settle();
-
-        const failingEnqueue = shareApp({
-          background: {
-            ...repos.background,
-            enqueueMany: () => Promise.reject(new Error("queue down")),
-          },
-        });
-
-        expect((await failingEnqueue.share("https://jobs.example.com/fila")).status).toBe(201);
-
-        const failingProfiles = shareApp({
-          matches: {
-            ...repos.matches,
-            profilesForMatching: () => Promise.reject(new Error("db down")),
-          },
-        });
-
-        expect((await failingProfiles.share("https://jobs.example.com/perfis")).status).toBe(201);
-        expect(
-          await repos.jobs.findBySource("hr-link", "https://jobs.example.com/perfis"),
-        ).toBeDefined();
-      });
-
       describe("tailored résumés", () => {
         const emptyTailoring = {
           rewrites: [],
@@ -4309,6 +3986,25 @@ describe.skipIf(!url)("api", () => {
       expect(await queued("compute_matches")).toEqual([]);
     });
 
+    it("fans out nothing when the company subscription is not active", async () => {
+      await matchingProfile();
+
+      const subscription = await repos.billing.getSubscription();
+
+      if (!subscription) throw new Error("missing subscription");
+
+      await repos.billing.updateSubscription(subscription.id, { status: "canceled" });
+
+      const app = feedsApp();
+      const feed = await createdFeed("acme");
+
+      await repos.background.enqueue("ingest_jobs", feed.id);
+
+      expect(await (await app.drainNow()).json()).toEqual({ processed: 1, failed: 0 });
+      expect((await repos.feeds.get(feed.id))?.openJobs).toBe(2);
+      expect(await queued("compute_matches")).toEqual([]);
+    });
+
     it("keeps imported jobs when fanning out matching fails", async () => {
       const logged = vi.spyOn(console, "error");
 
@@ -4338,464 +4034,23 @@ describe.skipIf(!url)("api", () => {
     });
   });
 
-  describe("recruiter partners", () => {
-    const extracted = {
-      isJobPosting: true,
-      title: "Analista de Dados",
-      company: "Acme",
-      workModel: "hybrid",
-      city: "Curitiba",
-      state: "PR",
-      salaryMinCents: null,
-      salaryMaxCents: null,
-      description: "Vaga de dados",
-    };
-
-    type PartnerBody = { name?: string; company?: string };
-
-    function recruitersApp(
-      overrides: {
-        generate?: GenerateStructured | null;
-        page?: FetchPageResult;
-        repos?: Partial<typeof repos>;
-      } = {},
-    ) {
-      const calls = { generate: 0, fetch: 0 };
-
-      const generate: GenerateStructured = async ({ schema }) => {
-        calls.generate += 1;
-
-        return schema.parse(extracted);
-      };
-
-      const instance = createApp(
-        webOrigin,
-        { ...repos, ...overrides.repos },
-        {
-          ...appOptions,
-          generateStructured:
-            overrides.generate === null ? undefined : (overrides.generate ?? generate),
-          fetchPage: async (pageUrl) => {
-            calls.fetch += 1;
-
-            return overrides.page ?? { url: pageUrl, text: "Vaga de dados" };
-          },
-        },
-      );
-
-      const admin = (path: string, method = "GET", body?: PartnerBody, session = "admin") =>
-        instance.handle(
-          new Request(`http://localhost/api${path}`, {
-            method,
-            headers: {
-              "x-test-session": session,
-              origin: webOrigin,
-              "content-type": "application/json",
-            },
-            body: body === undefined ? undefined : JSON.stringify(body),
-          }),
-        );
-
-      function submit(jobUrl: string, authorization?: string) {
-        const headers = new Headers({ "content-type": "application/json" });
-
-        if (authorization !== undefined) headers.set("authorization", authorization);
-
-        return instance.handle(
-          new Request("http://localhost/api/recruiters/jobs", {
-            method: "POST",
-            headers,
-            body: JSON.stringify({ url: jobUrl }),
-          }),
-        );
-      }
-
-      const share = (shareUrl: string) =>
-        instance.handle(
-          new Request("http://localhost/api/jobs/share", {
-            method: "POST",
-            headers: {
-              "x-test-session": "rh",
-              origin: webOrigin,
-              "content-type": "application/json",
-            },
-            body: JSON.stringify({ url: shareUrl }),
-          }),
-        );
-
-      return { calls, admin, submit, share };
-    }
-
-    async function newPartner(name = "Ana Ribeiro") {
-      return repos.recruiters.create({ name, company: "Talentos Parceiros" }, new Date());
-    }
-
-    const storedJobs = () =>
-      db
-        .select({
-          origin: jobs.origin,
-          source: jobs.source,
-          sourceKey: jobs.sourceKey,
-          recruiterPartnerId: jobs.recruiterPartnerId,
-        })
-        .from(jobs)
-        .orderBy(jobs.source, jobs.sourceKey);
-
-    function queuedMatches() {
-      return db
-        .select({ subject: backgroundJobs.subject, status: backgroundJobs.status })
-        .from(backgroundJobs)
-        .where(eq(backgroundJobs.kind, "compute_matches"));
-    }
-
-    async function matchingProfile() {
-      const cases: { id: string }[] = await (await call("/offboardings")).json();
-
-      const created = await repos.talent.enable({
-        caseId: cases[0].id,
-        personalEmail: "recrutadora.pessoal@example.com",
-        sponsoredUntil: "2099-12-31",
-      });
-
-      if (
-        created === "case_not_found" ||
-        created === "already_enabled" ||
-        created === "email_taken"
-      ) {
-        throw new Error(created);
-      }
-
-      await repos.talent.acceptTerms(created.id);
-      await db.insert(resumes).values({
-        profileId: created.id,
-        kind: "base",
-        content: {
-          headline: { id: "h", text: "Analista" },
-          summary: { id: "s", text: "Dados" },
-          experiences: [],
-          education: [],
-          skills: [],
-          languages: [],
-          contact: { email: null, phone: null, city: null, links: [] },
-        },
-      });
-
-      return created.id;
-    }
-
-    it("lets only admins manage recruiter partners", async () => {
-      const { admin } = recruitersApp();
-      const { partner } = await newPartner();
-
-      for (const session of ["rh", "gestor", "visualizador", "talent"]) {
-        expect((await admin("/recruiter-partners", "GET", undefined, session)).status).toBe(403);
-        expect(
-          (await admin("/recruiter-partners", "POST", { name: "X", company: "Y" }, session)).status,
-        ).toBe(403);
-        expect(
-          (await admin(`/recruiter-partners/${partner.id}`, "DELETE", undefined, session)).status,
-        ).toBe(403);
-      }
-
-      expect((await admin("/recruiter-partners", "GET", undefined, "anonymous")).status).toBe(401);
-      expect(await repos.recruiters.list()).toEqual([partner]);
-    });
-
-    it("creates, lists and revokes recruiter partners", async () => {
-      const { admin } = recruitersApp();
-
-      expect(await (await admin("/recruiter-partners")).json()).toEqual([]);
-
-      const created = await admin("/recruiter-partners", "POST", {
-        name: "  Ana Ribeiro ",
-        company: " Talentos Parceiros ",
-      });
-
-      expect(created.status).toBe(201);
-      expect(created.headers.get("cache-control")).toBe("no-store");
-
-      const { partner, token, submitUrl } = await created.json();
-
-      expect(partner).toEqual({
-        id: expect.any(String),
-        name: "Ana Ribeiro",
-        company: "Talentos Parceiros",
-        revokedAt: null,
-        createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
-      });
-      expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
-      expect(submitUrl).toBe(`${webOrigin}/recrutadoras/enviar`);
-      expect(await repos.recruiters.byToken(token)).toEqual({ id: partner.id });
-
-      const listed = await admin("/recruiter-partners");
-      const text = await listed.text();
-
-      expect(JSON.parse(text)).toEqual([partner]);
-      expect(text).not.toContain(token);
-      expect(text).not.toMatch(/[0-9a-f]{64}/);
-
-      for (const body of [
-        { name: "", company: "Talentos" },
-        { name: "   ", company: "Talentos" },
-        { name: "Ana", company: "x".repeat(256) },
-        { name: "Ana" },
-      ]) {
-        expect((await admin("/recruiter-partners", "POST", body)).status).toBe(422);
-      }
-
-      const path = `/recruiter-partners/${partner.id}`;
-
-      expect((await admin(path, "DELETE")).status).toBe(204);
-      expect(await repos.recruiters.byToken(token)).toBeUndefined();
-
-      const [revoked] = await (await admin("/recruiter-partners")).json();
-
-      expect(revoked.revokedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-      expect((await admin(path, "DELETE")).status).toBe(204);
-      expect((await (await admin("/recruiter-partners")).json())[0].revokedAt).toBe(
-        revoked.revokedAt,
-      );
-      expect((await admin(`/recruiter-partners/${crypto.randomUUID()}`, "DELETE")).status).toBe(
-        404,
-      );
-      expect((await admin("/recruiter-partners/nope", "DELETE")).status).toBe(422);
-    });
-
-    it("guards recruiter submissions", async () => {
-      const app = recruitersApp();
-      const { partner, token } = await newPartner();
-      const revoked = await newPartner("Revogada");
-
-      await repos.recruiters.revoke(revoked.partner.id, new Date());
-
-      for (const authorization of [
-        undefined,
-        "",
-        "Bearer",
-        "Bearer ",
-        `Basic ${token}`,
-        `bearer${token}`,
-        "Bearer unknown-token",
-        `Bearer ${revoked.token}`,
-      ]) {
-        const refused = await app.submit("https://jobs.example.com/guardada", authorization);
-
-        expect(refused.status).toBe(401);
-        expect(await refused.json()).toEqual({ error: "Unauthorized" });
-      }
-
-      const oversized = await app.submit(`https://x.example.com/${"a".repeat(2048)}`);
-
-      expect(oversized.status).toBe(401);
-      expect(oversized.headers.get("cache-control")).toBe("no-store");
-
-      expect(app.calls).toEqual({ generate: 0, fetch: 0 });
-      expect(await storedJobs()).toEqual([]);
-
-      const other = await newPartner("Outra");
-
-      vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-24T03:00:00.000Z") });
-
-      try {
-        for (let index = 0; index < 20; index += 1) {
-          expect(
-            (await app.submit(`https://jobs.example.com/vaga-${index}`, `Bearer ${token}`)).status,
-          ).toBe(201);
-        }
-
-        expect(app.calls).toEqual({ generate: 20, fetch: 20 });
-
-        vi.setSystemTime(new Date("2026-11-25T02:59:59.999Z"));
-
-        for (const jobUrl of [
-          "https://jobs.example.com/vaga-21",
-          "https://jobs.example.com/vaga-0",
-        ]) {
-          const capped = await app.submit(jobUrl, `Bearer ${token}`);
-
-          expect(capped.status).toBe(429);
-          expect(capped.headers.get("cache-control")).toBe("no-store");
-          expect(await capped.json()).toEqual({ error: "Daily limit reached" });
-        }
-
-        expect(app.calls).toEqual({ generate: 20, fetch: 20 });
-        expect(await storedJobs()).toHaveLength(20);
-        expect(
-          (await app.submit("https://jobs.example.com/outra", `Bearer ${other.token}`)).status,
-        ).toBe(201);
-        expect((await app.share("https://jobs.example.com/rh")).status).toBe(201);
-
-        vi.setSystemTime(new Date("2026-11-25T03:00:00.000Z"));
-
-        expect(
-          (await app.submit("https://jobs.example.com/vaga-21", `Bearer ${token}`)).status,
-        ).toBe(201);
-      } finally {
-        vi.useRealTimers();
-      }
-
-      expect(
-        (await storedJobs()).filter((job) => job.recruiterPartnerId === partner.id),
-      ).toHaveLength(21);
-    });
-
-    it("stores recruiter jobs with the partner, deduped apart from HR shares", async () => {
-      const app = recruitersApp();
-      const { partner, token } = await newPartner();
-      const other = await newPartner("Outra");
-      const link = "https://jobs.example.com/dados";
-
-      const created = await app.submit(link, `Bearer ${token}`);
-
-      expect(created.status).toBe(201);
-      expect(created.headers.get("cache-control")).toBe("no-store");
-
-      const job = await created.json();
-
-      expect(job).toEqual({
-        id: expect.any(String),
-        title: "Analista de Dados",
-        company: "Acme",
-        url: link,
-      });
-
-      expect((await app.share(link)).status).toBe(201);
-
-      const again = await app.submit(`${link}?utm_source=x`, `Bearer ${other.token}`);
-
-      expect(again.status).toBe(200);
-      expect(await again.json()).toEqual(job);
-      expect(app.calls).toEqual({ generate: 2, fetch: 2 });
-      expect(await storedJobs()).toEqual([
-        { origin: "hr", source: "hr-link", sourceKey: link, recruiterPartnerId: null },
-        {
-          origin: "recruiter",
-          source: "recruiter-link",
-          sourceKey: link,
-          recruiterPartnerId: partner.id,
-        },
-      ]);
-      expect(await repos.jobs.countByPartnerSince(other.partner.id, new Date(0))).toBe(0);
-    });
-
-    it("maps recruiter submission failures like HR shares", async () => {
-      const { partner, token } = await newPartner();
-      const bearer = `Bearer ${token}`;
-
-      const insecure = recruitersApp();
-      const rejected = await insecure.submit("http://jobs.example.com/vaga", bearer);
-
-      expect(rejected.status).toBe(422);
-      expect(await rejected.json()).toEqual({ error: "Invalid job url" });
-      expect(insecure.calls.fetch).toBe(0);
-      const oversized = await insecure.submit(`https://x.example.com/${"a".repeat(2048)}`, bearer);
-
-      expect(oversized.status).toBe(422);
-      expect(oversized.headers.get("cache-control")).toBe("no-store");
-      expect(
-        (await insecure.submit(`https://jobs.example.com/${"ã".repeat(600)}`, bearer)).status,
-      ).toBe(422);
-
-      const redirected = await recruitersApp({ page: "invalid_url" }).submit(
-        "https://jobs.example.com/redirect",
-        bearer,
-      );
-
-      expect(redirected.status).toBe(422);
-      expect(await redirected.json()).toEqual({ error: "Invalid job url" });
-
-      const unreachable = await recruitersApp({ page: "too_large" }).submit(
-        "https://jobs.example.com/grande",
-        bearer,
-      );
-
-      expect(unreachable.status).toBe(502);
-      expect(await unreachable.json()).toEqual({ error: "Could not read the job page" });
-
-      const notJob = await recruitersApp({
-        generate: async ({ schema }) => schema.parse({ ...extracted, isJobPosting: false }),
-      }).submit("https://blog.example.com/post", bearer);
-
-      expect(notJob.status).toBe(422);
-      expect(await notJob.json()).toEqual({ error: "Page is not a job posting" });
-
-      const noAi = recruitersApp({ generate: null });
-      const unavailable = await noAi.submit("https://jobs.example.com/sem-ia", bearer);
-
-      expect(unavailable.status).toBe(503);
-      expect(await unavailable.json()).toEqual({ error: "AI not configured" });
-      expect(noAi.calls.fetch).toBe(0);
-
-      const logged = vi.spyOn(console, "error");
-
-      const failed = await recruitersApp({
-        generate: ({ prompt }) => Promise.reject(leakyError(prompt)),
-      }).submit("https://jobs.example.com/llm-down", bearer);
-
-      expect(failed.status).toBe(502);
-      expect(await failed.json()).toEqual({ error: "Could not extract the job" });
-      expect(logged.mock.calls).toEqual([
-        ["job extraction failed", { name: "Error", message: "gateway down" }],
-      ]);
-      logged.mockRestore();
-
-      expect(await storedJobs()).toEqual([]);
-      expect(await repos.jobs.countByPartnerSince(partner.id, new Date(0))).toBe(0);
-    });
-
-    it("fans out matching when a recruiter submits a new job", async () => {
-      const profileId = await matchingProfile();
-      const app = recruitersApp();
-      const { token } = await newPartner();
-
-      await db.delete(backgroundJobs);
-
-      expect((await app.submit("https://jobs.example.com/nova", `Bearer ${token}`)).status).toBe(
-        201,
-      );
-      expect(await queuedMatches()).toEqual([{ subject: profileId, status: "pending" }]);
-
-      await db.delete(backgroundJobs);
-
-      expect((await app.submit("https://jobs.example.com/nova", `Bearer ${token}`)).status).toBe(
-        200,
-      );
-      expect(await queuedMatches()).toEqual([]);
-    });
-
-    it("keeps a recruiter job and logs when fanning out matching fails", async () => {
-      const logged = vi.spyOn(console, "error");
-
-      await matchingProfile();
-
-      const { token } = await newPartner();
-
-      const app = recruitersApp({
-        repos: {
-          background: {
-            ...repos.background,
-            enqueueMany: () => Promise.reject(new Error("queue down")),
-          },
-        },
-      });
-
-      expect((await app.submit("https://jobs.example.com/fila", `Bearer ${token}`)).status).toBe(
-        201,
-      );
-      expect(await storedJobs()).toHaveLength(1);
-      expect(logged.mock.calls).toEqual([
-        ["recruiter job fan-out failed", { name: "Error", message: "queue down" }],
-      ]);
-      logged.mockRestore();
-    });
-  });
-
   afterAll(async () => {
     await new Promise<void>((resolve) => {
       correiosServer.close(() => resolve());
     });
 
     await db.$client.end();
+  });
+
+  it("serves no route for HR job sharing or partner recruiters", async () => {
+    for (const [path, method] of [
+      ["/jobs/share", "POST"],
+      ["/recruiters/jobs", "POST"],
+      ["/recruiter-partners", "GET"],
+      ["/recruiter-partners", "POST"],
+    ] as const) {
+      expect((await call(path, method)).status).toBe(404);
+    }
   });
 
   it("reports health", async () => {

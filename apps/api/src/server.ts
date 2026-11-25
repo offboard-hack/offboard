@@ -1,4 +1,3 @@
-import { lookup } from "node:dns/promises";
 import { createClient } from "@offboard/db/client";
 import { node } from "@elysia/node";
 import { createRepositories } from "./repositories.js";
@@ -7,9 +6,7 @@ import { createApp } from "./app.js";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
 import { createGenerateStructured, gatewayModel } from "./shared/ai.js";
-import { createDnsGuardedFetch } from "./shared/dns-guard.js";
 import { diskStorage } from "./shared/disk-storage.js";
-import { fetchPageText } from "./shared/page-text.js";
 
 const config = z
   .object({
@@ -27,10 +24,6 @@ const db = createClient(config.POSTGRES_URL);
 const repos = createRepositories(db);
 const { auth, origin, sender } = createRuntimeAuth(db, repos.talent, config.WEB_ORIGIN);
 
-const guardedFetch = createDnsGuardedFetch((host) =>
-  lookup(host, { all: true }).then((rows) => rows.map((row) => row.address)),
-);
-
 createApp(origin, repos, {
   adapter: node(),
   auth,
@@ -43,7 +36,6 @@ createApp(origin, repos, {
   generateStructured: process.env.AI_GATEWAY_API_KEY
     ? createGenerateStructured(gatewayModel(process.env.AI_GATEWAY_API_KEY))
     : undefined,
-  fetchPage: (url) => fetchPageText(url, guardedFetch),
   storage: process.env.RESUME_STORAGE_DIR ? diskStorage(process.env.RESUME_STORAGE_DIR) : undefined,
   publicPageOrigin: process.env.PUBLIC_PAGE_ORIGIN,
 }).listen({

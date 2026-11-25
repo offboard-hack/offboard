@@ -13,7 +13,6 @@ export type TalentAggregates = {
   };
   hiresShared: number | null;
   topJobs: { title: string; company: string; applications: number }[];
-  sharedJobs: { title: string; company: string; sharedAt: string }[];
 };
 
 const minimumPeople = 5;
@@ -46,13 +45,12 @@ const hiredShared = and(
   eq(talentProfiles.shareOutcomeWithHr, true),
 );
 
-const sharedAt = sql<Date>`coalesce(${jobs.postedAt}, ${jobs.createdAt})`;
 const applicants = sql<number>`count(distinct ${applications.profileId})`;
 const total = sql<number>`count(*)::int`;
 
 export function createInsightsRepository(db: Database) {
   async function aggregates() {
-    const [[profiles], [figures], top, shared] = await Promise.all([
+    const [[profiles], [figures], top] = await Promise.all([
       db
         .select({
           enabled: total,
@@ -82,16 +80,6 @@ export function createInsightsRepository(db: Database) {
         .having(sql`${applicants} >= ${minimumPeople}`)
         .orderBy(desc(total), asc(jobs.title))
         .limit(listLimit),
-      db
-        .select({
-          title: jobs.title,
-          company: jobs.company,
-          sharedAt: sharedAt.mapWith(jobs.postedAt),
-        })
-        .from(jobs)
-        .where(and(eq(jobs.origin, "hr"), sql`${sharedAt} is not null`))
-        .orderBy(sql`${sharedAt} desc`, asc(jobs.id))
-        .limit(listLimit),
     ]);
 
     return {
@@ -105,11 +93,6 @@ export function createInsightsRepository(db: Database) {
       },
       hiresShared: suppressed(figures.hiresShared, figures.hiresSharedPeople),
       topJobs: top,
-      sharedJobs: shared.map((row) => ({
-        title: row.title,
-        company: row.company,
-        sharedAt: row.sharedAt.toISOString(),
-      })),
     } satisfies TalentAggregates;
   }
 

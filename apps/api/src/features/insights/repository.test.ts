@@ -15,7 +15,6 @@ const empty = {
   funnel: { sent: null, responded: null, interviews: null, offers: null },
   hiresShared: null,
   topJobs: [],
-  sharedJobs: [],
 };
 
 describe.skipIf(!url)("insights repository", () => {
@@ -222,46 +221,13 @@ describe.skipIf(!url)("insights repository", () => {
     expect(await repository.aggregates()).toMatchObject({ enabled: 8, activated: 5 });
   });
 
-  it("lists the five most recent jobs HR shared", async () => {
-    await job("Externa", { postedAt: new Date("2026-11-20T12:00:00Z") });
-    await job("Recrutadora", { origin: "recruiter", postedAt: new Date("2026-11-21T12:00:00Z") });
-    await job("Antiga", { origin: "hr", postedAt: new Date("2026-10-01T12:00:00Z") });
-    await job("Fechada", {
-      origin: "hr",
-      postedAt: new Date("2026-11-10T12:00:00Z"),
-      closedAt: new Date("2026-11-15T12:00:00Z"),
-    });
-    await job("Recente", { origin: "hr", postedAt: new Date("2026-11-12T12:00:00Z") });
-    await job("Sem data", {
-      origin: "hr",
-      postedAt: null,
-      createdAt: new Date("2026-11-23T12:00:00Z"),
-    });
-    await job("Sem data antiga", {
-      origin: "hr",
-      postedAt: null,
-      createdAt: new Date("2026-09-01T12:00:00Z"),
-    });
-    await job("Média", { origin: "hr", postedAt: new Date("2026-11-05T12:00:00Z") });
-
-    await job("Sem nenhuma data", { origin: "hr", postedAt: null, createdAt: null });
-
-    expect((await repository.aggregates()).sharedJobs).toEqual([
-      { title: "Sem data", company: "Acme", sharedAt: "2026-11-23T12:00:00.000Z" },
-      { title: "Recente", company: "Acme", sharedAt: "2026-11-12T12:00:00.000Z" },
-      { title: "Fechada", company: "Acme", sharedAt: "2026-11-10T12:00:00.000Z" },
-      { title: "Média", company: "Acme", sharedAt: "2026-11-05T12:00:00.000Z" },
-      { title: "Antiga", company: "Acme", sharedAt: "2026-10-01T12:00:00.000Z" },
-    ]);
-  });
-
   it("exposes no person-level data", async () => {
     const five = await people(5, {
       shareOutcomeWithHr: true,
       firstSignedInAt: new Date("2026-11-01T12:00:00Z"),
     });
 
-    const hired = await job("Analista", { origin: "hr", postedAt: new Date() });
+    const hired = await job("Analista", { postedAt: new Date() });
 
     for (const id of five) await close(id, hired, "hired", "offer");
 
@@ -272,7 +238,6 @@ describe.skipIf(!url)("insights repository", () => {
       "enabled",
       "funnel",
       "hiresShared",
-      "sharedJobs",
       "topJobs",
     ]);
     expect(Object.keys(result.funnel).sort()).toEqual([
@@ -283,9 +248,6 @@ describe.skipIf(!url)("insights repository", () => {
     ]);
     expect(result.topJobs.map((row) => Object.keys(row).sort())).toEqual([
       ["applications", "company", "title"],
-    ]);
-    expect(result.sharedJobs.map((row) => Object.keys(row).sort())).toEqual([
-      ["company", "sharedAt", "title"],
     ]);
 
     const serialized = JSON.stringify(result);
