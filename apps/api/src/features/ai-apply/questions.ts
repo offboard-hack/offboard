@@ -59,6 +59,9 @@ const standardKinds = new Map<string, QuestionKind>([
   ["location", "city"],
 ]);
 
+export const cityLabelPattern =
+  /^(?!.*(?:natal|nascimento|relocat\w*|mudar|gostaria)).*(?:\bcidade\b|localizacao|\blocation\b|onde (?:voce )?mora|\breside\b|\bresidencia\b)/;
+
 const labelKinds: [RegExp, QuestionKind][] = [
   [/linkedin/, "linkedin"],
   [/e-?mail/, "custom"],
@@ -67,10 +70,7 @@ const labelKinds: [RegExp, QuestionKind][] = [
   [/data de nascimento|date of birth|dt\.? (?:de )?nascimento/, "birth_date"],
   [/^cep(?:[^a-z0-9]*)$/, "cep"],
   [/endereco|address/, "address"],
-  [
-    /\bcidade\b(?! de nascimento)|localizacao|location|onde (?:voce )?mora|\breside\b|\bresidencia\b/,
-    "city",
-  ],
+  [cityLabelPattern, "city"],
 ];
 
 export const isSensitive = (label: string, section: FormQuestion["section"]) =>

@@ -48,6 +48,7 @@ import {
 } from "@offboard/employee";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { status } from "elysia";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.ts";
@@ -123,6 +124,8 @@ const auth: PortalAuth = {
     });
   },
 };
+
+const browserbase = { apiKey: "bb-key", projectId: "bb-project" };
 
 const appOptions = {
   auth,
@@ -856,6 +859,13 @@ describe.skipIf(!url)("api", () => {
         ...appOptions,
         aiApplyAllowlist: ["ANA.PESSOAL@example.com", "outra@example.com"],
         generateStructured: async ({ schema }) => schema.parse({}),
+        browserbase,
+      });
+
+      const withoutBrowser = createApp(webOrigin, repos, {
+        ...appOptions,
+        aiApplyAllowlist: ["ANA.PESSOAL@example.com"],
+        generateStructured: async ({ schema }) => schema.parse({}),
       });
 
       const call = (
@@ -952,6 +962,12 @@ describe.skipIf(!url)("api", () => {
       expect(await accepted.json()).toMatchObject({
         id: mine.id,
         aiApply: { consented: true, available: true },
+      });
+
+      expect(
+        await (await call(withoutBrowser, "talent", "/me", "GET", mine.id)).json(),
+      ).toMatchObject({
+        aiApply: { consented: true, available: false },
       });
 
       const stored = await consentOf(mine.id);
@@ -1071,6 +1087,7 @@ describe.skipIf(!url)("api", () => {
       const instance = createApp(webOrigin, repos, {
         ...appOptions,
         aiApplyAllowlist: [personalEmail],
+        browserbase,
         generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
         fetchGreenhouseImpl: async (input) => {
           urls.push(String(input));
@@ -1194,6 +1211,7 @@ describe.skipIf(!url)("api", () => {
       const instance = createApp(webOrigin, repos, {
         ...appOptions,
         aiApplyAllowlist: [personalEmail],
+        browserbase,
         generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
         fetchGreenhouseImpl: async () =>
           new Response(JSON.stringify({ questions: [text("one"), text("two")] })),
@@ -1248,6 +1266,57 @@ describe.skipIf(!url)("api", () => {
       expect(
         (await repos.answers.library(created.id)).questions.filter((item) => item.answer !== null),
       ).toEqual([]);
+    });
+
+    it("hides the message of an error that carries its own code", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      const failures = [
+        Object.assign(new Error("connect ECONNREFUSED 10.0.0.7:5432"), { code: "ECONNREFUSED" }),
+        new DOMException("signal timed out for ana@example.com", "TimeoutError"),
+        new Error("plain secret for ana@example.com"),
+      ];
+
+      try {
+        for (const failure of failures) {
+          const instance = createApp(webOrigin, repos, {
+            ...appOptions,
+            auth: {
+              ...auth,
+              handler: async () => {
+                throw failure;
+              },
+            },
+          });
+
+          const res = await instance.handle(new Request("http://localhost/api/auth/session"));
+
+          expect(res.status).toBe(500);
+          expect(await res.text()).toBe('{"error":"Internal error"}');
+        }
+
+        expect(JSON.stringify(logged.mock.calls)).not.toContain("ana@example.com");
+        expect(JSON.stringify(logged.mock.calls)).not.toContain("10.0.0.7");
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("keeps a thrown status response", async () => {
+      const instance = createApp(webOrigin, repos, {
+        ...appOptions,
+        auth: {
+          ...auth,
+          handler: async () => {
+            throw status(409, { error: "Conflict" });
+          },
+        },
+      });
+
+      const res = await instance.handle(new Request("http://localhost/api/auth/session"));
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "Conflict" });
     });
 
     it("keeps Elysia's own answer for a malformed JSON body", async () => {

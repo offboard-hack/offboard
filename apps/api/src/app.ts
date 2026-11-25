@@ -1,5 +1,5 @@
 import { cors } from "@elysia/cors";
-import { Elysia, t } from "elysia";
+import { Elysia, ElysiaCustomStatusResponse, t } from "elysia";
 import { actionConfigsRoutes } from "./features/action-configs/routes.js";
 import { fireActions } from "./features/action-configs/actions.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
@@ -69,6 +69,7 @@ type AppOptions = {
   runInBackground?: (task: () => Promise<void>) => void;
   publicPageOrigin?: string;
   aiApplyAllowlist?: string[];
+  browserbase?: { apiKey: string; projectId: string };
 };
 
 function ownResumePdf(name: string, content: ResumeContent) {
@@ -80,7 +81,13 @@ function ownResumePdf(name: string, content: ResumeContent) {
   });
 }
 
-const unhandledCodes = new Set<string | number>(["UNKNOWN", "INTERNAL_SERVER_ERROR"]);
+const elysiaCodes = new Set<string | number>([
+  "VALIDATION",
+  "PARSE",
+  "NOT_FOUND",
+  "INVALID_COOKIE_SIGNATURE",
+  "INVALID_FILE_TYPE",
+]);
 
 export function createApp(webOrigin: string, repos: Repositories, options: AppOptions) {
   const access = portalAccess(options.auth, webOrigin);
@@ -260,7 +267,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
   return new Elysia({ adapter: options.adapter, prefix: "/api" })
     .use(cors({ origin: webOrigin, credentials: false }))
     .onError(({ code, error, status }) => {
-      if (!unhandledCodes.has(code)) return undefined;
+      if (elysiaCodes.has(code) || error instanceof ElysiaCustomStatusResponse) return undefined;
 
       logUnhandled(error);
 
@@ -302,7 +309,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         (profile) => options.sendEmail(welcomeEmail(profile, webOrigin)),
         {
           allowlist: options.aiApplyAllowlist ?? [],
-          configured: options.generateStructured !== undefined,
+          configured: options.generateStructured !== undefined && options.browserbase !== undefined,
         },
       ),
     )
@@ -346,6 +353,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       aiApplyRoutes(repos.aiApply, talent, {
         allowlist: options.aiApplyAllowlist ?? [],
         generate: options.generateStructured,
+        runnerConfigured: options.browserbase !== undefined,
         takeLlmCall: repos.llmUsage.takeLlmCall,
         readForm: (board, posting) => readGreenhouseForm(fetchGreenhouse, board, posting),
         library: async (profileId) =>

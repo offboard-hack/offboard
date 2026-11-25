@@ -19,7 +19,7 @@ import { shareFilteredResume } from "../../shared/shared-resume.js";
 import { clipText, sanitizeText } from "../../shared/storable-text.js";
 import type { toPreferences } from "../../shared/talent-preferences.js";
 import { escapeUntrustedTags } from "../../shared/untrusted-json.js";
-import { isHiddenQuestion, isSensitive } from "./questions.js";
+import { cityLabelPattern, isHiddenQuestion, isSensitive } from "./questions.js";
 
 type Fields = ReturnType<typeof toPreferences>["profileFields"];
 
@@ -112,11 +112,7 @@ const overlaps: { field: keyof Fields; pattern: RegExp }[] = [
   },
   { field: "noticePeriod", pattern: /aviso previo|notice period/ },
   { field: "linkedin", pattern: /linkedin/ },
-  {
-    field: "city",
-    pattern:
-      /\bcidade\b(?! de nascimento)|localizacao|location|onde (?:voce )?mora|\breside\b|\bresidencia\b/,
-  },
+  { field: "city", pattern: cityLabelPattern },
 ];
 
 const draft = (

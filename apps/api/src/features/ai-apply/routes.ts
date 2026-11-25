@@ -36,6 +36,7 @@ export function aiApplyRoutes(
   deps: {
     allowlist: string[];
     generate: GenerateStructured | undefined;
+    runnerConfigured: boolean;
     takeLlmCall: UsageRepository["takeLlmCall"];
     readForm: (board: string, posting: string) => Promise<FormResult>;
     library: (
@@ -242,6 +243,8 @@ export function aiApplyRoutes(
         const open = gate(me);
 
         if (open.refused) return status(open.refused.code, { error: open.refused.error });
+
+        if (!deps.runnerConfigured) return status(503, { error: "AI Apply not configured" });
 
         const found = await repos.attempt(me.id, params.id);
 

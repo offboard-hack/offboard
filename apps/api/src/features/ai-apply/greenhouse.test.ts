@@ -129,6 +129,36 @@ describe("reads a Greenhouse form", () => {
     ]);
   });
 
+  it("keeps relocation, birthplace and preference questions custom", async () => {
+    const labels = [
+      "Are you open to relocation?",
+      "Cidade natal",
+      "Disponibilidade para mudar de cidade?",
+      "Em qual cidade gostaria de trabalhar?",
+      "Cidade",
+      "Localização (Cidade)",
+      "Current location",
+    ];
+
+    const questions = await read({
+      questions: [
+        ...labels.map((label, index) => question(label, true, field(`q${index}`, "input_text"))),
+        question("Localização", true, field("location", "input_text")),
+      ],
+    });
+
+    expect(questions.map((item) => item.kind)).toEqual([
+      "custom",
+      "custom",
+      "custom",
+      "custom",
+      "city",
+      "city",
+      "city",
+      "city",
+    ]);
+  });
+
   it("keeps section order and marks compliance and demographic sensitive", async () => {
     const questions = await read({
       demographic_questions: {

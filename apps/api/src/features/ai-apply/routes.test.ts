@@ -100,6 +100,7 @@ type Setup = {
   allowlist?: string[];
   consent?: boolean;
   generate?: GenerateStructured | null;
+  runnerConfigured?: boolean;
   form?: () => Response | Promise<Response>;
   saveAnswer?: SaveAnswer;
 };
@@ -232,6 +233,7 @@ describe.skipIf(!url)("ai apply route", () => {
         {
           allowlist: setup.allowlist ?? [email.toUpperCase()],
           generate: setup.generate === null ? undefined : setup.generate,
+          runnerConfigured: setup.runnerConfigured ?? true,
           takeLlmCall: setup.takeLlmCall ?? repos.llmUsage.takeLlmCall,
           readForm: (board, posting) => readGreenhouseForm(respond, board, posting),
           library: async (profileId) =>
@@ -1103,6 +1105,21 @@ describe.skipIf(!url)("ai apply route", () => {
       }
 
       expect((await attempts(profileId))[0]).toMatchObject({ state: "draft", confirmed: null });
+    });
+
+    it("refuses to confirm when Browserbase is not configured", async () => {
+      const { call, profileId, id } = await setup();
+      const body = { answers: [{ questionId: "why", value: "x" }] };
+
+      const bare = build({ generate: fakeModel().generate, runnerConfigured: false });
+      const refused = await bare.call(profileId, confirmPath(id), body);
+
+      expect(refused.status).toBe(503);
+      expect(await refused.json()).toEqual({ error: "AI Apply not configured" });
+      expect((await attempts(profileId))[0]).toMatchObject({ state: "draft", confirmed: null });
+      expect((await call(profileId, `/me/ai-applications/${id}`, undefined, "GET")).status).toBe(
+        200,
+      );
     });
 
     it("confirms once", async () => {
