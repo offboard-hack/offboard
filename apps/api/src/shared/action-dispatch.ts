@@ -1,4 +1,5 @@
 export type ActionContext = {
+  orgId: string;
   taskId: string;
   taskTitle: string;
   status: string;

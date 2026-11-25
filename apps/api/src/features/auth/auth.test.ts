@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "../../repositories.js";
-import { authRateLimit, authUser } from "@offboard/db/schema";
+import { authRateLimit, authUser, defaultOrgId } from "@offboard/db/schema";
 import { eq, like } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -82,7 +82,12 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
 
   it("only sends to invited members and rejects reuse, revoked invitations and revoked sessions", async () => {
     const email = `invite-${randomUUID()}@offboard.example`;
-    const member = await repos.createTeamMember({ name: "Pessoa convidada", email, role: "rh" });
+
+    const member = await repos.createTeamMember(defaultOrgId, {
+      name: "Pessoa convidada",
+      email,
+      role: "rh",
+    });
 
     expect((await requestLink(email, { origin: "https://another.example" })).status).toBe(403);
     expect((await auth.handler(new Request(`${origin}/api/auth/get-session`))).status).toBe(404);
@@ -101,7 +106,7 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     const headers = sessionHeaders(accepted);
     expect(await auth.resolvePrincipal(headers)).toEqual({
       kind: "authenticated",
-      principal: member,
+      principal: { ...member, orgId: defaultOrgId },
     });
 
     const reused = await verify(mixedCase);
@@ -109,10 +114,10 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     expect(reused.headers.getSetCookie()).toHaveLength(0);
 
     expect((await requestLink(email)).status).toBe(200);
-    expect(await repos.deleteTeamMember(member.id)).toBe(true);
+    expect(await repos.deleteTeamMember(defaultOrgId, member.id)).toBe(true);
     expect(await auth.resolvePrincipal(headers)).toEqual({ kind: "forbidden" });
 
-    const reinstated = await repos.createTeamMember({
+    const reinstated = await repos.createTeamMember(defaultOrgId, {
       name: member.name,
       email,
       role: "visualizador",
@@ -129,7 +134,7 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     const renewedHeaders = sessionHeaders(renewed);
     expect(await auth.resolvePrincipal(renewedHeaders)).toEqual({
       kind: "authenticated",
-      principal: reinstated,
+      principal: { ...reinstated, orgId: defaultOrgId },
     });
 
     await db.update(authUser).set({ emailVerified: false }).where(eq(authUser.email, email));
@@ -144,7 +149,7 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
 
     expect(signOut.status).toBe(200);
     expect(await auth.resolvePrincipal(renewedHeaders)).toEqual({ kind: "anonymous" });
-    expect(await repos.deleteTeamMember(reinstated.id)).toBe(true);
+    expect(await repos.deleteTeamMember(defaultOrgId, reinstated.id)).toBe(true);
 
     expect((await requestLink(email)).status).toBe(200);
 
@@ -161,10 +166,15 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     expect(malformed.headers.getSetCookie()).toHaveLength(0);
 
     const email = `revoked-${randomUUID()}@offboard.example`;
-    const member = await repos.createTeamMember({ name: "Pessoa removida", email, role: "rh" });
+
+    const member = await repos.createTeamMember(defaultOrgId, {
+      name: "Pessoa removida",
+      email,
+      role: "rh",
+    });
 
     expect((await requestLink(email)).status).toBe(200);
-    expect(await repos.deleteTeamMember(member.id)).toBe(true);
+    expect(await repos.deleteTeamMember(defaultOrgId, member.id)).toBe(true);
 
     const revoked = await verify(email);
     expect(revoked.headers.get("location")).toMatch(/\/entrar\?error=/);
@@ -180,7 +190,13 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
 
   it("confirms a deferred magic link request before the provider finishes sending", async () => {
     const email = `worker-${randomUUID()}@offboard.example`;
-    const member = await repos.createTeamMember({ name: "Pessoa de teste", email, role: "rh" });
+
+    const member = await repos.createTeamMember(defaultOrgId, {
+      name: "Pessoa de teste",
+      email,
+      role: "rh",
+    });
+
     const background: Promise<void>[] = [];
     const messages: string[] = [];
     let finishDelivery = () => {};
@@ -263,7 +279,7 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
 
       await Promise.allSettled(background);
       await new Promise<void>((resolve) => server.close(() => resolve()));
-      await repos.deleteTeamMember(member.id);
+      await repos.deleteTeamMember(defaultOrgId, member.id);
     }
   });
 
@@ -308,7 +324,12 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
       expect(runtime.origin).toBe("https://preview.offboard.example");
 
       const email = `runtime-${randomUUID()}@offboard.example`;
-      const member = await repos.createTeamMember({ name: "Pessoa de teste", email, role: "rh" });
+
+      const member = await repos.createTeamMember(defaultOrgId, {
+        name: "Pessoa de teste",
+        email,
+        role: "rh",
+      });
 
       try {
         const sent = await runtime.auth.handler(magicLinkRequest(email, runtime.origin));
@@ -331,7 +352,7 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
         const rejected = await runtime.auth.handler(magicLinkRequest(email, runtime.origin));
         expect(rejected.status).toBe(500);
       } finally {
-        await repos.deleteTeamMember(member.id);
+        await repos.deleteTeamMember(defaultOrgId, member.id);
       }
 
       vi.stubEnv("BETTER_AUTH_URL", "https://portal.offboard.example/");

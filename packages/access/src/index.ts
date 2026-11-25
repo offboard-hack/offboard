@@ -11,6 +11,7 @@ export const principalSchema = z.object({
   name: z.string(),
   email: z.email(),
   role: memberRoleSchema,
+  orgId: z.string().uuid(),
 });
 
 export type PortalPrincipal = z.infer<typeof principalSchema>;

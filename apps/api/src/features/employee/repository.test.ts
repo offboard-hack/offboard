@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
-import { employeeAccess } from "@offboard/db/schema";
+import { defaultOrgId, employeeAccess } from "@offboard/db/schema";
 import { emptyEmployeePlan } from "@offboard/employee";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -24,7 +24,7 @@ describe.skipIf(!url)("employee access transactions", () => {
   afterAll(() => db.$client.end());
 
   it("holds the access row until the operation using the active plan finishes", async () => {
-    const { id: caseId } = await repos.offboardings.createOffboarding({
+    const { id: caseId } = await repos.offboardings.createOffboarding(defaultOrgId, {
       name: "Pessoa de teste",
       role: "Analista",
       department: "Produto",
@@ -33,7 +33,9 @@ describe.skipIf(!url)("employee access transactions", () => {
 
     const email = randomUUID() + "@offboard.example";
     const plan = { ...emptyEmployeePlan, bookingDays: ["2027-01-26"] };
-    expect(await repos.employee.saveSettings(caseId, { email, plan, revision: 0 })).toBe("saved");
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, caseId, { email, plan, revision: 0 }),
+    ).toBe("saved");
 
     const [access] = await db
       .select()
@@ -74,9 +76,13 @@ describe.skipIf(!url)("employee access transactions", () => {
     expect((await operation)?.plan.bookingDays).toEqual(["2027-01-26"]);
     const revisedPlan = { ...plan, bookingDays: [] };
     expect(
-      await repos.employee.saveSettings(caseId, { email, plan: revisedPlan, revision: 1 }),
+      await repos.employee.saveSettings(defaultOrgId, caseId, {
+        email,
+        plan: revisedPlan,
+        revision: 1,
+      }),
     ).toBe("saved");
-    expect(await repos.employee.readSettings(caseId)).toMatchObject({
+    expect(await repos.employee.readSettings(defaultOrgId, caseId)).toMatchObject({
       plan: revisedPlan,
       revision: 2,
     });

@@ -26,7 +26,7 @@ type EmployeeData = {
 };
 
 export function createEmployeeRepository(db: Database) {
-  async function readSettings(caseId: string) {
+  async function readSettings(orgId: string, caseId: string) {
     const [settings] = await db
       .select({
         email: employeeAccess.email,
@@ -35,7 +35,7 @@ export function createEmployeeRepository(db: Database) {
       })
       .from(offboardingCases)
       .leftJoin(employeeAccess, eq(offboardingCases.id, employeeAccess.caseId))
-      .where(eq(offboardingCases.id, caseId));
+      .where(and(eq(offboardingCases.id, caseId), eq(offboardingCases.orgId, orgId)));
 
     return settings
       ? employeeAccessSchema.parse({
@@ -46,16 +46,27 @@ export function createEmployeeRepository(db: Database) {
       : null;
   }
 
-  async function saveSettings(caseId: string, settings: z.infer<typeof employeeAccessSchema>) {
+  async function saveSettings(
+    orgId: string,
+    caseId: string,
+    settings: z.infer<typeof employeeAccessSchema>,
+  ) {
     try {
       return await db.transaction(async (tx) => {
+        const [owned] = await tx
+          .select({ id: offboardingCases.id })
+          .from(offboardingCases)
+          .where(and(eq(offboardingCases.id, caseId), eq(offboardingCases.orgId, orgId)));
+
+        if (!owned) return "missing-case";
+
         const revision = settings.revision + 1;
         const { email, plan } = settings;
 
         if (settings.revision === 0) {
           const [created] = await tx
             .insert(employeeAccess)
-            .values({ caseId, email, plan, revision })
+            .values({ orgId, caseId, email, plan, revision })
             .onConflictDoNothing({ target: employeeAccess.caseId })
             .returning({ caseId: employeeAccess.caseId });
 
@@ -68,16 +79,7 @@ export function createEmployeeRepository(db: Database) {
           .where(eq(employeeAccess.caseId, caseId))
           .for("update");
 
-        if (!current) {
-          const [existing] = await tx
-            .select({ id: offboardingCases.id })
-            .from(offboardingCases)
-            .where(eq(offboardingCases.id, caseId));
-
-          return existing ? "changed" : "missing-case";
-        }
-
-        if (current.revision !== settings.revision) return "changed";
+        if (!current || current.revision !== settings.revision) return "changed";
 
         const changedEmail = current.email !== email;
 
@@ -98,8 +100,6 @@ export function createEmployeeRepository(db: Database) {
 
       if (code === "23505") return "email-in-use";
 
-      if (code === "23503") return "missing-case";
-
       throw error;
     }
   }
@@ -112,6 +112,7 @@ export function createEmployeeRepository(db: Database) {
     return db.transaction(async (tx) => {
       const [access] = await tx
         .select({
+          orgId: offboardingCases.orgId,
           deadline: offboardingCases.deadline,
           role: offboardingCases.role,
           department: offboardingCases.department,
@@ -130,10 +131,12 @@ export function createEmployeeRepository(db: Database) {
 
       if (!access) return null;
 
+      const { orgId, ...journey } = access;
+
       return operation({
-        readJourney: () => ({ ...access, plan: employeePlanSchema.parse(access.plan) }),
+        readJourney: () => ({ ...journey, plan: employeePlanSchema.parse(journey.plan) }),
         readState: (key) => readState(tx, principal, key),
-        saveState: (next) => saveState(tx, principal, next),
+        saveState: (next) => saveState(tx, orgId, principal, next),
       });
     });
   }
@@ -162,7 +165,12 @@ async function readState(tx: Transaction, principal: EmployeePrincipal, key: Emp
   return record ? employeeStateSchema.parse(record) : null;
 }
 
-async function saveState(tx: Transaction, principal: EmployeePrincipal, next: EmployeeState) {
+async function saveState(
+  tx: Transaction,
+  orgId: string,
+  principal: EmployeePrincipal,
+  next: EmployeeState,
+) {
   const owner = stateOwner(principal, next.key);
   const revision = next.revision + 1;
   const revisionMatch = and(owner, eq(employeeStates.revision, next.revision));
@@ -172,6 +180,7 @@ async function saveState(tx: Transaction, principal: EmployeePrincipal, next: Em
       ? await tx
           .insert(employeeStates)
           .values({
+            orgId,
             caseId: principal.caseId,
             userId: principal.id,
             key: next.key,

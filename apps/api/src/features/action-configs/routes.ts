@@ -25,15 +25,15 @@ const actionConfigRow = t.Object({
 export function actionConfigsRoutes(repos: ActionConfigsRepository, access: PortalAccessPlugin) {
   return new Elysia()
     .use(access)
-    .get("/action-configs", () => repos.listActionConfigs(), {
+    .get("/action-configs", ({ principal }) => repos.listActionConfigs(principal.orgId), {
       permit: ["read", "Integrations"],
       response: t.Array(actionConfigRow),
     })
     .post(
       "/action-configs",
-      async ({ body, set, status }) => {
+      async ({ body, principal, set, status }) => {
         try {
-          const created = await repos.createActionConfig(body);
+          const created = await repos.createActionConfig(principal.orgId, body);
           set.status = 201;
 
           return created;
@@ -58,8 +58,8 @@ export function actionConfigsRoutes(repos: ActionConfigsRepository, access: Port
     )
     .put(
       "/action-configs/:id",
-      async ({ params, body, status }) => {
-        const updated = await repos.updateActionConfig(params.id, body);
+      async ({ params, body, principal, status }) => {
+        const updated = await repos.updateActionConfig(principal.orgId, params.id, body);
 
         return updated ?? status(404, { error: "Action config not found" });
       },
@@ -76,8 +76,8 @@ export function actionConfigsRoutes(repos: ActionConfigsRepository, access: Port
     )
     .delete(
       "/action-configs/:id",
-      async ({ params, status }) => {
-        const removed = await repos.deleteActionConfig(params.id);
+      async ({ params, principal, status }) => {
+        const removed = await repos.deleteActionConfig(principal.orgId, params.id);
 
         return removed
           ? new Response(null, { status: 204 })

@@ -61,7 +61,7 @@ export function offboardingsRoutes(
 
         if (!result.delivered) return;
 
-        const updated = await repos.updateTaskStatus(task.id, "done");
+        const updated = await repos.updateTaskStatus(task.orgId, task.id, "done");
 
         if (!updated) return;
 
@@ -69,6 +69,7 @@ export function offboardingsRoutes(
 
         if (task.phase) {
           await dispatchAction({
+            orgId: task.orgId,
             taskId: task.id,
             taskTitle: task.title,
             status: "done",
@@ -92,20 +93,24 @@ export function offboardingsRoutes(
         },
       }),
     })
-    .get("/offboardings", () => repos.listOffboardings(), {
+    .get("/offboardings", ({ principal }) => repos.listOffboardings(principal.orgId), {
       permit: ["read", "Offboarding"],
       response: t.Array(caseSummary),
     })
-    .get("/offboardings/with-tasks", () => repos.listOffboardingsWithTasks(), {
-      permit: ["read", "Offboarding"],
-      response: t.Array(offboardingCase),
-    })
+    .get(
+      "/offboardings/with-tasks",
+      ({ principal }) => repos.listOffboardingsWithTasks(principal.orgId),
+      {
+        permit: ["read", "Offboarding"],
+        response: t.Array(offboardingCase),
+      },
+    )
     .post(
       "/offboardings",
-      async ({ body, set }) => {
+      async ({ body, principal, set }) => {
         set.status = 201;
 
-        return repos.createOffboarding(body);
+        return repos.createOffboarding(principal.orgId, body);
       },
       {
         permit: ["create", "Offboarding"],
@@ -120,10 +125,10 @@ export function offboardingsRoutes(
     )
     .post(
       "/offboardings/import",
-      async ({ body, set }) => {
+      async ({ body, principal, set }) => {
         set.status = 201;
 
-        return repos.bulkCreateOffboardings(body.rows);
+        return repos.bulkCreateOffboardings(principal.orgId, body.rows);
       },
       {
         permit: ["create", "Offboarding"],
@@ -135,11 +140,11 @@ export function offboardingsRoutes(
     )
     .get(
       "/offboardings/:id",
-      async ({ params, status }) => {
+      async ({ params, principal, status }) => {
         if (!z.guid().safeParse(params.id).success)
           return status(404, { error: "Offboarding not found" });
 
-        const found = await repos.getOffboarding(params.id);
+        const found = await repos.getOffboarding(principal.orgId, params.id);
 
         return found ?? status(404, { error: "Offboarding not found" });
       },
@@ -150,15 +155,17 @@ export function offboardingsRoutes(
     )
     .patch(
       "/tasks/:id/status",
-      async ({ params, body, status }) => {
-        const updated = await repos.updateTaskStatus(params.id, body.status);
+      async ({ params, body, principal, status }) => {
+        const { orgId } = principal;
+        const updated = await repos.updateTaskStatus(orgId, params.id, body.status);
 
         if (!updated) return status(404, { error: "Task not found" });
 
-        const phase = await repos.getTaskPhase(params.id);
+        const phase = await repos.getTaskPhase(orgId, params.id);
 
         if (phase) {
           dispatchAction({
+            orgId,
             taskId: params.id,
             taskTitle: updated.title,
             status: body.status,
@@ -177,8 +184,8 @@ export function offboardingsRoutes(
     )
     .patch(
       "/subtasks/:id/toggle",
-      async ({ params, status }) => {
-        const toggled = await repos.toggleSubtask(params.id);
+      async ({ params, principal, status }) => {
+        const toggled = await repos.toggleSubtask(principal.orgId, params.id);
 
         return toggled ?? status(404, { error: "Subtask not found" });
       },
@@ -195,14 +202,19 @@ export function offboardingsRoutes(
           return { accepted: false, reason: "event ignored" };
         }
 
-        const updated = await repos.updateTaskStatus(params.taskId, "done");
+        const orgId = await repos.getTaskOrgId(params.taskId);
+
+        if (!orgId) return status(404, { error: "Task not found" });
+
+        const updated = await repos.updateTaskStatus(orgId, params.taskId, "done");
 
         if (!updated) return status(404, { error: "Task not found" });
 
-        const phase = await repos.getTaskPhase(params.taskId);
+        const phase = await repos.getTaskPhase(orgId, params.taskId);
 
         if (phase) {
           dispatchAction({
+            orgId,
             taskId: params.taskId,
             taskTitle: updated.title,
             status: "done",
@@ -241,8 +253,8 @@ export function offboardingsRoutes(
     })
     .get(
       "/tasks/:id/tracking",
-      async ({ params, status }) => {
-        const row = await repos.getTaskTrackingCode(params.id);
+      async ({ params, principal, status }) => {
+        const row = await repos.getTaskTrackingCode(principal.orgId, params.id);
 
         if (!row) return status(404, { error: "Task not found" });
 

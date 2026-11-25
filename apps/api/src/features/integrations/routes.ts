@@ -38,13 +38,14 @@ export function integrationsRoutes(
 ) {
   return new Elysia()
     .use(access)
-    .get("/integrations", () => repos.listIntegrations(), {
+    .get("/integrations", ({ principal }) => repos.listIntegrations(principal.orgId), {
       permit: ["read", "Integrations"],
       response: t.Array(integrationRow),
     })
     .put(
       "/integrations/:name",
-      async ({ params, body }) => repos.upsertIntegration(params.name, body.status),
+      async ({ params, body, principal }) =>
+        repos.upsertIntegration(principal.orgId, params.name, body.status),
       {
         permit: ["manage", "Integrations"],
         params: t.Object({ name: t.String() }),

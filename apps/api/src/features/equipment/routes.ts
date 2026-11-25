@@ -26,14 +26,14 @@ const equipmentListRow = t.Composite([equipmentRow, t.Object({ person: t.String(
 export function equipmentRoutes(repos: EquipmentRepository, access: PortalAccessPlugin) {
   return new Elysia()
     .use(access)
-    .get("/equipment", () => repos.listEquipment(), {
+    .get("/equipment", ({ principal }) => repos.listEquipment(principal.orgId), {
       permit: ["read", "Offboarding"],
       response: t.Array(equipmentListRow),
     })
     .put(
       "/equipment/:id",
-      async ({ params, body, status }) => {
-        const updated = await repos.updateEquipmentStatus(params.id, body.status);
+      async ({ params, body, principal, status }) => {
+        const updated = await repos.updateEquipmentStatus(principal.orgId, params.id, body.status);
 
         if (!updated) return status(404, { error: "Equipment not found" });
 

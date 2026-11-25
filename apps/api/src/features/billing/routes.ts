@@ -59,8 +59,8 @@ export function billingRoutes(
     })
     .get(
       "/billing/subscription",
-      async ({ status }) => {
-        const subscription = await repos.getSubscription();
+      async ({ principal, status }) => {
+        const subscription = await repos.getSubscription(principal.orgId);
 
         return subscription ?? status(404, { error: "No subscription" });
       },
@@ -69,16 +69,16 @@ export function billingRoutes(
         response: { 200: subscriptionRow, 404: errorResponse },
       },
     )
-    .get("/billing/invoices", () => repos.listInvoices(), {
+    .get("/billing/invoices", ({ principal }) => repos.listInvoices(principal.orgId), {
       permit: ["manage", "Billing"],
       response: t.Array(invoiceRow),
     })
     .post(
       "/billing/checkout",
-      async ({ status }) => {
+      async ({ principal, status }) => {
         if (!gateway.configured) return status(503, { error: "Payments are not configured" });
 
-        const subscription = await repos.getSubscription();
+        const subscription = await repos.getSubscription(principal.orgId);
 
         if (!subscription) return status(404, { error: "No subscription" });
 

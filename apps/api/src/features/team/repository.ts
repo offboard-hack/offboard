@@ -1,5 +1,5 @@
 import type { Database } from "@offboard/db/client";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { teamMembers } from "@offboard/db/schema";
 
 type NewTeamMember = Pick<typeof teamMembers.$inferInsert, "name" | "email" | "role">;
@@ -12,23 +12,27 @@ export function createTeamRepository(db: Database) {
     role: teamMembers.role,
   };
 
-  async function listTeamMembers() {
-    return db.select(memberColumns).from(teamMembers).orderBy(asc(teamMembers.name));
+  async function listTeamMembers(orgId: string) {
+    return db
+      .select(memberColumns)
+      .from(teamMembers)
+      .where(eq(teamMembers.orgId, orgId))
+      .orderBy(asc(teamMembers.name));
   }
 
-  async function createTeamMember({ name, email, role }: NewTeamMember) {
+  async function createTeamMember(orgId: string, { name, email, role }: NewTeamMember) {
     const [row] = await db
       .insert(teamMembers)
-      .values({ name, email: email.trim().toLowerCase(), role })
+      .values({ orgId, name, email: email.trim().toLowerCase(), role })
       .returning(memberColumns);
 
     return row;
   }
 
-  async function deleteTeamMember(id: string) {
+  async function deleteTeamMember(orgId: string, id: string) {
     const rows = await db
       .delete(teamMembers)
-      .where(eq(teamMembers.id, id))
+      .where(and(eq(teamMembers.id, id), eq(teamMembers.orgId, orgId)))
       .returning({ id: teamMembers.id });
 
     return rows.length > 0;

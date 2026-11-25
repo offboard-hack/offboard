@@ -35,7 +35,7 @@ export function createBillingRepository(db: Database) {
       .orderBy(asc(plans.monthlyPriceCents));
   }
 
-  async function getSubscription() {
+  async function getSubscription(orgId: string) {
     const [row] = await db
       .select({
         id: subscriptions.id,
@@ -53,27 +53,30 @@ export function createBillingRepository(db: Database) {
       })
       .from(subscriptions)
       .innerJoin(plans, eq(plans.id, subscriptions.planId))
+      .where(eq(subscriptions.orgId, orgId))
       .orderBy(desc(subscriptions.createdAt))
       .limit(1);
 
     return row ?? null;
   }
 
-  async function listInvoices() {
+  async function listInvoices(orgId: string) {
     const rows = await db
       .select(invoiceColumns)
       .from(invoices)
+      .where(eq(invoices.orgId, orgId))
       .orderBy(desc(invoices.dueDate), desc(invoices.createdAt));
 
     return rows.map(serializeInvoice);
   }
 
-  async function findOpenInvoice(subscriptionId: string) {
+  async function findOpenInvoice(orgId: string, subscriptionId: string) {
     const [row] = await db
       .select(invoiceColumns)
       .from(invoices)
       .where(
         and(
+          eq(invoices.orgId, orgId),
           eq(invoices.subscriptionId, subscriptionId),
           inArray(invoices.status, ["pending", "failed"]),
         ),
@@ -86,7 +89,7 @@ export function createBillingRepository(db: Database) {
 
   async function getSubscriptionById(id: string) {
     const [row] = await db
-      .select({ id: subscriptions.id, planId: subscriptions.planId })
+      .select({ id: subscriptions.id, planId: subscriptions.planId, orgId: subscriptions.orgId })
       .from(subscriptions)
       .where(eq(subscriptions.id, id))
       .limit(1);
@@ -95,6 +98,7 @@ export function createBillingRepository(db: Database) {
   }
 
   async function updateSubscription(
+    orgId: string,
     id: string,
     patch: {
       status: SubscriptionStatus;
@@ -105,29 +109,35 @@ export function createBillingRepository(db: Database) {
     await db
       .update(subscriptions)
       .set({ ...patch, updatedAt: new Date() })
-      .where(eq(subscriptions.id, id));
+      .where(and(eq(subscriptions.id, id), eq(subscriptions.orgId, orgId)));
   }
 
-  async function getInvoiceByBillingId(abacatepayBillingId: string) {
+  async function getInvoiceByBillingId(orgId: string, abacatepayBillingId: string) {
     const [row] = await db
       .select(invoiceColumns)
       .from(invoices)
-      .where(eq(invoices.abacatepayBillingId, abacatepayBillingId))
+      .where(and(eq(invoices.orgId, orgId), eq(invoices.abacatepayBillingId, abacatepayBillingId)))
       .limit(1);
 
     return row ? serializeInvoice(row) : null;
   }
 
-  async function createInvoice(subscriptionId: string, amountCents: number, dueDate: string) {
+  async function createInvoice(
+    orgId: string,
+    subscriptionId: string,
+    amountCents: number,
+    dueDate: string,
+  ) {
     const [row] = await db
       .insert(invoices)
-      .values({ subscriptionId, amountCents, dueDate, status: "pending" })
+      .values({ orgId, subscriptionId, amountCents, dueDate, status: "pending" })
       .returning(invoiceColumns);
 
     return serializeInvoice(row);
   }
 
   async function updateInvoiceStatus(
+    orgId: string,
     id: string,
     status: InvoiceStatus,
     abacatepayBillingId?: string,
@@ -142,7 +152,7 @@ export function createBillingRepository(db: Database) {
     const [row] = await db
       .update(invoices)
       .set(changes)
-      .where(eq(invoices.id, id))
+      .where(and(eq(invoices.id, id), eq(invoices.orgId, orgId)))
       .returning(invoiceColumns);
 
     return row ? serializeInvoice(row) : null;
