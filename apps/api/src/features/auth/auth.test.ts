@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
+import { setTimeout as delay } from "node:timers/promises";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "../../repositories.js";
 import { authRateLimit, authUser } from "@offboard/db/schema";
@@ -175,6 +176,95 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
       .where(eq(authUser.email, email));
 
     expect(users).toHaveLength(0);
+  });
+
+  it("confirms a deferred magic link request before the provider finishes sending", async () => {
+    const email = `worker-${randomUUID()}@offboard.example`;
+    const member = await repos.createTeamMember({ name: "Pessoa de teste", email, role: "rh" });
+    const background: Promise<void>[] = [];
+    const messages: string[] = [];
+    let finishDelivery = () => {};
+
+    const pendingDelivery = new Promise<void>((resolve) => {
+      finishDelivery = resolve;
+    });
+
+    const server = createServer(async (request, response) => {
+      let body = "";
+      request.setEncoding("utf8");
+
+      for await (const chunk of request) body += chunk;
+
+      messages.push(body);
+      response.setHeader("content-type", "application/json");
+
+      if (messages.length === 1) {
+        await pendingDelivery;
+        response.end(JSON.stringify({ id: "test-email" }));
+      } else {
+        response.statusCode = 422;
+        response.end(JSON.stringify({ name: "validation_error", message: "Failed to send" }));
+      }
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    const log = vi.spyOn(console, "error");
+    const deadline = new AbortController();
+
+    try {
+      const { port } = z.object({ port: z.number() }).parse(server.address());
+
+      vi.stubEnv("RESEND_BASE_URL", `http://127.0.0.1:${port}`);
+
+      const runtime = createRuntimeAuth(db, undefined, {
+        env: {
+          BETTER_AUTH_URL: origin,
+          BETTER_AUTH_SECRET: randomUUID() + randomUUID(),
+          EMAIL_PROVIDER: "resend",
+          AUTH_EMAIL_FROM: "offboard@offboard.example",
+          RESEND_API_KEY: "test",
+        },
+        deferMagicLinkDelivery(delivery) {
+          background.push(delivery);
+        },
+      });
+
+      try {
+        const response = await Promise.race([
+          runtime.auth.handler(magicLinkRequest(email, origin)),
+          delay(2_000, null, { signal: deadline.signal }),
+        ]);
+
+        expect(response?.status).toBe(200);
+      } finally {
+        deadline.abort();
+        finishDelivery();
+      }
+
+      expect(background).toHaveLength(1);
+
+      await Promise.all(background);
+      expect(log).not.toHaveBeenCalled();
+      expect(JSON.parse(messages[0])).toEqual(
+        expect.objectContaining({ to: email, subject: "Seu link de acesso ao Offboard" }),
+      );
+
+      const failed = await runtime.auth.handler(magicLinkRequest(email, origin));
+
+      expect(failed.status).toBe(200);
+      expect(background).toHaveLength(2);
+
+      await Promise.all(background);
+      expect(log).toHaveBeenCalledExactlyOnceWith({ event: "auth.magic_link_delivery_failed" });
+    } finally {
+      finishDelivery();
+      log.mockRestore();
+
+      await Promise.allSettled(background);
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await repos.deleteTeamMember(member.id);
+    }
   });
 
   it("uses the configured public origin and sends email through Resend", async () => {

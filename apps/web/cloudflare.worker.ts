@@ -1,6 +1,6 @@
 import { createWorkerApi, type WorkerBindings } from "@offboard/api/worker";
 import start from "@tanstack/react-start/server-entry";
-import { env } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
 import { z } from "zod";
 import { apiTransport } from "./src/shared/lib/api-transport.server";
 
@@ -10,7 +10,7 @@ declare global {
   }
 }
 
-const handleApi = createWorkerApi(env);
+const handleApi = createWorkerApi(env, waitUntil);
 
 const cronConfig = z.object({
   BETTER_AUTH_URL: z.url(),

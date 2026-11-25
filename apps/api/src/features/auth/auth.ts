@@ -390,10 +390,12 @@ export function createRuntimeAuth(
     env = process.env,
     ipAddressHeaders,
     cloudflareEmail,
+    deferMagicLinkDelivery,
   }: {
     env?: Record<string, string | undefined>;
     ipAddressHeaders?: string[];
     cloudflareEmail?: CloudflareEmailBinding;
+    deferMagicLinkDelivery?: (delivery: Promise<void>) => void;
   } = {},
 ) {
   const secret = authSecret.parse(env.BETTER_AUTH_SECRET);
@@ -410,8 +412,16 @@ export function createRuntimeAuth(
     secret,
     onVercel: env.VERCEL === "1",
     ipAddressHeaders,
-    sendLink(message) {
-      return sender.send(signInEmail(message));
+    async sendLink(message) {
+      const delivery = sender.send(signInEmail(message));
+
+      if (!deferMagicLinkDelivery) return delivery;
+
+      deferMagicLinkDelivery(
+        delivery.catch(() => {
+          console.error({ event: "auth.magic_link_delivery_failed" });
+        }),
+      );
     },
     sendCode({ email, code }) {
       const text = `Seu código para entrar no Offboard é ${code}. Ele expira em ${codeLifetimeSeconds / 60} minutos.`;
