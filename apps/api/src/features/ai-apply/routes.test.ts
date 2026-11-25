@@ -86,6 +86,7 @@ type ModelAnswer = {
 };
 
 type Setup = {
+  takeLlmCall?: () => Promise<true | { retryAt: Date }>;
   allowlist?: string[];
   consent?: boolean;
   generate?: GenerateStructured | null;
@@ -200,11 +201,13 @@ describe.skipIf(!url)("ai apply route", () => {
         {
           allowlist: setup.allowlist ?? [email.toUpperCase()],
           generate: setup.generate === null ? undefined : setup.generate,
-          takeLlmCall: repos.llmUsage.takeLlmCall,
+          takeLlmCall: setup.takeLlmCall ?? repos.llmUsage.takeLlmCall,
           readForm: (board, posting) => readGreenhouseForm(respond, board, posting),
           library: async (profileId) =>
             (await repos.answers.library(profileId)).questions.flatMap((item) =>
-              item.answer === null ? [] : [{ question: item.text, answer: item.answer }],
+              item.answer === null
+                ? []
+                : [{ question: item.text, answer: item.answer, sensitive: item.sensitive }],
             ),
         },
       ),
@@ -760,6 +763,49 @@ describe.skipIf(!url)("ai apply route", () => {
       ).toEqual([["assisted", "document_required", resumeId]]);
     });
 
+    it("treats a required Portfólio or address-proof upload as a document", async () => {
+      const upload = (label: string, name: string) =>
+        JSON.stringify({
+          questions: [
+            { label, required: true, fields: [{ name, type: "input_file", values: [] }] },
+          ],
+        });
+
+      const { model, profileId, jobId } = await ready();
+
+      for (const [label, name] of [
+        ["Portfólio", "question_1"],
+        ["Comprovante de endereço", "question_2"],
+      ]) {
+        const { post } = build({
+          generate: model.generate,
+          form: () => new Response(upload(label, name)),
+        });
+
+        const body = await (await post(profileId, jobId)).json();
+
+        expect(body.attempt).toMatchObject({ state: "assisted", reason: "document_required" });
+
+        await db.delete(aiApplications);
+      }
+
+      expect(model.calls).toEqual([]);
+    });
+
+    it("returns the existing assisted attempt without reading the form again", async () => {
+      const { post, fetched, profileId, jobId } = await ready({
+        form: () => new Response(withDocument(true)),
+      });
+
+      const first = await (await post(profileId, jobId)).json();
+      const res = await post(profileId, jobId);
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).attempt).toEqual(first.attempt);
+      expect(fetched).toHaveLength(1);
+      expect(await attempts(profileId)).toHaveLength(1);
+    });
+
     it("drafts normally when the document is optional", async () => {
       const { post, profileId, jobId } = await ready({
         form: () => new Response(withDocument(false)),
@@ -787,6 +833,19 @@ describe.skipIf(!url)("ai apply route", () => {
       expect(res.status).toBe(429);
       expect(await res.json()).toEqual({ error: "Daily AI limit reached" });
       expect(model.calls).toEqual([]);
+      expect(await attempts(profileId)).toEqual([]);
+    });
+
+    it("lets a usage lookup failure surface as a server error", async () => {
+      const { post, profileId, jobId } = await ready({
+        takeLlmCall: async () => {
+          throw new Error("db down");
+        },
+      });
+
+      const res = await post(profileId, jobId);
+
+      expect(res.status).toBe(500);
       expect(await attempts(profileId)).toEqual([]);
     });
 

@@ -11,6 +11,9 @@ const sensitiveTerms = [
   "etnic\\w*",
   "racial",
   "trans",
+  "transg\\w*",
+  "transexua\\w*",
+  "religi\\w*",
   "autodeclar\\w*",
   "lgbt\\w*",
   "negr[oa]s?",
@@ -61,6 +64,10 @@ export const isSensitive = (label: string, section: FormQuestion["section"]) =>
 export const detectKind = (label: string, first: FormField) => {
   const standard = standardKinds.get(first.name);
 
+  if (first.type === "file") {
+    return standard === "resume" || standard === "cover_letter" ? standard : "document";
+  }
+
   if (standard !== undefined) return standard;
 
   const normalized = normalizeQuestion(label);
@@ -68,5 +75,5 @@ export const detectKind = (label: string, first: FormField) => {
 
   if (matched !== undefined) return matched[1];
 
-  return first.type === "file" ? "document" : "custom";
+  return "custom";
 };

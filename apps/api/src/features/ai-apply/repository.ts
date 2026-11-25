@@ -9,7 +9,7 @@ import {
   resumes,
   talentPreferences,
 } from "@offboard/db/schema";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { uniqueViolation } from "../../shared/http.js";
 import { toPreferences } from "../../shared/talent-preferences.js";
@@ -138,8 +138,31 @@ export function createAiApplyRepository(db: Database) {
     }
   }
 
+  async function assistedAttempt(profileId: string, jobId: string) {
+    const [row] = await db
+      .select({
+        attempt: aiApplications,
+        job: { id: jobs.id, title: jobs.title, company: jobs.company, url: jobs.url },
+      })
+      .from(aiApplications)
+      .innerJoin(jobs, eq(jobs.id, aiApplications.jobId))
+      .where(
+        and(
+          eq(aiApplications.profileId, profileId),
+          eq(aiApplications.jobId, jobId),
+          eq(aiApplications.state, "assisted"),
+          eq(aiApplications.reason, "document_required"),
+        ),
+      )
+      .orderBy(desc(aiApplications.createdAt))
+      .limit(1);
+
+    return row === undefined ? undefined : toAttemptView(row.attempt, row.job);
+  }
+
   return {
     openJob,
+    assistedAttempt,
     baseResume,
     hasApplied,
     isRejected,

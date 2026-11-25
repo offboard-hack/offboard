@@ -764,6 +764,7 @@ export const answerQuestions = pgTable(
     normalized: varchar("normalized", { length: 500 }).notNull(),
     text: varchar("text", { length: 500 }).notNull(),
     common: boolean("common").notNull().default(false),
+    sensitive: boolean("sensitive").notNull().default(false),
     createdAt: timestamp("created_at").defaultNow(),
   },
   (table) => [uniqueIndex("answer_questions_normalized_idx").on(table.normalized)],

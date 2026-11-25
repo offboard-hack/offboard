@@ -296,6 +296,33 @@ describe("reads a Greenhouse form", () => {
   });
 });
 
+describe("file fields", () => {
+  it("treats every upload except the résumé and the cover letter as a document", async () => {
+    const questions = await read({
+      questions: [
+        question("Portfólio (PDF)", false, field("q1", "input_file")),
+        question("Comprovante de endereço", true, field("q2", "input_file")),
+        question("LinkedIn em PDF", false, field("q3", "input_file")),
+        question(
+          "Currículo",
+          true,
+          field("resume", "input_file"),
+          field("resume_text", "textarea"),
+        ),
+        question("Carta", false, field("cover_letter", "input_file")),
+      ],
+    });
+
+    expect(questions.map((item) => [item.kind, item.required])).toEqual([
+      ["document", false],
+      ["document", true],
+      ["document", false],
+      ["resume", true],
+      ["cover_letter", false],
+    ]);
+  });
+});
+
 describe("isSensitive", () => {
   it("flags sensitive sections and labels", () => {
     expect(isSensitive("Qualquer", "compliance")).toBe(true);
@@ -313,6 +340,10 @@ describe("isSensitive", () => {
     expect(isSensitive("Você é LGBTQIA+?", "questions")).toBe(true);
     expect(isSensitive("Pessoa negra ou indígena?", "questions")).toBe(true);
     expect(isSensitive("Você é neurodivergente?", "questions")).toBe(true);
+    expect(isSensitive("Você é uma pessoa transgênero?", "questions")).toBe(true);
+    expect(isSensitive("Você é transexual?", "questions")).toBe(true);
+    expect(isSensitive("Qual a sua religião?", "questions")).toBe(true);
+    expect(isSensitive("Your religious beliefs", "questions")).toBe(true);
   });
 
   it("avoids substring false positives", () => {

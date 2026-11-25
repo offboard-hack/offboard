@@ -310,7 +310,9 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         readForm: (board, posting) => readGreenhouseForm(fetchGreenhouse, board, posting),
         library: async (profileId) =>
           (await repos.answers.library(profileId)).questions.flatMap((item) =>
-            item.answer === null ? [] : [{ question: item.text, answer: item.answer }],
+            item.answer === null
+              ? []
+              : [{ question: item.text, answer: item.answer, sensitive: item.sensitive }],
           ),
       }),
     )

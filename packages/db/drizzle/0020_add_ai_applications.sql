@@ -37,3 +37,7 @@ ALTER TABLE "ai_applications" ADD CONSTRAINT "ai_applications_resume_id_resumes_
 CREATE UNIQUE INDEX "ai_applications_active_idx" ON "ai_applications" USING btree ("profile_id","job_id") WHERE "ai_applications"."state" in ('draft', 'queued', 'running', 'submitting', 'needs_check');
 --> statement-breakpoint
 CREATE INDEX "ai_applications_profile_created_idx" ON "ai_applications" USING btree ("profile_id","created_at");
+--> statement-breakpoint
+ALTER TABLE "answer_questions" ADD COLUMN "sensitive" boolean DEFAULT false NOT NULL;
+--> statement-breakpoint
+UPDATE "answer_questions" SET "sensitive" = true WHERE "normalized" = 'voce se autodeclara pessoa com deficiencia (pcd)';

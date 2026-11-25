@@ -1,4 +1,4 @@
-import type { FormQuestion } from "@offboard/db/schema";
+import type { FormQuestion, ResumeContent } from "@offboard/db/schema";
 import { Elysia, t } from "elysia";
 import { aiApplyAccess } from "../../shared/ai-apply-access.js";
 import type { GenerateStructured } from "../../shared/ai.js";
@@ -21,11 +21,35 @@ export function aiApplyRoutes(
     generate: GenerateStructured | undefined;
     takeLlmCall: UsageRepository["takeLlmCall"];
     readForm: (board: string, posting: string) => Promise<FormResult>;
-    library: (profileId: string) => Promise<{ question: string; answer: string }[]>;
+    library: (
+      profileId: string,
+    ) => Promise<{ question: string; answer: string; sensitive: boolean }[]>;
   },
 ) {
   const needsDocument = (questions: FormQuestion[]) =>
     questions.some((question) => question.kind === "document" && question.required);
+
+  async function draftInputs(
+    me: { id: string; name: string; email: string },
+    jobId: string,
+    questions: FormQuestion[],
+    resume: ResumeContent,
+  ) {
+    const [fields, library, coverLetter] = await Promise.all([
+      repos.profileFields(me.id),
+      deps.library(me.id),
+      repos.coverLetter(me.id, jobId),
+    ]);
+
+    return {
+      questions,
+      account: { name: me.name, email: me.email },
+      fields,
+      library,
+      resume,
+      coverLetter,
+    };
+  }
 
   return new Elysia().use(talentAccess).post(
     "/me/jobs/:jobId/ai-apply",
@@ -57,6 +81,10 @@ export function aiApplyRoutes(
 
       if (await repos.hasActive(me.id, job.id)) return status(409, inProgress);
 
+      const existing = await repos.assistedAttempt(me.id, job.id);
+
+      if (existing) return status(200, { attempt: existing });
+
       const form = await deps.readForm(job.board, job.posting);
 
       if ("error" in form) {
@@ -67,47 +95,41 @@ export function aiApplyRoutes(
 
       const assisted = needsDocument(form.questions);
 
-      let limited = false;
+      const stops: ("limited" | "failed")[] = [];
 
       const capped: GenerateStructured = async (request) => {
         if ((await deps.takeLlmCall(me.id, new Date())) !== true) {
-          limited = true;
+          stops.push("limited");
 
           throw new Error("Daily AI limit reached");
         }
 
-        return generate(request);
+        return generate(request).catch((cause) => {
+          stops.push("failed");
+          logFailure("AI application draft failed")(cause);
+
+          throw cause;
+        });
       };
 
-      const answers = assisted
+      const drafted = assisted
         ? []
-        : await Promise.all([
-            repos.profileFields(me.id),
-            deps.library(me.id),
-            repos.coverLetter(me.id, job.id),
-          ])
-            .then(([fields, library, coverLetter]) =>
-              draftAnswers(capped, {
-                questions: form.questions,
-                account: { name: me.name, email: me.email },
-                fields,
-                library,
-                resume: base.content,
-                coverLetter,
-              }),
-            )
-            .catch(logFailure("AI application draft failed"));
+        : await draftInputs(me, job.id, form.questions, base.content).then((input) =>
+            draftAnswers(capped, input).catch((cause) => {
+              if (stops.length === 0) throw cause;
+            }),
+          );
 
-      if (limited) return status(429, { error: "Daily AI limit reached" });
+      if (stops.includes("limited")) return status(429, { error: "Daily AI limit reached" });
 
-      if (answers === undefined) return status(502, { error: "Could not prepare the application" });
+      if (drafted === undefined) return status(502, { error: "Could not prepare the application" });
 
       const attempt = await repos.createAttempt(
         me.id,
         job.id,
         {
           form: { questions: form.questions },
-          draft: answers,
+          draft: drafted,
           state: assisted ? "assisted" : "draft",
           reason: assisted ? "document_required" : null,
           resumeId: base.id,
@@ -121,6 +143,7 @@ export function aiApplyRoutes(
       talent: "active",
       params,
       response: {
+        200: t.Object({ attempt: attemptResponse }),
         201: t.Object({ attempt: attemptResponse }),
         403: errorResponse,
         404: errorResponse,

@@ -15,6 +15,7 @@ export function createAnswersRepository(db: Database) {
         id: answerQuestions.id,
         text: answerQuestions.text,
         common: answerQuestions.common,
+        sensitive: answerQuestions.sensitive,
         answer: talentAnswers.answer,
       })
       .from(answerQuestions)
@@ -67,16 +68,23 @@ export function createAnswersRepository(db: Database) {
     return true;
   }
 
-  async function ensureQuestion(text: string, now: Date) {
+  async function ensureQuestion(
+    text: string,
+    now: Date,
+    { sensitive = false }: { sensitive?: boolean } = {},
+  ) {
     const trimmed = sanitizeText(text).trim();
     const normalized = normalizeQuestion(trimmed);
 
     if (normalized === "" || trimmed.length > questionLimit) throw new Error("Invalid question");
 
-    await db
+    const insert = db
       .insert(answerQuestions)
-      .values({ normalized, text: trimmed, common: false, createdAt: now })
-      .onConflictDoNothing({ target: answerQuestions.normalized });
+      .values({ normalized, text: trimmed, common: false, sensitive, createdAt: now });
+
+    await (sensitive
+      ? insert.onConflictDoUpdate({ target: answerQuestions.normalized, set: { sensitive: true } })
+      : insert.onConflictDoNothing({ target: answerQuestions.normalized }));
 
     const [row] = await db
       .select({ id: answerQuestions.id })

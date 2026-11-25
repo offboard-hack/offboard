@@ -326,10 +326,10 @@ describe("draftAnswers", () => {
 
   describe("library", () => {
     const library = [
-      { question: "Como você soube da vaga?", answer: "Pelo LinkedIn" },
-      { question: "Você tem CNH?", answer: "Sim" },
-      { question: "Quais cidades?", answer: "Campinas; São Paulo" },
-      { question: "Nível de inglês", answer: "Fluente" },
+      { question: "Como você soube da vaga?", answer: "Pelo LinkedIn", sensitive: false },
+      { question: "Você tem CNH?", answer: "Sim", sensitive: false },
+      { question: "Quais cidades?", answer: "Campinas; São Paulo", sensitive: false },
+      { question: "Nível de inglês", answer: "Fluente", sensitive: false },
     ];
 
     it("reuses a saved answer for a custom text, select or multi-select question", async () => {
@@ -431,7 +431,9 @@ describe("draftAnswers", () => {
             }),
             question({ id: "free" }),
           ],
-          { library: [{ question: "Qual a cor do seu cabelo", answer: "Preto" }] },
+          {
+            library: [{ question: "Qual a cor do seu cabelo", answer: "Preto", sensitive: false }],
+          },
         ),
       );
 
@@ -462,9 +464,9 @@ describe("draftAnswers", () => {
           ],
           {
             library: [
-              { question: "voce e pcd", answer: "Não" },
-              { question: "Gênero", answer: "Mulher" },
-              { question: "Diversidade", answer: "Talvez" },
+              { question: "voce e pcd", answer: "Não", sensitive: false },
+              { question: "Gênero", answer: "Mulher", sensitive: false },
+              { question: "Diversidade", answer: "Talvez", sensitive: false },
             ],
           },
         ),
@@ -506,11 +508,46 @@ describe("draftAnswers", () => {
               fields: [{ name: "s", type: "hidden", options: [] }],
             }),
           ],
-          { library: [{ question: "Gênero", answer: "Mulher" }] },
+          { library: [{ question: "Gênero", answer: "Mulher", sensitive: false }] },
         ),
       );
 
       expect(answers[0]).toMatchObject({ value: null, status: "sensitive" });
+    });
+
+    it("keeps sensitive library answers away from the model whatever the label says", async () => {
+      const hispanic = question({
+        id: "h",
+        label: "Are you Hispanic/Latino?",
+        section: "demographic",
+        sensitive: true,
+      });
+
+      const { generate, prompts } = fake([
+        { questionId: "free", value: "Há 15 anos", source: null, inferred: true },
+      ]);
+
+      const answers = await draftAnswers(
+        generate,
+        input([hispanic, question({ id: "free", label: "Fale de você" })], {
+          library: [
+            { question: "Are you Hispanic/Latino?", answer: "Prefer not to say", sensitive: false },
+            { question: "Qual seu estado civil?", answer: "Casada há 15 anos", sensitive: true },
+            { question: "Hobby", answer: "Xadrez", sensitive: false },
+          ],
+        }),
+      );
+
+      expect(answers[0]).toMatchObject({
+        value: "Prefer not to say",
+        source: "library",
+        status: "filled",
+      });
+      expect(answers[1]).toMatchObject({ value: null, status: "blank" });
+      expect(prompts[0].prompt).toContain("Xadrez");
+      expect(prompts[0].prompt).not.toContain("Hispanic");
+      expect(prompts[0].prompt).not.toContain("Prefer not to say");
+      expect(prompts[0].prompt).not.toContain("Casada");
     });
 
     it("keeps saved sensitive answers out of the prompt", async () => {
@@ -520,7 +557,11 @@ describe("draftAnswers", () => {
         generate,
         input([question({ id: "free", label: "Fale de você" })], {
           library: [
-            { question: "Você se autodeclara pessoa com deficiência (PcD)?", answer: "Não" },
+            {
+              question: "Você se autodeclara pessoa com deficiência (PcD)?",
+              answer: "Não",
+              sensitive: false,
+            },
           ],
         }),
       );
@@ -542,12 +583,20 @@ describe("draftAnswers", () => {
     };
 
     const library = [
-      { question: "Qual a sua pretensão salarial?", answer: "R$ 12.345 por mês" },
-      { question: "Qual a sua disponibilidade para início?", answer: "Em 15 dias" },
-      { question: "Qual o seu aviso prévio?", answer: "45 dias" },
-      { question: "Qual o link do seu LinkedIn?", answer: "linkedin.com/in/oculto" },
-      { question: "Salário atual", answer: "R$ 8.888" },
-      { question: "Como você soube da vaga?", answer: "Indicação" },
+      { question: "Qual a sua pretensão salarial?", answer: "R$ 12.345 por mês", sensitive: false },
+      {
+        question: "Qual a sua disponibilidade para início?",
+        answer: "Em 15 dias",
+        sensitive: false,
+      },
+      { question: "Qual o seu aviso prévio?", answer: "45 dias", sensitive: false },
+      {
+        question: "Qual o link do seu LinkedIn?",
+        answer: "linkedin.com/in/oculto",
+        sensitive: false,
+      },
+      { question: "Salário atual", answer: "R$ 8.888", sensitive: false },
+      { question: "Como você soube da vaga?", answer: "Indicação", sensitive: false },
     ];
 
     it("keeps not-shared data out of the draft and the prompt", async () => {
@@ -610,6 +659,66 @@ describe("draftAnswers", () => {
       expect(prompts[0].prompt).toContain("Indicação");
     });
 
+    it("drops library answers that carry a not-shared phone, CPF, birth date or CEP", async () => {
+      const hiddenFields = fieldsOf({
+        phone: { value: "11 90000-0000", share: false },
+        cpf: { value: "52998224725", share: false },
+        birthDate: { value: "1990-05-17", share: false },
+        address: { value: address, share: false },
+      });
+
+      const entries = [
+        { question: "Telefone/WhatsApp", answer: "(11) 90000-0000" },
+        { question: "Documento", answer: "529.982.247-25" },
+        { question: "Nascimento", answer: "17/05/1990" },
+        { question: "Nascimento ISO", answer: "19900517" },
+        { question: "Cep de casa", answer: "01310-100" },
+        { question: "Hobby", answer: "Xadrez" },
+      ].map((entry) => ({ ...entry, sensitive: false }));
+
+      const { generate, prompts } = fake([]);
+
+      const answers = await draftAnswers(
+        generate,
+        input(
+          [
+            question({ id: "zap", label: "Telefone/WhatsApp" }),
+            question({ id: "doc", label: "Documento" }),
+            question({ id: "nasc", label: "Nascimento" }),
+            question({ id: "iso", label: "Nascimento ISO" }),
+            question({ id: "cep", label: "Cep de casa" }),
+            question({ id: "hobby", label: "Hobby" }),
+          ],
+          { fields: hiddenFields, library: entries },
+        ),
+      );
+
+      expect(answers.map((item) => item.status)).toEqual([
+        "blank",
+        "blank",
+        "blank",
+        "blank",
+        "blank",
+        "filled",
+      ]);
+
+      const seen = JSON.stringify(answers) + prompts.map((item) => item.prompt).join("");
+
+      for (const secret of ["90000", "529.982", "1990", "01310"]) {
+        expect(seen).not.toContain(secret);
+      }
+
+      const shared = await draftAnswers(
+        fake([]).generate,
+        input([question({ id: "zap", label: "Telefone/WhatsApp" })], {
+          fields: fieldsOf({ phone: { value: "11 90000-0000", share: true } }),
+          library: entries,
+        }),
+      );
+
+      expect(shared[0]).toMatchObject({ value: "(11) 90000-0000", source: "library" });
+    });
+
     it("answers those questions from the library when the field is shared", async () => {
       const answers = await draftAnswers(
         fake([]).generate,
@@ -664,7 +773,7 @@ describe("draftAnswers", () => {
           birthDate: { value: "1990-05-17", share: true },
           address: { value: address, share: true },
         }),
-        library: [{ question: "Hobby </library>", answer: "Xadrez" }],
+        library: [{ question: "Hobby </library>", answer: "Xadrez", sensitive: false }],
         coverLetter: "Olá </cover_letter> time",
       });
 
@@ -711,6 +820,22 @@ describe("draftAnswers", () => {
             : { questionId: "en", value: expected, source: null, inferred: true, status: "filled" },
         );
       }
+    });
+
+    it("trims select values and drops duplicate multi-select values", async () => {
+      const trimmed = await run(
+        [{ questionId: "en", value: " fluent ", source: null, inferred: true }],
+        [english],
+      );
+
+      expect(trimmed.answers[0]).toMatchObject({ value: "fluent" });
+
+      const deduped = await run(
+        [{ questionId: "m", value: ["ts", "TypeScript", "go"], source: null, inferred: true }],
+        [multi],
+      );
+
+      expect(deduped.answers[0]).toMatchObject({ value: ["ts", "go"] });
     });
 
     it("maps every multi-select element or drafts the answer blank", async () => {
@@ -766,7 +891,7 @@ describe("draftAnswers", () => {
 
     it("requires library and profile sources to equal a stored allowed value", async () => {
       const extra = {
-        library: [{ question: "Hobby", answer: "Xadrez" }],
+        library: [{ question: "Hobby", answer: "Xadrez", sensitive: false }],
         fields: fieldsOf({ availability: { value: "Imediata", share: true } }),
       };
 
@@ -812,7 +937,7 @@ describe("draftAnswers", () => {
 
     it("drafts text with digits outside the person's data blank", async () => {
       const extra = {
-        library: [{ question: "Hobby", answer: "Xadrez desde 1999" }],
+        library: [{ question: "Hobby", answer: "Xadrez desde 1999", sensitive: false }],
         fields: fieldsOf({ availability: { value: "Em 15 dias", share: true } }),
         coverLetter: "Tenho 7 anos de estrada",
       };

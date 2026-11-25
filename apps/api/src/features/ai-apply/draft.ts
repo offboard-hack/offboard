@@ -31,7 +31,7 @@ export type DraftInput = {
   questions: FormQuestion[];
   account: { name: string; email: string };
   fields: Fields;
-  library: { question: string; answer: string }[];
+  library: { question: string; answer: string; sensitive: boolean }[];
   resume: ResumeContent;
   coverLetter: string | null;
 };
@@ -130,7 +130,8 @@ const filledOrBlank = (
     ? draft(question, "blank")
     : draft(question, "filled", value, source);
 
-const optionValue = (field: FormField, wanted: string) => {
+const optionValue = (field: FormField, given: string) => {
+  const wanted = given.trim();
   const normalized = normalizeQuestion(wanted);
 
   return (
@@ -142,7 +143,9 @@ const optionValue = (field: FormField, wanted: string) => {
 const optionValues = (field: FormField, wanted: string[]) => {
   const mapped = wanted.map((item) => optionValue(field, item));
 
-  return mapped.length > 0 && mapped.every((item) => item !== undefined) ? mapped : null;
+  return mapped.length > 0 && mapped.every((item) => item !== undefined)
+    ? [...new Set(mapped)]
+    : null;
 };
 
 const splitName = (name: string) => {
@@ -206,6 +209,25 @@ const profileKeys = [
   "salaryExpectation",
 ] as const;
 
+function hiddenDigits(fields: Fields) {
+  const secrets: string[] = [];
+  const { phone, cpf, birthDate, address } = fields;
+
+  if (!phone.share && phone.value !== null) secrets.push(phone.value.replace(/\D/g, "").slice(-8));
+
+  if (!cpf.share && cpf.value !== null) secrets.push(cpf.value);
+
+  if (!birthDate.share && birthDate.value !== null) {
+    const [year, month, day] = birthDate.value.split("-");
+
+    secrets.push(`${year}${month}${day}`, `${day}${month}${year}`);
+  }
+
+  if (!address.share && address.value !== null) secrets.push(address.value.cep);
+
+  return secrets.filter((secret) => secret.length >= 8);
+}
+
 export async function draftAnswers(generate: GenerateStructured, input: DraftInput) {
   const { fields, account } = input;
   const resume = shareFilteredResume(input.resume, fields);
@@ -214,17 +236,38 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
   const blocked = (normalized: string) =>
     overlaps.some(({ field, pattern }) => !fields[field].share && pattern.test(normalized));
 
+  const hidden = hiddenDigits(fields);
+
+  const sensitiveLabels = new Set(
+    input.questions
+      .filter((question) => question.sensitive)
+      .map((question) => normalizeQuestion(question.label)),
+  );
+
   const library = new Map<string, string>();
   const modelLibrary: { question: string; answer: string }[] = [];
 
   for (const entry of input.library) {
     const normalized = normalizeQuestion(entry.question);
+    const digits = entry.answer.replace(/\D/g, "");
 
-    if (entry.answer.trim() === "" || blocked(normalized)) continue;
+    if (
+      entry.answer.trim() === "" ||
+      blocked(normalized) ||
+      hidden.some((secret) => digits.includes(secret))
+    ) {
+      continue;
+    }
 
     if (!library.has(normalized)) library.set(normalized, entry.answer);
 
-    if (!isSensitive(entry.question, "questions")) modelLibrary.push(entry);
+    if (
+      !entry.sensitive &&
+      !sensitiveLabels.has(normalized) &&
+      !isSensitive(entry.question, "questions")
+    ) {
+      modelLibrary.push({ question: entry.question, answer: entry.answer });
+    }
   }
 
   const profile = profileKeys.flatMap((key) => {

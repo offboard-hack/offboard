@@ -190,10 +190,45 @@ describe.skipIf(!url)("answers repository", () => {
       id,
       text: "Qual seu time favorito?",
       common: false,
+      sensitive: false,
       answer: "Nenhum",
     });
     expect(library.unanswered).toBe(10);
     expect((await repository.library(otherProfileId)).questions).toHaveLength(10);
+  });
+
+  it("marks a question sensitive and never unmarks it", async () => {
+    const flagged = async (id: string) => {
+      await repository.answer(profileId, id, "Resposta", first);
+
+      return (await repository.library(profileId)).questions.find((item) => item.id === id)
+        ?.sensitive;
+    };
+
+    const id = await repository.ensureQuestion("Você é hispânico?", first);
+
+    expect(await flagged(id)).toBe(false);
+    expect(await repository.ensureQuestion("Você é hispânico?", second, { sensitive: true })).toBe(
+      id,
+    );
+    expect(await flagged(id)).toBe(true);
+    expect(await repository.ensureQuestion("Você é hispânico?", second)).toBe(id);
+    expect(await repository.ensureQuestion("Você é hispânico?", second, { sensitive: false })).toBe(
+      id,
+    );
+    expect(await flagged(id)).toBe(true);
+
+    const fresh = await repository.ensureQuestion("Outra sensível?", first, { sensitive: true });
+
+    expect(await flagged(fresh)).toBe(true);
+  });
+
+  it("flags the PcD common question as sensitive", async () => {
+    const common = (await repository.library(profileId)).questions.filter((item) => item.sensitive);
+
+    expect(common.map((item) => item.text)).toEqual([
+      "Você se autodeclara pessoa com deficiência (PcD)?",
+    ]);
   });
 
   it("orders common questions first, then by text", async () => {
