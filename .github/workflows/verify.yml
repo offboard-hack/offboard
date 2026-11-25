@@ -58,6 +58,7 @@ jobs:
       OFFBOARD_HYPERDRIVE_REGION: "aws:us-east-2"
       OFFBOARD_AI_CONFIGURED: ${{ vars.OFFBOARD_AI_CONFIGURED }}
       OFFBOARD_RESUMES_BUCKET: ${{ vars.OFFBOARD_RESUMES_BUCKET }}
+      OFFBOARD_AI_APPLY_CONFIGURED: ${{ vars.OFFBOARD_AI_APPLY_CONFIGURED }}
     steps:
       - uses: actions/checkout@v7
         with:
