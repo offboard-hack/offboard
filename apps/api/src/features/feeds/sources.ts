@@ -245,7 +245,7 @@ export const fetchFeed = async (feed: Feed, fetchImpl: typeof fetch = fetch) => 
   const source = sources[feed.provider];
   const downloaded = await download(source.url(feed.board), fetchImpl);
 
-  if ("error" in downloaded) return downloaded;
+  if (downloaded.text === undefined) return downloaded;
 
   return source.read(downloaded.text, feed);
 };

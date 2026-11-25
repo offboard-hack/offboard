@@ -13,6 +13,7 @@ import {
   applications,
   backgroundJobs,
   interviews,
+  jobFeeds,
   jobMatches,
   jobs,
   llmUsage,
@@ -3939,6 +3940,388 @@ describe.skipIf(!url)("api", () => {
         expect(await res.json()).toEqual({ error: "File storage not configured" });
         expect((await request(instance, id, "/me")).status).toBe(200);
       });
+    });
+  });
+
+  describe("job feeds", () => {
+    type FeedBody = {
+      provider?: string;
+      board?: string;
+      companyLabel?: string | null;
+      enabled?: boolean;
+    };
+
+    const greenhouseBody = (ids: number[]) =>
+      Response.json({
+        jobs: ids.map((id) => ({
+          id,
+          title: `Engenheira ${id}`,
+          company_name: "Acme Pagamentos",
+          absolute_url: `https://job-boards.greenhouse.io/acme/jobs/${id}`,
+          location: { name: "São Paulo, Brasil" },
+          first_published: "2026-11-02T10:15:00-03:00",
+          content: "&lt;p&gt;Vaga&lt;/p&gt;",
+        })),
+      });
+
+    function feedsApp(overrides: Partial<typeof repos> = {}, ids = [1, 2]) {
+      const fetched: string[] = [];
+      const background: (() => Promise<void>)[] = [];
+
+      const instance = createApp(
+        webOrigin,
+        { ...repos, ...overrides },
+        {
+          ...appOptions,
+          fetchFeedImpl: async (input) => {
+            const target = String(input);
+
+            fetched.push(target);
+
+            return target.includes("broken")
+              ? new Response("missing", { status: 404 })
+              : greenhouseBody(ids);
+          },
+          runInBackground: (task) => {
+            background.push(task);
+          },
+        },
+      );
+
+      const send = (path: string, method = "GET", body?: FeedBody, session = "admin") =>
+        instance.handle(
+          new Request(`http://localhost/api${path}`, {
+            method,
+            headers: {
+              "x-test-session": session,
+              origin: webOrigin,
+              "content-type": "application/json",
+            },
+            body: body === undefined ? undefined : JSON.stringify(body),
+          }),
+        );
+
+      const drainNow = (method = "POST") =>
+        instance.handle(
+          new Request("http://localhost/api/background/drain", {
+            method,
+            headers: { authorization: `Bearer ${cronSecret}` },
+          }),
+        );
+
+      async function kicks() {
+        const tasks = background.splice(0);
+
+        await Promise.all(tasks.map((task) => task()));
+
+        return tasks.length;
+      }
+
+      return { instance, fetched, send, drainNow, kicks };
+    }
+
+    async function createdFeed(board: string, provider: "greenhouse" | "lever" = "greenhouse") {
+      const feed = await repos.feeds.create({ provider, board, companyLabel: null });
+
+      if (feed === "exists") throw new Error("feed exists");
+
+      return feed;
+    }
+
+    function queued(kind: string) {
+      return db
+        .select({ subject: backgroundJobs.subject, status: backgroundJobs.status })
+        .from(backgroundJobs)
+        .where(eq(backgroundJobs.kind, kind));
+    }
+
+    async function matchingProfile() {
+      const cases: { id: string }[] = await (await call("/offboardings")).json();
+
+      const created = await repos.talent.enable({
+        caseId: cases[0].id,
+        personalEmail: "feeds.pessoal@example.com",
+        sponsoredUntil: "2099-12-31",
+      });
+
+      if (
+        created === "case_not_found" ||
+        created === "already_enabled" ||
+        created === "email_taken"
+      ) {
+        throw new Error(created);
+      }
+
+      await repos.talent.acceptTerms(created.id);
+      await db.insert(resumes).values({
+        profileId: created.id,
+        kind: "base",
+        content: {
+          headline: { id: "h", text: "Engenheira" },
+          summary: { id: "s", text: "Dados" },
+          experiences: [],
+          education: [],
+          skills: [],
+          languages: [],
+          contact: { email: null, phone: null, city: null, links: [] },
+        },
+      });
+
+      return created.id;
+    }
+
+    it("lets only admins manage job feeds", async () => {
+      const { send } = feedsApp();
+      const feed = await createdFeed("acme");
+
+      for (const [path, method, body] of [
+        ["/job-feeds", "GET", undefined],
+        ["/job-feeds", "POST", { provider: "lever", board: "outra" }],
+        [`/job-feeds/${feed.id}`, "PATCH", { enabled: false }],
+        [`/job-feeds/${feed.id}`, "DELETE", undefined],
+      ] as const) {
+        expect((await send(path, method, body, "rh")).status).toBe(403);
+      }
+
+      expect(await repos.feeds.list()).toEqual([feed]);
+    });
+
+    it("creates, lists, updates and removes job feeds", async () => {
+      const { send } = feedsApp();
+
+      expect(await (await send("/job-feeds")).json()).toEqual([]);
+
+      const created = await send("/job-feeds", "POST", {
+        provider: "lever",
+        board: "acme_br-1",
+        companyLabel: "  Acme  ",
+      });
+
+      expect(created.status).toBe(201);
+
+      const feed = await created.json();
+
+      expect(feed).toEqual({
+        id: expect.any(String),
+        provider: "lever",
+        board: "acme_br-1",
+        companyLabel: "Acme",
+        enabled: true,
+        lastSyncedAt: null,
+        lastError: null,
+        openJobs: 0,
+      });
+
+      const duplicate = await send("/job-feeds", "POST", { provider: "lever", board: "acme_br-1" });
+
+      expect(duplicate.status).toBe(409);
+      expect(await duplicate.json()).toEqual({ error: "Feed already exists" });
+
+      for (const body of [
+        { provider: "lever", board: "Acme" },
+        { provider: "lever", board: "-acme" },
+        { provider: "lever", board: "a".repeat(101) },
+        { provider: "workday", board: "acme" },
+        { provider: "lever", board: "acme", companyLabel: "x".repeat(256) },
+      ]) {
+        expect((await send("/job-feeds", "POST", body)).status).toBe(422);
+      }
+
+      const blank = await send("/job-feeds", "POST", {
+        provider: "greenhouse",
+        board: "acme",
+        companyLabel: "  ",
+      });
+
+      expect(await blank.json()).toMatchObject({ companyLabel: null });
+
+      const path = `/job-feeds/${feed.id}`;
+
+      expect((await send(path, "PATCH", {})).status).toBe(422);
+      expect((await send(path, "PATCH", { companyLabel: "x".repeat(256) })).status).toBe(422);
+
+      const updated = await send(path, "PATCH", { enabled: false, companyLabel: " Nova " });
+
+      expect(updated.status).toBe(200);
+      expect(await updated.json()).toMatchObject({ enabled: false, companyLabel: "Nova" });
+      expect(await (await send(path, "PATCH", { companyLabel: null })).json()).toMatchObject({
+        companyLabel: null,
+      });
+
+      const missing = `/job-feeds/${crypto.randomUUID()}`;
+
+      expect((await send(missing, "PATCH", { enabled: true })).status).toBe(404);
+      expect((await send(missing, "DELETE")).status).toBe(404);
+      expect((await send("/job-feeds/nope", "DELETE")).status).toBe(422);
+
+      expect(
+        (await (await send("/job-feeds")).json()).map((row: { board: string }) => row.board),
+      ).toEqual(["acme", "acme_br-1"]);
+
+      expect((await send(path, "DELETE")).status).toBe(204);
+      expect(
+        (await (await send("/job-feeds")).json()).map((row: { board: string }) => row.board),
+      ).toEqual(["acme"]);
+    });
+
+    it("imports a new feed in the background and keeps jobs after removing it", async () => {
+      const app = feedsApp();
+
+      const created = await app.send("/job-feeds", "POST", {
+        provider: "greenhouse",
+        board: "acme",
+      });
+
+      const feed = await created.json();
+
+      expect(await queued("ingest_jobs")).toEqual([{ subject: feed.id, status: "pending" }]);
+      expect(app.fetched).toEqual([]);
+      expect(await app.kicks()).toBe(1);
+      expect(app.fetched).toEqual([
+        "https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true",
+      ]);
+      expect(await queued("ingest_jobs")).toEqual([{ subject: feed.id, status: "done" }]);
+
+      const [listed] = await (await app.send("/job-feeds")).json();
+
+      expect(listed).toMatchObject({ id: feed.id, openJobs: 2, lastError: null });
+      expect(listed.lastSyncedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(
+        await db
+          .select({ sourceKey: jobs.sourceKey, origin: jobs.origin, company: jobs.company })
+          .from(jobs)
+          .where(eq(jobs.source, "greenhouse"))
+          .orderBy(jobs.sourceKey),
+      ).toEqual([
+        { sourceKey: "acme:1", origin: "external", company: "Acme Pagamentos" },
+        { sourceKey: "acme:2", origin: "external", company: "Acme Pagamentos" },
+      ]);
+
+      expect((await app.send(`/job-feeds/${feed.id}`, "DELETE")).status).toBe(204);
+      expect(await db.select().from(jobs).where(eq(jobs.source, "greenhouse"))).toHaveLength(2);
+    });
+
+    it("creates a feed without kicking an import when enqueueing fails", async () => {
+      const app = feedsApp({
+        background: {
+          ...repos.background,
+          enqueue: () => Promise.reject(new Error("queue down")),
+        },
+      });
+
+      const created = await app.send("/job-feeds", "POST", { provider: "lever", board: "acme" });
+
+      expect(created.status).toBe(201);
+      expect(await app.kicks()).toBe(0);
+      expect(await queued("ingest_jobs")).toEqual([]);
+    });
+
+    it("schedules only due enabled feeds before draining", async () => {
+      const app = feedsApp();
+      const due = await createdFeed("due");
+      const fresh = await createdFeed("fresh");
+      const disabled = await createdFeed("disabled");
+      const sevenHoursAgo = new Date(Date.now() - 7 * 60 * 60_000);
+
+      await db.update(jobFeeds).set({ lastSyncedAt: sevenHoursAgo }).where(eq(jobFeeds.id, due.id));
+      await db.update(jobFeeds).set({ lastSyncedAt: new Date() }).where(eq(jobFeeds.id, fresh.id));
+      await repos.feeds.update(disabled.id, { enabled: false });
+
+      expect(await (await app.drainNow("GET")).json()).toEqual({ processed: 1, failed: 0 });
+      expect(app.fetched).toEqual([
+        "https://boards-api.greenhouse.io/v1/boards/due/jobs?content=true",
+      ]);
+
+      expect(await (await app.drainNow()).json()).toEqual({ processed: 0, failed: 0 });
+      expect(app.fetched).toHaveLength(1);
+    });
+
+    it("still drains when scheduling feeds fails", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      const app = feedsApp({
+        feeds: { ...repos.feeds, dueIds: () => Promise.reject(new Error("db down")) },
+      });
+
+      await createdFeed("acme");
+      await repos.background.enqueue("ingest_jobs", crypto.randomUUID());
+
+      const drained = await app.drainNow();
+
+      expect(drained.status).toBe(200);
+      expect(await drained.json()).toEqual({ processed: 1, failed: 0 });
+      expect(app.fetched).toEqual([]);
+      expect(logged.mock.calls).toEqual([
+        ["feed scheduling failed", { name: "Error", message: "db down" }],
+      ]);
+      logged.mockRestore();
+    });
+
+    it("completes ingest jobs of missing or disabled feeds without fetching", async () => {
+      const app = feedsApp();
+      const disabled = await createdFeed("disabled");
+
+      await repos.feeds.update(disabled.id, { enabled: false });
+      await repos.background.enqueue("ingest_jobs", disabled.id);
+      await repos.background.enqueue("ingest_jobs", crypto.randomUUID());
+
+      expect(await (await app.drainNow()).json()).toEqual({ processed: 2, failed: 0 });
+      expect(app.fetched).toEqual([]);
+      expect(await queued("ingest_jobs")).toMatchObject([{ status: "done" }, { status: "done" }]);
+    });
+
+    it("records a failed fetch without retrying it", async () => {
+      const app = feedsApp();
+      const feed = await createdFeed("broken", "lever");
+
+      await repos.background.enqueue("ingest_jobs", feed.id);
+
+      expect(await (await app.drainNow()).json()).toEqual({ processed: 1, failed: 0 });
+      expect(app.fetched).toEqual(["https://api.lever.co/v0/postings/broken?mode=json"]);
+      expect(await repos.feeds.get(feed.id)).toMatchObject({ lastError: "http_404", openJobs: 0 });
+      expect(await queued("compute_matches")).toEqual([]);
+    });
+
+    it("fans out matching when a sync creates jobs", async () => {
+      const profileId = await matchingProfile();
+      const app = feedsApp();
+
+      const feed = await (
+        await app.send("/job-feeds", "POST", { provider: "greenhouse", board: "acme" })
+      ).json();
+
+      await app.kicks();
+
+      expect(await queued("compute_matches")).toEqual([{ subject: profileId, status: "pending" }]);
+
+      await db.delete(backgroundJobs);
+      await repos.background.enqueue("ingest_jobs", feed.id);
+      await app.drainNow();
+
+      expect(await queued("ingest_jobs")).toEqual([{ subject: feed.id, status: "done" }]);
+      expect(await queued("compute_matches")).toEqual([]);
+    });
+
+    it("keeps imported jobs when fanning out matching fails", async () => {
+      await matchingProfile();
+
+      const feed = await createdFeed("acme");
+
+      const app = feedsApp({
+        background: {
+          ...repos.background,
+          enqueueMany: (kind, subjects) =>
+            kind === "compute_matches"
+              ? Promise.reject(new Error("queue down"))
+              : repos.background.enqueueMany(kind, subjects),
+        },
+      });
+
+      await repos.background.enqueue("ingest_jobs", feed.id);
+
+      expect(await (await app.drainNow()).json()).toEqual({ processed: 1, failed: 0 });
+      expect((await repos.feeds.get(feed.id))?.openJobs).toBe(2);
+      expect(await queued("compute_matches")).toEqual([]);
     });
   });
 

@@ -9,7 +9,14 @@ export function backgroundRoutes(
   repo: BackgroundRepository,
   handlers: Record<string, JobHandler>,
   cronSecret: string | undefined,
+  beforeDrain?: () => Promise<void>,
 ) {
+  const scheduledDrain = async () => {
+    await beforeDrain?.();
+
+    return drain(repo, handlers);
+  };
+
   return new Elysia()
     .macro({
       machine: (_caller: "cron") => ({
@@ -18,11 +25,11 @@ export function backgroundRoutes(
         },
       }),
     })
-    .get("/background/drain", () => drain(repo, handlers), {
+    .get("/background/drain", scheduledDrain, {
       machine: "cron",
       response: drained,
     })
-    .post("/background/drain", () => drain(repo, handlers), {
+    .post("/background/drain", scheduledDrain, {
       machine: "cron",
       response: drained,
     });

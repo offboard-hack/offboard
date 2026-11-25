@@ -8,6 +8,8 @@ import { authRoutes } from "./features/auth/routes.js";
 import { createAbacatePayGateway, type AbacatePayGateway } from "./features/billing/abacatepay.js";
 import { billingRoutes } from "./features/billing/routes.js";
 import { equipmentRoutes } from "./features/equipment/routes.js";
+import { fetchFeed } from "./features/feeds/sources.js";
+import { feedsRoutes } from "./features/feeds/routes.js";
 import { exitSurveysRoutes } from "./features/exit-surveys/routes.js";
 import { insightsRoutes } from "./features/insights/routes.js";
 import { integrationsRoutes } from "./features/integrations/routes.js";
@@ -27,6 +29,7 @@ import { backgroundRoutes } from "./features/background/routes.js";
 import { drain, type JobHandler } from "./features/background/drain.js";
 import { accountRoutes } from "./features/account/routes.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
+import { logFailure } from "./shared/error-summary.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
 import type { ResumeContent } from "@offboard/db/schema";
@@ -50,6 +53,7 @@ type AppOptions = {
   abacatepayWebhookSecret?: string;
   generateStructured?: GenerateStructured;
   fetchPage?: (url: URL) => Promise<FetchPageResult>;
+  fetchFeedImpl?: typeof fetch;
   storage?: ObjectStorage;
   runInBackground?: (task: () => Promise<void>) => void;
   publicPageOrigin?: string;
@@ -92,6 +96,16 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     });
 
   const handlers = {
+    ingest_jobs: async (job) => {
+      const feed = await repos.feeds.get(job.subject);
+
+      if (!feed?.enabled) return;
+
+      const result = await fetchFeed(feed, options.fetchFeedImpl);
+      const synced = await repos.feeds.sync(feed.id, result, new Date());
+
+      if (synced !== "failed" && synced.created > 0) await matchNewJob().catch(() => undefined);
+    },
     score_resume: async (job) => {
       const resume = await repos.resumes.forScoring(job.subject);
 
@@ -176,6 +190,24 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     );
   }
 
+  async function ingestFeed(feedId: string) {
+    if (!(await enqueued("ingest_jobs", feedId))) return;
+
+    runInBackground(async () => {
+      await drain(repos.background, handlers, {
+        limit: 1,
+        target: { kind: "ingest_jobs", subject: feedId },
+      });
+    });
+  }
+
+  async function scheduleFeeds() {
+    await repos.feeds
+      .dueIds(new Date())
+      .then((due) => repos.background.enqueueMany("ingest_jobs", due))
+      .catch(logFailure("feed scheduling failed"));
+  }
+
   return new Elysia({ adapter: options.adapter, prefix: "/api" })
     .use(cors({ origin: webOrigin, credentials: false }))
     .get("/health", () => ({ status: "ok" }) satisfies { status: "ok" }, {
@@ -229,11 +261,12 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         renderPdf: ownResumePdf,
       }),
     )
-    .use(backgroundRoutes(repos.background, handlers, options.cronSecret))
+    .use(backgroundRoutes(repos.background, handlers, options.cronSecret, scheduleFeeds))
     .use(accountRoutes(repos.account, talent, options.storage))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
     .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret))
+    .use(feedsRoutes(repos.feeds, access, ingestFeed))
     .use(
       billingRoutes(
         repos.billing,
