@@ -320,8 +320,69 @@ describe("draftAnswers", () => {
       ]),
     );
 
-    expect(answers.map((item) => item.status)).toEqual(["blank", "blank"]);
+    expect(answers.map((item) => item.status)).toEqual(["filled", "blank"]);
     expect(prompts).toEqual([]);
+  });
+
+  it("drafts a hidden-only question as filled without a value and never sends it", async () => {
+    const { generate, prompts } = fake([]);
+
+    const answers = await draftAnswers(
+      generate,
+      input(
+        [
+          question({
+            id: "lat",
+            label: "Latitude",
+            required: true,
+            fields: [{ name: "lat", type: "hidden", options: [] }],
+          }),
+        ],
+        { library: [{ question: "Latitude", answer: "-23.5", sensitive: false }] },
+      ),
+    );
+
+    expect(answers).toEqual([
+      { questionId: "lat", value: null, source: null, inferred: false, status: "filled" },
+    ]);
+    expect(prompts).toEqual([]);
+  });
+
+  describe("city", () => {
+    const cityQuestion = question({ id: "city", label: "Localização", kind: "city" });
+    const saved = [{ question: "Localização", answer: "Campinas, SP", sensitive: false }];
+
+    it("withholds a not-shared city from the draft, the library and the model", async () => {
+      const { generate, prompts } = fake([]);
+
+      const answers = await draftAnswers(
+        generate,
+        input(
+          [cityQuestion, question({ id: "home", label: "Onde você mora?" }), question({ id: "x" })],
+          { fields: fieldsOf({ city: { value: "Campinas", share: false } }), library: saved },
+        ),
+      );
+
+      expect(answers.map((item) => item.status)).toEqual(["not_shared", "not_shared", "blank"]);
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0].prompt).not.toContain("Campinas");
+    });
+
+    it("fills a shared city and leaves an unset one blank", async () => {
+      const shared = await draftAnswers(
+        fake([]).generate,
+        input([cityQuestion], { fields: fieldsOf({ city: { value: "Santos", share: true } }) }),
+      );
+
+      expect(shared[0]).toMatchObject({ value: "Santos", source: "profile", status: "filled" });
+
+      const unset = await draftAnswers(
+        fake([]).generate,
+        input([cityQuestion], { fields: fieldsOf({ city: { value: null, share: true } }) }),
+      );
+
+      expect(unset[0]).toMatchObject({ value: null, status: "blank" });
+    });
   });
 
   describe("library", () => {
@@ -505,7 +566,10 @@ describe("draftAnswers", () => {
               id: "s",
               label: "Gênero",
               sensitive: true,
-              fields: [{ name: "s", type: "hidden", options: [] }],
+              fields: [
+                { name: "s", type: "hidden", options: [] },
+                { name: "t", type: "text", options: [] },
+              ],
             }),
           ],
           { library: [{ question: "Gênero", answer: "Mulher", sensitive: false }] },
@@ -657,6 +721,34 @@ describe("draftAnswers", () => {
 
       expect(prompts).toHaveLength(1);
       expect(prompts[0].prompt).toContain("Indicação");
+    });
+
+    it("drops non-padded variants of a not-shared birth date", async () => {
+      const { generate, prompts } = fake([]);
+
+      const answers = await draftAnswers(
+        generate,
+        input(
+          [
+            question({ id: "a", label: "Nasc A" }),
+            question({ id: "b", label: "Nasc B" }),
+            question({ id: "c", label: "Nasc C" }),
+            question({ id: "d", label: "Hobby" }),
+          ],
+          {
+            fields: fieldsOf({ birthDate: { value: "1990-03-05", share: false } }),
+            library: [
+              { question: "Nasc A", answer: "5/3/1990", sensitive: false },
+              { question: "Nasc B", answer: "1990-3-5", sensitive: false },
+              { question: "Nasc C", answer: "05/3/1990", sensitive: false },
+              { question: "Hobby", answer: "Xadrez desde 1.990", sensitive: false },
+            ],
+          },
+        ),
+      );
+
+      expect(answers.map((item) => item.status)).toEqual(["blank", "blank", "blank", "filled"]);
+      expect(prompts[0].prompt).not.toMatch(/5\/3|1990-3/);
     });
 
     it("drops library answers that carry a not-shared phone, CPF, birth date or CEP", async () => {

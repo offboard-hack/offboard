@@ -100,6 +100,33 @@ describe("reads a Greenhouse form", () => {
       ["location", "Localização"],
     ]);
     expect(byLabel("Longitude").fields[0]?.type).toBe("hidden");
+    expect(byLabel("Localização").kind).toBe("city");
+    expect(byLabel("Você precisa de alguma adaptação de acessibilidade").sensitive).toBe(true);
+    expect(byLabel("Você necessita de alguma adaptação ou recurso").sensitive).toBe(true);
+  });
+
+  it("detects the city only on text fields and keeps selects custom", async () => {
+    const questions = await read({
+      questions: [
+        question("Cidade onde você mora", true, field("q1", "input_text")),
+        question("Onde você reside?", true, field("q2", "textarea")),
+        question("Localização", true, field("location", "input_text")),
+        question("Cidade de nascimento", true, field("q3", "input_text")),
+        question("LinkedIn", true, field("q4", "multi_value_single_select")),
+        question("Cidade onde você mora", true, field("q5", "multi_value_single_select")),
+        question("CPF", true, field("q6", "multi_value_multi_select")),
+      ],
+    });
+
+    expect(questions.map((item) => item.kind)).toEqual([
+      "city",
+      "city",
+      "city",
+      "custom",
+      "custom",
+      "custom",
+      "custom",
+    ]);
   });
 
   it("keeps section order and marks compliance and demographic sensitive", async () => {

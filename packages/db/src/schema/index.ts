@@ -102,6 +102,7 @@ export type QuestionKind =
   | "birth_date"
   | "cep"
   | "address"
+  | "city"
   | "document"
   | "custom";
 

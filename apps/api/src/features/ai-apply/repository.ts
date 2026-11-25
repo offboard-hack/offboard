@@ -8,8 +8,22 @@ import {
   jobs,
   resumes,
   talentPreferences,
+  talentProfiles,
 } from "@offboard/db/schema";
-import { and, asc, desc, eq, exists, gt, inArray, isNull, notExists } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  notExists,
+  or,
+} from "drizzle-orm";
 import { z } from "zod";
 import { uniqueViolation } from "../../shared/http.js";
 import { toPreferences } from "../../shared/talent-preferences.js";
@@ -17,7 +31,7 @@ import { toAttemptView } from "./view.js";
 
 const sourceKey = /^([a-z0-9][a-z0-9_-]*):(\d+)$/;
 
-const nonFinal = ["draft", "queued", "running", "submitting", "needs_check"] as const;
+const nonFinal = ["queued", "running", "submitting", "needs_check"] as const;
 
 type NewAttempt = {
   form: { questions: FormQuestion[] };
@@ -115,7 +129,7 @@ export function createAiApplyRepository(db: Database) {
     return row !== undefined;
   }
 
-  async function hasActive(profileId: string, jobId: string) {
+  async function hasActive(profileId: string, jobId: string, now: Date) {
     const [row] = await db
       .select({ id: aiApplications.id })
       .from(aiApplications)
@@ -123,7 +137,13 @@ export function createAiApplyRepository(db: Database) {
         and(
           eq(aiApplications.profileId, profileId),
           eq(aiApplications.jobId, jobId),
-          inArray(aiApplications.state, nonFinal),
+          or(
+            inArray(aiApplications.state, nonFinal),
+            and(
+              eq(aiApplications.state, "draft"),
+              gt(aiApplications.preparedAt, new Date(now.getTime() - expiry)),
+            ),
+          ),
         ),
       );
 
@@ -152,17 +172,44 @@ export function createAiApplyRepository(db: Database) {
 
   async function createAttempt(profileId: string, jobId: string, attempt: NewAttempt, now: Date) {
     try {
-      const [row] = await db
-        .insert(aiApplications)
-        .values({ profileId, jobId, ...attempt, preparedAt: now })
-        .returning();
+      return await db.transaction(async (tx) => {
+        const [consenting] = await tx
+          .select({ id: talentProfiles.id })
+          .from(talentProfiles)
+          .where(and(eq(talentProfiles.id, profileId), isNotNull(talentProfiles.aiApplyConsentAt)))
+          .for("update");
 
-      const [job] = await db
-        .select({ id: jobs.id, title: jobs.title, company: jobs.company, url: jobs.url })
-        .from(jobs)
-        .where(eq(jobs.id, jobId));
+        if (consenting === undefined) return "no_consent" as const;
 
-      return toAttemptView(row, job);
+        await tx
+          .update(aiApplications)
+          .set({ state: "cancelled", reason: "expired", finishedAt: now, updatedAt: now })
+          .where(
+            and(
+              eq(aiApplications.profileId, profileId),
+              eq(aiApplications.jobId, jobId),
+              eq(aiApplications.state, "draft"),
+              lte(aiApplications.preparedAt, new Date(now.getTime() - expiry)),
+            ),
+          );
+
+        const [row] = await tx
+          .insert(aiApplications)
+          .values({
+            profileId,
+            jobId,
+            ...attempt,
+            preparedAt: now,
+            createdAt: now,
+            updatedAt: now,
+            finishedAt: attempt.state === "assisted" ? now : null,
+          })
+          .returning();
+
+        const [job] = await tx.select(jobColumns).from(jobs).where(eq(jobs.id, jobId));
+
+        return toAttemptView(row, job);
+      });
     } catch (error) {
       if (uniqueViolation.safeParse(error).success) return "in_progress" as const;
 

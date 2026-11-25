@@ -46,6 +46,8 @@ describe.skipIf(!url)("ai apply repository", () => {
       throw new Error(created);
     }
 
+    await repos.talent.setAiApplyConsent(created.id, true, new Date());
+
     await expect(
       repos.aiApply.createAttempt(
         created.id,

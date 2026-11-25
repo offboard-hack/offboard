@@ -1,6 +1,7 @@
 import { normalizeQuestion } from "@offboard/db/question";
 import type { ConfirmedAnswer, DraftAnswer, FormQuestion } from "@offboard/db/schema";
 import { sanitizeText } from "../../shared/storable-text.js";
+import { isHiddenQuestion } from "./questions.js";
 
 export type GivenAnswer = { questionId: string; value: string | string[] | null };
 
@@ -41,7 +42,10 @@ function clean(question: FormQuestion, value: string | string[] | null) {
 }
 
 export function confirmedAnswers(questions: FormQuestion[], given: GivenAnswer[]) {
-  const asked = questions.filter((question) => !isFileQuestion(question));
+  const asked = questions.filter(
+    (question) => !isFileQuestion(question) && !isHiddenQuestion(question),
+  );
+
   const byId = new Map(given.map((answer) => [answer.questionId, answer.value]));
 
   if (byId.size !== given.length || given.length !== asked.length) return undefined;

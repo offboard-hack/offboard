@@ -19,7 +19,7 @@ import { shareFilteredResume } from "../../shared/shared-resume.js";
 import { clipText, sanitizeText } from "../../shared/storable-text.js";
 import type { toPreferences } from "../../shared/talent-preferences.js";
 import { escapeUntrustedTags } from "../../shared/untrusted-json.js";
-import { isSensitive } from "./questions.js";
+import { isHiddenQuestion, isSensitive } from "./questions.js";
 
 type Fields = ReturnType<typeof toPreferences>["profileFields"];
 
@@ -64,6 +64,7 @@ const system = [
 const profileKinds = new Map<QuestionKind, (fields: Fields) => Shared>([
   ["phone", (fields) => fields.phone],
   ["linkedin", (fields) => fields.linkedin],
+  ["city", (fields) => fields.city],
   ["website", (fields) => fields.portfolio],
   [
     "cpf",
@@ -111,6 +112,11 @@ const overlaps: { field: keyof Fields; pattern: RegExp }[] = [
   },
   { field: "noticePeriod", pattern: /aviso previo|notice period/ },
   { field: "linkedin", pattern: /linkedin/ },
+  {
+    field: "city",
+    pattern:
+      /\bcidade\b(?! de nascimento)|localizacao|location|onde (?:voce )?mora|\breside\b|\bresidencia\b/,
+  },
 ];
 
 const draft = (
@@ -217,15 +223,21 @@ function hiddenDigits(fields: Fields) {
 
   if (!cpf.share && cpf.value !== null) secrets.push(cpf.value);
 
-  if (!birthDate.share && birthDate.value !== null) {
-    const [year, month, day] = birthDate.value.split("-");
-
-    secrets.push(`${year}${month}${day}`, `${day}${month}${year}`);
-  }
-
   if (!address.share && address.value !== null) secrets.push(address.value.cep);
 
-  return secrets.filter((secret) => secret.length >= 8);
+  const hiddenSecrets = secrets.filter((secret) => secret.length >= 8);
+
+  if (birthDate.share || birthDate.value === null) return hiddenSecrets;
+
+  const [year, month, day] = birthDate.value.split("-");
+  const days = [day, String(Number(day))];
+  const months = [month, String(Number(month))];
+
+  const variants = days.flatMap((d) =>
+    months.flatMap((m) => [`${d}${m}${year}`, `${year}${m}${d}`]),
+  );
+
+  return [...hiddenSecrets, ...variants.filter((variant) => variant.length >= 6)];
 }
 
 export async function draftAnswers(generate: GenerateStructured, input: DraftInput) {
@@ -311,6 +323,8 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
   function settle(question: FormQuestion) {
     const { kind } = question;
     const accountValue = accountValues.get(kind);
+
+    if (isHiddenQuestion(question)) return draft(question, "filled");
 
     if (accountValue !== undefined) return filledOrBlank(question, accountValue, "account");
 

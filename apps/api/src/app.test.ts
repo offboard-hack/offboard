@@ -30,7 +30,7 @@ import {
   tasks,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -890,6 +890,138 @@ describe.skipIf(!url)("api", () => {
         (await repos.answers.library(created.id)).questions.find((item) => item.id === common.id)
           ?.answer,
       ).toBe("Resposta final");
+    });
+
+    it("answers 500 without data and rolls back every library save when a confirm fails", async () => {
+      const [firstCase] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
+
+      const created = await repos.talent.enable({
+        caseId: firstCase.id,
+        personalEmail,
+        sponsoredUntil,
+      });
+
+      if (
+        created === "case_not_found" ||
+        created === "already_enabled" ||
+        created === "email_taken"
+      ) {
+        throw new Error(created);
+      }
+
+      await repos.talent.acceptTerms(created.id);
+      await repos.talent.setAiApplyConsent(created.id, true, new Date());
+
+      await db.insert(resumes).values({
+        profileId: created.id,
+        kind: "base",
+        content: {
+          headline: { id: "h", text: "Engenheira" },
+          summary: { id: "s", text: "Backend" },
+          experiences: [],
+          education: [],
+          skills: [],
+          languages: [],
+          contact: { email: null, phone: null, city: null, links: [] },
+        },
+      });
+
+      const [job] = await db
+        .insert(jobs)
+        .values({
+          origin: "external",
+          source: "greenhouse",
+          sourceKey: "acme:43",
+          title: "Backend",
+          company: "Acme",
+          url: "https://job-boards.greenhouse.io/acme/jobs/43",
+        })
+        .returning({ id: jobs.id });
+
+      const text = (name: string) => ({
+        label: `Pergunta ${name}`,
+        required: false,
+        fields: [{ name, type: "input_text", values: [] }],
+      });
+
+      const instance = createApp(webOrigin, repos, {
+        ...appOptions,
+        aiApplyAllowlist: [personalEmail],
+        generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
+        fetchGreenhouseImpl: async () =>
+          new Response(JSON.stringify({ questions: [text("one"), text("two")] })),
+      });
+
+      const headers = {
+        "x-test-session": "talent",
+        "x-test-talent-id": created.id,
+        origin: webOrigin,
+        "content-type": "application/json",
+      };
+
+      const prepared = await instance.handle(
+        new Request(`http://localhost/api/me/jobs/${job.id}/ai-apply`, {
+          method: "POST",
+          headers,
+        }),
+      );
+
+      const { attempt } = await prepared.json();
+
+      await db.execute(
+        sql`alter table talent_answers add constraint boom_check check (answer <> 'segredo-da-ana')`,
+      );
+
+      try {
+        const res = await instance.handle(
+          new Request(`http://localhost/api/me/ai-applications/${attempt.id}/confirm`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              answers: [
+                { questionId: "one", value: "resposta-valida" },
+                { questionId: "two", value: "segredo-da-ana" },
+              ],
+            }),
+          }),
+        );
+
+        expect(res.status).toBe(500);
+        expect(await res.text()).toBe('{"error":"Internal error"}');
+      } finally {
+        await db.execute(sql`alter table talent_answers drop constraint boom_check`);
+      }
+
+      const [row] = await db
+        .select({ state: aiApplications.state, confirmed: aiApplications.confirmed })
+        .from(aiApplications)
+        .where(eq(aiApplications.id, attempt.id));
+
+      expect(row).toEqual({ state: "draft", confirmed: null });
+      expect(
+        (await repos.answers.library(created.id)).questions.filter((item) => item.answer !== null),
+      ).toEqual([]);
+    });
+
+    it("keeps Elysia's own answer for a malformed JSON body", async () => {
+      const instance = createApp(webOrigin, repos, appOptions);
+
+      for (const path of ["/api/me/resume", "/api/me/resumes/any"]) {
+        const res = await instance.handle(
+          new Request(`http://localhost${path}`, {
+            method: "PATCH",
+            headers: {
+              "x-test-session": "talent",
+              "content-type": "application/json",
+              origin: webOrigin,
+            },
+            body: "{",
+          }),
+        );
+
+        expect(res.status).toBe(400);
+        expect(await res.text()).not.toContain("Internal error");
+      }
     });
 
     it("denies a talent session whose profile no longer exists", async () => {

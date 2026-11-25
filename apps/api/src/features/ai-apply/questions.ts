@@ -31,6 +31,18 @@ const sensitiveTerms = [
   "diversity",
   "consentimento",
   "consent",
+  "acessibilidade",
+  "accessibility",
+  "adaptac\\w*",
+  "acomodac\\w*",
+  "accommodations?",
+  "necessidades especiais",
+  "pne",
+  "deficientes?",
+  "laudo",
+  "saude",
+  "health",
+  "neurodivers\\w*",
 ];
 
 const sensitivePattern = new RegExp(`(?<![a-z0-9])(?:${sensitiveTerms.join("|")})(?![a-z0-9])`);
@@ -44,6 +56,7 @@ const standardKinds = new Map<string, QuestionKind>([
   ["resume_text", "resume"],
   ["cover_letter", "cover_letter"],
   ["cover_letter_text", "cover_letter"],
+  ["location", "city"],
 ]);
 
 const labelKinds: [RegExp, QuestionKind][] = [
@@ -54,12 +67,19 @@ const labelKinds: [RegExp, QuestionKind][] = [
   [/data de nascimento|date of birth|dt\.? (?:de )?nascimento/, "birth_date"],
   [/^cep(?:[^a-z0-9]*)$/, "cep"],
   [/endereco|address/, "address"],
+  [
+    /\bcidade\b(?! de nascimento)|localizacao|location|onde (?:voce )?mora|\breside\b|\bresidencia\b/,
+    "city",
+  ],
 ];
 
 export const isSensitive = (label: string, section: FormQuestion["section"]) =>
   section === "compliance" ||
   section === "demographic" ||
   sensitivePattern.test(normalizeQuestion(label));
+
+export const isHiddenQuestion = (question: FormQuestion) =>
+  question.fields.length > 0 && question.fields.every((field) => field.type === "hidden");
 
 export const detectKind = (label: string, first: FormField) => {
   const standard = standardKinds.get(first.name);
@@ -69,6 +89,8 @@ export const detectKind = (label: string, first: FormField) => {
   }
 
   if (standard !== undefined) return standard;
+
+  if (first.type !== "text" && first.type !== "textarea") return "custom";
 
   const normalized = normalizeQuestion(label);
   const matched = labelKinds.find(([pattern]) => pattern.test(normalized));

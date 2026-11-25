@@ -43,6 +43,7 @@ const formQuestion = t.Object({
     "birth_date",
     "cep",
     "address",
+    "city",
     "document",
     "custom",
   ]),

@@ -34,6 +34,27 @@ describe("confirmedAnswers", () => {
     ]);
   });
 
+  it("ignores hidden-only questions and never turns them into library entries", () => {
+    const hidden = question({
+      id: "lat",
+      required: true,
+      fields: [{ name: "lat", type: "hidden", options: [] }],
+    });
+
+    const asked = question({ id: "q" });
+    const given = [{ questionId: "q", value: "oi" }];
+
+    expect(confirmedAnswers([hidden, asked], given)).toEqual([{ questionId: "q", value: "oi" }]);
+    expect(
+      confirmedAnswers([hidden, asked], [...given, { questionId: "lat", value: "1" }]),
+    ).toBeUndefined();
+    expect(
+      libraryEntries([hidden, asked], [{ questionId: "q", value: "oi" }], []).map(
+        (entry) => entry.label,
+      ),
+    ).toEqual(["Pergunta"]);
+  });
+
   it("ignores file questions", () => {
     const file = question({ id: "cv", kind: "resume", fields: [] });
 

@@ -1523,5 +1523,179 @@ describe.skipIf(!url)("ai apply route", () => {
         expect(res.status).toBe(409);
       }
     });
+
+    it("confirms the Stone form once every visible question is answered", async () => {
+      const { post, call, profileId, jobId } = await ready();
+
+      const prepared = await (await post(profileId, jobId)).json();
+      const files = new Set(["resume", "cover_letter", "document"]);
+
+      const hidden = prepared.attempt.questions.filter(
+        (item: FormQuestion) =>
+          item.fields.length > 0 && item.fields.every((field) => field.type === "hidden"),
+      );
+
+      expect(hidden.map((item: FormQuestion) => item.label)).toEqual(["Longitude", "Latitude"]);
+
+      for (const item of hidden) {
+        expect(answerFor(prepared, item.id)).toEqual({
+          questionId: item.id,
+          value: null,
+          source: null,
+          inferred: false,
+          status: "filled",
+        });
+      }
+
+      const answers = prepared.attempt.questions
+        .filter((item: FormQuestion) => !files.has(item.kind) && !hidden.includes(item))
+        .map((item: FormQuestion) => {
+          const [field] = item.fields;
+
+          return {
+            questionId: item.id,
+            value:
+              field.type === "single_select"
+                ? field.options[0].value
+                : field.type === "multi_select"
+                  ? [field.options[0].value]
+                  : "x",
+          };
+        });
+
+      const res = await call(profileId, confirmPath(prepared.attempt.id), { answers });
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).state).toBe("queued");
+
+      const saved = (await library(profileId)).map((item) => item.text);
+
+      for (const label of ["Longitude", "Latitude", "Localização"]) {
+        expect(saved).not.toContain(label);
+      }
+    });
+
+    it("never saves a city answer to the library", async () => {
+      const { call, profileId, jobId } = await ready();
+
+      const where = question("where", { label: "Localização", kind: "city", required: true });
+
+      const id = await seed(profileId, jobId, [where, why]);
+
+      const res = await call(profileId, confirmPath(id), {
+        answers: [
+          { questionId: "where", value: "Campinas, SP" },
+          { questionId: "why", value: "Porque sim" },
+        ],
+      });
+
+      expect(res.status).toBe(200);
+      expect((await library(profileId)).map((item) => item.text)).toEqual(["Por que a Stone?"]);
+    });
+
+    it("withholds a not-shared city that sits in the library from the draft and the model", async () => {
+      const { post, model, profileId, jobId } = await ready();
+
+      await db.insert(talentPreferences).values({
+        profileId,
+        profileFields: { city: { value: "Campinas", share: false } } satisfies ProfileFields,
+      });
+
+      await db.transaction((tx) =>
+        saveToLibrary(
+          tx,
+          profileId,
+          "Localização",
+          "Campinas, SP",
+          { sensitive: false },
+          new Date(),
+        ),
+      );
+
+      const body = await (await post(profileId, jobId)).json();
+
+      expect(answerFor(body, questionOf(body, "Localização").id)).toMatchObject({
+        value: null,
+        status: "not_shared",
+      });
+      expect(model.calls.map((item) => item.prompt).join("")).not.toContain("Campinas");
+    });
+
+    it("replaces an expired draft when preparing again", async () => {
+      const { post, profileId, jobId } = await ready();
+
+      const old = await seed(profileId, jobId, [why], {
+        preparedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+      });
+
+      const res = await post(profileId, jobId);
+
+      expect(res.status).toBe(201);
+
+      const rows = await attempts(profileId);
+
+      expect(rows).toHaveLength(2);
+      expect(rows.find((row) => row.id === old)).toMatchObject({
+        state: "cancelled",
+        reason: "expired",
+      });
+      expect(rows.find((row) => row.id === old)?.finishedAt).toBeInstanceOf(Date);
+      expect(rows.filter((row) => row.state === "draft")).toHaveLength(1);
+
+      const fresh = await post(profileId, jobId);
+
+      expect(fresh.status).toBe(409);
+    });
+
+    it("refuses to prepare when consent is withdrawn before the attempt is stored", async () => {
+      let withdraw = async () => {};
+
+      const { post, profileId, jobId } = await ready({
+        form: async () => {
+          await withdraw();
+
+          return new Response(stone);
+        },
+      });
+
+      withdraw = async () => {
+        await db
+          .update(talentProfiles)
+          .set({ aiApplyConsentAt: null })
+          .where(eq(talentProfiles.id, profileId));
+      };
+
+      const res = await post(profileId, jobId);
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "AI Apply not available" });
+      expect(await attempts(profileId)).toEqual([]);
+    });
+
+    it("stamps an assisted attempt as finished with the app clock", async () => {
+      const { post, profileId, jobId } = await ready({
+        form: () =>
+          new Response(
+            JSON.stringify({
+              questions: [
+                {
+                  label: "Laudo",
+                  required: true,
+                  fields: [{ name: "q", type: "input_file", values: [] }],
+                },
+              ],
+            }),
+          ),
+      });
+
+      expect((await post(profileId, jobId)).status).toBe(201);
+
+      const [row] = await attempts(profileId);
+
+      expect(row.state).toBe("assisted");
+      expect(row.finishedAt?.getTime()).toBe(row.preparedAt.getTime());
+      expect(row.createdAt?.getTime()).toBe(row.preparedAt.getTime());
+      expect(row.updatedAt?.getTime()).toBe(row.preparedAt.getTime());
+    });
   });
 });

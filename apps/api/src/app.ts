@@ -29,7 +29,7 @@ import { backgroundRoutes } from "./features/background/routes.js";
 import { drain, type JobHandler } from "./features/background/drain.js";
 import { accountRoutes } from "./features/account/routes.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
-import { logFailure } from "./shared/error-summary.js";
+import { logFailure, logUnhandled } from "./shared/error-summary.js";
 import { rejectionsRoutes } from "./features/preferences/rejections-routes.js";
 import { answersRoutes } from "./features/preferences/answers-routes.js";
 import { readGreenhouseForm } from "./features/ai-apply/greenhouse.js";
@@ -75,6 +75,8 @@ function ownResumePdf(name: string, content: ResumeContent) {
     contact: { ...view.contact, phone: content.contact.phone, city: content.contact.city },
   });
 }
+
+const unhandledCodes = new Set<string | number>(["UNKNOWN", "INTERNAL_SERVER_ERROR"]);
 
 export function createApp(webOrigin: string, repos: Repositories, options: AppOptions) {
   const access = portalAccess(options.auth, webOrigin);
@@ -236,6 +238,13 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
   return new Elysia({ adapter: options.adapter, prefix: "/api" })
     .use(cors({ origin: webOrigin, credentials: false }))
+    .onError(({ code, error, status }) => {
+      if (!unhandledCodes.has(code)) return undefined;
+
+      logUnhandled(error);
+
+      return status(500, { error: "Internal error" });
+    })
     .get("/health", () => ({ status: "ok" }) satisfies { status: "ok" }, {
       response: t.Object({ status: t.Literal("ok") }),
     })

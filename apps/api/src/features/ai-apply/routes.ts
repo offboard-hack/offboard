@@ -120,7 +120,7 @@ export function aiApplyRoutes(
 
         const inProgress = { error: "Already in progress" };
 
-        if (await repos.hasActive(me.id, job.id)) return status(409, inProgress);
+        if (await repos.hasActive(me.id, job.id, new Date())) return status(409, inProgress);
 
         const existing = await repos.assistedAttempt(me.id, job.id);
 
@@ -178,6 +178,8 @@ export function aiApplyRoutes(
           },
           new Date(),
         );
+
+        if (attempt === "no_consent") return status(403, { error: "AI Apply not available" });
 
         return attempt === "in_progress" ? status(409, inProgress) : status(201, { attempt });
       },
