@@ -4,8 +4,10 @@ import type { Page } from "./cdp.js";
 
 export type LiveForm = {
   fields: { name: string; required: boolean; options: string[] }[];
+  ready: boolean;
   closed: boolean;
   loginRequired: boolean;
+  blocked: boolean;
 };
 
 type Files = { resume: string; coverLetter: string | null; coverLetterText: string | null };
@@ -16,6 +18,7 @@ type FillInput = {
   account: { firstName: string; lastName: string; email: string };
   files: Files;
   phoneCountry: "BR";
+  attach: boolean;
 };
 
 type Failure = { failed: "upload_failed" | "form_changed"; field: string };
@@ -36,10 +39,27 @@ const submitButton = '#application-form button[type="submit"]';
 
 const countries = { BR: { search: "Bra", names: ["brasil", "brazil"], code: "+55" } };
 
+const controlNames = new Map([
+  [locationControl, "location"],
+  ["country", "phone"],
+]);
+
 const signInPattern = /my\.greenhouse\.io|sign_in|\/login/;
+
+const closedPattern =
+  /no longer open|n[aã]o est[aá] mais aberta|page not found|p[aá]gina n[aã]o encontrada|\b404\b/i;
+
+const confirmationPattern =
+  /recebemos sua inscri|agradecemos (sua inscri|o seu cadastro)|obrigad[oa] por se candidatar|candidatura (foi )?(realizada|enviada|recebida)|inscri[cç][aã]o (foi )?(realizada|enviada|recebida)|thank you for applying|thanks for applying|received your application|application (has been )?(received|submitted)/i;
+
+const challengePattern = /\/recaptcha\/(api2|enterprise)\/bframe|hcaptcha/;
+
+const captchaCopyPattern = /preencha o recaptcha|complete the recaptcha/i;
 
 const normalize = (text: string) =>
   text.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
+
+const loose = (text: string) => normalize(text).normalize("NFD").replace(/\p{M}/gu, "");
 
 const digits = (text: string) => text.replace(/\D/g, "");
 
@@ -51,13 +71,21 @@ const listbox = (id: string) => byId(`react-select-${id}-listbox`);
 
 const fail = (failed: Failure["failed"], field: string) => ({ failed, field }) satisfies Failure;
 
+const visibility = `const shown = (element) => { const box = element.getBoundingClientRect(); return box.width > 0 && box.height > 0 && element.checkVisibility({ opacityProperty: true, visibilityProperty: true }); }; const onScreen = (element) => { const box = element.getBoundingClientRect(); return shown(element) && box.bottom > 0 && box.right > 0 && box.top < innerHeight && box.left < innerWidth; }; const text = (element) => (element.innerText ?? element.textContent ?? "").trim().slice(0, 500);`;
+
 const readyExpression = `(() => { const form = document.querySelector("#application-form"); return form ? Object.keys(form).some((key) => key.startsWith("__react")) : document.readyState === "complete"; })()`;
 
-const snapshotExpression = `(() => { const context = window.__remixContext ?? window.__reactRouterContext; const data = Object.values(context?.state?.loaderData ?? {}).find((entry) => Array.isArray(entry?.jobPost?.questions)); return { href: location.href, form: document.querySelector("#application-form") !== null, password: document.querySelector('input[type="password"]') !== null, questions: data ? data.jobPost.questions : null }; })()`;
+const formPageExpression = `(() => { const context = window.__remixContext ?? window.__reactRouterContext; const data = Object.values(context?.state?.loaderData ?? {}).find((entry) => Array.isArray(entry?.jobPost?.questions)); const form = document.querySelector("#application-form"); return { href: location.href, form: form !== null, password: document.querySelector('input[type="password"]') !== null, title: document.title, notices: [...document.querySelectorAll('[class*="flash"], h1, h2')].slice(0, 20).map((item) => (item.textContent ?? "").trim()), questions: data ? data.jobPost.questions : null, required: form ? [...form.querySelectorAll('[aria-required="true"], [required]')].map((item) => ({ id: item.id ?? "", name: item.getAttribute("name") ?? "", labelledBy: item.getAttribute("aria-labelledby") ?? "" })) : [] }; })()`;
 
-const coordinatesExpression = `(() => { const form = document.querySelector("#application-form"); const key = form && Object.keys(form).find((name) => name.startsWith("__reactFiber")); const filled = (value) => value !== undefined && value !== null && String(value) !== ""; for (let fiber = key ? form[key] : null, depth = 0; fiber && depth < 100; fiber = fiber.return, depth += 1) { for (const node of [fiber, fiber.alternate]) { for (let hook = node?.memoizedState, index = 0; hook && typeof hook === "object" && index < 100; hook = hook.next, index += 1) { const state = hook.memoizedState; if (state && typeof state === "object" && "latitude" in state && "longitude" in state && filled(state.latitude) && filled(state.longitude)) return true; } } } return false; })()`;
+const locationStatesExpression = `(() => { const form = document.querySelector("#application-form"); const key = form && Object.keys(form).find((name) => name.startsWith("__reactFiber")); const states = []; for (let fiber = key ? form[key] : null, depth = 0; fiber && depth < 100; fiber = fiber.return, depth += 1) { for (const node of [fiber, fiber.alternate]) { for (let hook = node?.memoizedState, index = 0; hook && typeof hook === "object" && index < 100; hook = hook.next, index += 1) { const state = hook.memoizedState; if (state && typeof state === "object" && "latitude" in state && "longitude" in state) states.push({ location: String(state.location ?? ""), latitude: String(state.latitude ?? ""), longitude: String(state.longitude ?? "") }); } } } return states.slice(0, 10); })()`;
 
-const outcomeExpression = `(() => { const visible = (element) => { const box = element.getBoundingClientRect(); return box.width > 0 && box.height > 0 && box.bottom > 0 && box.right > 0 && box.top < innerHeight && box.left < innerWidth && element.checkVisibility({ opacityProperty: true, visibilityProperty: true }); }; const form = document.querySelector("#application-form"); const text = document.body?.innerText ?? ""; if (location.pathname.includes("/confirmation") || document.querySelector(".confirmation__content") || (!form && /recebemos sua inscri|agradecemos (sua inscri|o seu cadastro)|obrigad[oa] por se candidatar|candidatura (foi )?(realizada|enviada|recebida)|inscri[cç][aã]o (foi )?(realizada|enviada|recebida)|thank you for applying|thanks for applying|received your application|application (has been )?(received|submitted)/i.test(text))) return "confirmed"; const challenge = [...document.querySelectorAll("iframe")].some((frame) => (/\\/recaptcha\\/(api2|enterprise)\\/bframe/.test(frame.src) || /hcaptcha/.test(frame.src)) && visible(frame)); if (challenge || /preencha o recaptcha|complete the recaptcha/i.test(text)) return "blocked"; const errors = [...document.querySelectorAll(".helper-text--error, .flash-contents--extra-light-red")].some((item) => visible(item) && item.textContent.trim() !== ""); return errors ? "invalid" : null; })()`;
+const outcomeExpression = `(() => { ${visibility} return { path: location.pathname, form: document.querySelector("#application-form") !== null, frames: [...document.querySelectorAll("iframe")].map((frame) => ({ src: frame.src, visible: onScreen(frame) })), errors: [...document.querySelectorAll(".helper-text--error, .flash-contents--extra-light-red")].map((item) => ({ text: text(item), visible: shown(item) })), confirmations: [...document.querySelectorAll('.confirmation__content, [class*="confirmation"]')].slice(0, 20).map((item) => ({ text: text(item), visible: shown(item) })) }; })()`;
+
+const confirmationSignal = `location.pathname.includes("/confirmation") || document.querySelector(".confirmation__content") !== null`;
+
+const guardExpression = `(() => { const submits = 'button[type="submit"], input[type="submit"], #application-form button:not([type])'; if (!window.__offboardGuard) { const guard = { armed: true }; window.__offboardGuard = guard; const stop = (event) => { event.preventDefault(); event.stopImmediatePropagation(); }; window.addEventListener("submit", (event) => { if (guard.armed) stop(event); }, true); window.addEventListener("click", (event) => { if (guard.armed && event.target instanceof Element && event.target.closest(submits)) stop(event); }, true); const { submit, requestSubmit } = HTMLFormElement.prototype; HTMLFormElement.prototype.submit = function () { if (!guard.armed) submit.call(this); }; HTMLFormElement.prototype.requestSubmit = function (submitter) { if (!guard.armed) requestSubmit.call(this, submitter); }; } window.__offboardGuard.armed = true; return true; })()`;
+
+const liftExpression = `(() => { if (window.__offboardGuard) window.__offboardGuard.armed = false; return true; })()`;
 
 const liveQuestion = z.object({
   required: z.boolean(),
@@ -69,27 +97,70 @@ const liveQuestion = z.object({
   ),
 });
 
-const snapshot = z.object({
+const formPage = z.object({
   href: z.string(),
   form: z.boolean(),
   password: z.boolean(),
+  title: z.string(),
+  notices: z.array(z.string()),
   questions: z.array(liveQuestion).nullable().catch(null),
+  required: z.array(z.object({ id: z.string(), name: z.string(), labelledBy: z.string() })),
 });
 
-const menuOptions = z.array(z.object({ id: z.string(), text: z.string(), focused: z.boolean() }));
+export type FormPage = z.infer<typeof formPage>;
 
-const outcome = z.enum(["confirmed", "blocked", "invalid"]).nullable();
+const visibleText = z.object({ text: z.string(), visible: z.boolean() });
+
+const outcomePage = z.object({
+  path: z.string(),
+  form: z.boolean(),
+  frames: z.array(z.object({ src: z.string(), visible: z.boolean() })),
+  errors: z.array(visibleText),
+  confirmations: z.array(visibleText),
+});
+
+export type OutcomePage = z.infer<typeof outcomePage>;
+
+const locationStates = z.array(
+  z.object({ location: z.string(), latitude: z.string(), longitude: z.string() }),
+);
+
+export type LocationState = z.infer<typeof locationStates>[number];
+
+const menuOptions = z.array(z.object({ id: z.string(), text: z.string() }));
 
 const liveNames = (name: string) =>
   name === "candidate_location" ? ["location", "latitude", "longitude"] : [name];
 
-export const readLiveForm = async (page: Page) => {
-  await page.waitFor(readyExpression, readyMs);
+const controlName = (control: FormPage["required"][number]) => {
+  if (control.name.endsWith("[]")) return control.name;
 
-  const live = await page.evaluate(snapshotExpression, snapshot);
-  const loginRequired = !live.form && (live.password || signInPattern.test(live.href));
+  if (control.id !== "") return controlNames.get(control.id) ?? control.id;
 
-  const fields = (live.form ? (live.questions ?? []) : []).flatMap((item) =>
+  if (control.name !== "") return control.name;
+
+  return /^upload-label-(.+)$/.exec(control.labelledBy)?.[1];
+};
+
+export const liveFormFrom = (page: FormPage) => {
+  if (!page.form) {
+    const loginRequired = page.password || signInPattern.test(page.href);
+
+    const closed =
+      !loginRequired &&
+      (/[?&]error=true/.test(page.href) ||
+        [page.title, ...page.notices].some((text) => closedPattern.test(text)));
+
+    return {
+      fields: [],
+      ready: true,
+      closed,
+      loginRequired,
+      blocked: !closed && !loginRequired,
+    } satisfies LiveForm;
+  }
+
+  const fields = (page.questions ?? []).flatMap((item) =>
     item.fields.flatMap((field) =>
       liveNames(field.name).map((name) => ({
         name,
@@ -99,7 +170,39 @@ export const readLiveForm = async (page: Page) => {
     ),
   );
 
-  return { fields, closed: !live.form && !loginRequired, loginRequired } satisfies LiveForm;
+  const known = new Set(fields.map((field) => field.name));
+
+  const extra = [
+    ...new Set(
+      page.required.flatMap((control) => {
+        const name = controlName(control);
+
+        return name === undefined || known.has(name) ? [] : [name];
+      }),
+    ),
+  ];
+
+  return {
+    fields: [...fields, ...extra.map((name) => ({ name, required: true, options: [] }))],
+    ready: true,
+    closed: false,
+    loginRequired: false,
+    blocked: false,
+  } satisfies LiveForm;
+};
+
+export const readLiveForm = async (page: Page) => {
+  if (!(await page.waitFor(readyExpression, readyMs))) {
+    return {
+      fields: [],
+      ready: false,
+      closed: false,
+      loginRequired: false,
+      blocked: false,
+    } satisfies LiveForm;
+  }
+
+  return liveFormFrom(await page.evaluate(formPageExpression, formPage));
 };
 
 const chosenValues = (value: Answer | undefined) =>
@@ -113,6 +216,8 @@ export const checkForm = (
   const fields = new Map(live.fields.map((field) => [field.name, field]));
   const known = new Set(questions.flatMap((item) => item.fields.map((field) => field.name)));
   const values = new Map(confirmed.map((answer) => [answer.questionId, answer.value]));
+
+  if (!live.ready) return "form_changed";
 
   if (live.fields.some((field) => field.required && !known.has(field.name))) return "form_changed";
 
@@ -137,8 +242,58 @@ export const checkForm = (
   return "ok";
 };
 
+export const challengeVisible = (page: OutcomePage) =>
+  page.frames.some((frame) => frame.visible && challengePattern.test(frame.src)) ||
+  page.errors.some((error) => error.visible && captchaCopyPattern.test(error.text));
+
+export const errorsVisible = (page: OutcomePage) =>
+  page.errors.some((error) => error.visible && error.text !== "");
+
+export const classifyOutcome = (page: OutcomePage) => {
+  const confirmed =
+    page.path.includes("/confirmation") ||
+    page.confirmations.some((item) => item.visible && confirmationPattern.test(item.text));
+
+  if (confirmed) return "confirmed";
+
+  if (challengeVisible(page)) return "blocked";
+
+  return errorsVisible(page) ? "invalid" : "timeout";
+};
+
+export const locationMatches = (city: string, shown: string | null, states: LocationState[]) => {
+  if (shown === null) return false;
+
+  const [place = ""] = shown.split(",");
+
+  return (
+    loose(place) === loose(city) &&
+    states.some(
+      (state) =>
+        state.latitude.trim() !== "" &&
+        state.longitude.trim() !== "" &&
+        loose(state.location) === loose(shown),
+    )
+  );
+};
+
 const exists = (page: Page, selector: string) =>
   page.evaluate(`${found(selector)} !== null`, z.boolean());
+
+const valueOf = (page: Page, selector: string) =>
+  page.evaluate(`${found(selector)}?.value ?? null`, z.string().nullable());
+
+const shownIn = (page: Page, id: string) =>
+  page.evaluate(
+    `${found(byId(id))}?.closest(".select__control")?.querySelector(".select__single-value")?.textContent ?? null`,
+    z.string().nullable(),
+  );
+
+const tickedIn = (page: Page, name: string) =>
+  page.evaluate(
+    `[...document.querySelectorAll(${JSON.stringify(`input[type="checkbox"][name=${JSON.stringify(name)}]`)})].flatMap((box) => (box.checked ? [box.value] : []))`,
+    z.array(z.string()),
+  );
 
 const sameText = (typed: string, kept: string) => normalize(typed) === normalize(kept);
 
@@ -146,13 +301,14 @@ const sameDigits = (typed: string, kept: string) => digits(typed) === digits(kep
 
 const typeInto = async (page: Page, id: string, text: string, same = sameText) => {
   const selector = byId(id);
+  const tag = await page.evaluate(`${found(selector)}?.tagName ?? null`, z.string().nullable());
 
-  if (!(await exists(page, selector))) return fail("form_changed", id);
+  if (tag === null || (tag === "INPUT" && /[\r\n]/.test(text))) return fail("form_changed", id);
 
   await page.click(selector);
   await page.type(text);
 
-  const kept = await page.evaluate(`${found(selector)}?.value ?? null`, z.string().nullable());
+  const kept = await valueOf(page, selector);
 
   return kept !== null && same(text, kept) ? undefined : fail("form_changed", id);
 };
@@ -171,10 +327,15 @@ const choose = async (page: Page, id: string, choice: Choice) => {
 
   await page.click(selector);
   await page.type(choice.search);
-  await page.waitFor(`${found(listbox(id))} !== null`, menuMs);
+
+  if (!(await page.waitFor(`${found(listbox(id))} !== null`, menuMs))) {
+    await page.press("Escape");
+
+    return fail("form_changed", choice.field);
+  }
 
   const options = await page.evaluate(
-    `(() => { const active = ${found(selector)}?.getAttribute("aria-activedescendant") ?? ""; return [...document.querySelectorAll(${JSON.stringify(`${listbox(id)} [role="option"]`)})].map((option) => ({ id: option.id, text: option.textContent ?? "", focused: option.id === active })); })()`,
+    `[...document.querySelectorAll(${JSON.stringify(`${listbox(id)} [role="option"]`)})].map((option) => ({ id: option.id, text: option.textContent ?? "" }))`,
     menuOptions,
   );
 
@@ -186,13 +347,9 @@ const choose = async (page: Page, id: string, choice: Choice) => {
     return fail("form_changed", choice.field);
   }
 
-  if (match.focused) await page.press("Enter");
-  else await page.click(byId(match.id));
+  await page.click(byId(match.id));
 
-  const shown = await page.evaluate(
-    `${found(selector)}?.closest(".select__control")?.querySelector(".select__single-value")?.textContent ?? null`,
-    z.string().nullable(),
-  );
+  const shown = await shownIn(page, id);
 
   return shown !== null && choice.shows(shown) ? undefined : fail("form_changed", choice.field);
 };
@@ -238,10 +395,15 @@ const fillLocation = async (page: Page, city: string) => {
   }
 
   await page.click(first);
+  await page.waitFor(
+    `${locationStatesExpression}.some((state) => state.latitude !== "" && state.longitude !== "")`,
+    coordinatesMs,
+  );
 
-  return (await page.waitFor(coordinatesExpression, coordinatesMs))
-    ? undefined
-    : fail("form_changed", "location");
+  const shown = await shownIn(page, locationControl);
+  const states = await page.evaluate(locationStatesExpression, locationStates);
+
+  return locationMatches(city, shown, states) ? undefined : fail("form_changed", "location");
 };
 
 const tick = async (page: Page, name: string, values: string[]) => {
@@ -258,17 +420,13 @@ const tick = async (page: Page, name: string, values: string[]) => {
     if (!checked) await page.click(selector);
   }
 
-  const ticked = await page.evaluate(
-    `[...document.querySelectorAll(${JSON.stringify(`input[type="checkbox"][name=${JSON.stringify(name)}]`)})].flatMap((box) => (box.checked ? [box.value] : []))`,
-    z.array(z.string()),
-  );
-
+  const ticked = await tickedIn(page, name);
   const same = ticked.length === values.length && values.every((value) => ticked.includes(value));
 
   return same ? undefined : fail("form_changed", name);
 };
 
-const attach = async (page: Page, name: string, path: string) => {
+const attachFile = async (page: Page, name: string, path: string) => {
   const selector = byId(name);
   const file = path.slice(path.lastIndexOf("/") + 1);
 
@@ -284,7 +442,8 @@ const attach = async (page: Page, name: string, path: string) => {
   return shown ? undefined : fail("upload_failed", name);
 };
 
-const fillCoverLetter = async (page: Page, question: FormQuestion, files: Files) => {
+const fillCoverLetter = async (page: Page, question: FormQuestion, input: FillInput) => {
+  const { files } = input;
   const writable = question.fields.some((field) => field.name === letterField);
 
   if (files.coverLetterText !== null && writable) {
@@ -299,7 +458,9 @@ const fillCoverLetter = async (page: Page, question: FormQuestion, files: Files)
     return typeInto(page, letterField, files.coverLetterText);
   }
 
-  if (files.coverLetter !== null) return attach(page, "cover_letter", files.coverLetter);
+  if (files.coverLetter !== null && input.attach) {
+    return attachFile(page, "cover_letter", files.coverLetter);
+  }
 };
 
 const fillAnswer = (page: Page, question: FormQuestion, value: Answer, input: FillInput) => {
@@ -327,6 +488,19 @@ const fillAnswer = (page: Page, question: FormQuestion, value: Answer, input: Fi
     : chooseLabel(page, first.name, label);
 };
 
+const accountFields = new Set(["first_name", "last_name", "email"]);
+
+const filledByDriver = (question: FormQuestion) => {
+  const [first] = question.fields;
+
+  return (
+    first === undefined ||
+    accountFields.has(first.name) ||
+    first.type === "file" ||
+    question.fields.every((field) => field.type === "hidden")
+  );
+};
+
 const fillQuestion = (page: Page, question: FormQuestion, value: Answer, input: FillInput) => {
   const [first] = question.fields;
   const { account, files } = input;
@@ -339,29 +513,67 @@ const fillQuestion = (page: Page, question: FormQuestion, value: Answer, input: 
 
   if (first.name === "email") return typeInto(page, first.name, account.email);
 
-  if (first.name === "resume") return attach(page, first.name, files.resume);
+  if (first.name === "resume") {
+    return input.attach ? attachFile(page, first.name, files.resume) : undefined;
+  }
 
-  if (first.name === "cover_letter") return fillCoverLetter(page, question, files);
+  if (first.name === "cover_letter") return fillCoverLetter(page, question, input);
 
   if (first.type === "file") return;
 
   return fillAnswer(page, question, value, input);
 };
 
+const untouched = async (page: Page, question: FormQuestion) => {
+  const [first] = question.fields;
+
+  if (first === undefined || filledByDriver(question)) return true;
+
+  if (first.type === "multi_select") return (await tickedIn(page, first.name)).length === 0;
+
+  if (first.name === "location") return (await shownIn(page, locationControl)) === null;
+
+  if (first.type === "single_select") return (await shownIn(page, first.name)) === null;
+
+  return ((await valueOf(page, byId(first.name))) ?? "") === "";
+};
+
 export const fillGreenhouse = async (page: Page, input: FillInput) => {
   const values = new Map(input.confirmed.map((answer) => [answer.questionId, answer.value]));
+
+  await page.evaluate(guardExpression, z.boolean());
 
   for (const question of input.questions) {
     const failure = await fillQuestion(page, question, values.get(question.id) ?? null, input);
 
     if (failure !== undefined) return failure;
   }
+
+  for (const question of input.questions) {
+    if ((values.get(question.id) ?? null) !== null) continue;
+
+    if (!(await untouched(page, question))) return fail("form_changed", question.id);
+  }
 };
 
-export const submitGreenhouse = (page: Page) => page.click(submitButton);
+export const submitGreenhouse = async (page: Page) => {
+  const before = await page.evaluate(outcomeExpression, outcomePage);
+
+  if (challengeVisible(before) || errorsVisible(before)) return "not_clicked";
+
+  await page.evaluate(liftExpression, z.boolean());
+  await page.click(submitButton);
+
+  return "clicked";
+};
 
 export const awaitOutcome = async (page: Page, timeoutMs: number) => {
-  if (!(await page.waitFor(`${outcomeExpression} !== null`, timeoutMs))) return "timeout";
+  const deadline = Date.now() + timeoutMs;
 
-  return (await page.evaluate(outcomeExpression, outcome)) ?? "timeout";
+  for (;;) {
+    const signalled = await page.waitFor(confirmationSignal, Math.max(1, deadline - Date.now()));
+    const outcome = classifyOutcome(await page.evaluate(outcomeExpression, outcomePage));
+
+    if (outcome === "confirmed" || !signalled || Date.now() >= deadline) return outcome;
+  }
 };
