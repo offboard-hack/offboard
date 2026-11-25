@@ -377,6 +377,64 @@ describe.skipIf(!url)("api", () => {
     expect((await call(`/offboardings/${created.id}`)).status).toBe(200);
   });
 
+  it("creates an offboarding with employee email and normalizes case", async () => {
+    const body = {
+      name: "Lúcia Pires",
+      role: "Designer",
+      department: "Produto",
+      deadline: "2026-12-15",
+      email: "Lucia@Offboard.Example",
+    };
+
+    const res = await call("/offboardings", "POST", body);
+    const created = await res.json();
+
+    expect(res.status).toBe(201);
+    expect(created).toEqual({
+      id: expect.any(String),
+      name: body.name,
+      role: body.role,
+      department: body.department,
+      deadline: body.deadline,
+      completed: 0,
+      total: 0,
+    });
+
+    const [access] = await db
+      .select({ email: employeeAccess.email })
+      .from(employeeAccess)
+      .where(eq(employeeAccess.caseId, created.id));
+
+    expect(access.email).toBe("lucia@offboard.example");
+  });
+
+  it("rejects duplicate employee email on offboarding creation without leaving an orphan case", async () => {
+    const email = `dup-${randomUUID()}@offboard.example`;
+    const before = await (await call("/offboardings")).json();
+
+    await call("/offboardings", "POST", {
+      name: "Primeira",
+      role: "Dev",
+      department: "TI",
+      deadline: "2026-12-20",
+      email,
+    });
+
+    const duplicate = await call("/offboardings", "POST", {
+      name: "Segunda",
+      role: "Dev",
+      department: "TI",
+      deadline: "2026-12-20",
+      email,
+    });
+
+    expect(duplicate.status).toBe(409);
+    expect(await duplicate.json()).toEqual({ error: "Email already in use" });
+
+    const after = await (await call("/offboardings")).json();
+    expect(after.length).toBe(before.length + 1);
+  });
+
   it.each([
     { name: "", role: "Dev", department: "Eng", deadline: "2026-12-01" },
     { name: "Ana", role: "Dev", department: "Eng", deadline: "tomorrow" },
@@ -385,6 +443,35 @@ describe.skipIf(!url)("api", () => {
     const res = await call("/offboardings", "POST", body);
 
     expect(res.status).toBe(422);
+  });
+
+  it("rethrows unexpected offboarding create errors", async () => {
+    const failing = createApp(
+      webOrigin,
+      {
+        ...repos,
+        offboardings: {
+          ...repos.offboardings,
+          createOffboarding: () => Promise.reject(new Error("boom")),
+        },
+      },
+      appOptions,
+    );
+
+    const res = await failing.handle(
+      new Request("http://localhost/api/offboardings", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: webOrigin },
+        body: JSON.stringify({
+          name: "Test",
+          role: "Dev",
+          department: "Eng",
+          deadline: "2026-12-01",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(500);
   });
 
   it("imports offboardings in bulk", async () => {
