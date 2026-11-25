@@ -65,9 +65,18 @@ describe.skipIf(!url)("answers repository", () => {
     expect(library.unanswered).toBe(10);
     expect(library.questions.every((item) => item.common && item.answer === null)).toBe(true);
 
-    const texts = library.questions.map((item) => item.text);
-
-    expect(texts).toEqual([...texts].sort((a, b) => a.localeCompare(b)));
+    expect(library.questions.map((item) => item.text)).toEqual([
+      "Como você soube da vaga?",
+      "Qual a sua disponibilidade para início?",
+      "Qual a sua pretensão salarial?",
+      "Qual o link do seu LinkedIn?",
+      "Qual o seu aviso prévio?",
+      "Qual o seu nível de inglês?",
+      "Você aceita trabalhar no modelo presencial?",
+      "Você possui CNH?",
+      "Você se autodeclara pessoa com deficiência (PcD)?",
+      "Você tem disponibilidade para viagens?",
+    ]);
   });
 
   it("stores an answer, counts it and keeps the others unanswered", async () => {

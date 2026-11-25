@@ -165,9 +165,7 @@ export function createAccountRepository(db: Database) {
       .select({
         question: answerQuestions.text,
         answer: talentAnswers.answer,
-        updatedAt: sql<Date>`coalesce(${talentAnswers.updatedAt}, now())`.mapWith(
-          talentAnswers.updatedAt,
-        ),
+        updatedAt: talentAnswers.updatedAt,
       })
       .from(talentAnswers)
       .innerJoin(answerQuestions, eq(answerQuestions.id, talentAnswers.questionId))
@@ -242,7 +240,7 @@ export function createAccountRepository(db: Database) {
       answers: ownAnswers.map((item) => ({
         question: item.question,
         answer: item.answer,
-        updatedAt: item.updatedAt.toISOString(),
+        updatedAt: item.updatedAt?.toISOString() ?? null,
       })),
     };
   }

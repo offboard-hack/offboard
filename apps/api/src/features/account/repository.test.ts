@@ -541,8 +541,15 @@ describe.skipIf(!url)("account repository", () => {
     await repos.answers.answer(profileId, early, "A", new Date("2026-03-02T00:00:00Z"));
     await repos.answers.answer(otherProfileId, early, "Alheia", new Date());
 
+    const undated = await repos.answers.ensureQuestion("Mmm sem data?");
+
+    await db
+      .insert(talentAnswers)
+      .values({ profileId, questionId: undated, answer: "M", updatedAt: null });
+
     expect((await repository.exportData(profileId))?.answers).toEqual([
       { question: "Aaa primeira?", answer: "A", updatedAt: "2026-03-02T00:00:00.000Z" },
+      { question: "Mmm sem data?", answer: "M", updatedAt: null },
       { question: "Zzz última?", answer: "Z", updatedAt: "2026-03-01T00:00:00.000Z" },
     ]);
   });
