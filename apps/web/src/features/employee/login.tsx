@@ -4,25 +4,49 @@ import { employeeCodeSchema, employeeLoginSchema } from "@offboard/employee";
 import { revalidateLogic, useForm, useStore } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import { useHydrated } from "@tanstack/react-router";
-import { useState } from "react";
+import { REGEXP_ONLY_DIGITS } from "input-otp";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import { Button } from "@/shared/ui/shadcn/button";
 import { Input } from "@/shared/ui/shadcn/input";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/shared/ui/shadcn/input-otp";
 import { Label } from "@/shared/ui/shadcn/label";
 import { Spinner } from "@/shared/ui/shadcn/spinner";
 import { notifySessionChange } from "@/shared/lib/session-change";
 import { employeeAuth, requestEmployeeCode } from "./auth";
 
-export function EmployeeLogin() {
-  const [email, setEmail] = useState<string | null>(null);
+const resendCooldownSeconds = 30;
+const otpSlots = [0, 1, 2, 3, 4, 5];
 
-  return email ? (
-    <CodeForm key={email} email={email} reset={() => setEmail(null)} />
+type LoginStep =
+  | { kind: "email"; email: string }
+  | { kind: "code"; email: string; resendAt: number };
+
+export function EmployeeLogin() {
+  const [step, setStep] = useState<LoginStep>({ kind: "email", email: "" });
+
+  return step.kind === "code" ? (
+    <CodeForm
+      email={step.email}
+      initialResendAt={step.resendAt}
+      editEmail={() => setStep({ kind: "email", email: step.email })}
+    />
   ) : (
-    <EmailForm onSent={setEmail} />
+    <EmailForm
+      initialEmail={step.email}
+      onSent={(email) =>
+        setStep({ kind: "code", email, resendAt: Date.now() + resendCooldownSeconds * 1000 })
+      }
+    />
   );
 }
 
-function EmailForm({ onSent }: { onSent: (email: string) => void }) {
+function EmailForm({
+  initialEmail,
+  onSent,
+}: {
+  initialEmail: string;
+  onSent: (email: string) => void;
+}) {
   const hydrated = useHydrated();
 
   const request = useMutation({
@@ -31,7 +55,7 @@ function EmailForm({ onSent }: { onSent: (email: string) => void }) {
   });
 
   const form = useForm({
-    defaultValues: { email: "" },
+    defaultValues: { email: initialEmail },
     validationLogic: revalidateLogic({ mode: "submit", modeAfterSubmission: "change" }),
     validators: { onDynamic: employeeLoginSchema },
     onSubmit: ({ value }) => request.mutate(employeeLoginSchema.parse(value).email),
@@ -63,6 +87,7 @@ function EmailForm({ onSent }: { onSent: (email: string) => void }) {
                 spellCheck={false}
                 required
                 autoComplete="email"
+                autoFocus={initialEmail !== ""}
                 value={field.state.value}
                 onChange={(event) => field.handleChange(event.target.value)}
                 onBlur={field.handleBlur}
@@ -100,9 +125,36 @@ function EmailForm({ onSent }: { onSent: (email: string) => void }) {
   );
 }
 
-function CodeForm({ email, reset }: { email: string; reset: () => void }) {
+function CodeForm({
+  email,
+  initialResendAt,
+  editEmail,
+}: {
+  email: string;
+  initialResendAt: number;
+  editEmail: () => void;
+}) {
   const [error, setError] = useState("");
-  const resend = useMutation({ mutationFn: () => requestEmployeeCode(email) });
+  const [resendAt, setResendAt] = useState(initialResendAt);
+
+  const subscribeToCooldown = useCallback(
+    (tick: () => void) => {
+      const timer = window.setInterval(() => {
+        tick();
+
+        if (Date.now() >= resendAt) window.clearInterval(timer);
+      }, 250);
+
+      return () => window.clearInterval(timer);
+    },
+    [resendAt],
+  );
+
+  const secondsLeft = useSyncExternalStore(
+    subscribeToCooldown,
+    () => Math.max(0, Math.ceil((resendAt - Date.now()) / 1000)),
+    () => resendCooldownSeconds,
+  );
 
   const form = useForm({
     defaultValues: { code: "" },
@@ -111,23 +163,34 @@ function CodeForm({ email, reset }: { email: string; reset: () => void }) {
     onSubmit: async ({ value }) => {
       setError("");
 
-      const { error: signInError } = await employeeAuth.signIn.emailOtp({
-        email,
-        otp: employeeCodeSchema.parse(value).code,
-      });
+      const { code } = employeeCodeSchema.parse(value);
 
-      if (signInError) {
-        setError(
-          signInError.status === 429
-            ? "Muitas tentativas. Aguarde antes de tentar novamente."
-            : "Código inválido ou expirado. Confira ou solicite outro.",
-        );
+      try {
+        const { error: signInError } = await employeeAuth.signIn.emailOtp({ email, otp: code });
 
-        return;
+        if (signInError) {
+          setError(
+            signInError.status === 429
+              ? "Muitas tentativas. Aguarde antes de tentar novamente."
+              : "Código inválido ou expirado. Confira ou solicite outro.",
+          );
+
+          return;
+        }
+
+        notifySessionChange();
+        window.location.assign("/colaborador");
+      } catch {
+        setError("Não foi possível entrar. Tente novamente.");
       }
+    },
+  });
 
-      notifySessionChange();
-      window.location.assign("/colaborador");
+  const resend = useMutation({
+    mutationFn: () => requestEmployeeCode(email),
+    onSuccess: () => {
+      form.reset();
+      setResendAt(Date.now() + resendCooldownSeconds * 1000);
     },
   });
 
@@ -142,9 +205,33 @@ function CodeForm({ email, reset }: { email: string; reset: () => void }) {
         void form.handleSubmit();
       }}
     >
-      <p role="status" className="rounded-xl bg-muted px-3 py-2 text-sm wrap-anywhere">
-        Se {email} tiver acesso, você receberá um código de seis dígitos.
+      <p role="status" className="rounded-xl bg-muted px-3 py-2 text-sm">
+        {resend.isSuccess
+          ? "Se este e-mail tiver acesso, você receberá um novo código de seis dígitos."
+          : "Se este e-mail tiver acesso, você receberá um código de seis dígitos."}
       </p>
+      <div className="grid gap-2">
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="employee-email">E-mail</Label>
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="-my-1 px-0 motion-reduce:transition-none"
+            onClick={editEmail}
+            disabled={busy || resend.isPending}
+          >
+            Usar outro e-mail
+          </Button>
+        </div>
+        <Input
+          id="employee-email"
+          type="email"
+          className="h-12 px-4 text-base sm:text-sm"
+          value={email}
+          readOnly
+        />
+      </div>
       <form.Field name="code">
         {(field) => {
           const issue = field.state.meta.errors[0]?.message;
@@ -152,21 +239,38 @@ function CodeForm({ email, reset }: { email: string; reset: () => void }) {
           return (
             <div className="grid gap-2">
               <Label htmlFor="employee-code">Código de acesso</Label>
-              <Input
+              <InputOTP
                 id="employee-code"
                 name={field.name}
                 inputMode="numeric"
-                className="h-12 px-4 text-base sm:text-sm"
-                required
                 autoComplete="one-time-code"
-                maxLength={6}
+                autoFocus
+                required
+                maxLength={otpSlots.length}
+                pattern={REGEXP_ONLY_DIGITS}
+                pasteTransformer={(text) => text.replace(/[\s-]/g, "")}
+                containerClassName="w-full"
                 value={field.state.value}
-                onChange={(event) => field.handleChange(event.target.value)}
+                onChange={(code) => {
+                  field.handleChange(code);
+                  setError("");
+                }}
                 onBlur={field.handleBlur}
                 disabled={busy || resend.isPending}
                 aria-invalid={!!issue}
                 aria-describedby={issue ? "employee-code-error" : undefined}
-              />
+              >
+                <InputOTPGroup className="grid w-full grid-cols-6">
+                  {otpSlots.map((index) => (
+                    <InputOTPSlot
+                      key={index}
+                      index={index}
+                      className="h-12 w-full text-lg"
+                      aria-invalid={!!issue}
+                    />
+                  ))}
+                </InputOTPGroup>
+              </InputOTP>
               {issue ? (
                 <p id="employee-code-error" className="text-sm text-destructive">
                   {issue}
@@ -181,33 +285,33 @@ function CodeForm({ email, reset }: { email: string; reset: () => void }) {
           {error || resend.error?.message}
         </p>
       ) : null}
-      {resend.isSuccess ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          Se houver acesso, enviamos outro código.
-        </p>
-      ) : null}
-      <Button
-        type="submit"
-        className="h-12 motion-reduce:transition-none"
-        disabled={busy || resend.isPending}
-      >
-        {busy ? <Spinner aria-hidden="true" /> : null}
-        {busy ? "Entrando…" : "Entrar"}
-      </Button>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="ghost" type="button" onClick={reset} disabled={busy || resend.isPending}>
-          Usar outro e-mail
+      <div className="grid gap-2">
+        <Button
+          type="submit"
+          className="h-12 motion-reduce:transition-none"
+          disabled={busy || resend.isPending}
+        >
+          {busy ? <Spinner aria-hidden="true" /> : null}
+          {busy ? "Entrando…" : "Entrar"}
         </Button>
         <Button
-          variant="ghost"
+          variant="secondary"
           type="button"
-          disabled={busy || resend.isPending}
+          className="h-12 tabular-nums motion-reduce:transition-none disabled:text-muted-foreground disabled:opacity-100"
+          disabled={busy || resend.isPending || secondsLeft > 0}
           onClick={() => {
             setError("");
             resend.mutate();
           }}
         >
-          {resend.isPending ? "Enviando…" : "Enviar outro código"}
+          {resend.isPending ? (
+            <>
+              <Spinner aria-hidden="true" />
+              Enviando…
+            </>
+          ) : (
+            <>Enviar outro código{secondsLeft > 0 ? ` em ${secondsLeft}s` : ""}</>
+          )}
         </Button>
       </div>
     </form>

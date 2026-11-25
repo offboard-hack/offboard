@@ -83,6 +83,12 @@ export function SignInPage({
               : "Este link é inválido ou expirou. Solicite um novo link para entrar."}
           </p>
         )}
+        {delivery === "sent" && (
+          <p role="status" className="rounded-xl bg-muted px-3 py-2 text-sm">
+            Se o e-mail estiver cadastrado, você receberá um link para entrar. Confira a caixa de
+            entrada e o spam.
+          </p>
+        )}
         <form.Field name="email">
           {(field) => {
             const error = field.state.meta.errors[0]?.message;
@@ -131,12 +137,6 @@ export function SignInPage({
             </Button>
           )}
         </form.Subscribe>
-        {delivery === "sent" && (
-          <p role="status" className="rounded-xl bg-muted px-3 py-2 text-sm">
-            Se o e-mail estiver cadastrado, você receberá um link para entrar. Confira a caixa de
-            entrada e o spam.
-          </p>
-        )}
         {(delivery === "failed" || delivery === "limited") && (
           <p role="alert" className="text-sm text-destructive">
             {delivery === "limited"
