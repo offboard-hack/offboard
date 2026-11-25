@@ -2,8 +2,9 @@ import type { ResumeContent } from "@offboard/db/schema";
 
 const maxTerms = 40;
 
-export function searchTerms(content: ResumeContent) {
+export function searchTerms(content: ResumeContent, titles: string[]) {
   const sources = [
+    ...titles,
     content.headline.text,
     ...content.experiences.map((experience) => experience.role),
     ...content.skills.map((skill) => skill.name),

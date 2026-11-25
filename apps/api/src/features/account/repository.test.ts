@@ -8,6 +8,7 @@ import {
   authUser,
   interviews,
   jobMatches,
+  jobRejections,
   jobs,
   offboardingCases,
   publicPageDailyViews,
@@ -617,6 +618,57 @@ describe.skipIf(!url)("account repository", () => {
       profileFields: { phone: { value: "11 90000-0000", share: true } },
     });
     expect(JSON.stringify(exported)).not.toContain("Foreign");
+  });
+
+  it("exports the rejections newest first and deletes them with the profile", async () => {
+    expect((await repository.exportData(profileId))?.rejections).toEqual([]);
+
+    const closed = await job("closed-one");
+    const open = await job("open-one");
+    const foreign = await job("foreign-one");
+
+    await db.update(jobs).set({ closedAt: new Date() }).where(eq(jobs.id, closed));
+    await db.insert(jobRejections).values([
+      {
+        profileId,
+        jobId: open,
+        reason: "salary",
+        note: "baixo",
+        createdAt: new Date("2026-03-01T00:00:00Z"),
+      },
+      { profileId, jobId: closed, reason: "other", createdAt: new Date("2026-03-02T00:00:00Z") },
+      { profileId: otherProfileId, jobId: foreign, reason: "company" },
+    ]);
+
+    const undated = await job("undated-one");
+
+    await db
+      .insert(jobRejections)
+      .values({ profileId, jobId: undated, reason: "other", createdAt: null });
+
+    const exported = await repository.exportData(profileId);
+
+    expect(exported?.rejections).toEqual([
+      expect.objectContaining({ createdAt: null }),
+      {
+        job: { id: closed, title: "Vaga closed-one", company: expect.any(String) },
+        reason: "other",
+        note: null,
+        createdAt: "2026-03-02T00:00:00.000Z",
+      },
+      {
+        job: { id: open, title: "Vaga open-one", company: expect.any(String) },
+        reason: "salary",
+        note: "baixo",
+        createdAt: "2026-03-01T00:00:00.000Z",
+      },
+    ]);
+    expect(JSON.stringify(exported)).not.toContain("foreign-one");
+
+    expect(await repository.deleteProfile(profileId)).toBe(true);
+    expect(await db.select().from(jobRejections)).toEqual([
+      expect.objectContaining({ profileId: otherProfileId }),
+    ]);
   });
 
   it("exports nothing for an unknown profile", async () => {

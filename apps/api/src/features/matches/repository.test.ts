@@ -2,9 +2,11 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import {
   jobMatches,
+  jobRejections,
   jobs,
   offboardingCases,
   resumes,
+  talentPreferences,
   type ResumeContent,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
@@ -268,6 +270,15 @@ describe.skipIf(!url)("matches repository", () => {
     expect(await repository.profilesForMatching(lastDay)).toEqual([profileId]);
   });
 
+  it("reads the target titles with defaults", async () => {
+    expect(await repository.targetTitles(profileId)).toEqual([]);
+
+    await db.insert(talentPreferences).values({ profileId, targetTitles: ["Backend", "SRE"] });
+
+    expect(await repository.targetTitles(profileId)).toEqual(["Backend", "SRE"]);
+    expect(await repository.targetTitles(otherProfileId)).toEqual([]);
+  });
+
   describe("candidates", () => {
     const older = new Date("2026-11-01T00:00:00.000Z");
     const newer = new Date("2026-11-10T00:00:00.000Z");
@@ -311,13 +322,13 @@ describe.skipIf(!url)("matches repository", () => {
 
       const query = toTsQuery(["engenheira", "typescript"]);
 
-      expect((await repository.candidates(query, 30)).map((item) => item.id)).toEqual([
+      expect((await repository.candidates(profileId, query, 30)).map((item) => item.id)).toEqual([
         ids.exact,
         ids.partial,
         ids.unrelated,
         ids.undated,
       ]);
-      expect(await repository.candidates(query, 1)).toEqual([
+      expect(await repository.candidates(profileId, query, 1)).toEqual([
         {
           id: ids.exact,
           title: "Engenheira de Software TypeScript",
@@ -328,24 +339,52 @@ describe.skipIf(!url)("matches repository", () => {
           description: "Vaga para engenheira com TypeScript e Node.",
         },
       ]);
-      expect((await repository.candidates(query, 3)).map((item) => item.id)).toEqual([
+      expect((await repository.candidates(profileId, query, 3)).map((item) => item.id)).toEqual([
         ids.exact,
         ids.partial,
         ids.unrelated,
       ]);
     });
 
+    it("skips jobs this profile rejected on both queries and still fills the limit", async () => {
+      const ids = await catalog();
+
+      await db.insert(jobRejections).values([
+        { profileId, jobId: ids.exact, reason: "salary" },
+        { profileId, jobId: ids.unrelated, reason: "other" },
+        { profileId: otherProfileId, jobId: ids.partial, reason: "other" },
+      ]);
+
+      const query = toTsQuery(["engenheira", "typescript"]);
+
+      expect((await repository.candidates(profileId, query, 30)).map((item) => item.id)).toEqual([
+        ids.partial,
+        ids.undated,
+      ]);
+      expect((await repository.candidates(profileId, query, 2)).map((item) => item.id)).toEqual([
+        ids.partial,
+        ids.undated,
+      ]);
+      expect((await repository.candidates(profileId, null, 30)).map((item) => item.id)).toEqual([
+        ids.partial,
+        ids.undated,
+      ]);
+      expect(
+        (await repository.candidates(otherProfileId, null, 30)).map((item) => item.id),
+      ).toContain(ids.exact);
+    });
+
     it("falls back to the newest open jobs without terms", async () => {
       const ids = await catalog();
       const tied = await job("empatada", { postedAt: newer, createdAt: older });
 
-      expect((await repository.candidates(null, 30)).map((item) => item.id)).toEqual([
+      expect((await repository.candidates(profileId, null, 30)).map((item) => item.id)).toEqual([
         ids.unrelated,
         tied,
         ...[ids.exact, ids.partial].sort(),
         ids.undated,
       ]);
-      expect((await repository.candidates(null, 2)).map((item) => item.id)).toEqual([
+      expect((await repository.candidates(profileId, null, 2)).map((item) => item.id)).toEqual([
         ids.unrelated,
         tied,
       ]);
@@ -355,18 +394,23 @@ describe.skipIf(!url)("matches repository", () => {
       const ids = await catalog();
 
       const query = toTsQuery(
-        searchTerms({
-          ...content,
-          headline: { id: "headline", text: "C++ O'Reilly &|!:* (a|b) 'x' \\ \" <-> ½ Ⅻ ²" },
-          summary: { id: "summary", text: "engenheira:* & !typescript" },
-        }),
+        searchTerms(
+          {
+            ...content,
+            headline: { id: "headline", text: "C++ O'Reilly &|!:* (a|b) 'x' \\ \" <-> ½ Ⅻ ²" },
+            summary: { id: "summary", text: "engenheira:* & !typescript" },
+          },
+          [],
+        ),
       );
 
       expect(query).not.toBeNull();
-      expect((await repository.candidates(query, 30))[0]?.id).toBe(ids.exact);
+      expect((await repository.candidates(profileId, query, 30))[0]?.id).toBe(ids.exact);
       expect(
-        (await repository.candidates(toTsQuery(["para", "com", "que"]), 30)).map((item) => item.id),
-      ).toEqual((await repository.candidates(null, 30)).map((item) => item.id));
+        (await repository.candidates(profileId, toTsQuery(["para", "com", "que"]), 30)).map(
+          (item) => item.id,
+        ),
+      ).toEqual((await repository.candidates(profileId, null, 30)).map((item) => item.id));
     });
   });
 });

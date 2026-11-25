@@ -90,6 +90,14 @@ const exportResponse = t.Object({
     t.Object({ day: t.String(), visits: t.Number(), recruiterVisits: t.Number() }),
   ),
   preferences: t.Unknown(),
+  rejections: t.Array(
+    t.Object({
+      job: t.Object({ id: t.String(), title: t.String(), company: t.String() }),
+      reason: t.String(),
+      note: nullable,
+      createdAt: nullable,
+    }),
+  ),
   answers: t.Array(t.Object({ question: t.String(), answer: t.String(), updatedAt: nullable })),
 });
 

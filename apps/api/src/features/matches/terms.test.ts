@@ -32,7 +32,7 @@ function resume(overrides: Partial<ResumeContent> = {}) {
 
 describe("searchTerms", () => {
   it("builds safe search terms from the headline, roles, skills and summary", () => {
-    const terms = searchTerms(resume());
+    const terms = searchTerms(resume(), []);
 
     expect(terms).toEqual([
       "engenheira",
@@ -64,6 +64,7 @@ describe("searchTerms", () => {
         experiences: [],
         skills,
       }),
+      [],
     );
 
     expect(terms).toHaveLength(40);
@@ -81,8 +82,23 @@ describe("searchTerms", () => {
           experiences: [],
           skills: [],
         }),
+        [],
       ),
     ).toEqual([]);
+  });
+
+  it("starts with the target titles, deduped and capped", () => {
+    expect(searchTerms(resume(), ["Engenheira de Dados", "SRE", "Pessoa Dev"]).slice(0, 7)).toEqual(
+      ["engenheira", "dados", "sre", "pessoa", "dev", "software", "node"],
+    );
+
+    const titles = Array.from(
+      { length: 20 },
+      (_, index) => `cargo${String(index).padStart(2, "0")} extra${index}`,
+    );
+
+    expect(searchTerms(resume(), titles)).toHaveLength(40);
+    expect(searchTerms(resume(), titles)[0]).toBe("cargo00");
   });
 });
 

@@ -6,6 +6,7 @@ import {
   authUser,
   interviews,
   jobMatches,
+  jobRejections,
   jobs,
   publicPageDailyViews,
   publicPages,
@@ -161,6 +162,18 @@ export function createAccountRepository(db: Database) {
       .from(talentPreferences)
       .where(eq(talentPreferences.profileId, profileId));
 
+    const ownRejections = await db
+      .select({
+        job: { id: jobs.id, title: jobs.title, company: jobs.company },
+        reason: jobRejections.reason,
+        note: jobRejections.note,
+        createdAt: jobRejections.createdAt,
+      })
+      .from(jobRejections)
+      .innerJoin(jobs, eq(jobs.id, jobRejections.jobId))
+      .where(eq(jobRejections.profileId, profileId))
+      .orderBy(desc(jobRejections.createdAt), asc(jobRejections.jobId));
+
     const ownAnswers = await db
       .select({
         question: answerQuestions.text,
@@ -237,6 +250,10 @@ export function createAccountRepository(db: Database) {
         : null,
       pageViews: views,
       preferences: toPreferences(ownPreferences),
+      rejections: ownRejections.map((rejection) => ({
+        ...rejection,
+        createdAt: rejection.createdAt?.toISOString() ?? null,
+      })),
       answers: ownAnswers.map((item) => ({
         question: item.question,
         answer: item.answer,

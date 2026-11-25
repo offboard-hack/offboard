@@ -1,6 +1,14 @@
 import type { Database } from "@offboard/db/client";
-import { jobMatches, jobs, resumes, talentProfiles } from "@offboard/db/schema";
+import {
+  jobMatches,
+  jobRejections,
+  jobs,
+  resumes,
+  talentPreferences,
+  talentProfiles,
+} from "@offboard/db/schema";
 import { and, asc, desc, eq, gte, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
+import { toPreferences } from "../../shared/talent-preferences.js";
 import type { MatchJob, MatchResult } from "./score.js";
 
 const version = sql<Date>`coalesce(${resumes.updatedAt}, ${resumes.createdAt})`.mapWith(
@@ -24,7 +32,11 @@ const vector = sql`to_tsvector('portuguese', ${jobs.title} || ' ' || ${jobs.desc
 
 const newest = [sql`${jobs.postedAt} desc nulls last`, desc(jobs.createdAt), asc(jobs.id)];
 
-const open = isNull(jobs.closedAt);
+const openFor = (profileId: string) =>
+  and(
+    isNull(jobs.closedAt),
+    sql`not exists (select 1 from ${jobRejections} where ${jobRejections.profileId} = ${profileId} and ${jobRejections.jobId} = ${jobs.id})`,
+  );
 
 const saoPauloOffsetMs = 3 * 60 * 60_000;
 
@@ -38,7 +50,18 @@ export function createMatchesRepository(db: Database) {
     return row;
   }
 
-  async function candidates(tsQuery: string | null, limit: number) {
+  async function targetTitles(profileId: string) {
+    const [row] = await db
+      .select()
+      .from(talentPreferences)
+      .where(eq(talentPreferences.profileId, profileId));
+
+    return toPreferences(row).targetTitles;
+  }
+
+  async function candidates(profileId: string, tsQuery: string | null, limit: number) {
+    const open = openFor(profileId);
+
     if (tsQuery === null) {
       return db
         .select(jobColumns)
@@ -150,7 +173,7 @@ export function createMatchesRepository(db: Database) {
     return rows.map((row) => row.profileId);
   }
 
-  return { baseResume, candidates, freshJobIds, saveMatches, profilesForMatching };
+  return { baseResume, targetTitles, candidates, freshJobIds, saveMatches, profilesForMatching };
 }
 
 export type MatchesRepository = ReturnType<typeof createMatchesRepository>;

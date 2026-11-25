@@ -15,12 +15,14 @@ import {
   interviews,
   jobSources,
   jobMatches,
+  jobRejections,
   jobs,
   llmUsage,
   offboardingCases,
   publicPageDailyViews,
   publicPages,
   resumes,
+  talentPreferences,
   talentProfiles,
   tasks,
 } from "@offboard/db/schema";
@@ -2684,6 +2686,53 @@ describe.skipIf(!url)("api", () => {
         );
       });
 
+      it("does not score jobs the person rejected", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        await openJobs(["Engenheira de Software", "Designer", "Analista de Dados"]);
+
+        const [designer] = await db
+          .select({ id: jobs.id })
+          .from(jobs)
+          .where(eq(jobs.title, "Designer"));
+
+        await db
+          .insert(jobRejections)
+          .values({ profileId: id, jobId: designer.id, reason: "other" });
+
+        await upload(app.instance, id);
+        await app.settle();
+
+        expect(app.matching.batches.flat().sort()).toEqual([
+          "Analista de Dados",
+          "Engenheira de Software",
+        ]);
+        expect((await storedMatches(id)).map((row) => row.jobId)).not.toContain(designer.id);
+      });
+
+      it("searches for the target titles before the résumé terms", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        await openJobs([
+          ...Array.from({ length: 34 }, (_, index) => `Vaga ${index}`),
+          "Zootecnista Veterinária",
+        ]);
+
+        await upload(app.instance, id);
+        await app.settle();
+
+        expect(app.matching.batches.flat()).not.toContain("Zootecnista Veterinária");
+
+        await db.delete(jobMatches);
+        await db.insert(talentPreferences).values({ profileId: id, targetTitles: ["Zootecnista"] });
+        await repos.background.enqueue("compute_matches", id);
+        await app.settle();
+
+        expect(app.matching.batches.flat()).toContain("Zootecnista Veterinária");
+      });
+
       it("hides matches of an edited résumé until they are recomputed", async () => {
         const app = resumesApp();
         const id = await profile();
@@ -3547,6 +3596,283 @@ describe.skipIf(!url)("api", () => {
 
         expect(res.status).toBe(404);
         expect(await res.json()).toEqual({ error: "Profile not found" });
+      });
+
+      describe("rejections", () => {
+        const reject = (
+          instance: ReturnType<typeof resumesApp>["instance"],
+          id: string,
+          jobId: string,
+          json: { reason?: string | number; note?: string | number | null } = { reason: "salary" },
+        ) => request(instance, id, `/me/jobs/${jobId}/reject`, { method: "POST", json });
+
+        const unreject = (
+          instance: ReturnType<typeof resumesApp>["instance"],
+          id: string,
+          jobId: string,
+        ) => request(instance, id, `/me/jobs/${jobId}/reject`, { method: "DELETE" });
+
+        async function openJob(title: string, values: Partial<typeof jobs.$inferInsert> = {}) {
+          const [row] = await db
+            .insert(jobs)
+            .values({
+              origin: "external",
+              source: "seed",
+              sourceKey: title,
+              title,
+              company: "Acme",
+              url: `https://jobs.example.com/${title}`,
+              ...values,
+            })
+            .returning({ id: jobs.id });
+
+          return row.id;
+        }
+
+        async function listed(instance: ReturnType<typeof resumesApp>["instance"], id: string) {
+          const body = await (await request(instance, id, "/me/jobs")).json();
+
+          return body.items.map((item: { title: string }) => item.title);
+        }
+
+        it("requires an active talent session", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const jobId = await openJob("Vaga");
+
+          expect((await reject(instance, id, jobId)).status).toBe(204);
+
+          for (const [path, method] of [
+            [`/me/jobs/${jobId}/reject`, "POST"],
+            [`/me/jobs/${jobId}/reject`, "DELETE"],
+            ["/me/rejections", "GET"],
+          ]) {
+            const json = method === "POST" ? { reason: "other" } : undefined;
+
+            expect(
+              (await request(instance, id, path, { method, json, session: "admin" })).status,
+            ).toBe(403);
+            expect(
+              (
+                await instance.handle(
+                  new Request(`http://localhost/api${path}`, {
+                    method,
+                    headers: json ? { "content-type": "application/json" } : {},
+                    body: json ? JSON.stringify(json) : undefined,
+                  }),
+                )
+              ).status,
+            ).toBe(403);
+          }
+        });
+
+        it("hides rejected jobs and brings them back when the rejection is removed", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const other = await profile("outra.pessoal@example.com", 1);
+          await openJob("Fica", { postedAt: new Date("2026-02-01T00:00:00Z") });
+          const drop = await openJob("Some", { postedAt: new Date("2026-01-01T00:00:00Z") });
+
+          expect(await listed(instance, id)).toEqual(["Fica", "Some"]);
+
+          const res = await reject(instance, id, drop, { reason: "company" });
+
+          expect(res.status).toBe(204);
+          expect(await res.text()).toBe("");
+          expect(await listed(instance, id)).toEqual(["Fica"]);
+          expect(await listed(instance, other)).toEqual(["Fica", "Some"]);
+          expect((await (await request(instance, id, "/me/jobs")).json()).total).toBe(1);
+
+          expect((await unreject(instance, id, drop)).status).toBe(204);
+          expect((await unreject(instance, id, drop)).status).toBe(204);
+          expect((await unreject(instance, id, "not-a-uuid")).status).toBe(204);
+          expect(await listed(instance, id)).toEqual(["Fica", "Some"]);
+        });
+
+        it("answers 404 for unknown, malformed and closed jobs", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const closed = await openJob("Fechada", { closedAt: new Date() });
+
+          for (const jobId of [crypto.randomUUID(), "not-a-uuid", closed]) {
+            const res = await reject(instance, id, jobId);
+
+            expect(res.status).toBe(404);
+            expect(await res.json()).toEqual({ error: "Job not found" });
+          }
+        });
+
+        it("validates the reason and the note", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const jobId = await openJob("Vaga");
+
+          const invalid = [
+            {},
+            { reason: "nope" },
+            { reason: 1 },
+            { reason: "other", note: 5 },
+            { reason: "other", note: "x".repeat(501) },
+            { reason: "other", note: `  ${"x".repeat(500)}  ${"y".repeat(1)}` },
+          ];
+
+          for (const json of invalid) {
+            const res = await reject(instance, id, jobId, json);
+
+            expect(res.status).toBe(422);
+            expect(await res.json()).toEqual({ error: "Invalid rejection" });
+          }
+
+          expect(await db.select().from(jobRejections)).toEqual([]);
+          expect(
+            (
+              await instance.handle(
+                new Request(`http://localhost/api/me/jobs/${jobId}/reject`, {
+                  method: "POST",
+                  headers: {
+                    "x-test-session": "talent",
+                    "x-test-talent-id": id,
+                    origin: webOrigin,
+                  },
+                }),
+              )
+            ).status,
+          ).toBe(422);
+        });
+
+        it("answers 400 for a malformed body", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const jobId = await openJob("Vaga");
+
+          const res = await instance.handle(
+            new Request(`http://localhost/api/me/jobs/${jobId}/reject`, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "x-test-session": "talent",
+                "x-test-talent-id": id,
+                origin: webOrigin,
+              },
+              body: "{",
+            }),
+          );
+
+          expect(res.status).toBe(400);
+        });
+
+        it("stores a trimmed, sanitized note and overwrites on repeat", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const jobId = await openJob("Vaga");
+
+          await reject(instance, id, jobId, { reason: "salary", note: `  paga\u0000 pouco  ` });
+
+          const [first] = await db.select().from(jobRejections);
+
+          expect(first).toMatchObject({ reason: "salary", note: "paga pouco" });
+
+          await reject(instance, id, jobId, { reason: "location", note: "x".repeat(500) });
+
+          const [second] = await db.select().from(jobRejections);
+
+          expect(second.note).toHaveLength(500);
+          expect(second.reason).toBe("location");
+          expect(second.createdAt?.getTime()).toBeGreaterThanOrEqual(
+            first.createdAt?.getTime() ?? 0,
+          );
+
+          await reject(instance, id, jobId, { reason: "other", note: "   " });
+
+          expect(await db.select().from(jobRejections)).toMatchObject([
+            { reason: "other", note: null },
+          ]);
+        });
+
+        it("lists rejections with reason counts for the person only", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const other = await profile("outra.pessoal@example.com", 1);
+          const a = await openJob("A");
+          const b = await openJob("B", { closedAt: new Date() });
+          const c = await openJob("C");
+
+          await db.insert(jobRejections).values([
+            {
+              profileId: id,
+              jobId: a,
+              reason: "salary",
+              createdAt: new Date("2026-01-01T00:00:00Z"),
+            },
+            {
+              profileId: id,
+              jobId: b,
+              reason: "salary",
+              note: "fechou",
+              createdAt: new Date("2026-01-03T00:00:00Z"),
+            },
+            {
+              profileId: id,
+              jobId: c,
+              reason: "company",
+              createdAt: new Date("2026-01-02T00:00:00Z"),
+            },
+            { profileId: other, jobId: a, reason: "other" },
+          ]);
+
+          const res = await request(instance, id, "/me/rejections");
+
+          expect(res.status).toBe(200);
+          expect(await res.json()).toEqual({
+            items: [
+              {
+                job: { id: b, title: "B", company: "Acme" },
+                reason: "salary",
+                note: "fechou",
+                createdAt: "2026-01-03T00:00:00.000Z",
+              },
+              {
+                job: { id: c, title: "C", company: "Acme" },
+                reason: "company",
+                note: null,
+                createdAt: "2026-01-02T00:00:00.000Z",
+              },
+              {
+                job: { id: a, title: "A", company: "Acme" },
+                reason: "salary",
+                note: null,
+                createdAt: "2026-01-01T00:00:00.000Z",
+              },
+            ],
+            reasons: [
+              { reason: "salary", count: 2 },
+              { reason: "company", count: 1 },
+            ],
+          });
+        });
+
+        it("flags and ranks the jobs that fit the stored preferences", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          await openJob("Longe", { company: "Bad", postedAt: new Date("2026-03-01T00:00:00Z") });
+          await openJob("Perto", { postedAt: new Date("2026-01-01T00:00:00Z") });
+          await db
+            .insert(talentPreferences)
+            .values({ profileId: id, jobPreferences: { excludedCompanies: ["bad"] } });
+
+          const body = await (await request(instance, id, "/me/jobs")).json();
+
+          expect(
+            body.items.map((item: { title: string; fitsPreferences: boolean }) => [
+              item.title,
+              item.fitsPreferences,
+            ]),
+          ).toEqual([
+            ["Perto", true],
+            ["Longe", false],
+          ]);
+        });
       });
 
       describe("answers", () => {

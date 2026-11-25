@@ -30,6 +30,7 @@ import { drain, type JobHandler } from "./features/background/drain.js";
 import { accountRoutes } from "./features/account/routes.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
 import { logFailure } from "./shared/error-summary.js";
+import { rejectionsRoutes } from "./features/preferences/rejections-routes.js";
 import { answersRoutes } from "./features/preferences/answers-routes.js";
 import { preferencesRoutes } from "./features/preferences/routes.js";
 import { teamRoutes } from "./features/team/routes.js";
@@ -147,8 +148,14 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
       const fresh = await repos.matches.freshJobIds(job.subject, resume.version);
 
+      const titles = await repos.matches.targetTitles(job.subject);
+
       const pending = (
-        await repos.matches.candidates(toTsQuery(searchTerms(resume.content)), matchCandidates)
+        await repos.matches.candidates(
+          job.subject,
+          toTsQuery(searchTerms(resume.content, titles)),
+          matchCandidates,
+        )
       ).filter((candidate) => !fresh.has(candidate.id));
 
       for (let start = 0; start < pending.length; start += matchBatch) {
@@ -274,6 +281,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       }),
     )
     .use(answersRoutes(repos.answers, talent))
+    .use(rejectionsRoutes(repos.rejections, talent))
     .use(backgroundRoutes(repos.background, handlers, options.cronSecret, scheduleSources))
     .use(accountRoutes(repos.account, talent, options.storage))
     .use(equipmentRoutes(repos.equipment, access))

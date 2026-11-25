@@ -1,6 +1,14 @@
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
-import { applications, jobMatches, jobs, offboardingCases, resumes } from "@offboard/db/schema";
+import {
+  applications,
+  jobMatches,
+  jobRejections,
+  jobs,
+  offboardingCases,
+  resumes,
+  talentPreferences,
+} from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { and, eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -245,6 +253,169 @@ describe.skipIf(!url)("jobs repository", () => {
 
       expect(second.total).toBe(3);
       expect(second.items.map((job) => job.title)).toEqual(["old"]);
+    });
+
+    describe("rejections and preferences", () => {
+      type Stored = typeof talentPreferences.$inferInsert.jobPreferences;
+
+      function prefer(jobPreferences: Stored, id = profileId) {
+        return db.insert(talentPreferences).values({ profileId: id, jobPreferences });
+      }
+
+      async function titles(id = profileId, page = 1, pageSize = 20) {
+        const result = await repository.listForTalent(id, { page, pageSize });
+
+        return result.items.map((job) => job.title);
+      }
+
+      async function fits() {
+        const result = await repository.listForTalent(profileId, { page: 1, pageSize: 50 });
+
+        return Object.fromEntries(result.items.map((job) => [job.title, job.fitsPreferences]));
+      }
+
+      async function reject(sourceKey: string, id = profileId) {
+        const [job] = await db
+          .select({ id: jobs.id })
+          .from(jobs)
+          .where(eq(jobs.sourceKey, sourceKey));
+
+        await db.insert(jobRejections).values({ profileId: id, jobId: job.id, reason: "salary" });
+      }
+
+      it("hides rejected jobs", async () => {
+        await insert("keep", { workModel: "remote", postedAt: new Date("2026-03-01T00:00:00Z") });
+        await insert("drop", { workModel: "remote", postedAt: new Date("2026-02-01T00:00:00Z") });
+        await insert("other", { workModel: "hybrid", postedAt: new Date("2026-01-01T00:00:00Z") });
+        await match(profileId, "drop", 99);
+        await reject("drop");
+        await reject("other", otherProfileId);
+
+        const listed = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
+
+        expect(listed.total).toBe(2);
+        expect(listed.items.map((job) => job.title)).toEqual(["keep", "other"]);
+
+        const remote = await repository.listForTalent(profileId, {
+          workModel: "remote",
+          page: 1,
+          pageSize: 10,
+        });
+
+        expect(remote.total).toBe(1);
+        expect(remote.items.map((job) => job.title)).toEqual(["keep"]);
+
+        const paged = await repository.listForTalent(profileId, { page: 2, pageSize: 1 });
+
+        expect(paged.total).toBe(2);
+        expect(paged.items.map((job) => job.title)).toEqual(["other"]);
+        expect(await titles(otherProfileId)).toEqual(["keep", "drop"]);
+      });
+
+      it("keeps the existing order and fits everything without preferences", async () => {
+        await insert("a", { postedAt: new Date("2026-01-01T00:00:00Z"), workModel: "onsite" });
+        await insert("b", { postedAt: new Date("2026-02-01T00:00:00Z"), company: "Zed" });
+        await insert("c");
+        await match(profileId, "a", 50);
+
+        const before = await titles();
+
+        expect(before).toEqual(["a", "b", "c"]);
+        expect(Object.values(await fits())).toEqual([true, true, true]);
+
+        await prefer({});
+
+        expect(await titles()).toEqual(before);
+        expect(Object.values(await fits())).toEqual([true, true, true]);
+      });
+
+      it("ranks jobs that fit preferences first", async () => {
+        await insert("remote-new", {
+          postedAt: new Date("2026-03-01T00:00:00Z"),
+          workModel: "remote",
+        });
+        await insert("onsite-top", {
+          postedAt: new Date("2026-04-01T00:00:00Z"),
+          workModel: "onsite",
+        });
+        await insert("hybrid-old", {
+          postedAt: new Date("2026-01-01T00:00:00Z"),
+          workModel: "hybrid",
+        });
+        await insert("unknown", { postedAt: new Date("2026-02-01T00:00:00Z") });
+        await match(profileId, "onsite-top", 99);
+        await match(profileId, "hybrid-old", 80);
+        await prefer({ workModels: ["remote", "hybrid"] });
+
+        expect(await titles()).toEqual(["hybrid-old", "remote-new", "unknown", "onsite-top"]);
+        expect(await fits()).toEqual({
+          "hybrid-old": true,
+          "remote-new": true,
+          unknown: true,
+          "onsite-top": false,
+        });
+      });
+
+      it("matches locations by state and city, with remote, relocate and unknown fitting", async () => {
+        await insert("sp-city", { workModel: "onsite", state: "sp", city: " São Paulo " });
+        await insert("sp-other", { workModel: "onsite", state: "SP", city: "Campinas" });
+        await insert("sp-nocity", { workModel: "onsite", state: "SP" });
+        await insert("rj", { workModel: "onsite", state: "RJ", city: "Rio" });
+        await insert("rj-remote", { workModel: "remote", state: "RJ" });
+        await insert("nowhere", { workModel: "onsite" });
+        await prefer({ locations: [{ city: "são paulo", state: "SP" }] });
+
+        expect(await fits()).toEqual({
+          "sp-city": true,
+          "sp-other": false,
+          "sp-nocity": false,
+          rj: false,
+          "rj-remote": true,
+          nowhere: true,
+        });
+
+        await db
+          .update(talentPreferences)
+          .set({ jobPreferences: { locations: [{ city: null, state: "sp" }] } });
+
+        expect(await fits()).toMatchObject({ "sp-other": true, "sp-nocity": true, rj: false });
+
+        await db
+          .update(talentPreferences)
+          .set({ jobPreferences: { locations: [{ city: null, state: "SP" }], relocate: true } });
+
+        expect(await fits()).toMatchObject({ rj: true });
+      });
+
+      it("excludes companies case-insensitively", async () => {
+        await insert("a", { company: "  ACME Corp " });
+        await insert("b", { company: "Other" });
+        await prefer({ excludedCompanies: [" acme corp", "x"] });
+
+        expect(await fits()).toEqual({ a: false, b: true });
+        expect(await titles()).toEqual(["b", "a"]);
+      });
+
+      it("applies the salary floor and lets unknown salaries fit", async () => {
+        await insert("high", { salaryMaxCents: 1_000_000 });
+        await insert("exact", { salaryMaxCents: 500_000 });
+        await insert("low", { salaryMaxCents: 100_000, salaryMinCents: 50_000 });
+        await insert("unknown");
+        await prefer({ salaryFloorCents: 500_000 });
+
+        expect(await fits()).toEqual({ high: true, exact: true, low: false, unknown: true });
+      });
+
+      it("keeps fitting jobs first across pages", async () => {
+        await insert("n1", { company: "Bad", postedAt: new Date("2026-05-01T00:00:00Z") });
+        await insert("n2", { company: "Bad", postedAt: new Date("2026-04-01T00:00:00Z") });
+        await insert("f1", { postedAt: new Date("2026-02-01T00:00:00Z") });
+        await insert("f2", { postedAt: new Date("2026-01-01T00:00:00Z") });
+        await prefer({ excludedCompanies: ["bad"] });
+
+        expect(await titles(profileId, 1, 3)).toEqual(["f1", "f2", "n1"]);
+        expect(await titles(profileId, 2, 3)).toEqual(["n2"]);
+      });
     });
   });
 });
