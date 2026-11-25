@@ -46,6 +46,7 @@ const hiredShared = and(
   eq(talentProfiles.shareOutcomeWithHr, true),
 );
 
+const sharedAt = sql<Date>`coalesce(${jobs.postedAt}, ${jobs.createdAt})`;
 const applicants = sql<number>`count(distinct ${applications.profileId})`;
 const total = sql<number>`count(*)::int`;
 
@@ -85,11 +86,11 @@ export function createInsightsRepository(db: Database) {
         .select({
           title: jobs.title,
           company: jobs.company,
-          sharedAt: sql<Date>`coalesce(${jobs.postedAt}, ${jobs.createdAt})`.mapWith(jobs.postedAt),
+          sharedAt: sharedAt.mapWith(jobs.postedAt),
         })
         .from(jobs)
-        .where(eq(jobs.origin, "hr"))
-        .orderBy(sql`${jobs.postedAt} desc nulls last`, desc(jobs.createdAt))
+        .where(and(eq(jobs.origin, "hr"), sql`${sharedAt} is not null`))
+        .orderBy(sql`${sharedAt} desc`, asc(jobs.id))
         .limit(listLimit),
     ]);
 

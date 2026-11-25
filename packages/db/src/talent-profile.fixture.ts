@@ -14,6 +14,7 @@ export const seedTalentProfiles: SeedTalentProfile[] = [
     personalEmail: "marina.lopes@exemplo.com",
     name: "Marina Lopes",
     sponsoredForDays: 120,
+    signedIn: true,
   },
 ];
 
@@ -38,6 +39,14 @@ export const seedCohortProfiles: SeedTalentProfile[] = [
   cohortMember("André Lima", true, false),
   cohortMember("Nina Castro", true, false),
   cohortMember("Gustavo Ribeiro", true, false),
-  cohortMember("Carla Mendonça", false, false),
-  cohortMember("Felipe Oliveira", false, false),
+  cohortMember("Carla Mendonça", true, false),
+  cohortMember("Felipe Oliveira", true, false),
+];
+
+const bystander = (name: string, personalEmail: string) =>
+  ({ caseName: name, personalEmail, name, sponsoredForDays: 120 }) satisfies SeedTalentProfile;
+
+export const seedBystanderProfiles: SeedTalentProfile[] = [
+  bystander("Helena Pires", "helena.pires@exemplo.com"),
+  bystander("Diego Rocha", "diego.rocha@exemplo.com"),
 ];

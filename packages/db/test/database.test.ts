@@ -5,7 +5,11 @@ import { describe, expect, it } from "vitest";
 import { createClient, createRequestScopedClient } from "../src/client.ts";
 import { and, eq } from "drizzle-orm";
 import type { Database } from "../src/client.ts";
-import { seedCohortProfiles, seedTalentProfiles } from "../src/talent-profile.fixture.ts";
+import {
+  seedBystanderProfiles,
+  seedCohortProfiles,
+  seedTalentProfiles,
+} from "../src/talent-profile.fixture.ts";
 import { seedApplications, seedCohortApplications } from "../src/application.fixture.ts";
 import { seedJobs } from "../src/job.fixture.ts";
 import {
@@ -90,7 +94,9 @@ it.skipIf(!url)(
 
       const marinaId = await marinaProfileId(db);
       const profiles = await db.select().from(talentProfiles);
-      expect(profiles).toHaveLength(seedTalentProfiles.length + seedCohortProfiles.length);
+      expect(profiles).toHaveLength(
+        seedTalentProfiles.length + seedCohortProfiles.length + seedBystanderProfiles.length,
+      );
 
       const profile = profiles.find((item) => item.id === marinaId);
 
@@ -704,17 +710,40 @@ it.skipIf(!url)("seeds enough people for HR aggregates", async () => {
     await seedDatabase(db);
 
     const profiles = await db.select().from(talentProfiles);
-    expect(profiles).toHaveLength(seedTalentProfiles.length + 7);
 
-    const cohort = profiles.filter((item) => item.name !== "Marina Lopes");
-    expect(cohort).toHaveLength(7);
+    expect(profiles).toHaveLength(
+      seedTalentProfiles.length + seedCohortProfiles.length + seedBystanderProfiles.length,
+    );
+
+    const bystanderNames = new Set(seedBystanderProfiles.map((item) => item.name));
+
+    const cohort = profiles.filter(
+      (item) => item.name !== "Marina Lopes" && !bystanderNames.has(item.name),
+    );
+
+    expect(cohort).toHaveLength(seedCohortProfiles.length);
     expect(cohort.every((item) => item.personalEmail.endsWith("@exemplo.com"))).toBe(true);
     expect(cohort.every((item) => item.termsAcceptedAt !== null && item.caseId !== null)).toBe(
       true,
     );
-    expect(cohort.filter((item) => item.firstSignedInAt !== null)).toHaveLength(5);
+
+    const bystanders = profiles.filter((item) => bystanderNames.has(item.name));
+    expect(bystanders).toHaveLength(seedBystanderProfiles.length);
+    expect(
+      bystanders.every(
+        (item) =>
+          item.termsAcceptedAt === null && item.firstSignedInAt === null && item.caseId !== null,
+      ),
+    ).toBe(true);
 
     const rows = await db.select().from(applications);
+    const applicantIds = new Set(rows.map((item) => item.profileId));
+    expect(bystanders.some((item) => applicantIds.has(item.id))).toBe(false);
+    expect(
+      profiles
+        .filter((item) => applicantIds.has(item.id))
+        .every((item) => item.firstSignedInAt !== null),
+    ).toBe(true);
 
     const reached = (stages: string[], closedReasons: string[] = []) =>
       new Set(

@@ -15,7 +15,13 @@ const talentAggregatesResponse = t.Object({
   }),
   hiresShared: suppressedCount,
   topJobs: t.Array(t.Object({ title: t.String(), company: t.String(), applications: t.Integer() })),
-  sharedJobs: t.Array(t.Object({ title: t.String(), company: t.String(), sharedAt: t.String() })),
+  sharedJobs: t.Array(
+    t.Object({
+      title: t.String(),
+      company: t.String(),
+      sharedAt: t.String({ format: "date-time" }),
+    }),
+  ),
 });
 
 export function insightsRoutes(repos: InsightsRepository, access: PortalAccessPlugin) {

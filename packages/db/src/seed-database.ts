@@ -56,6 +56,7 @@ import {
 } from "./public-page.fixture.ts";
 import {
   seedCohortProfiles,
+  seedBystanderProfiles,
   seedTalentProfiles,
   type SeedTalentProfile,
 } from "./talent-profile.fixture.ts";
@@ -88,7 +89,7 @@ export async function seedDatabase(
   fixtures = {
     cases: seedCases,
     members: seedTeamMembers,
-    talentProfiles: [...seedTalentProfiles, ...seedCohortProfiles],
+    talentProfiles: [...seedTalentProfiles, ...seedCohortProfiles, ...seedBystanderProfiles],
     jobs: seedJobs,
     applications: [...seedApplications, ...seedCohortApplications],
     interviews: seedInterviews,

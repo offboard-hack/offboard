@@ -244,12 +244,14 @@ describe.skipIf(!url)("insights repository", () => {
     });
     await job("Média", { origin: "hr", postedAt: new Date("2026-11-05T12:00:00Z") });
 
+    await job("Sem nenhuma data", { origin: "hr", postedAt: null, createdAt: null });
+
     expect((await repository.aggregates()).sharedJobs).toEqual([
+      { title: "Sem data", company: "Acme", sharedAt: "2026-11-23T12:00:00.000Z" },
       { title: "Recente", company: "Acme", sharedAt: "2026-11-12T12:00:00.000Z" },
       { title: "Fechada", company: "Acme", sharedAt: "2026-11-10T12:00:00.000Z" },
       { title: "Média", company: "Acme", sharedAt: "2026-11-05T12:00:00.000Z" },
       { title: "Antiga", company: "Acme", sharedAt: "2026-10-01T12:00:00.000Z" },
-      { title: "Sem data", company: "Acme", sharedAt: "2026-11-23T12:00:00.000Z" },
     ]);
   });
 

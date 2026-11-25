@@ -61,7 +61,7 @@
 
 - `PortalPermission` subject union gains `"TalentAggregates"`; `createPortalAbility("rh")` can `read` it; `admin` via `manage all`.
 - `setConsent(profileId: string, share: boolean, now: Date): Promise<TalentProfile>`.
-- `PUT /me/consent { shareOutcomeWithHr: boolean }` (`talent: "active"`) → 200 me shape (now including `shareOutcomeWithHr`).
+- `PUT /me/consent { shareOutcomeWithHr: boolean }` (`talent: "signed-in"`) → 200 me shape (now including `shareOutcomeWithHr`).
 
 - [ ] **Step 1: Failing tests** — ability: rh/admin can read `TalentAggregates`, gestor/visualizador cannot; `stores the person's own consent` (PUT true then false; another profile unchanged; portal session → 403; GET /me shows the flag).
 - [ ] **Step 2: Run** `npx vitest run src/features/talent src/app.test.ts` → FAIL.
