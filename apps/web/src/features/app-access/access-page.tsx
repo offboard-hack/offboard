@@ -3,16 +3,21 @@ import { Shield01Icon, UserGroupIcon, UserCheck01Icon, ViewIcon } from "@hugeico
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { createTeamMember, deleteTeamMember, teamQuery } from "@/entities/team";
+import {
+  createTeamMember,
+  deleteTeamMember,
+  updateTeamMemberRole,
+  teamQuery,
+} from "@/entities/team";
 import type { MemberRole, TeamMember } from "@/entities/team";
 import { listPagination } from "@/shared/lib/list-pagination";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
+import { PortalFilter } from "@/shared/ui/select";
 import { Button } from "@/shared/ui/shadcn/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/shadcn/popover";
 import { classProps } from "../../shared/lib/class-props";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
-import { Badge } from "../../shared/ui/shadcn/badge";
 import { portalStyles as s } from "../../shared/ui/surface.styles";
 import { AddMemberDialog } from "./add-member-dialog";
 import type { NewMember } from "./add-member-dialog";
@@ -72,26 +77,31 @@ const roleCards: {
   },
 ];
 
-const roleBadges: Record<
-  MemberRole,
-  { variant: "default" | "secondary" | "outline"; className: string }
-> = {
-  admin: { variant: "default", className: "" },
-  rh: { variant: "secondary", className: "" },
-  gestor: { variant: "outline", className: "" },
-  visualizador: { variant: "outline", className: "bg-muted text-muted-foreground" },
-};
+const roleItems: { value: MemberRole; label: string }[] = [
+  { value: "admin", label: "Admin" },
+  { value: "rh", label: "RH" },
+  { value: "gestor", label: "Gestor" },
+  { value: "visualizador", label: "Visualizador" },
+];
 
 const route = getRouteApi("/_portal/equipe");
+const portalRoute = getRouteApi("/_portal");
 
 export function AccessPage() {
   const navigate = route.useNavigate();
   const client = useQueryClient();
   const { data: team } = useSuspenseQuery(teamQuery);
+  const { principal } = portalRoute.useRouteContext();
 
   const refresh = () => client.invalidateQueries(teamQuery);
 
   const add = useMutation({ mutationFn: createTeamMember, onSettled: refresh });
+
+  const updateRole = useMutation({
+    mutationFn: ({ id, role }: { id: string; role: MemberRole }) => updateTeamMemberRole(id, role),
+    onSettled: refresh,
+  });
+
   const remove = useMutation({ mutationFn: deleteTeamMember, onSettled: refresh });
 
   async function addMember({ name, email, role }: NewMember) {
@@ -107,12 +117,21 @@ export function AccessPage() {
       accessorFn: ({ role }) => roleDetails[role].label,
       header: "Papel",
       cell: ({ row }) => {
-        const { variant, className } = roleBadges[row.original.role];
+        const member = row.original;
+        const isSelf = member.id === principal.id;
 
         return (
-          <Badge variant={variant} className={className}>
-            {roleDetails[row.original.role].label}
-          </Badge>
+          <PortalFilter
+            label={`Papel de ${member.name}`}
+            value={member.role}
+            items={roleItems}
+            onChange={(next: string) => {
+              // WARNING: roleItems constrains next to a valid MemberRole
+              const role = next as MemberRole;
+              updateRole.mutate({ id: member.id, role });
+            }}
+            disabled={isSelf || updateRole.isPending}
+          />
         );
       },
     },
@@ -151,6 +170,11 @@ export function AccessPage() {
       breadcrumb={<ListBreadcrumb title="Equipe e permissões" />}
     >
       <section className="min-w-0" aria-labelledby="equipe">
+        {updateRole.isError && (
+          <p role="alert" className="mb-3 text-sm text-destructive">
+            Não foi possível alterar o papel. Atualize a página e tente novamente.
+          </p>
+        )}
         {remove.isError && (
           <p role="alert" className="mb-3 text-sm text-destructive">
             Não foi possível remover o acesso. Atualize a página e tente novamente.

@@ -1,10 +1,10 @@
 import { Elysia, t } from "elysia";
 import type { PortalAccessPlugin } from "../../shared/access.js";
 import { errorResponse, uniqueViolation } from "../../shared/http.js";
-import { memberRole, portalPrincipalResponse } from "../../shared/portal-auth.js";
+import { memberRole, portalPrincipalResponse, type PortalAuth } from "../../shared/portal-auth.js";
 import type { TeamRepository } from "./repository.js";
 
-export function teamRoutes(repos: TeamRepository, access: PortalAccessPlugin) {
+export function teamRoutes(repos: TeamRepository, access: PortalAccessPlugin, auth: PortalAuth) {
   return new Elysia()
     .use(access)
     .get("/team", () => repos.listTeamMembers(), {
@@ -35,6 +35,26 @@ export function teamRoutes(repos: TeamRepository, access: PortalAccessPlugin) {
           role: memberRole,
         }),
         response: { 201: portalPrincipalResponse, 409: errorResponse },
+      },
+    )
+    .put(
+      "/team/:id",
+      async ({ params, body, request, status }) => {
+        const access = await auth.resolvePrincipal(request.headers);
+
+        if (access.kind === "authenticated" && access.principal.id === params.id) {
+          return status(403, { error: "Cannot change your own role" });
+        }
+
+        const updated = await repos.updateTeamMemberRole(params.id, body.role);
+
+        return updated ?? status(404, { error: "Team member not found" });
+      },
+      {
+        permit: ["manage", "Team"],
+        params: t.Object({ id: t.String({ format: "uuid" }) }),
+        body: t.Object({ role: memberRole }),
+        response: { 200: portalPrincipalResponse, 403: errorResponse, 404: errorResponse },
       },
     )
     .delete(

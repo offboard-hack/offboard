@@ -799,6 +799,73 @@ describe.skipIf(!url)("api", () => {
     expect(await (await call("/team")).json()).toHaveLength(2);
   });
 
+  it("updates a team member role", async () => {
+    const [first] = await (await call("/team")).json();
+    const res = await call(`/team/${first.id}`, "PUT", { role: "visualizador" });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ...first, role: "visualizador" });
+  });
+
+  it("returns 404 when updating unknown team member role", async () => {
+    const res = await call(`/team/${missingCaseId}`, "PUT", { role: "rh" });
+
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects invalid role on update", async () => {
+    const [first] = await (await call("/team")).json();
+    const res = await call(`/team/${first.id}`, "PUT", { role: "root" });
+
+    expect(res.status).toBe(422);
+  });
+
+  it("prevents changing your own role", async () => {
+    const members = await (await call("/team")).json();
+    const self = members.find((m: { email: string }) => m.email === "member@example.com");
+
+    if (!self) {
+      await call("/team", "POST", {
+        name: "Test Member",
+        email: "member@example.com",
+        role: "admin",
+      });
+    }
+
+    const updated = await (await call("/team")).json();
+    const me = updated.find((m: { email: string }) => m.email === "member@example.com");
+
+    const selfAuth: PortalAuth = {
+      handler: auth.handler,
+      resolvePrincipal: () =>
+        Promise.resolve({
+          kind: "authenticated" as const,
+          principal: {
+            id: me.id,
+            name: "Test Member",
+            email: "member@example.com",
+            role: "admin" as const,
+          },
+        }),
+    };
+
+    const selfApp = createApp(webOrigin, repos, {
+      ...appOptions,
+      auth: selfAuth,
+    });
+
+    const res = await selfApp.handle(
+      new Request(`http://localhost/api/team/${me.id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json", origin: webOrigin },
+        body: JSON.stringify({ role: "rh" }),
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Cannot change your own role" });
+  });
+
   it("returns 404 when deleting unknown team member", async () => {
     const res = await call(`/team/${missingCaseId}`, "DELETE");
 

@@ -498,6 +498,17 @@ describe.skipIf(!url)("team members", () => {
     ).rejects.toThrow();
   });
 
+  it("updates a member role and returns null for unknown ids", async () => {
+    const [first] = await repos.team.listTeamMembers();
+
+    const updated = await repos.team.updateTeamMemberRole(first.id, "visualizador");
+    expect(updated).toEqual({ ...first, role: "visualizador" });
+
+    expect(
+      await repos.team.updateTeamMemberRole("00000000-0000-4000-8000-000000000000", "rh"),
+    ).toBeNull();
+  });
+
   it("deletes by id and reports whether a row was removed", async () => {
     const [first] = await repos.team.listTeamMembers();
 
