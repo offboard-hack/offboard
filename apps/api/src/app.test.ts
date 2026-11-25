@@ -887,6 +887,36 @@ describe.skipIf(!url)("api", () => {
     expect(noPhase.status).toBe(422);
   });
 
+  it("rethrows non-unique-violation errors from createOffboarding", async () => {
+    const failing = createApp(
+      webOrigin,
+      {
+        ...repos,
+        offboardings: {
+          ...repos.offboardings,
+          createOffboarding: () => Promise.reject(new Error("unexpected")),
+        },
+      },
+      appOptions,
+    );
+
+    const res = await failing.handle(
+      new Request("http://localhost/api/offboardings", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: webOrigin },
+        body: JSON.stringify({
+          name: "Rethrow",
+          role: "Dev",
+          department: "Eng",
+          deadline: "2026-12-01",
+          email: "rethrow@example.com",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(500);
+  });
+
   it("rethrows unexpected create errors", async () => {
     const failing = createApp(
       webOrigin,
@@ -1744,6 +1774,16 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         })
       ).status,
     ).toBe(409);
+
+    const emailInUse = await request(`/employee-access/${second.id}`, "PUT", hrCookie, {
+      email,
+      plan,
+      revision: 1,
+    });
+
+    expect(emailInUse.status).toBe(409);
+    expect(await emailInUse.json()).toMatchObject({ code: "email-in-use" });
+
     await expect(
       repos.employee.saveSettings(defaultOrgId, "invalid-case-id", { email, plan, revision: 0 }),
     ).rejects.toThrow();
@@ -1822,6 +1862,35 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     expect(
       await repos.employee.saveSettings(defaultOrgId, missingCaseId, { email, plan, revision: 1 }),
     ).toBe("missing-case");
+  });
+
+  it("returns email-in-use when updating employee access to a taken email", async () => {
+    const emailA = `taken-a-${randomUUID()}@offboard.example`;
+    const emailB = `taken-b-${randomUUID()}@offboard.example`;
+
+    await repos.offboardings.createOffboarding(defaultOrgId, {
+      name: "Taken A",
+      role: "Dev",
+      department: "Eng",
+      deadline: "2027-01-01",
+      email: emailA,
+    });
+
+    const caseB = await repos.offboardings.createOffboarding(defaultOrgId, {
+      name: "Taken B",
+      role: "Dev",
+      department: "Eng",
+      deadline: "2027-01-01",
+      email: emailB,
+    });
+
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, caseB.id, {
+        email: emailA,
+        plan: emptyEmployeePlan,
+        revision: 1,
+      }),
+    ).toBe("email-in-use");
   });
 
   it("rejects a previously delivered code if the case is revoked before verification", async () => {
