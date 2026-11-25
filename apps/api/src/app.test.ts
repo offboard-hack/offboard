@@ -1135,6 +1135,19 @@ describe.skipIf(!url)("api", () => {
     expect(await res.json()).toEqual({ trackingCode: null, tracking: null });
   });
 
+  it("returns null tracking when tracking is not configured", async () => {
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const task = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    await db.update(tasks).set({ trackingCode: "XX000000000BR" }).where(eq(tasks.id, task.id));
+
+    const res = await app.handle(new Request(`http://localhost/api/tasks/${task.id}/tracking`));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ trackingCode: "XX000000000BR", tracking: null });
+  });
+
   it("returns 404 for tracking on unknown task", async () => {
     const res = await app.handle(
       new Request(`http://localhost/api/tasks/${missingTaskId}/tracking`),
@@ -1176,6 +1189,20 @@ describe.skipIf(!url)("api", () => {
 
     const after = await (await call(`/offboardings/${list[0].id}`)).json();
     expect(after.tasks.find((t: { id: string }) => t.id === todo.id).status).toBe("done");
+  });
+
+  it("skips tracking check when tracking is not configured", async () => {
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const todo = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    await db.update(tasks).set({ trackingCode: "ZZ000000000BR" }).where(eq(tasks.id, todo.id));
+
+    const res = await app.handle(cronRequest());
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.delivered).toEqual([]);
   });
 
   it("checks tracked shipments via POST", async () => {
