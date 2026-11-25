@@ -3877,6 +3877,47 @@ describe.skipIf(!url)("api", () => {
       expect(await queued("compute_matches")).toEqual([]);
     });
 
+    it("logs a failed fetch with only its identifying fields", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      const app = sourcesApp([
+        { kind: "lever", target: "broken", label: null },
+        { kind: "greenhouse", target: "acme", label: null },
+      ]);
+
+      await app.drainNow();
+
+      expect(logged.mock.calls).toEqual([
+        [
+          "source sync failed",
+          { kind: "lever", target: "broken", error: "http_error", status: 404 },
+        ],
+      ]);
+      logged.mockRestore();
+    });
+
+    it("logs a failed fetch without a status when it is not an http error", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      const instance = createApp(webOrigin, repos, {
+        ...appOptions,
+        catalog: [acme],
+        fetchFeedImpl: () => Promise.reject(new Error("offline")),
+      });
+
+      await instance.handle(
+        new Request("http://localhost/api/background/drain", {
+          method: "POST",
+          headers: { authorization: `Bearer ${cronSecret}` },
+        }),
+      );
+
+      expect(logged.mock.calls).toEqual([
+        ["source sync failed", { kind: "greenhouse", target: "acme", error: "network" }],
+      ]);
+      logged.mockRestore();
+    });
+
     it("fans out matching when a sync creates jobs", async () => {
       const profileId = await matchingProfile();
       const app = sourcesApp([acme]);

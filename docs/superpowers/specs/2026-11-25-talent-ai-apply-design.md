@@ -52,8 +52,8 @@ Today the app helps a person decide and prepare, but they still apply by hand on
 
 ### Job catalog and sources
 
-- **Global catalog.** The `jobs` table stays; `origin` becomes the kind of source (`ats_board`, `aggregator`, `scraper`, `partner`); HR sharing (`POST /api/jobs/share`, origin `hr`, the share pipeline's HR use) is removed. Existing `hr` rows are closed by the migration.
-- **Source registry, not admin-managed.** Sources are configured by the Offboard team (code + config/DB rows edited by us, not exposed in the customer portal). The PR 9 `job_feeds` table becomes `job_sources` with a `kind` (`greenhouse_board`, `lever_board`, `aggregator`, `scraper`) and a `target` (board slug, aggregator query set, scraper name); no portal admin routes.
+- **Global catalog.** The `jobs` table stays; the `origin` enum is kept: `external` for every automated source, with `source` saying which provider; HR sharing (`POST /api/jobs/share`, origin `hr`, the share pipeline's HR use) is removed. Existing `hr` rows are closed by the migration.
+- **Source registry, not admin-managed.** Sources are configured by the Offboard team (code + config/DB rows edited by us, not exposed in the customer portal). The PR 9 `job_feeds` table becomes `job_sources` with a `kind` (`greenhouse | lever` for now; aggregator and scraper kinds are added in their PRs) and a `target` (board slug, aggregator query set, scraper name); no portal admin routes. An empty catalog disables all sources and closes their jobs.
 - **Adapters** behind the existing `JobSource`/`fetchFeed` shape:
   - ATS boards: Greenhouse, Lever (built in PR 9), later Ashby/Workable/SmartRecruiters — a large curated list of Brazilian company boards maintained by us.
   - Aggregator APIs: Jooble and/or Adzuna (Brazil coverage, API keys) — queries built from the catalog's demand (all people's headlines/roles), not per person.
@@ -64,7 +64,7 @@ Today the app helps a person decide and prepare, but they still apply by hand on
 
 ### Partner recruiters
 
-- Kept as an optional curated source (built in PR 9): agencies we partner with submit jobs through a token link; their jobs enter the same global catalog with `origin = partner`. Proposal — Samuel confirms.
+- Removed for now (Samuel, 2026-11-25); the code is recoverable from commit `b1efcc7`.
 
 ### Preferences (Preferências screen)
 
@@ -107,7 +107,7 @@ Decided with Samuel (2026-11-25); numbers still open:
 
 ## Delivery order (one PR each, stacked after #89)
 
-1. Reshape PR 9: `job_sources` registry (no admin routes), Greenhouse/Lever adapters, partner recruiters as a source (if kept), remove HR job sharing.
+1. Reshape PR 9: `job_sources` registry (no admin routes), Greenhouse/Lever adapters, remove HR job sharing.
 2. Aggregator API source + cross-source dedup + stored tsvector + apply channel detection.
 3. Gupy scraper source (login-required channel).
 4. Preferences: modes, target titles, job preferences, answer library (seeded common questions), rejection reasons; cover letter + screening-answer generation; Assisted package.
@@ -118,7 +118,6 @@ Decided with Samuel (2026-11-25); numbers still open:
 
 ## Open questions for Samuel
 
-- Partner recruiters: keep as a source? If kept, tokens are issued by the Offboard team (internal), not the customer portal.
 - Plan numbers: daily AI application limit for Plano X; prices for Base and X.
 - Which scraping targets first (Gupy? others?) and which aggregator(s) to sign up for.
 

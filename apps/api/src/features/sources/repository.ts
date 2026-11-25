@@ -18,6 +18,26 @@ const ownedBy = (kind: Kind, target: string) =>
     sql`left(${jobs.sourceKey}, length(${target}::text) + 1) = ${target}::text || ':'`,
   );
 
+const closeStale = async (
+  tx: Pick<Database, "update">,
+  source: { kind: Kind; target: string },
+  now: Date,
+) => {
+  const closed = await tx
+    .update(jobs)
+    .set({ closedAt: now, updatedAt: now })
+    .where(
+      and(
+        ownedBy(source.kind, source.target),
+        isNull(jobs.closedAt),
+        lt(jobs.lastSeenAt, new Date(now.getTime() - closeAfterMs)),
+      ),
+    )
+    .returning({ id: jobs.id });
+
+  return closed.length;
+};
+
 const errorCode = (result: Extract<FeedResult, { error: string }>) =>
   result.error === "http_error" ? `http_${result.status}` : result.error;
 
@@ -133,12 +153,21 @@ export function createSourcesRepository(db: Database) {
 
   async function sync(sourceId: string, result: FeedResult, now: Date) {
     if ("error" in result) {
-      await db
-        .update(jobSources)
-        .set({ lastSyncedAt: now, lastError: errorCode(result) })
-        .where(eq(jobSources.id, sourceId));
+      return db.transaction(async (tx) => {
+        const [source] = await tx
+          .update(jobSources)
+          .set({ lastSyncedAt: now, lastError: errorCode(result) })
+          .where(eq(jobSources.id, sourceId))
+          .returning({
+            kind: jobSources.kind,
+            target: jobSources.target,
+            enabled: jobSources.enabled,
+          });
 
-      return "failed" as const;
+        if (source?.enabled) await closeStale(tx, source, now);
+
+        return "failed" as const;
+      });
     }
 
     return db.transaction(async (tx) => {
@@ -201,19 +230,9 @@ export function createSourcesRepository(db: Database) {
         }
       }
 
-      const closed = await tx
-        .update(jobs)
-        .set({ closedAt: now, updatedAt: now })
-        .where(
-          and(
-            ownedBy(source.kind, source.target),
-            isNull(jobs.closedAt),
-            lt(jobs.lastSeenAt, new Date(now.getTime() - closeAfterMs)),
-          ),
-        )
-        .returning({ id: jobs.id });
+      const closed = await closeStale(tx, source, now);
 
-      return { created, updated, closed: closed.length, skipped: result.skipped };
+      return { created, updated, closed, skipped: result.skipped };
     });
   }
 

@@ -364,11 +364,11 @@ describe.skipIf(!url)("sources repository", () => {
 
     const before = await jobsOf("greenhouse");
 
-    expect(await feeds.sync(feed.id, { error: "http_error", status: 404 }, at(5))).toBe("failed");
-    expect(await stored(feed.id)).toMatchObject({ lastSyncedAt: at(5), lastError: "http_404" });
+    expect(await feeds.sync(feed.id, { error: "http_error", status: 404 }, at(2))).toBe("failed");
+    expect(await stored(feed.id)).toMatchObject({ lastSyncedAt: at(2), lastError: "http_404" });
 
     for (const error of ["invalid_json", "timeout", "too_large", "network"] as const) {
-      expect(await feeds.sync(feed.id, { error }, at(6))).toBe("failed");
+      expect(await feeds.sync(feed.id, { error }, at(3))).toBe("failed");
       expect((await stored(feed.id)).lastError).toBe(error);
     }
 
@@ -429,6 +429,46 @@ describe.skipIf(!url)("sources repository", () => {
       { sourceKey: "acme:1", closedAt: at(6) },
       { sourceKey: "acme:2", closedAt: null, lastSeenAt: at(7) },
     ]);
+  });
+
+  it("closes a source's jobs that went unseen for three days when it keeps failing", async () => {
+    const stale = await created("greenhouse", "acme");
+    const fresh = await created("lever", "acme");
+    const other = await created("greenhouse", "other");
+
+    await feeds.sync(stale.id, { jobs: [feedJob("acme:1")], skipped: 0 }, start);
+    await feeds.sync(fresh.id, { jobs: [feedJob("acme:1")], skipped: 0 }, at(2));
+    await feeds.sync(other.id, { jobs: [feedJob("other:1")], skipped: 0 }, at(4));
+    await db.insert(jobs).values({
+      origin: "hr",
+      source: "greenhouse",
+      sourceKey: "acme:hr",
+      title: "HR",
+      company: "Acme",
+      url: "https://jobs.example.com/vaga",
+      lastSeenAt: start,
+    });
+
+    expect(await feeds.sync(stale.id, { error: "timeout" }, at(4))).toBe("failed");
+    expect(await feeds.sync(fresh.id, { error: "timeout" }, at(4))).toBe("failed");
+
+    expect(await stored(stale.id)).toMatchObject({ lastSyncedAt: at(4), lastError: "timeout" });
+    expect(await jobsOf("greenhouse")).toMatchObject([
+      { sourceKey: "acme:1", closedAt: at(4) },
+      { sourceKey: "acme:hr", closedAt: null },
+      { sourceKey: "other:1", closedAt: null },
+    ]);
+    expect(await jobsOf("lever")).toMatchObject([{ sourceKey: "acme:1", closedAt: null }]);
+  });
+
+  it("does not close jobs when a disabled source reports a failure", async () => {
+    const feed = await created("greenhouse", "acme");
+
+    await feeds.sync(feed.id, { jobs: [feedJob("acme:1")], skipped: 0 }, start);
+    await db.update(jobSources).set({ enabled: false }).where(eq(jobSources.id, feed.id));
+
+    expect(await feeds.sync(feed.id, { error: "timeout" }, at(10))).toBe("failed");
+    expect(await jobsOf("greenhouse")).toMatchObject([{ closedAt: null }]);
   });
 
   it("scopes closing to the source", async () => {

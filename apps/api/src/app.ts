@@ -105,6 +105,16 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         options.fetchFeedImpl,
       );
 
+      if ("error" in result) {
+        const failure = { kind: source.kind, target: source.target, error: result.error };
+
+        if (result.error === "http_error") {
+          console.error("source sync failed", { ...failure, status: result.status });
+        } else {
+          console.error("source sync failed", failure);
+        }
+      }
+
       const synced = await repos.sources.sync(source.id, result, new Date());
 
       if (synced !== "failed" && synced.created > 0) {
