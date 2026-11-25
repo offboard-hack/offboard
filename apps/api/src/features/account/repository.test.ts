@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import {
+  aiApplications,
   applicationEvents,
   applications,
   authAccount,
@@ -725,6 +726,104 @@ describe.skipIf(!url)("account repository", () => {
     expect(await repository.deleteProfile(profileId)).toBe(true);
     expect(await db.select().from(applicationPackages)).toEqual([
       expect.objectContaining({ profileId: otherProfileId, coverLetter: "Alheia" }),
+    ]);
+  });
+
+  it("exports the AI applications newest first with the confirmed answers and deletes them with the profile", async () => {
+    expect((await repository.exportData(profileId))?.aiApplications).toEqual([]);
+
+    const confirmedJob = await job("ai-confirmed");
+    const draftJob = await job("ai-draft");
+    const foreignJob = await job("ai-foreign");
+
+    const question = (id: string, label: string) => ({
+      id,
+      label,
+      required: false,
+      section: "questions" as const,
+      fields: [],
+      kind: "custom" as const,
+      sensitive: false,
+    });
+
+    const form = { questions: [question("a", "Pergunta A"), question("b", "Pergunta B")] };
+    const preparedAt = new Date("2026-03-01T10:00:00Z");
+
+    const [older, newer] = await db
+      .insert(aiApplications)
+      .values([
+        {
+          profileId,
+          jobId: draftJob,
+          state: "draft",
+          form,
+          draft: [
+            { questionId: "a", value: "rascunho", source: null, inferred: false, status: "filled" },
+            { questionId: "gone", value: "x", source: null, inferred: false, status: "filled" },
+          ],
+          preparedAt,
+          createdAt: new Date("2026-03-01T10:00:00Z"),
+        },
+        {
+          profileId,
+          jobId: confirmedJob,
+          state: "queued",
+          reason: null,
+          form,
+          draft: [
+            { questionId: "a", value: "rascunho", source: null, inferred: false, status: "filled" },
+          ],
+          confirmed: [
+            { questionId: "a", value: "final" },
+            { questionId: "b", value: ["1", "2"] },
+          ],
+          preparedAt,
+          confirmedAt: new Date("2026-03-02T10:00:00Z"),
+          finishedAt: new Date("2026-03-03T10:00:00Z"),
+          createdAt: new Date("2026-03-02T10:00:00Z"),
+        },
+        {
+          profileId: otherProfileId,
+          jobId: foreignJob,
+          state: "draft",
+          form,
+          draft: [],
+          preparedAt,
+        },
+      ])
+      .returning({ id: aiApplications.id });
+
+    const exported = await repository.exportData(profileId);
+
+    expect(exported?.aiApplications).toEqual([
+      {
+        job: { id: confirmedJob, title: "Vaga ai-confirmed", company: "Acme" },
+        state: "queued",
+        reason: null,
+        answers: [
+          { question: "Pergunta A", value: "final" },
+          { question: "Pergunta B", value: ["1", "2"] },
+        ],
+        preparedAt: "2026-03-01T10:00:00.000Z",
+        confirmedAt: "2026-03-02T10:00:00.000Z",
+        finishedAt: "2026-03-03T10:00:00.000Z",
+      },
+      {
+        job: { id: draftJob, title: "Vaga ai-draft", company: "Acme" },
+        state: "draft",
+        reason: null,
+        answers: [{ question: "Pergunta A", value: "rascunho" }],
+        preparedAt: "2026-03-01T10:00:00.000Z",
+        confirmedAt: null,
+        finishedAt: null,
+      },
+    ]);
+    expect(JSON.stringify(exported)).not.toContain(foreignJob);
+    expect(older.id).not.toBe(newer.id);
+
+    expect(await repository.deleteProfile(profileId)).toBe(true);
+    expect(await db.select({ id: aiApplications.id }).from(aiApplications)).toEqual([
+      { id: expect.any(String) },
     ]);
   });
 

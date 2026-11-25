@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
-import type { ProfileFields, ResumeContent } from "@offboard/db/schema";
+import type { FormQuestion, ProfileFields, ResumeContent } from "@offboard/db/schema";
 import {
   aiApplications,
   applicationPackages,
@@ -23,6 +23,7 @@ import { createRepositories } from "../../repositories.js";
 import type { GenerateStructured } from "../../shared/ai.js";
 import type { PortalAuth } from "../../shared/portal-auth.js";
 import { talentAccess } from "../../shared/talent-access.js";
+import type { SaveAnswer } from "./repository.js";
 import { aiApplyRoutes } from "./routes.js";
 import { readGreenhouseForm } from "./greenhouse.js";
 
@@ -85,12 +86,18 @@ type ModelAnswer = {
   inferred: boolean;
 };
 
+type Body = {
+  answers: { questionId: string; value: string | string[] | null }[];
+  rehearsal?: boolean;
+};
+
 type Setup = {
   takeLlmCall?: () => Promise<true | { retryAt: Date }>;
   allowlist?: string[];
   consent?: boolean;
   generate?: GenerateStructured | null;
   form?: () => Response | Promise<Response>;
+  saveAnswer?: SaveAnswer;
 };
 
 describe.skipIf(!url)("ai apply route", () => {
@@ -168,6 +175,12 @@ describe.skipIf(!url)("ai apply route", () => {
     return row.id;
   }
 
+  const saveToLibrary: SaveAnswer = async (profileId, label, text, { sensitive }, now) => {
+    const questionId = await repos.answers.ensureQuestion(label, now, { sensitive });
+
+    await repos.answers.answer(profileId, questionId, text, now);
+  };
+
   function fakeModel(answers: (prompt: string) => ModelAnswer[] = () => []) {
     const calls: { system: string; prompt: string }[] = [];
 
@@ -209,6 +222,7 @@ describe.skipIf(!url)("ai apply route", () => {
                 ? []
                 : [{ question: item.text, answer: item.answer, sensitive: item.sensitive }],
             ),
+          saveAnswer: setup.saveAnswer ?? saveToLibrary,
         },
       ),
     );
@@ -221,7 +235,20 @@ describe.skipIf(!url)("ai apply route", () => {
         }),
       );
 
-    return { post, fetched };
+    const call = (profileId: string, path: string, body?: Body, method = "POST") =>
+      instance.handle(
+        new Request(`http://localhost${path}`, {
+          method,
+          headers: {
+            "x-test-talent-id": profileId,
+            origin: webOrigin,
+            "content-type": "application/json",
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        }),
+      );
+
+    return { post, fetched, call };
   }
 
   const attempts = (profileId: string) =>
@@ -891,6 +918,498 @@ describe.skipIf(!url)("ai apply route", () => {
       expect(res.status).toBe(409);
       expect(await res.json()).toEqual({ error: "Already in progress" });
       expect(await attempts(profileId)).toHaveLength(1);
+    });
+  });
+
+  describe("attempts", () => {
+    const question = (id: string, partial: Partial<FormQuestion> = {}) =>
+      ({
+        id,
+        label: id,
+        required: false,
+        section: "questions",
+        fields: [{ name: id, type: "text", options: [] }],
+        kind: "custom",
+        sensitive: false,
+        ...partial,
+      }) satisfies FormQuestion;
+
+    const choice = (id: string, type: "single_select" | "multi_select", labels: string[]) =>
+      question(id, {
+        fields: [
+          {
+            name: id,
+            type,
+            options: labels.map((label, index) => ({ label, value: String(index) })),
+          },
+        ],
+      });
+
+    const why = question("why", { label: "Por que a Stone?", required: true });
+
+    const pcd = {
+      ...choice("pcd", "single_select", ["Yes", "No"]),
+      label: "Você é uma pessoa com deficiência?",
+      required: true,
+      sensitive: true,
+    };
+
+    const source = {
+      ...choice("source", "multi_select", ["LinkedIn", "Indicação", "Site"]),
+      label: "Como conheceu a Stone?",
+    };
+
+    const mail = question("email", { label: "E-mail", required: true, kind: "email" });
+    const cv = question("resume", { label: "CV", required: true, kind: "resume", fields: [] });
+
+    const letter = question("cover_letter", {
+      label: "Carta",
+      required: true,
+      kind: "cover_letter",
+      fields: [],
+    });
+
+    async function seed(
+      profileId: string,
+      jobId: string,
+      questions: FormQuestion[],
+      extra: Partial<typeof aiApplications.$inferInsert> = {},
+    ) {
+      const [row] = await db
+        .insert(aiApplications)
+        .values({
+          profileId,
+          jobId,
+          state: "draft",
+          form: { questions },
+          draft: [],
+          preparedAt: new Date(),
+          ...extra,
+        })
+        .returning({ id: aiApplications.id });
+
+      return row.id;
+    }
+
+    const confirmPath = (id: string) => `/me/ai-applications/${id}/confirm`;
+    const cancelPath = (id: string) => `/me/ai-applications/${id}/cancel`;
+
+    const complete = [
+      { questionId: "why", value: "  Gosto de fintechs. " },
+      { questionId: "pcd", value: "1" },
+      { questionId: "source", value: ["0", "2", "0"] },
+      { questionId: "email", value: "ana@example.com" },
+    ];
+
+    async function setup(questions = [why, pcd, source, mail, cv], setupOptions: Setup = {}) {
+      const app = await ready(setupOptions);
+      const id = await seed(app.profileId, app.jobId, questions);
+
+      return { ...app, id };
+    }
+
+    const library = async (profileId: string) =>
+      (await repos.answers.library(profileId)).questions.filter((item) => item.answer !== null);
+
+    it("lists newest first and returns one attempt, only to its owner", async () => {
+      const { call, profileId, jobId } = await ready();
+      const otherId = await profile("outra@example.com", 1);
+      const otherJob = await addJob("stone:2");
+      const older = await seed(profileId, jobId, [why], { state: "cancelled" });
+      const newer = await seed(profileId, otherJob, [why]);
+      const foreign = await seed(otherId, jobId, [why]);
+
+      await db
+        .update(aiApplications)
+        .set({ createdAt: new Date("2026-01-01T00:00:00Z") })
+        .where(eq(aiApplications.id, older));
+
+      const listed = await call(profileId, "/me/ai-applications", undefined, "GET");
+      const body = await listed.json();
+
+      expect(listed.status).toBe(200);
+      expect(body.items.map((item: { id: string }) => item.id)).toEqual([newer, older]);
+      expect(body.items[1]).toMatchObject({ state: "cancelled", questions: [why] });
+
+      const one = await call(profileId, `/me/ai-applications/${newer}`, undefined, "GET");
+
+      expect(one.status).toBe(200);
+      expect(await one.json()).toMatchObject({ id: newer, job: { id: otherJob } });
+
+      for (const id of [foreign, "not-a-uuid", "00000000-0000-4000-8000-000000000001"]) {
+        const missing = await call(profileId, `/me/ai-applications/${id}`, undefined, "GET");
+
+        expect(missing.status).toBe(404);
+        expect(await missing.json()).toEqual({ error: "Attempt not found" });
+
+        const confirmed = await call(profileId, confirmPath(id), { answers: [] });
+
+        expect(confirmed.status).toBe(404);
+        expect(await confirmed.json()).toEqual({ error: "Attempt not found" });
+
+        const cancelled = await call(profileId, cancelPath(id));
+
+        expect(cancelled.status).toBe(404);
+        expect(await cancelled.json()).toEqual({ error: "Attempt not found" });
+      }
+
+      expect(
+        (await db.select().from(aiApplications).where(eq(aiApplications.id, foreign)))[0],
+      ).toMatchObject({ state: "draft" });
+    });
+
+    it("applies the gate to every attempt route", async () => {
+      const { profileId, jobId } = await ready();
+      const id = await seed(profileId, jobId, [why]);
+
+      const routes: [string, string, Body?][] = [
+        ["GET", "/me/ai-applications"],
+        ["GET", `/me/ai-applications/${id}`],
+        ["POST", confirmPath(id), { answers: [{ questionId: "why", value: "x" }] }],
+        ["POST", cancelPath(id)],
+      ];
+
+      const unlisted = build({ allowlist: [], generate: fakeModel().generate });
+      const off = build({ generate: null });
+
+      for (const [method, path, body] of routes) {
+        const denied = await unlisted.call(profileId, path, body, method);
+
+        expect(denied.status).toBe(403);
+        expect(await denied.json()).toEqual({ error: "AI Apply not available" });
+
+        const unavailable = await off.call(profileId, path, body, method);
+
+        expect(unavailable.status).toBe(503);
+        expect(await unavailable.json()).toEqual({ error: "AI not configured" });
+      }
+
+      expect((await attempts(profileId))[0]).toMatchObject({ state: "draft", confirmed: null });
+    });
+
+    it("confirms once", async () => {
+      const { call, profileId, id } = await setup();
+
+      const results = await Promise.all([
+        call(profileId, confirmPath(id), { answers: complete }),
+        call(profileId, confirmPath(id), { answers: complete }),
+      ]);
+
+      expect(results.map((res) => res.status).sort()).toEqual([200, 409]);
+
+      const loser = results.find((res) => res.status === 409);
+
+      expect(await loser?.json()).toEqual({ error: "Already in progress" });
+
+      const rows = await attempts(profileId);
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0].state).toBe("queued");
+
+      const again = await call(profileId, confirmPath(id), { answers: complete });
+
+      expect(again.status).toBe(409);
+      expect(await again.json()).toEqual({ error: "Already in progress" });
+    });
+
+    it("queues the attempt with the cleaned answers", async () => {
+      const { call, profileId, id } = await setup();
+      const before = Date.now();
+
+      const res = await call(profileId, confirmPath(id), { answers: complete, rehearsal: true });
+      const body = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(body).toMatchObject({ id, state: "queued", reason: null, rehearsal: true });
+      expect(Date.parse(body.confirmedAt)).toBeGreaterThanOrEqual(before);
+
+      const [row] = await attempts(profileId);
+
+      expect(row.state).toBe("queued");
+      expect(row.rehearsal).toBe(true);
+      expect(row.confirmedAt?.toISOString()).toBe(body.confirmedAt);
+      expect(row.confirmed).toEqual([
+        { questionId: "why", value: "Gosto de fintechs." },
+        { questionId: "pcd", value: "1" },
+        { questionId: "source", value: ["0", "2"] },
+        { questionId: "email", value: "ana@example.com" },
+      ]);
+
+      const lax = await seed(profileId, await addJob("stone:10"), [
+        { ...why, required: false },
+        { ...source },
+      ]);
+
+      const blank = await call(profileId, confirmPath(lax), {
+        answers: [
+          { questionId: "why", value: "   " },
+          { questionId: "source", value: [] },
+        ],
+      });
+
+      expect(blank.status).toBe(200);
+      expect(
+        (await db.select().from(aiApplications).where(eq(aiApplications.id, lax)))[0].confirmed,
+      ).toEqual([
+        { questionId: "why", value: null },
+        { questionId: "source", value: null },
+      ]);
+    });
+
+    it("saves confirmed answers to the library", async () => {
+      const profileId = await profile();
+      await addResume(profileId);
+
+      const [stoneJob, otherJob] = [await addJob(), await addJob("stone:77")];
+
+      const phone = question("phone", {
+        label: "Telefone",
+        kind: "phone",
+        sensitive: false,
+      });
+
+      const bare = question("bare", { label: "Algo opcional" });
+      const symbols = question("symbols", { label: "???" });
+      const long = question("long", { label: "x".repeat(600) });
+
+      const model = fakeModel();
+      const app = build({ generate: model.generate });
+
+      const id = await seed(profileId, stoneJob, [
+        why,
+        pcd,
+        source,
+        mail,
+        phone,
+        bare,
+        symbols,
+        long,
+      ]);
+
+      const res = await app.call(profileId, confirmPath(id), {
+        answers: [
+          ...complete,
+          { questionId: "phone", value: "11 91111-2222" },
+          { questionId: "bare", value: null },
+          { questionId: "symbols", value: "sem rótulo" },
+          { questionId: "long", value: "resposta longa" },
+        ],
+      });
+
+      expect(res.status).toBe(200);
+
+      const saved = await library(profileId);
+
+      expect(saved.map(({ text, answer, sensitive }) => ({ text, answer, sensitive }))).toEqual(
+        expect.arrayContaining([
+          { text: "Por que a Stone?", answer: "Gosto de fintechs.", sensitive: false },
+          { text: pcd.label, answer: "No", sensitive: true },
+          { text: source.label, answer: "LinkedIn; Site", sensitive: false },
+          { text: "x".repeat(500), answer: "resposta longa", sensitive: false },
+        ]),
+      );
+      expect(saved).toHaveLength(4);
+
+      await db.delete(aiApplications).where(eq(aiApplications.id, id));
+
+      const next = await app.post(profileId, otherJob);
+      const body = await next.json();
+      const sensitive = questionOf(body, "Você é uma pessoa com deficiência");
+
+      expect(answerFor(body, sensitive.id)).toMatchObject({
+        value: "0",
+        source: "library",
+        status: "filled",
+        inferred: false,
+      });
+    });
+
+    it("does not save a not-shared profile answer the person filled", async () => {
+      const { call, profileId, jobId } = await ready();
+      const phone = question("phone", { label: "Telefone", kind: "phone" });
+      const id = await seed(profileId, jobId, [phone]);
+
+      const res = await call(profileId, confirmPath(id), {
+        answers: [{ questionId: "phone", value: "11 90000-0000" }],
+      });
+
+      expect(res.status).toBe(200);
+      expect((await attempts(profileId))[0].confirmed).toEqual([
+        { questionId: "phone", value: "11 90000-0000" },
+      ]);
+      expect(await library(profileId)).toEqual([]);
+    });
+
+    it("rejects incomplete or invalid answers", async () => {
+      const { call, profileId, id } = await setup();
+
+      const only = (index: number, value: string | string[] | null) =>
+        complete.map((item, at) => (at === index ? { ...item, value } : item));
+
+      const bad: Body["answers"][] = [
+        only(0, ""),
+        only(0, null),
+        only(0, "x".repeat(2_001)),
+        only(0, ["lista"]),
+        only(1, "5"),
+        only(1, "No"),
+        only(1, " 1"),
+        only(1, null),
+        only(1, ["1"]),
+        only(2, ["9"]),
+        only(2, "0"),
+        only(3, ""),
+        complete.slice(1),
+        [...complete, { questionId: "why", value: "duplicada" }],
+        [...complete, { questionId: "ghost", value: "x" }],
+        [...complete, { questionId: "resume", value: null }],
+        complete.map((item) =>
+          item.questionId === "why" ? { ...item, questionId: "ghost" } : item,
+        ),
+        [],
+      ];
+
+      for (const answers of bad) {
+        const res = await call(profileId, confirmPath(id), { answers });
+
+        expect(res.status).toBe(422);
+        expect(await res.json()).toEqual({ error: "Invalid answers" });
+      }
+
+      expect((await attempts(profileId))[0]).toMatchObject({ state: "draft", confirmed: null });
+      expect(await library(profileId)).toEqual([]);
+
+      const exact = await call(profileId, confirmPath(id), {
+        answers: only(0, "x".repeat(2_000)),
+      });
+
+      expect(exact.status).toBe(200);
+    });
+
+    it("requires a stored cover letter for a required cover letter question", async () => {
+      const { call, profileId, jobId, id } = await setup([why, letter]);
+      const answers = [{ questionId: "why", value: "Porque sim" }];
+
+      const missing = await call(profileId, confirmPath(id), { answers });
+
+      expect(missing.status).toBe(409);
+      expect(await missing.json()).toEqual({ error: "Generate a cover letter first" });
+
+      await db.insert(applicationPackages).values({ profileId, jobId, coverLetter: "Olá" });
+
+      const ok = await call(profileId, confirmPath(id), { answers });
+
+      expect(ok.status).toBe(200);
+    });
+
+    it("expires drafts after 7 days", async () => {
+      const { call, profileId, jobId } = await ready();
+      const day = 24 * 60 * 60 * 1000;
+
+      const old = await seed(profileId, jobId, [why], {
+        preparedAt: new Date(Date.now() - 7 * day - 1000),
+      });
+
+      const answers = [{ questionId: "why", value: "ok" }];
+
+      const expired = await call(profileId, confirmPath(old), { answers });
+
+      expect(expired.status).toBe(409);
+      expect(await expired.json()).toEqual({ error: "Draft expired" });
+      expect((await attempts(profileId))[0].state).toBe("draft");
+
+      await db
+        .update(aiApplications)
+        .set({ preparedAt: new Date(Date.now() - 6 * day) })
+        .where(eq(aiApplications.id, old));
+
+      expect((await call(profileId, confirmPath(old), { answers })).status).toBe(200);
+    });
+
+    it("refuses to confirm after applying by hand, after the job closes or from another state", async () => {
+      const { call, profileId, jobId, resumeId } = await ready();
+      const answers = [{ questionId: "why", value: "ok" }];
+      const id = await seed(profileId, jobId, [why]);
+
+      await db.insert(applications).values({ profileId, jobId, resumeId });
+
+      const applied = await call(profileId, confirmPath(id), { answers });
+
+      expect(applied.status).toBe(409);
+      expect(await applied.json()).toEqual({ error: "Already applied" });
+
+      const closedJob = await addJob("stone:5", "greenhouse", new Date());
+      const closed = await seed(profileId, closedJob, [why]);
+      const gone = await call(profileId, confirmPath(closed), { answers });
+
+      expect(gone.status).toBe(404);
+      expect(await gone.json()).toEqual({ error: "Job not found" });
+
+      for (const state of ["queued", "cancelled", "assisted"] as const) {
+        const spare = await addJob(`stone:${state.length}00`);
+        const other = await seed(profileId, spare, [why], { state });
+
+        const res = await call(profileId, confirmPath(other), { answers });
+
+        expect(res.status).toBe(409);
+        expect(await res.json()).toEqual({ error: "Already in progress" });
+      }
+
+      expect((await attempts(profileId)).filter((row) => row.state === "queued")).toHaveLength(1);
+      expect(await library(profileId)).toEqual([]);
+    });
+
+    it("answers 500 and keeps the draft when saving to the library fails", async () => {
+      const failing = build({
+        generate: fakeModel().generate,
+        saveAnswer: async () => {
+          throw new Error("library down");
+        },
+      });
+
+      const profileId = await profile();
+      const id = await seed(profileId, await addJob(), [why]);
+
+      const res = await failing.call(profileId, confirmPath(id), {
+        answers: [{ questionId: "why", value: "ok" }],
+      });
+
+      expect(res.status).toBe(500);
+      expect((await attempts(profileId))[0]).toMatchObject({ state: "draft", confirmed: null });
+    });
+
+    it("cancels drafts and queued attempts only", async () => {
+      const { call, profileId, jobId } = await ready();
+      const draft = await seed(profileId, jobId, [why]);
+      const before = Date.now();
+
+      const first = await call(profileId, cancelPath(draft));
+      const body = await first.json();
+
+      expect(first.status).toBe(200);
+      expect(body).toMatchObject({ id: draft, state: "cancelled", reason: "cancelled_by_person" });
+
+      const [row] = await attempts(profileId);
+
+      expect(row.finishedAt?.getTime()).toBeGreaterThanOrEqual(before);
+
+      const again = await call(profileId, cancelPath(draft));
+
+      expect(again.status).toBe(409);
+      expect(await again.json()).toEqual({ error: "Cannot cancel" });
+
+      const queued = await seed(profileId, jobId, [why], { state: "queued" });
+
+      expect((await call(profileId, cancelPath(queued))).status).toBe(200);
+
+      for (const state of ["assisted", "submitted", "running"] as const) {
+        const id = await seed(profileId, await addJob(`stone:${state.length}00`), [why], { state });
+        const res = await call(profileId, cancelPath(id));
+
+        expect(res.status).toBe(409);
+      }
+
+      expect((await call(profileId, "/me/jobs/" + jobId + "/ai-apply")).status).not.toBe(404);
     });
   });
 });

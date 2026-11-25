@@ -314,6 +314,11 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
               ? []
               : [{ question: item.text, answer: item.answer, sensitive: item.sensitive }],
           ),
+        saveAnswer: async (profileId, label, text, { sensitive }, now) => {
+          const questionId = await repos.answers.ensureQuestion(label, now, { sensitive });
+
+          await repos.answers.answer(profileId, questionId, text, now);
+        },
       }),
     )
     .use(backgroundRoutes(repos.background, handlers, options.cronSecret, scheduleSources))

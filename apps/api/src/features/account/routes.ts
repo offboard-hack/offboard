@@ -100,6 +100,22 @@ const exportResponse = t.Object({
       createdAt: nullable,
     }),
   ),
+  aiApplications: t.Array(
+    t.Object({
+      job: t.Object({ id: t.String(), title: t.String(), company: t.String() }),
+      state: t.String(),
+      reason: nullable,
+      answers: t.Array(
+        t.Object({
+          question: t.String(),
+          value: t.Union([t.String(), t.Array(t.String()), t.Null()]),
+        }),
+      ),
+      preparedAt: t.String(),
+      confirmedAt: nullable,
+      finishedAt: nullable,
+    }),
+  ),
   answers: t.Array(t.Object({ question: t.String(), answer: t.String(), updatedAt: nullable })),
   packages: t.Array(
     t.Object({

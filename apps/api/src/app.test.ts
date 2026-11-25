@@ -858,7 +858,9 @@ describe.skipIf(!url)("api", () => {
       expect(urls).toEqual([
         "https://boards-api.greenhouse.io/v1/boards/acme/jobs/42?questions=true",
       ]);
-      expect((await res.json()).attempt.answers).toEqual([
+      const { attempt } = await res.json();
+
+      expect(attempt.answers).toEqual([
         {
           questionId: "question_1",
           value: "Resposta pronta",
@@ -867,6 +869,27 @@ describe.skipIf(!url)("api", () => {
           status: "filled",
         },
       ]);
+
+      const confirmed = await instance.handle(
+        new Request(`http://localhost/api/me/ai-applications/${attempt.id}/confirm`, {
+          method: "POST",
+          headers: {
+            "x-test-session": "talent",
+            "x-test-talent-id": created.id,
+            origin: webOrigin,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            answers: [{ questionId: "question_1", value: "Resposta final" }],
+          }),
+        }),
+      );
+
+      expect(confirmed.status).toBe(200);
+      expect(
+        (await repos.answers.library(created.id)).questions.find((item) => item.id === common.id)
+          ?.answer,
+      ).toBe("Resposta final");
     });
 
     it("denies a talent session whose profile no longer exists", async () => {

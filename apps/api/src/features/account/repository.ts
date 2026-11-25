@@ -1,5 +1,6 @@
 import type { Database } from "@offboard/db/client";
 import {
+  aiApplications,
   answerQuestions,
   applicationEvents,
   applicationPackages,
@@ -202,6 +203,23 @@ export function createAccountRepository(db: Database) {
       .where(eq(talentAnswers.profileId, profileId))
       .orderBy(asc(answerQuestions.text), asc(answerQuestions.id));
 
+    const ownAttempts = await db
+      .select({
+        job: { id: jobs.id, title: jobs.title, company: jobs.company },
+        state: aiApplications.state,
+        reason: aiApplications.reason,
+        form: aiApplications.form,
+        draft: aiApplications.draft,
+        confirmed: aiApplications.confirmed,
+        preparedAt: aiApplications.preparedAt,
+        confirmedAt: aiApplications.confirmedAt,
+        finishedAt: aiApplications.finishedAt,
+      })
+      .from(aiApplications)
+      .innerJoin(jobs, eq(jobs.id, aiApplications.jobId))
+      .where(eq(aiApplications.profileId, profileId))
+      .orderBy(desc(aiApplications.createdAt), asc(aiApplications.id));
+
     return {
       profile: {
         name: profile.name,
@@ -276,6 +294,17 @@ export function createAccountRepository(db: Database) {
       packages: ownPackages.map((item) => ({
         ...item,
         updatedAt: item.updatedAt?.toISOString() ?? null,
+      })),
+      aiApplications: ownAttempts.map(({ form, draft, confirmed, ...attempt }) => ({
+        ...attempt,
+        answers: (confirmed ?? draft).flatMap((answer) => {
+          const question = form.questions.find((item) => item.id === answer.questionId);
+
+          return question === undefined ? [] : [{ question: question.label, value: answer.value }];
+        }),
+        preparedAt: attempt.preparedAt.toISOString(),
+        confirmedAt: attempt.confirmedAt?.toISOString() ?? null,
+        finishedAt: attempt.finishedAt?.toISOString() ?? null,
       })),
       answers: ownAnswers.map((item) => ({
         question: item.question,
