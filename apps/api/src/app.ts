@@ -9,6 +9,7 @@ import { createAbacatePayGateway, type AbacatePayGateway } from "./features/bill
 import { billingRoutes } from "./features/billing/routes.js";
 import { equipmentRoutes } from "./features/equipment/routes.js";
 import { exitSurveysRoutes } from "./features/exit-surveys/routes.js";
+import { insightsRoutes } from "./features/insights/routes.js";
 import { integrationsRoutes } from "./features/integrations/routes.js";
 import { jobsRoutes } from "./features/jobs/routes.js";
 import { offboardingsRoutes } from "./features/offboardings/routes.js";
@@ -195,6 +196,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     )
     .use(actionConfigsRoutes(repos.actionConfigs, access))
     .use(teamRoutes(repos.team, access))
+    .use(insightsRoutes(repos.insights, access))
     .use(
       talentRoutes(repos.talent, access, talent, (profile) =>
         options.sendEmail(welcomeEmail(profile, webOrigin)),

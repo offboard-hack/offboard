@@ -586,6 +586,43 @@ describe.skipIf(!url)("api", () => {
       expect(gone.status).toBe(403);
     });
 
+    it("restricts aggregates to admin and rh", async () => {
+      await db.insert(jobs).values({
+        origin: "hr",
+        source: "hr-link",
+        sourceKey: "https://jobs.example.com/agregados",
+        title: "Analista de Dados",
+        company: "Acme",
+        url: "https://jobs.example.com/agregados",
+        postedAt: new Date("2026-11-20T12:00:00Z"),
+      });
+
+      const expected = {
+        enabled: 0,
+        activated: null,
+        funnel: { sent: null, responded: null, interviews: null, offers: null },
+        hiresShared: null,
+        topJobs: [],
+        sharedJobs: [
+          { title: "Analista de Dados", company: "Acme", sharedAt: "2026-11-20T12:00:00.000Z" },
+        ],
+      };
+
+      for (const session of ["admin", "rh"]) {
+        const response = await asSession(session, "/talent/aggregates");
+
+        expect(response.status).toBe(200);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        expect(await response.json()).toEqual(expected);
+      }
+
+      for (const session of ["gestor", "visualizador", "talent"]) {
+        expect((await asSession(session, "/talent/aggregates")).status).toBe(403);
+      }
+
+      expect((await asSession("anonymous", "/talent/aggregates")).status).toBe(401);
+    });
+
     describe("jobs catalog", () => {
       const extracted = {
         isJobPosting: true,

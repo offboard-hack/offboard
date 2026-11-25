@@ -17,6 +17,7 @@ import { createUsageRepository } from "./shared/llm-usage.js";
 import { createAccountRepository } from "./features/account/repository.js";
 import { createBackgroundRepository } from "./features/background/repository.js";
 import { createPagesRepository } from "./features/pages/repository.js";
+import { createInsightsRepository } from "./features/insights/repository.js";
 
 export function createRepositories(db: Database) {
   return {
@@ -38,6 +39,7 @@ export function createRepositories(db: Database) {
     account: createAccountRepository(db),
     background: createBackgroundRepository(db),
     pages: createPagesRepository(db),
+    insights: createInsightsRepository(db),
   };
 }
 

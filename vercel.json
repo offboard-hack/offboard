@@ -31,6 +31,7 @@
     { "source": "/api/jobs/:path*", "destination": "/api/offboard" },
     { "source": "/api/team", "destination": "/api/offboard" },
     { "source": "/api/team/:path*", "destination": "/api/offboard" },
+    { "source": "/api/talent/:path*", "destination": "/api/offboard" },
     { "source": "/api/webhooks/:path*", "destination": "/api/offboard" },
     { "source": "/api/correios/:path*", "destination": "/api/offboard" },
     { "source": "/api/background/:path*", "destination": "/api/offboard" },
