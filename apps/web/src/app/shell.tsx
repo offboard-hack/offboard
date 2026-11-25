@@ -77,11 +77,6 @@ export function PortalLayout({
         >
           {children}
         </div>
-        <footer className="mt-auto border-t px-4 py-2 text-center text-xs text-muted-foreground">
-          <a href="https://www.siterastreio.com.br/" target="_blank" rel="noopener noreferrer">
-            Rastreamento
-          </a>
-        </footer>
       </SidebarInset>
     </SidebarProvider>
   );
