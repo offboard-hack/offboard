@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { GenerateStructured } from "../../shared/ai.js";
+import { digitRuns, resumeDigits } from "../../shared/resume-digits.js";
 import { clipText, storableText } from "../../shared/storable-text.js";
 import type { ResumeContent } from "./content.js";
 import { textNodes, type TextNode } from "./score.js";
@@ -76,32 +77,6 @@ function serializeJob(job: TailorJob) {
   return escapeTags(json);
 }
 
-const digitRuns = (text: string | null) => text?.match(/\p{Nd}+/gu) ?? [];
-
-function baseDigits(content: ResumeContent) {
-  const texts = [
-    content.headline.text,
-    content.summary.text,
-    ...content.experiences.flatMap((experience) => [
-      experience.company,
-      experience.role,
-      experience.start,
-      experience.end,
-      ...experience.bullets.map((bullet) => bullet.text),
-    ]),
-    ...content.education.flatMap((education) => [
-      education.institution,
-      education.degree,
-      education.start,
-      education.end,
-    ]),
-    ...content.skills.map((skill) => skill.name),
-    ...content.languages.flatMap((language) => [language.name, language.level]),
-  ];
-
-  return new Set(texts.flatMap(digitRuns));
-}
-
 function ordered<T extends { id: string }>(items: T[], ids: string[]) {
   const byId = new Map(items.map((item) => [item.id, item]));
   const picked = new Map<string, T>();
@@ -127,7 +102,7 @@ export async function tailorResume(
   });
 
   const known = new Map(textNodes(base).map((node) => [node.id, node.text]));
-  const digits = baseDigits(base);
+  const digits = resumeDigits(base);
   const claimed = new Set<string>();
   const rewrites = new Map<string, string>();
 
