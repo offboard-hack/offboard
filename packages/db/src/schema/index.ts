@@ -57,6 +57,18 @@ export type JobPreferences = {
 
 export type ProfileField = { value: string | null; share: boolean };
 
+export type Address = {
+  cep: string;
+  street: string;
+  number: string;
+  complement: string | null;
+  neighborhood: string;
+  city: string;
+  state: string;
+};
+
+export type AddressField = { value: Address | null; share: boolean };
+
 export type ProfileFields = {
   phone?: ProfileField;
   city?: ProfileField;
@@ -66,6 +78,57 @@ export type ProfileFields = {
   availability?: ProfileField;
   noticePeriod?: ProfileField;
   salaryExpectation?: ProfileField;
+  cpf?: ProfileField;
+  birthDate?: ProfileField;
+  address?: AddressField;
+};
+
+export type FormField = {
+  name: string;
+  type: "text" | "textarea" | "file" | "hidden" | "single_select" | "multi_select";
+  options: { label: string; value: string }[];
+};
+
+export type QuestionKind =
+  | "first_name"
+  | "last_name"
+  | "email"
+  | "phone"
+  | "resume"
+  | "cover_letter"
+  | "linkedin"
+  | "website"
+  | "cpf"
+  | "birth_date"
+  | "cep"
+  | "address"
+  | "document"
+  | "custom";
+
+export type FormQuestion = {
+  id: string;
+  label: string;
+  required: boolean;
+  section: "questions" | "location" | "compliance" | "demographic";
+  fields: FormField[];
+  kind: QuestionKind;
+  sensitive: boolean;
+};
+
+export type DraftAnswer = {
+  questionId: string;
+  value: string | string[] | null;
+  source: "account" | "profile" | "library" | "resume" | "cover_letter" | null;
+  inferred: boolean;
+  status: "filled" | "blank" | "not_shared" | "sensitive";
+};
+
+export type ConfirmedAnswer = { questionId: string; value: string | string[] | null };
+
+export type AttemptEvidence = {
+  fields: { question: string; value: string | string[] | null }[];
+  files: string[];
+  finalUrl: string | null;
 };
 
 export type ConfigValue =
@@ -154,6 +217,8 @@ export const talentProfiles = pgTable(
     termsAcceptedAt: timestamp("terms_accepted_at"),
     firstSignedInAt: timestamp("first_signed_in_at"),
     shareOutcomeWithHr: boolean("share_outcome_with_hr").notNull().default(false),
+    aiApplyConsentAt: timestamp("ai_apply_consent_at"),
+    aiApplyConsentVersion: varchar("ai_apply_consent_version", { length: 20 }),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
@@ -238,6 +303,8 @@ export const applicationClosedReasonEnum = pgEnum("application_closed_reason", [
 
 export const interviewModeEnum = pgEnum("interview_mode", ["video", "in_person", "phone"]);
 
+export const applicationChannelEnum = pgEnum("application_channel", ["manual", "ai_apply"]);
+
 export const applications = pgTable(
   "applications",
   {
@@ -250,6 +317,7 @@ export const applications = pgTable(
       .references(() => jobs.id, { onDelete: "restrict" }),
     resumeId: uuid("resume_id").references(() => resumes.id, { onDelete: "set null" }),
     publicToken: varchar("public_token", { length: 64 }),
+    channel: applicationChannelEnum("channel").notNull().default("manual"),
     status: applicationStatusEnum("status").notNull().default("sent"),
     furthestStage: applicationStatusEnum("furthest_stage").notNull().default("sent"),
     closedReason: applicationClosedReasonEnum("closed_reason"),
@@ -745,6 +813,51 @@ export const jobRejections = pgTable(
   (table) => [
     primaryKey({ columns: [table.profileId, table.jobId] }),
     index("job_rejections_job_idx").on(table.jobId),
+  ],
+);
+
+export const aiApplicationStateEnum = pgEnum("ai_application_state", [
+  "draft",
+  "queued",
+  "running",
+  "submitting",
+  "submitted",
+  "rehearsed",
+  "assisted",
+  "needs_check",
+  "cancelled",
+]);
+
+export const aiApplications = pgTable(
+  "ai_applications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "restrict" }),
+    state: aiApplicationStateEnum("state").notNull().default("draft"),
+    reason: varchar("reason", { length: 50 }),
+    form: jsonb("form").$type<{ questions: FormQuestion[] }>().notNull(),
+    draft: jsonb("draft").$type<DraftAnswer[]>().notNull(),
+    confirmed: jsonb("confirmed").$type<ConfirmedAnswer[]>(),
+    rehearsal: boolean("rehearsal").notNull().default(false),
+    resumeId: uuid("resume_id").references(() => resumes.id, { onDelete: "set null" }),
+    evidence: jsonb("evidence").$type<AttemptEvidence>(),
+    screenshotKey: varchar("screenshot_key", { length: 512 }),
+    preparedAt: timestamp("prepared_at").notNull(),
+    confirmedAt: timestamp("confirmed_at"),
+    finishedAt: timestamp("finished_at"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("ai_applications_active_idx")
+      .on(table.profileId, table.jobId)
+      .where(sql`${table.state} in ('draft', 'queued', 'running', 'submitting', 'needs_check')`),
+    index("ai_applications_profile_created_idx").on(table.profileId, table.createdAt),
   ],
 );
 

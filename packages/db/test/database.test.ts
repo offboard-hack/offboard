@@ -14,6 +14,7 @@ import {
 import { seedApplications, seedCohortApplications } from "../src/application.fixture.ts";
 import { seedJobs } from "../src/job.fixture.ts";
 import {
+  aiApplications,
   answerQuestions,
   applicationEvents,
   applicationPackages,
@@ -1143,6 +1144,173 @@ it.skipIf(!url)("stores preferences, answers, rejections and packages", async ()
     await db.delete(talentProfiles).where(eq(talentProfiles.id, profileId));
     expect(await db.select().from(talentAnswers)).toHaveLength(0);
     expect(await db.select().from(talentPreferences)).toHaveLength(0);
+  } finally {
+    await db.$client.end();
+  }
+});
+
+it.skipIf(!url)("stores AI applications", async () => {
+  const db = createClient(url ?? "");
+
+  try {
+    await migrate(db, {
+      migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
+    });
+    await seedDatabase(db);
+
+    const profileId = await marinaProfileId(db);
+    const seeded = await db.select().from(applications);
+
+    expect(seeded.length).toBeGreaterThan(0);
+    expect(seeded.every((item) => item.channel === "manual")).toBe(true);
+    expect(await db.select().from(aiApplications)).toHaveLength(0);
+
+    const [profile] = await db
+      .select()
+      .from(talentProfiles)
+      .where(eq(talentProfiles.id, profileId));
+
+    expect(profile.aiApplyConsentAt).toBeNull();
+    expect(profile.aiApplyConsentVersion).toBeNull();
+
+    const consentAt = new Date("2026-11-25T12:00:00Z");
+    await db
+      .update(talentProfiles)
+      .set({ aiApplyConsentAt: consentAt, aiApplyConsentVersion: "2026-11-25" })
+      .where(eq(talentProfiles.id, profileId));
+
+    const [consented] = await db
+      .select()
+      .from(talentProfiles)
+      .where(eq(talentProfiles.id, profileId));
+
+    expect(consented.aiApplyConsentAt).toEqual(consentAt);
+    expect(consented.aiApplyConsentVersion).toBe("2026-11-25");
+
+    const applied = new Set(
+      seeded.filter((item) => item.profileId === profileId).map((item) => item.jobId),
+    );
+
+    const allJobs = await db.select({ id: jobs.id }).from(jobs);
+    const job = allJobs.find((item) => !applied.has(item.id));
+    const other = allJobs.find((item) => item.id !== job?.id);
+
+    if (!job || !other) {
+      throw new Error("expected seeded jobs");
+    }
+
+    const form = {
+      questions: [
+        {
+          id: "first_name",
+          label: "First Name",
+          required: true,
+          section: "questions" as const,
+          fields: [{ name: "first_name", type: "text" as const, options: [] }],
+          kind: "first_name" as const,
+          sensitive: false,
+        },
+      ],
+    };
+
+    const draft = [
+      {
+        questionId: "first_name",
+        value: "Marina",
+        source: "account" as const,
+        inferred: false,
+        status: "filled" as const,
+      },
+    ];
+
+    const now = new Date("2026-11-25T12:00:00Z");
+    const values = { profileId, jobId: job.id, form, draft, preparedAt: now };
+
+    const [first] = await db.insert(aiApplications).values(values).returning();
+
+    expect(first).toMatchObject({
+      state: "draft",
+      reason: null,
+      confirmed: null,
+      rehearsal: false,
+      resumeId: null,
+      evidence: null,
+      screenshotKey: null,
+      confirmedAt: null,
+      finishedAt: null,
+      form,
+      draft,
+    });
+    expect(first.createdAt).toBeInstanceOf(Date);
+    expect(first.updatedAt).toBeInstanceOf(Date);
+
+    await expect(db.insert(aiApplications).values(values)).rejects.toMatchObject({
+      cause: { code: "23505" },
+    });
+
+    for (const state of ["queued", "running", "submitting", "needs_check"] as const) {
+      await db.update(aiApplications).set({ state }).where(eq(aiApplications.id, first.id));
+      await expect(db.insert(aiApplications).values(values)).rejects.toMatchObject({
+        cause: { code: "23505" },
+      });
+    }
+
+    await db.insert(aiApplications).values({ ...values, jobId: other.id });
+
+    for (const state of ["submitted", "rehearsed", "assisted", "cancelled"] as const) {
+      await db
+        .update(aiApplications)
+        .set({ state, reason: "document_required", finishedAt: now })
+        .where(eq(aiApplications.id, first.id));
+      const [again] = await db.insert(aiApplications).values(values).returning();
+      await db.delete(aiApplications).where(eq(aiApplications.id, again.id));
+    }
+
+    await expect(
+      db.insert(aiApplications).values({ ...values, state: sql`'bogus'` }),
+    ).rejects.toMatchObject({ cause: { code: "22P02" } });
+    await expect(
+      db.insert(aiApplications).values({ ...values, jobId: sql`null` }),
+    ).rejects.toMatchObject({ cause: { code: "23502" } });
+
+    const [resume] = await db.select().from(resumes).where(eq(resumes.profileId, profileId));
+
+    const [linked] = await db
+      .insert(aiApplications)
+      .values({
+        ...values,
+        state: "cancelled",
+        resumeId: resume.id,
+        confirmed: [{ questionId: "first_name", value: "Marina" }],
+        evidence: {
+          fields: [{ question: "first_name", value: "Marina" }],
+          files: [],
+          finalUrl: null,
+        },
+        screenshotKey: "evidence/shot.png",
+        rehearsal: true,
+      })
+      .returning();
+
+    expect(linked).toMatchObject({ rehearsal: true, screenshotKey: "evidence/shot.png" });
+
+    await db.delete(resumes).where(eq(resumes.id, resume.id));
+
+    const [orphaned] = await db
+      .select()
+      .from(aiApplications)
+      .where(eq(aiApplications.id, linked.id));
+
+    expect(orphaned.resumeId).toBeNull();
+
+    await db.delete(applications);
+    await db.delete(resumes).where(eq(resumes.kind, "tailored"));
+    await expect(db.delete(jobs).where(eq(jobs.id, job.id))).rejects.toMatchObject({
+      cause: { code: "23503" },
+    });
+
+    await db.delete(talentProfiles).where(eq(talentProfiles.id, profileId));
+    expect(await db.select().from(aiApplications)).toHaveLength(0);
   } finally {
     await db.$client.end();
   }

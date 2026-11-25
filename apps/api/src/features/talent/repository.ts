@@ -67,6 +67,8 @@ export function createTalentRepository(db: Database) {
               termsAcceptedAt: sql<null>`null::timestamp`.as("terms_accepted_at"),
               firstSignedInAt: sql<null>`null::timestamp`.as("first_signed_in_at"),
               shareOutcomeWithHr: sql<boolean>`false`.as("share_outcome_with_hr"),
+              aiApplyConsentAt: sql<null>`null::timestamp`.as("ai_apply_consent_at"),
+              aiApplyConsentVersion: sql<null>`null::varchar`.as("ai_apply_consent_version"),
               createdAt: sql<Date>`now()`.as("created_at"),
               updatedAt: sql<Date>`now()`.as("updated_at"),
             })
