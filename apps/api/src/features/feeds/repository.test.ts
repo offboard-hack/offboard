@@ -116,6 +116,9 @@ describe.skipIf(!url)("feeds repository", () => {
     expect(await feeds.remove(feed.id)).toBe(false);
     expect(await feeds.get(feed.id)).toBeUndefined();
     expect(await jobsOf("lever")).toMatchObject([{ sourceKey: "acme:1", closedAt: null }]);
+    expect(
+      await feeds.create({ provider: "lever", board: "acme", companyLabel: null }),
+    ).toMatchObject({ openJobs: 1 });
   });
 
   it("rethrows unexpected errors when creating a feed", async () => {

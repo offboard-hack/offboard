@@ -79,9 +79,12 @@ export function createFeedsRepository(db: Database) {
 
   async function create(input: { provider: Provider; board: string; companyLabel: string | null }) {
     try {
-      const [row] = await db.insert(jobFeeds).values(input).returning(feedColumns);
+      const [{ openJobs: count, ...row }] = await db
+        .insert(jobFeeds)
+        .values(input)
+        .returning({ ...feedColumns, openJobs });
 
-      return toView(row, 0);
+      return toView(row, count);
     } catch (error) {
       if (uniqueViolation.safeParse(error).success) return "exists";
 
