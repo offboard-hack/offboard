@@ -6,9 +6,14 @@ import { createRepositories } from "./repositories.js";
 import { createApp } from "./app.js";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
+import { parseAllowlist } from "./shared/ai-apply-access.js";
+import { createGenerateStructured, gatewayModel } from "./shared/ai.js";
+import { diskStorage } from "./shared/disk-storage.js";
+import type { WelcomeMessage } from "./features/talent/welcome.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 
 const db = createClient(process.env.POSTGRES_URL ?? "");
+const repos = createRepositories(db);
 
 const noopAuth: PortalAuth = {
   handler: () => Promise.resolve(new Response("Auth not configured", { status: 501 })),
@@ -28,24 +33,36 @@ const noopAuth: PortalAuth = {
 function buildApp() {
   let auth: PortalAuth;
   let origin: string;
+  let sendEmail: (message: WelcomeMessage) => Promise<void>;
 
   try {
-    const runtime = createRuntimeAuth(db, process.env.WEB_ORIGIN);
+    const runtime = createRuntimeAuth(db, repos.talent, process.env.WEB_ORIGIN);
     auth = runtime.auth;
     origin = runtime.origin;
+    sendEmail = (message) => runtime.sender.send(message);
   } catch {
     auth = noopAuth;
     origin = process.env.WEB_ORIGIN ?? "*";
+    sendEmail = () => Promise.reject(new Error("Email not configured"));
   }
 
-  return createApp(origin, createRepositories(db), {
+  return createApp(origin, repos, {
     adapter: node(),
     auth,
+    sendEmail,
     cronSecret: process.env.CRON_SECRET,
     webhookSecret: process.env.WEBHOOK_SECRET,
     slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
     abacatepay: createAbacatePayGateway(process.env.ABACATEPAY_API_KEY),
     abacatepayWebhookSecret: process.env.ABACATEPAY_WEBHOOK_SECRET,
+    generateStructured: process.env.AI_GATEWAY_API_KEY
+      ? createGenerateStructured(gatewayModel(process.env.AI_GATEWAY_API_KEY))
+      : undefined,
+    storage: process.env.RESUME_STORAGE_DIR
+      ? diskStorage(process.env.RESUME_STORAGE_DIR)
+      : undefined,
+    publicPageOrigin: process.env.PUBLIC_PAGE_ORIGIN,
+    aiApplyAllowlist: parseAllowlist(process.env.AI_APPLY_ALLOWLIST),
   });
 }
 

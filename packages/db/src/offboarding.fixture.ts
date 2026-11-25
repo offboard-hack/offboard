@@ -492,4 +492,35 @@ export const seedCases: readonly SeedCase[] = [
       },
     ],
   },
+  {
+    name: "Helena Pires",
+    role: "Analista financeira",
+    department: "Financeiro",
+    deadline: "2026-12-12",
+    tasks: [
+      {
+        team: "RH e DP",
+        title: "Comunicar desligamento e aviso prévio",
+        status: "done",
+        phase: "pre",
+      },
+      { team: "RH e DP", title: "Agendar exame demissional", status: "todo", phase: "pre" },
+      { team: "TI", title: "Bloquear acessos no último dia", status: "todo", phase: "d0" },
+    ],
+  },
+  {
+    name: "Diego Rocha",
+    role: "Desenvolvedor",
+    department: "Tecnologia",
+    deadline: "2026-12-19",
+    tasks: [
+      {
+        team: "RH e DP",
+        title: "Comunicar desligamento e aviso prévio",
+        status: "in_progress",
+        phase: "pre",
+      },
+      { team: "TI", title: "Coletar notebook e acessórios", status: "todo", phase: "first-week" },
+    ],
+  },
 ];

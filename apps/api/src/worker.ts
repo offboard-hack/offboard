@@ -5,6 +5,9 @@ import { createApp } from "./app.js";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
 import { emailProvider, type CloudflareEmailBinding } from "./features/auth/email.js";
+import { parseAllowlist } from "./shared/ai-apply-access.js";
+import { createGenerateStructured, gatewayModel } from "./shared/ai.js";
+import { r2Storage, type R2BucketLike } from "./shared/object-storage.js";
 import { createRepositories } from "./repositories.js";
 
 const runtimeConfig = z.object({
@@ -19,16 +22,20 @@ const runtimeConfig = z.object({
   SLACK_SIGNING_SECRET: z.string().min(1).optional(),
   ABACATEPAY_API_KEY: z.string().min(1).optional(),
   ABACATEPAY_WEBHOOK_SECRET: z.string().min(1).optional(),
+  AI_GATEWAY_API_KEY: z.string().min(1).optional(),
+  AI_APPLY_ALLOWLIST: z.string().optional(),
+  PUBLIC_PAGE_ORIGIN: z.string().min(1).optional(),
 });
 
 export type WorkerBindings = Partial<z.input<typeof runtimeConfig>> & {
   EMAIL?: CloudflareEmailBinding;
   HYPERDRIVE?: { connectionString: string };
+  RESUMES?: R2BucketLike;
 };
 
 export function createWorkerApi(
   bindings: WorkerBindings,
-  deferMagicLinkDelivery: (delivery: Promise<void>) => void,
+  waitUntil: (task: Promise<unknown>) => void,
 ) {
   const config = runtimeConfig.safeParse(bindings);
   const hyperdrive = bindings.HYPERDRIVE;
@@ -50,22 +57,35 @@ export function createWorkerApi(
   }
 
   const { db, run } = createRequestScopedClient(getDatabaseUrl);
+  const repos = createRepositories(db);
 
-  const { auth, origin } = createRuntimeAuth(db, undefined, {
+  const { auth, origin, sender } = createRuntimeAuth(db, repos.talent, undefined, {
     env: config.data,
     ipAddressHeaders: ["cf-connecting-ip"],
     cloudflareEmail: bindings.EMAIL,
-    deferMagicLinkDelivery,
+    deferMagicLinkDelivery: waitUntil,
   });
 
-  const app = createApp(origin, createRepositories(db), {
+  const aiKey = config.data.AI_GATEWAY_API_KEY;
+
+  const app = createApp(origin, repos, {
     adapter: CloudflareAdapter,
     auth,
+    sendEmail: (message) => sender.send(message),
     cronSecret: config.data.CRON_SECRET,
     webhookSecret: config.data.WEBHOOK_SECRET,
     slackSigningSecret: config.data.SLACK_SIGNING_SECRET,
     abacatepay: createAbacatePayGateway(config.data.ABACATEPAY_API_KEY),
     abacatepayWebhookSecret: config.data.ABACATEPAY_WEBHOOK_SECRET,
+    generateStructured: aiKey ? createGenerateStructured(gatewayModel(aiKey)) : undefined,
+    storage: bindings.RESUMES && r2Storage(bindings.RESUMES),
+    publicPageOrigin: config.data.PUBLIC_PAGE_ORIGIN,
+    aiApplyAllowlist: parseAllowlist(config.data.AI_APPLY_ALLOWLIST),
+    runInBackground: (task) => {
+      const background = run(task).catch(() => undefined);
+
+      waitUntil(background);
+    },
   }).compile();
 
   return (request: Request) => run(() => Promise.resolve(app.handle(request)));

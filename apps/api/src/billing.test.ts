@@ -156,9 +156,9 @@ describe.skipIf(!url)("billing", () => {
     );
   });
 
-  let app = createApp(webOrigin, repos, { auth });
+  let app = createApp(webOrigin, repos, { auth, sendEmail: () => Promise.resolve() });
 
-  const unconfigured = createApp(webOrigin, repos, { auth });
+  const unconfigured = createApp(webOrigin, repos, { auth, sendEmail: () => Promise.resolve() });
 
   function call(path: string, init: { method?: string; session?: string; body?: string } = {}) {
     const headers = new Headers({ origin: webOrigin });
@@ -218,6 +218,7 @@ describe.skipIf(!url)("billing", () => {
 
     app = createApp(webOrigin, repos, {
       auth,
+      sendEmail: () => Promise.resolve(),
       abacatepay: createAbacatePayGateway("secret-key", base),
       abacatepayWebhookSecret: webhookSecret,
     });

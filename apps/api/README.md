@@ -63,8 +63,13 @@ public health endpoint at `http://127.0.0.1:3001/api/health` returns
 | `CRON_SECRET`               | Bearer secret for `/api/correios/check`. Vercel Cron sends this automatically.                                                                                                                      |
 | `WEBHOOK_SECRET`            | Bearer secret for `/api/webhooks/inbound/:taskId`.                                                                                                                                                  |
 | `SLACK_SIGNING_SECRET`      | Slack app signing secret for `/api/integrations/slack/events`.                                                                                                                                      |
+| `AI_GATEWAY_API_KEY`        | Optional Vercel AI Gateway key. Enables résumé reading, scoring, tailoring and job matching; without it résumé upload and tailoring return 503.                                                     |
+| `AI_APPLY_ALLOWLIST`        | Optional comma-separated personal emails allowed to use AI Apply. Requires `AI_GATEWAY_API_KEY` and the person's own consent; empty means nobody.                                                   |
+| `RESUME_STORAGE_DIR`        | Optional directory for uploaded résumé files in local and Node runs. Without storage, `POST /api/me/resume/upload` returns 503.                                                                     |
+| `OFFBOARD_RESUMES_BUCKET`   | Build-time R2 bucket name. Binds `RESUMES` on the Worker; without it, résumé uploads return 503.                                                                                                    |
 | `ABACATEPAY_API_KEY`        | AbacatePay API key. Without it `POST /api/billing/checkout` returns 503.                                                                                                                            |
 | `ABACATEPAY_WEBHOOK_SECRET` | Secret for `POST /api/billing/webhook`, sent as `?webhookSecret=` or used to verify Standard Webhooks signatures.                                                                                   |
+| `PUBLIC_PAGE_ORIGIN`        | Optional origin for public résumé links (`<origin>/p/<slug>`). Defaults to the portal origin.                                                                                                       |
 
 ## Grant and revoke access
 
@@ -143,6 +148,9 @@ binding:
 ```sh
 EMAIL_PROVIDER=cloudflare OFFBOARD_API_CONFIGURED=1 npm run deploy:cloudflare -w @offboard/web -- --secrets-file /path/to/preview-secrets.env
 ```
+
+Set `OFFBOARD_AI_CONFIGURED=1` for the build to declare the `AI_GATEWAY_API_KEY`
+secret, and `OFFBOARD_AI_APPLY_CONFIGURED=1` to declare `AI_APPLY_ALLOWLIST`.
 
 Include `WEBHOOK_SECRET` and `SLACK_SIGNING_SECRET` in that file if you plan to
 test the corresponding integrations. To enable the Correios schedule, include

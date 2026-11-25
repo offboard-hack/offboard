@@ -10,6 +10,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import { talentProfiles } from "./index.ts";
 
 export const authUser = pgTable("auth_user", {
   id: text("id").primaryKey(),
@@ -32,6 +33,9 @@ export const authSession = pgTable(
     memberId: uuid("member_id"),
     employeeCaseId: uuid("employee_case_id"),
     employeeGrantId: uuid("employee_grant_id"),
+    talentProfileId: uuid("talent_profile_id").references(() => talentProfiles.id, {
+      onDelete: "cascade",
+    }),
     expiresAt: timestamp("expires_at").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -43,7 +47,7 @@ export const authSession = pgTable(
     index("auth_session_employee_case_id_idx").on(table.employeeCaseId),
     check(
       "auth_session_one_audience",
-      sql`num_nonnulls(${table.memberId}, ${table.employeeCaseId}) = 1`,
+      sql`num_nonnulls(${table.memberId}, ${table.employeeCaseId}, ${table.talentProfileId}) = 1`,
     ),
     check(
       "auth_session_employee_grant",

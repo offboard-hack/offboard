@@ -21,10 +21,13 @@ export const portalPrincipalResponse = t.Composite([
   t.Object({ orgId: t.String({ format: "uuid" }) }),
 ]);
 
+export type TalentPrincipal = { id: string; name: string; email: string };
+
 export type PortalAccess =
   | { kind: "anonymous" }
   | { kind: "forbidden" }
-  | { kind: "authenticated"; principal: PortalPrincipal };
+  | { kind: "authenticated"; principal: PortalPrincipal }
+  | { kind: "talent"; profile: TalentPrincipal };
 
 export type PortalAuth = {
   handler: (request: Request) => Promise<Response>;
