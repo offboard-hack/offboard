@@ -16,7 +16,10 @@ describe("parseAllowlist", () => {
 });
 
 describe("aiApplyAccess", () => {
-  const consented = { personalEmail: "Ana@Example.com", aiApplyConsentAt: new Date() };
+  const consented = {
+    personalEmail: "Ana@Example.com",
+    aiApplyConsentAt: "2026-11-25T00:00:00.000Z",
+  };
 
   it("allows a consenting, allowlisted email regardless of case", () => {
     expect(aiApplyAccess(consented, ["ana@example.com"])).toBe("allowed");
@@ -25,6 +28,11 @@ describe("aiApplyAccess", () => {
   it("rejects an empty allowlist or another email", () => {
     expect(aiApplyAccess(consented, [])).toBe("not_allowed");
     expect(aiApplyAccess(consented, ["bia@example.com"])).toBe("not_allowed");
+  });
+
+  it("normalizes allowlist entries and ignores empty ones", () => {
+    expect(aiApplyAccess(consented, ["  ANA@example.COM "])).toBe("allowed");
+    expect(aiApplyAccess({ ...consented, personalEmail: " " }, [" ", ""])).toBe("not_allowed");
   });
 
   it("rejects a missing consent", () => {

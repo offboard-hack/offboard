@@ -723,11 +723,19 @@ describe.skipIf(!url)("api", () => {
       const others = await seedAttempt(other.id, "ai-other", "draft");
 
       await put(gated, "talent", other.id, true);
+
+      const older = new Date("2020-01-01T00:00:00Z");
+
+      await db
+        .update(talentProfiles)
+        .set({ aiApplyConsentAt: older, aiApplyConsentVersion: "2020-01-01" })
+        .where(eq(talentProfiles.id, mine.id));
       await put(gated, "talent", mine.id, true);
 
-      expect((await consentOf(mine.id)).at?.getTime()).toBeGreaterThanOrEqual(
-        stored.at?.getTime() ?? 0,
-      );
+      const refreshed = await consentOf(mine.id);
+
+      expect(refreshed.at?.getTime()).toBeGreaterThan(older.getTime());
+      expect(refreshed.version).toBe("2026-11-25");
 
       const withdrawn = await put(gated, "talent", mine.id, false);
 

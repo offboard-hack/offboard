@@ -41,10 +41,8 @@ function toTalentAccess(profile: TalentProfile) {
 type AiApply = { allowlist: string[]; configured: boolean };
 
 function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: AiApply) {
-  const consentAt = profile.aiApplyConsentAt === null ? null : new Date(profile.aiApplyConsentAt);
-
   const access = aiApplyAccess(
-    { personalEmail: profile.email, aiApplyConsentAt: consentAt },
+    { personalEmail: profile.email, aiApplyConsentAt: profile.aiApplyConsentAt },
     aiApply.allowlist,
   );
 
@@ -55,7 +53,7 @@ function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: AiApply
     termsAccepted: profile.termsAcceptedAt !== null,
     shareOutcomeWithHr: profile.shareOutcomeWithHr,
     aiApply: {
-      consented: consentAt !== null,
+      consented: profile.aiApplyConsentAt !== null,
       available: access === "allowed" && aiApply.configured,
     },
     entitlement,

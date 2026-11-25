@@ -256,7 +256,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         talent,
         (profile) => options.sendEmail(welcomeEmail(profile, webOrigin)),
         {
-          allowlist: (options.aiApplyAllowlist ?? []).map((email) => email.toLowerCase()),
+          allowlist: options.aiApplyAllowlist ?? [],
           configured: options.generateStructured !== undefined,
         },
       ),
