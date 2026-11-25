@@ -11,7 +11,7 @@ import UserCircleIcon from "@hugeicons/core-free-icons/UserCircleIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { employeeDate } from "@offboard/employee";
 import { applicationCounts } from "@offboard/employee/career";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, type ErrorComponentProps } from "@tanstack/react-router";
 import { useCallback, type ReactNode } from "react";
 import {
@@ -28,7 +28,7 @@ import {
   Handoff,
   Termination,
 } from "@/features/employee/departure";
-import { Privacy, Profile } from "@/features/employee/privacy";
+import { Privacy, PrivacyNotice, Profile } from "@/features/employee/privacy";
 import { subscribeToSessionChanges } from "@/shared/lib/session-change";
 import { ListPage, type ListMetric } from "@/shared/ui/list-page";
 import { ListPendingPage } from "@/shared/ui/list-pending-page";
@@ -109,13 +109,13 @@ function parentScreen(screen: EmployeeScreen) {
 
 export function EmployeePage() {
   const { account } = route.useRouteContext();
-  const { tela } = route.useSearch();
+  const { tela: screen } = route.useSearch();
 
   const { data: consent, refetch: recheckAccess } = useSuspenseQuery(
     employeeStateQuery(account, "consent"),
   );
 
-  const accepted = consent.key === "consent" && consent.value.accepted;
+  const { data: journey } = useSuspenseQuery(employeeJourneyQuery(account));
 
   const onMainMount = useCallback(
     () =>
@@ -125,14 +125,7 @@ export function EmployeePage() {
     [recheckAccess],
   );
 
-  const { data: journey } = useQuery({
-    ...employeeJourneyQuery(account),
-    enabled: accepted,
-  });
-
   if (consent.key !== "consent") throw new Error("Não foi possível abrir suas escolhas.");
-
-  const screen = accepted ? tela : "privacidade";
 
   return (
     <PortalLayout
@@ -140,37 +133,32 @@ export function EmployeePage() {
       fullWidth
       focusOnSearch
       onMainMount={onMainMount}
-      workspaceName={journey?.plan.company ?? workspaceName}
+      workspaceName={journey.plan.company ?? workspaceName}
       sidebarDescription={sidebarDescription}
-      navigation={accepted ? <EmployeeNavigation screen={screen} /> : null}
+      navigation={<EmployeeNavigation screen={screen} />}
       accountMenu={
         <SidebarUser name={account.name} label="Colaborador" signInPath="/colaborador/entrar">
-          {accepted ? (
-            <SidebarUserItem
-              link={<Link to="/colaborador" search={{ tela: "perfil" }} />}
-              icon={UserCircleIcon}
-            >
-              Perfil
-            </SidebarUserItem>
-          ) : null}
+          <SidebarUserItem
+            link={<Link to="/colaborador" search={{ tela: "perfil" }} />}
+            icon={UserCircleIcon}
+          >
+            Perfil
+          </SidebarUserItem>
         </SidebarUser>
       }
     >
-      {screen === "privacidade" ? (
-        <EmployeeScreenPage
-          screen={screen}
-          showPath={accepted}
-          title={accepted ? titles[screen] : "Sua jornada é privada"}
-        >
-          <Privacy
-            account={account}
-            state={consent}
-            signOut={<PortalSignOut signInPath="/colaborador/entrar" />}
-          />
-        </EmployeeScreenPage>
-      ) : (
-        <EmployeeContent screen={screen} account={account} />
-      )}
+      <div className="flex min-h-[calc(100svh-3rem)] flex-col">
+        {screen === "privacidade" ? (
+          <EmployeeScreenPage screen={screen}>
+            <Privacy account={account} state={consent} />
+          </EmployeeScreenPage>
+        ) : (
+          <EmployeeContent screen={screen} account={account} />
+        )}
+        {!consent.value.accepted && (
+          <PrivacyNotice account={account} state={consent} visible={screen !== "privacidade"} />
+        )}
+      </div>
     </PortalLayout>
   );
 }
@@ -258,18 +246,15 @@ function EmployeeNavigation({ screen }: { screen?: EmployeeScreen }) {
 
 function EmployeeScreenPage({
   screen,
-  title = titles[screen],
   metrics,
-  showPath = true,
   children,
 }: {
   screen: EmployeeScreen;
-  title?: string;
   metrics?: ListMetric[];
-  showPath?: boolean;
   children: ReactNode;
 }) {
   const parent = parentScreen(screen);
+  const title = titles[screen];
 
   return (
     <ListPage
@@ -278,7 +263,7 @@ function EmployeeScreenPage({
       breadcrumb={
         <Breadcrumb aria-label="Localização">
           <BreadcrumbList>
-            {showPath && screen !== "hoje" ? (
+            {screen !== "hoje" ? (
               <>
                 <BreadcrumbItem>
                   <BreadcrumbLink render={<Link to="/colaborador" search={{ tela: "hoje" }} />}>
@@ -288,7 +273,7 @@ function EmployeeScreenPage({
                 <BreadcrumbSeparator />
               </>
             ) : null}
-            {showPath && parent !== screen ? (
+            {parent !== screen ? (
               <>
                 <BreadcrumbItem>
                   <BreadcrumbLink render={<Link to="/colaborador" search={{ tela: parent }} />}>
@@ -299,7 +284,7 @@ function EmployeeScreenPage({
               </>
             ) : null}
             <BreadcrumbItem>
-              <BreadcrumbPage>{showPath ? titles[screen] : title}</BreadcrumbPage>
+              <BreadcrumbPage>{title}</BreadcrumbPage>
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>

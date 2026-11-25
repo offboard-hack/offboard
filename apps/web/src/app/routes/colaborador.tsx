@@ -47,12 +47,9 @@ export const Route = createFileRoute("/colaborador")({
     const { account, queryClient } = context;
 
     try {
-      const consent = await queryClient.ensureQueryData(employeeStateQuery(account, "consent"));
-
-      if (consent.key !== "consent" || !consent.value.accepted) return;
-
       await Promise.all([
         queryClient.ensureQueryData(employeeJourneyQuery(account)),
+        queryClient.ensureQueryData(employeeStateQuery(account, "consent")),
         queryClient.ensureQueryData(employeeStateQuery(account, "departure-v1")),
         queryClient.ensureQueryData(employeeStateQuery(account, "career")),
       ]);

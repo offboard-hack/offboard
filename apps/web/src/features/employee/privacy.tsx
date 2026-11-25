@@ -1,52 +1,82 @@
 import SecurityCheckIcon from "@hugeicons/core-free-icons/SecurityCheckIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { EmployeeState } from "@offboard/employee";
-import { useForm } from "@tanstack/react-form";
-import { useQueryClient } from "@tanstack/react-query";
 import { Link, useHydrated } from "@tanstack/react-router";
-import type { ReactNode } from "react";
-import { z } from "zod";
-import { type EmployeeAccount, employeeJourneyQuery, useEmployeeWrite } from "@/entities/employee";
+import { useState, type ReactNode } from "react";
+import { type EmployeeAccount, useEmployeeWrite } from "@/entities/employee";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/shadcn/alert";
-import { Checkbox } from "@/shared/ui/shadcn/checkbox";
 import { Button } from "@/shared/ui/shadcn/button";
+import { Card, CardContent, CardHeader } from "@/shared/ui/shadcn/card";
 import { EmployeeError, EmployeePanel } from "./ui";
 
-const consentForm = z.object({
-  terms: z.boolean().refine((value) => value, "Aceite os Termos de uso para continuar."),
-  privacy: z.boolean().refine((value) => value, "Confirme a leitura da Política de privacidade."),
-});
-
-export function Privacy({
-  account,
-  state,
-  signOut,
-}: {
+type PrivacyChoice = {
   account: EmployeeAccount;
   state: Extract<EmployeeState, { key: "consent" }>;
-  signOut: ReactNode;
-}) {
+};
+
+const acceptanceText =
+  "Ao aceitar, você concorda com os Termos de uso e confirma a leitura da Política de privacidade.";
+
+export function PrivacyNotice({ account, state, visible }: PrivacyChoice & { visible: boolean }) {
+  const [dismissed, setDismissed] = useState(false);
+
+  if (!visible || dismissed) return null;
+
+  return (
+    <aside
+      aria-labelledby="aviso-privacidade"
+      className="sticky bottom-0 z-10 mt-auto ml-auto w-full max-w-md px-3 pb-3 sm:px-6 sm:pb-4"
+    >
+      <Card size="sm" className="gap-3 shadow-lg ring-0">
+        <CardHeader className="gap-1">
+          <h2 id="aviso-privacidade" className="text-base font-semibold">
+            Termos e privacidade
+          </h2>
+          <p className="text-muted-foreground">
+            {acceptanceText}{" "}
+            <Link
+              to="/colaborador"
+              search={{ tela: "privacidade" }}
+              className="font-medium text-primary underline underline-offset-4"
+            >
+              Ler os documentos
+            </Link>
+          </p>
+        </CardHeader>
+        <CardContent>
+          <PrivacyActions account={account} state={state} onDismiss={() => setDismissed(true)} />
+        </CardContent>
+      </Card>
+    </aside>
+  );
+}
+
+function PrivacyActions({ account, state, onDismiss }: PrivacyChoice & { onDismiss?: () => void }) {
   const hydrated = useHydrated();
-  const queryClient = useQueryClient();
   const write = useEmployeeWrite(account);
 
-  const form = useForm({
-    defaultValues: { terms: false, privacy: false },
-    validators: { onSubmit: consentForm },
-    onSubmit: ({ value }) => {
-      consentForm.parse(value);
-      write.mutate(
-        { ...state, value: { accepted: true } },
-        {
-          onSuccess: () =>
-            void queryClient.invalidateQueries({
-              queryKey: employeeJourneyQuery(account).queryKey,
-            }),
-        },
-      );
-    },
-  });
+  return (
+    <div className="grid gap-2">
+      <EmployeeError message={write.error?.message} />
+      <div className={onDismiss ? "flex flex-wrap justify-end gap-2" : "flex"}>
+        {onDismiss && (
+          <Button type="button" variant="ghost" disabled={write.isPending} onClick={onDismiss}>
+            Agora não
+          </Button>
+        )}
+        <Button
+          type="button"
+          disabled={!hydrated || write.isPending}
+          onClick={() => write.mutate({ ...state, value: { accepted: true } })}
+        >
+          {write.isPending ? "Salvando…" : "Aceitar"}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
+export function Privacy({ account, state }: PrivacyChoice) {
   return (
     <div className="space-y-5">
       <Alert role="note">
@@ -54,7 +84,7 @@ export function Privacy({
         <AlertTitle>Dados vinculados à sua conta</AlertTitle>
         <AlertDescription>Seu progresso fica disponível no aplicativo e na web.</AlertDescription>
       </Alert>
-      <EmployeePanel title="Antes de continuar">
+      <EmployeePanel title="Termos e política">
         <div className="divide-y">
           <details className="py-3">
             <summary className="cursor-pointer font-bold">Termos de uso</summary>
@@ -78,56 +108,12 @@ export function Privacy({
             Suas escolhas estão salvas na sua conta.
           </p>
         ) : (
-          <form
-            noValidate
-            className="grid gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void form.handleSubmit();
-            }}
-          >
-            <form.Field name="terms">
-              {(field) => (
-                <div>
-                  <label className="flex min-h-11 items-center gap-2">
-                    <Checkbox
-                      disabled={!hydrated || write.isPending}
-                      checked={field.state.value}
-                      onCheckedChange={field.handleChange}
-                    />{" "}
-                    Li e aceito os Termos de uso.
-                  </label>
-                  <EmployeeError message={field.state.meta.errors[0]?.message} />
-                </div>
-              )}
-            </form.Field>
-            <form.Field name="privacy">
-              {(field) => (
-                <div>
-                  <label className="flex min-h-11 items-center gap-2">
-                    <Checkbox
-                      disabled={!hydrated || write.isPending}
-                      checked={field.state.value}
-                      onCheckedChange={field.handleChange}
-                    />{" "}
-                    Li a Política de privacidade.
-                  </label>
-                  <EmployeeError message={field.state.meta.errors[0]?.message} />
-                </div>
-              )}
-            </form.Field>
-            <EmployeeError message={write.error?.message} />
-            <Button
-              type="submit"
-              className="justify-self-start"
-              disabled={!hydrated || write.isPending}
-            >
-              {write.isPending ? "Salvando…" : "Salvar escolhas e continuar"}
-            </Button>
-          </form>
+          <>
+            <p className="text-sm text-muted-foreground">{acceptanceText}</p>
+            <PrivacyActions account={account} state={state} />
+          </>
         )}
       </EmployeePanel>
-      {!state.value.accepted ? signOut : null}
     </div>
   );
 }

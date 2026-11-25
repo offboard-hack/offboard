@@ -1388,7 +1388,10 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     expect((await signIn(email, codes.get(email) ?? "")).status).toBe(400);
     expect((await request("/session", "GET", cookie)).status).toBe(403);
     expect((await request(`/employee-access/${second.id}`, "GET", cookie)).status).toBe(403);
-    expect((await request("/employee/journey", "GET", cookie)).status).toBe(403);
+    const journeyBeforeConsent = await request("/employee/journey", "GET", cookie);
+    expect(journeyBeforeConsent.status).toBe(200);
+    expect(journeyBeforeConsent.headers.get("cache-control")).toBe("private, no-store");
+    expect(await journeyBeforeConsent.json()).toMatchObject({ deadline: first.deadline, plan });
 
     const initialConsent = await request("/employee/state/consent", "GET", cookie);
     expect(await initialConsent.json()).toEqual({
@@ -1396,7 +1399,13 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       revision: 0,
       value: { accepted: false },
     });
-    expect((await request("/employee/state/career", "GET", cookie)).status).toBe(403);
+    const careerBeforeConsent = await request("/employee/state/career", "GET", cookie);
+    expect(careerBeforeConsent.status).toBe(200);
+    expect(await careerBeforeConsent.json()).toMatchObject({
+      key: "career",
+      revision: 0,
+      value: { base: { name: first.name }, versions: [], applications: [] },
+    });
 
     const blockedDeparture: EmployeeState = {
       key: "departure-v1",

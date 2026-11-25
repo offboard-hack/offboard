@@ -66,34 +66,21 @@ export function employeeRoutes(
               }
             })
             .get("/journey", async ({ employee, status }) => {
-              const result = await repo.withAccess(employee, "read", async (data) => {
-                const consent = await data.readState("consent");
-
-                if (consent?.key !== "consent" || !consent.value.accepted) {
-                  return status(403, { error: "Consent required" });
-                }
-
-                return data.readJourney();
-              });
+              const result = await repo.withAccess(employee, "read", async (data) =>
+                data.readJourney(),
+              );
 
               return result ?? status(401, { error: "Unauthorized" });
             })
             .get(
               "/state/:key",
               async ({ employee, params, status }) => {
-                const result = await repo.withAccess(employee, "read", async (data) => {
-                  if (params.key !== "consent") {
-                    const consent = await data.readState("consent");
-
-                    if (consent?.key !== "consent" || !consent.value.accepted) {
-                      return status(403, { error: "Consent required" });
-                    }
-                  }
-
-                  return (
-                    (await data.readState(params.key)) ?? initialState(params.key, employee.name)
-                  );
-                });
+                const result = await repo.withAccess(
+                  employee,
+                  "read",
+                  async (data) =>
+                    (await data.readState(params.key)) ?? initialState(params.key, employee.name),
+                );
 
                 return result ?? status(401, { error: "Unauthorized" });
               },

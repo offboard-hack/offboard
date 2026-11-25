@@ -89,10 +89,12 @@ The employee enters a six-digit code delivered through the configured email
 provider at `/colaborador/entrar` or in the mobile app. Clearing or changing
 the email revokes the old employee sessions.
 
-After consent, the same Elysia API serves the journey and saves departure and
-career state in PostgreSQL. Each write includes the revision read by the
-client. Conflicting writes return 409 so the client can refresh the current
-record. A session for the employee area cannot access the HR portal.
+The Elysia API serves the journey to an authenticated employee. Employees can
+read it before accepting the terms and acknowledging the privacy policy.
+Saving departure or career changes in PostgreSQL requires acceptance. Each
+write includes the revision read by the client. Conflicting writes return 409
+so the client can refresh the current record. A session for the employee area
+cannot access the HR portal.
 
 ## Prepare a Vercel preview
 

@@ -104,6 +104,17 @@ export function useEmployeeWrite(account: EmployeeAccount) {
         );
       }
 
+      const errorValue = result.error?.value;
+
+      if (
+        result.status === 403 &&
+        errorValue &&
+        "error" in errorValue &&
+        errorValue.error === "Consent required"
+      ) {
+        throw new Error("Para salvar, aceite os termos em Perfil → Privacidade.");
+      }
+
       if (result.status === 422) {
         void queryClient.invalidateQueries({ queryKey: employeeJourneyQuery(account).queryKey });
         throw new Error("Essa opção não está mais disponível. Confira os dados e tente novamente.");
