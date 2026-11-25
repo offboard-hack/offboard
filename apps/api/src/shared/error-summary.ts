@@ -16,9 +16,21 @@ export function logFailure(context: string) {
   };
 }
 
-export function logUnhandled(cause: unknown) {
+function codeSummary(cause: unknown) {
   const code = causeCode.safeParse(cause);
   const name = cause instanceof Error ? cause.name : "Unknown";
 
-  console.error("unhandled error", code.success ? { name, code: code.data.cause.code } : { name });
+  return code.success ? { name, code: code.data.cause.code } : { name };
+}
+
+export function logUnhandled(cause: unknown) {
+  console.error("unhandled error", codeSummary(cause));
+}
+
+export function logFailureCode(context: string) {
+  return (cause: unknown) => {
+    console.error(context, codeSummary(cause));
+
+    return undefined;
+  };
 }

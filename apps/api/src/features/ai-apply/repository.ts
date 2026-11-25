@@ -1,7 +1,13 @@
 import type { Database } from "@offboard/db/client";
-import type { ConfirmedAnswer, DraftAnswer, FormQuestion } from "@offboard/db/schema";
+import type {
+  AttemptEvidence,
+  ConfirmedAnswer,
+  DraftAnswer,
+  FormQuestion,
+} from "@offboard/db/schema";
 import {
   aiApplications,
+  applicationEvents,
   applicationPackages,
   applications,
   jobRejections,
@@ -32,6 +38,15 @@ import { toAttemptView } from "./view.js";
 const sourceKey = /^([a-z0-9][a-z0-9_-]*):(\d+)$/;
 
 const nonFinal = ["queued", "running", "submitting", "needs_check"] as const;
+
+type AttemptState = (typeof aiApplications.$inferSelect)["state"];
+
+type Finish = {
+  state: Exclude<AttemptState, "draft" | "queued" | "running" | "submitting" | "submitted">;
+  reason: string | null;
+  evidence?: AttemptEvidence;
+  screenshotKey?: string | null;
+};
 
 type NewAttempt = {
   form: { questions: FormQuestion[] };
@@ -366,8 +381,154 @@ export function createAiApplyRepository(db: Database) {
       : ("not_cancellable" as const);
   }
 
+  async function runnable(id: string) {
+    if (!z.uuid().safeParse(id).success) return undefined;
+
+    const [row] = await db
+      .select({
+        attempt: aiApplications,
+        job: { url: jobs.url, closedAt: jobs.closedAt },
+        profile: {
+          name: talentProfiles.name,
+          email: talentProfiles.personalEmail,
+          consentAt: talentProfiles.aiApplyConsentAt,
+        },
+        resume: resumes.content,
+        coverLetter: applicationPackages.coverLetter,
+      })
+      .from(aiApplications)
+      .innerJoin(jobs, eq(jobs.id, aiApplications.jobId))
+      .innerJoin(talentProfiles, eq(talentProfiles.id, aiApplications.profileId))
+      .leftJoin(resumes, eq(resumes.id, aiApplications.resumeId))
+      .leftJoin(
+        applicationPackages,
+        and(
+          eq(applicationPackages.profileId, aiApplications.profileId),
+          eq(applicationPackages.jobId, aiApplications.jobId),
+        ),
+      )
+      .where(eq(aiApplications.id, id));
+
+    return row === undefined
+      ? undefined
+      : { ...row, applied: await hasApplied(row.attempt.profileId, row.attempt.jobId) };
+  }
+
+  async function queuedIds() {
+    const rows = await db
+      .select({ id: aiApplications.id })
+      .from(aiApplications)
+      .where(eq(aiApplications.state, "queued"));
+
+    return rows.map((row) => row.id);
+  }
+
+  async function claimForRun(id: string, now: Date) {
+    const rows = await db
+      .update(aiApplications)
+      .set({ state: "running", updatedAt: now })
+      .where(and(eq(aiApplications.id, id), inArray(aiApplications.state, ["queued", "running"])))
+      .returning({ id: aiApplications.id });
+
+    return rows.length > 0;
+  }
+
+  async function markSubmitting(id: string, now: Date) {
+    const rows = await db
+      .update(aiApplications)
+      .set({ state: "submitting", updatedAt: now })
+      .where(
+        and(
+          eq(aiApplications.id, id),
+          eq(aiApplications.state, "running"),
+          notExists(
+            db
+              .select({ id: applications.id })
+              .from(applications)
+              .where(
+                and(
+                  eq(applications.profileId, aiApplications.profileId),
+                  eq(applications.jobId, aiApplications.jobId),
+                ),
+              ),
+          ),
+        ),
+      )
+      .returning({ id: aiApplications.id });
+
+    return rows.length > 0;
+  }
+
+  async function finish(id: string, from: AttemptState[], outcome: Finish, now: Date) {
+    const rows = await db
+      .update(aiApplications)
+      .set({
+        ...outcome,
+        finishedAt: outcome.state === "needs_check" ? null : now,
+        updatedAt: now,
+      })
+      .where(and(eq(aiApplications.id, id), inArray(aiApplications.state, from)))
+      .returning({ id: aiApplications.id });
+
+    return rows.length > 0;
+  }
+
+  async function submittedWithApplication(
+    id: string,
+    record: { evidence: AttemptEvidence; screenshotKey: string | null },
+    now: Date,
+  ) {
+    return db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(aiApplications)
+        .set({ state: "submitted", reason: null, ...record, finishedAt: now, updatedAt: now })
+        .where(and(eq(aiApplications.id, id), eq(aiApplications.state, "submitting")))
+        .returning({
+          profileId: aiApplications.profileId,
+          jobId: aiApplications.jobId,
+          resumeId: aiApplications.resumeId,
+        });
+
+      if (row === undefined) return "lost" as const;
+
+      const [created] = await tx
+        .insert(applications)
+        .values({
+          ...row,
+          channel: "ai_apply",
+          appliedAt: now,
+          statusChangedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoNothing({ target: [applications.profileId, applications.jobId] })
+        .returning({ id: applications.id });
+
+      if (created === undefined) {
+        await tx
+          .update(aiApplications)
+          .set({ state: "needs_check", finishedAt: null, updatedAt: now })
+          .where(eq(aiApplications.id, id));
+
+        return "needs_check" as const;
+      }
+
+      await tx
+        .insert(applicationEvents)
+        .values({ applicationId: created.id, status: "sent", createdAt: now });
+
+      return "submitted" as const;
+    });
+  }
+
   return {
     attempt,
+    runnable,
+    queuedIds,
+    claimForRun,
+    markSubmitting,
+    finish,
+    submittedWithApplication,
     get,
     list,
     confirm,

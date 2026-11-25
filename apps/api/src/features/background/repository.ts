@@ -1,6 +1,19 @@
 import type { Database } from "@offboard/db/client";
 import { backgroundJobs, type ConfigValue } from "@offboard/db/schema";
-import { and, asc, eq, gte, inArray, lt, lte, notExists, or, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gte,
+  inArray,
+  lt,
+  lte,
+  notExists,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { alias, type PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
@@ -15,6 +28,8 @@ export type BackgroundJob = {
 type Claimed = Pick<BackgroundJob, "id" | "attempts">;
 
 export type ClaimTarget = { kind: string; subject: string };
+
+export type ClaimFilter = { target?: ClaimTarget; kinds?: string[]; excludeKinds?: string[] };
 
 const lockMs = 5 * 60_000;
 const maxAttempts = 3;
@@ -114,10 +129,15 @@ export function createBackgroundRepository(db: Database) {
     }
   }
 
-  async function claim(limit: number, now = new Date(), target?: ClaimTarget) {
-    const targeted =
+  async function claim(limit: number, now = new Date(), filter: ClaimFilter = {}) {
+    const { target, kinds, excludeKinds } = filter;
+
+    const targeted = and(
       target &&
-      and(eq(backgroundJobs.kind, target.kind), eq(backgroundJobs.subject, target.subject));
+        and(eq(backgroundJobs.kind, target.kind), eq(backgroundJobs.subject, target.subject)),
+      kinds && inArray(backgroundJobs.kind, kinds),
+      excludeKinds && notInArray(backgroundJobs.kind, excludeKinds),
+    );
 
     return db.transaction(async (tx) => {
       await tx

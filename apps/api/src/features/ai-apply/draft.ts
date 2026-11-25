@@ -150,7 +150,7 @@ const optionValues = (field: FormField, wanted: string[]) => {
     : null;
 };
 
-const splitName = (name: string) => {
+export const splitName = (name: string) => {
   const parts = name.trim().split(/\s+/);
 
   return { first: parts[0], last: parts.slice(1).join(" ") };

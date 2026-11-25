@@ -37,6 +37,9 @@ import { answersRoutes } from "./features/preferences/answers-routes.js";
 import { readGreenhouseForm } from "./features/ai-apply/greenhouse.js";
 import { createAnswersRepository } from "./features/preferences/answers.js";
 import { aiApplyRoutes } from "./features/ai-apply/routes.js";
+import { createBrowserbase } from "./features/ai-apply/browser/browserbase.js";
+import { openPage } from "./features/ai-apply/browser/cdp.js";
+import { runAiApplication, type RunnerDeps } from "./features/ai-apply/runner.js";
 import { packageRoutes } from "./features/preferences/package-routes.js";
 import { preferencesRoutes } from "./features/preferences/routes.js";
 import type { TrackingConfig } from "./features/offboardings/correios.js";
@@ -65,6 +68,7 @@ type AppOptions = {
   catalog?: readonly CatalogSource[];
   fetchFeedImpl?: typeof fetch;
   fetchGreenhouseImpl?: typeof fetch;
+  fetchBrowserImpl?: typeof fetch;
   storage?: ObjectStorage;
   runInBackground?: (task: () => Promise<void>) => void;
   publicPageOrigin?: string;
@@ -126,7 +130,21 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       void task().catch(() => undefined);
     });
 
+  const fetchBrowser = options.fetchBrowserImpl ?? fetch;
+
+  const runner = {
+    repo: repos.aiApply,
+    allowlist: options.aiApplyAllowlist ?? [],
+    browserbase: options.browserbase && createBrowserbase(fetchBrowser, options.browserbase),
+    openPage: (connectUrl: string) => openPage(fetchBrowser, connectUrl),
+    storage: options.storage,
+    renderResume: ownResumePdf,
+    budgetMs: 200_000,
+    outcomeMs: 30_000,
+  } satisfies RunnerDeps;
+
   const handlers = {
+    ai_apply: (job) => runAiApplication(runner, job.subject, () => new Date()),
     ingest_jobs: async (job) => {
       const source = await repos.sources.get(job.subject);
 
@@ -264,6 +282,14 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       .catch(logFailure("source scheduling failed"));
   }
 
+  async function beforeDrain() {
+    await scheduleSources();
+    await repos.aiApply
+      .queuedIds()
+      .then((ids) => repos.background.enqueueMany("ai_apply", ids))
+      .catch(logFailure("AI application scheduling failed"));
+  }
+
   return new Elysia({ adapter: options.adapter, prefix: "/api" })
     .use(cors({ origin: webOrigin, credentials: false }))
     .onError(({ code, error, status }) => {
@@ -362,6 +388,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
               ? []
               : [{ question: item.text, answer: item.answer, sensitive: item.sensitive }],
           ),
+        enqueueRun: (attemptId) => repos.background.enqueue("ai_apply", attemptId),
         saveAnswer: async (tx, profileId, label, text, { sensitive }, now) => {
           const answers = createAnswersRepository(tx);
           const questionId = await answers.ensureQuestion(label, now, { sensitive });
@@ -370,7 +397,12 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         },
       }),
     )
-    .use(backgroundRoutes(repos.background, handlers, options.cronSecret, scheduleSources))
+    .use(
+      backgroundRoutes(repos.background, handlers, options.cronSecret, {
+        beforeDrain,
+        isolated: { kind: "ai_apply", budgetMs: 210_000 },
+      }),
+    )
     .use(accountRoutes(repos.account, talent, options.storage))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))

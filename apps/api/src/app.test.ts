@@ -1155,6 +1155,138 @@ describe.skipIf(!url)("api", () => {
       ).toBe("Resposta final");
     });
 
+    it("runs a confirmed AI application from the scheduled drain", async () => {
+      const [firstCase] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
+
+      const created = await repos.talent.enable({
+        orgId: defaultOrgId,
+        caseId: firstCase.id,
+        personalEmail,
+        sponsoredUntil,
+      });
+
+      if (
+        created === "case_not_found" ||
+        created === "already_enabled" ||
+        created === "email_taken"
+      ) {
+        throw new Error(created);
+      }
+
+      await repos.talent.acceptTerms(created.id);
+      await repos.talent.setAiApplyConsent(created.id, true, new Date());
+
+      await db.insert(resumes).values({
+        profileId: created.id,
+        kind: "base",
+        content: {
+          headline: { id: "h", text: "Engenheira" },
+          summary: { id: "s", text: "Backend" },
+          experiences: [],
+          education: [],
+          skills: [],
+          languages: [],
+          contact: { email: null, phone: null, city: null, links: [] },
+        },
+      });
+
+      const [job] = await db
+        .insert(jobs)
+        .values({
+          origin: "external",
+          source: "greenhouse",
+          sourceKey: "acme:42",
+          title: "Backend",
+          company: "Acme",
+          url: "https://job-boards.greenhouse.io/acme/jobs/42",
+        })
+        .returning({ id: jobs.id });
+
+      const browser: string[] = [];
+      const logged = vi.spyOn(console, "error");
+
+      const instance = createApp(webOrigin, repos, {
+        ...appOptions,
+        aiApplyAllowlist: [personalEmail],
+        browserbase,
+        generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
+        fetchGreenhouseImpl: async () =>
+          new Response(
+            JSON.stringify({
+              questions: [
+                {
+                  label: "Por que a Acme?",
+                  required: true,
+                  fields: [{ name: "question_1", type: "input_text", values: [] }],
+                },
+              ],
+            }),
+          ),
+        fetchBrowserImpl: async (input, init) => {
+          const target = String(input);
+
+          browser.push(`${init?.method ?? "GET"} ${target}`);
+
+          return target === "https://api.browserbase.com/v1/sessions"
+            ? Response.json({ id: "s1", connectUrl: "wss://connect.test/s1" })
+            : new Response(null);
+        },
+      });
+
+      const talentHeaders = {
+        "x-test-session": "talent",
+        "x-test-talent-id": created.id,
+        origin: webOrigin,
+        "content-type": "application/json",
+      };
+
+      const prepared = await instance.handle(
+        new Request(`http://localhost/api/me/jobs/${job.id}/ai-apply`, {
+          method: "POST",
+          headers: talentHeaders,
+        }),
+      );
+
+      const { attempt } = await prepared.json();
+
+      const confirmed = await instance.handle(
+        new Request(`http://localhost/api/me/ai-applications/${attempt.id}/confirm`, {
+          method: "POST",
+          headers: talentHeaders,
+          body: JSON.stringify({ answers: [{ questionId: "question_1", value: "Pagamentos" }] }),
+        }),
+      );
+
+      expect(confirmed.status).toBe(200);
+      expect(
+        (await db.select().from(backgroundJobs)).map((row) => [row.kind, row.subject, row.status]),
+      ).toEqual([["ai_apply", attempt.id, "pending"]]);
+
+      await db.delete(backgroundJobs);
+
+      const drained = await instance.handle(
+        new Request("http://localhost/api/background/drain", {
+          method: "POST",
+          headers: { authorization: `Bearer ${cronSecret}` },
+        }),
+      );
+
+      expect(await drained.json()).toEqual({ processed: 1, failed: 0 });
+      expect(
+        (await db.select().from(aiApplications).where(eq(aiApplications.id, attempt.id)))[0],
+      ).toMatchObject({ state: "assisted", reason: "error" });
+      expect(browser).toEqual([
+        "POST https://api.browserbase.com/v1/sessions",
+        "GET https://connect.test/s1",
+        "POST https://api.browserbase.com/v1/sessions/s1",
+      ]);
+      expect(logged).toHaveBeenCalledWith("AI application run failed", {
+        name: "CdpError",
+        message: "no websocket",
+      });
+      logged.mockRestore();
+    });
+
     it("answers 500 without data and rolls back every library save when a confirm fails", async () => {
       const [firstCase] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
 

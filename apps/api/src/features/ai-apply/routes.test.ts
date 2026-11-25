@@ -6,6 +6,7 @@ import { normalizeQuestion } from "@offboard/db/question";
 import {
   aiApplications,
   answerQuestions,
+  backgroundJobs,
   applicationPackages,
   applications,
   defaultOrgId,
@@ -22,7 +23,7 @@ import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Elysia } from "elysia";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRepositories } from "../../repositories.js";
 import type { GenerateStructured } from "../../shared/ai.js";
 import type { PortalAuth } from "../../shared/portal-auth.js";
@@ -103,6 +104,7 @@ type Setup = {
   runnerConfigured?: boolean;
   form?: () => Response | Promise<Response>;
   saveAnswer?: SaveAnswer;
+  enqueueRun?: (attemptId: string) => Promise<void>;
 };
 
 describe.skipIf(!url)("ai apply route", () => {
@@ -243,6 +245,8 @@ describe.skipIf(!url)("ai apply route", () => {
                 : [{ question: item.text, answer: item.answer, sensitive: item.sensitive }],
             ),
           saveAnswer: setup.saveAnswer ?? saveToLibrary,
+          enqueueRun:
+            setup.enqueueRun ?? ((attemptId) => repos.background.enqueue("ai_apply", attemptId)),
         },
       ),
     );
@@ -1145,6 +1149,39 @@ describe.skipIf(!url)("ai apply route", () => {
 
       expect(again.status).toBe(409);
       expect(await again.json()).toEqual({ error: "Already in progress" });
+    });
+
+    it("enqueues the run once the confirm is stored", async () => {
+      const { call, profileId, id } = await setup();
+
+      expect(await db.select().from(backgroundJobs)).toEqual([]);
+
+      const res = await call(profileId, confirmPath(id), { answers: complete });
+
+      expect(res.status).toBe(200);
+      expect(
+        (await db.select().from(backgroundJobs)).map((job) => [job.kind, job.subject, job.status]),
+      ).toEqual([["ai_apply", id, "pending"]]);
+    });
+
+    it("confirms even when the run cannot be enqueued", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      const { call, profileId, id } = await setup(undefined, {
+        enqueueRun: async () => {
+          throw new Error("queue down");
+        },
+      });
+
+      const res = await call(profileId, confirmPath(id), { answers: complete });
+
+      expect(res.status).toBe(200);
+      expect((await attempts(profileId))[0].state).toBe("queued");
+      expect(logged).toHaveBeenCalledWith("AI application enqueue failed", {
+        name: "Error",
+        message: "queue down",
+      });
+      logged.mockRestore();
     });
 
     it("queues the attempt with the cleaned answers", async () => {

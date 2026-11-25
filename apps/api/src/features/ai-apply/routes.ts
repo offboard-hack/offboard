@@ -43,6 +43,7 @@ export function aiApplyRoutes(
       profileId: string,
     ) => Promise<{ question: string; answer: string; sensitive: boolean }[]>;
     saveAnswer: SaveAnswer;
+    enqueueRun: (attemptId: string) => Promise<void>;
   },
 ) {
   const needsDocument = (questions: FormQuestion[]) =>
@@ -284,6 +285,8 @@ export function aiApplyRoutes(
         if (result === "in_progress" || result === "expired" || result === "applied") {
           return status(409, { error: conflicts[result] });
         }
+
+        await deps.enqueueRun(result.id).catch(logFailure("AI application enqueue failed"));
 
         return result;
       },

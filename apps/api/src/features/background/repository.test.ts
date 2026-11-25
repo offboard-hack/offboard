@@ -295,11 +295,11 @@ describe.skipIf(!url)("background repository", () => {
     await repository.enqueue("compute_matches", "mine", {}, minutesAfter(start, -5));
     await repository.enqueue("score_resume", "other", {}, minutesAfter(start, -4));
 
-    expect(await repository.claim(5, start, target)).toEqual([]);
+    expect(await repository.claim(5, start, { target })).toEqual([]);
 
     await repository.enqueue("score_resume", "mine", { n: 1 }, start);
 
-    expect(await repository.claim(5, start, target)).toEqual([
+    expect(await repository.claim(5, start, { target })).toEqual([
       {
         id: expect.any(String),
         kind: "score_resume",
@@ -308,7 +308,7 @@ describe.skipIf(!url)("background repository", () => {
         attempts: 1,
       },
     ]);
-    expect(await repository.claim(5, start, target)).toEqual([]);
+    expect(await repository.claim(5, start, { target })).toEqual([]);
     expect((await rows()).map((job) => [job.kind, job.subject, job.status])).toEqual([
       ["compute_matches", "older", "pending"],
       ["compute_matches", "mine", "pending"],
@@ -322,18 +322,52 @@ describe.skipIf(!url)("background repository", () => {
     const job = await running("stuck");
     const other = await running("other");
 
-    const [reclaimed] = await repository.claim(1, minutesAfter(start, 6), target);
+    const [reclaimed] = await repository.claim(1, minutesAfter(start, 6), { target });
 
     expect(reclaimed).toMatchObject({ id: job.id, attempts: 2 });
-    expect(await repository.claim(1, minutesAfter(start, 12), target)).toEqual([
+    expect(await repository.claim(1, minutesAfter(start, 12), { target })).toEqual([
       expect.objectContaining({ id: job.id, attempts: 3 }),
     ]);
-    expect(await repository.claim(1, minutesAfter(start, 18), target)).toEqual([]);
+    expect(await repository.claim(1, minutesAfter(start, 18), { target })).toEqual([]);
     expect(await row(job.id)).toMatchObject({
       status: "failed",
       lastError: "Stopped while running",
     });
     expect(await row(other.id)).toMatchObject({ status: "running", attempts: 1 });
+  });
+
+  it("claims only the included kinds, or every kind but the excluded ones", async () => {
+    await repository.enqueue("ai_apply", "attempt", {}, minutesAfter(start, -10));
+    await repository.enqueue("score_resume", "resume", {}, minutesAfter(start, -5));
+    await repository.enqueue("compute_matches", "profile", {}, minutesAfter(start, -4));
+
+    const others = await repository.claim(5, start, { excludeKinds: ["ai_apply"] });
+
+    expect(others.map((job) => job.kind)).toEqual(["score_resume", "compute_matches"]);
+    expect(await repository.claim(5, start, { excludeKinds: ["ai_apply"] })).toEqual([]);
+
+    const applies = await repository.claim(5, start, { kinds: ["ai_apply"] });
+
+    expect(applies.map((job) => job.subject)).toEqual(["attempt"]);
+  });
+
+  it("leaves stale jobs of a filtered-out kind alone", async () => {
+    await repository.enqueue("ai_apply", "attempt", {}, start);
+
+    const [job] = await repository.claim(1, start, { kinds: ["ai_apply"] });
+
+    await db.update(backgroundJobs).set({ attempts: 3 }).where(eq(backgroundJobs.id, job.id));
+
+    expect(
+      await repository.claim(5, minutesAfter(start, 6), { excludeKinds: ["ai_apply"] }),
+    ).toEqual([]);
+    expect(await row(job.id)).toMatchObject({ status: "running", attempts: 3 });
+
+    expect(await repository.claim(5, minutesAfter(start, 6), { kinds: ["ai_apply"] })).toEqual([]);
+    expect(await row(job.id)).toMatchObject({
+      status: "failed",
+      lastError: "Stopped while running",
+    });
   });
 
   it("never claims finished jobs", async () => {
