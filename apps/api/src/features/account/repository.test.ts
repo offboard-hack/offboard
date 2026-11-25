@@ -14,6 +14,7 @@ import {
   publicPages,
   resumes,
   resumeSuggestions,
+  talentPreferences,
   talentProfiles,
   teamMembers,
 } from "@offboard/db/schema";
@@ -526,6 +527,55 @@ describe.skipIf(!url)("account repository", () => {
       createdAt: null,
       updatedAt: null,
     });
+  });
+
+  it("exports default preferences without a row and the stored ones with it", async () => {
+    expect((await repository.exportData(profileId))?.preferences).toEqual({
+      mode: "review",
+      hybridThreshold: 75,
+      targetTitles: [],
+      jobPreferences: {
+        workModels: [],
+        locations: [],
+        relocate: false,
+        salaryFloorCents: null,
+        seniorities: [],
+        excludedCompanies: [],
+      },
+      profileFields: {
+        phone: { value: null, share: false },
+        city: { value: null, share: false },
+        linkedin: { value: null, share: false },
+        portfolio: { value: null, share: false },
+        workAuthorization: { value: null, share: false },
+        availability: { value: null, share: false },
+        noticePeriod: { value: null, share: false },
+        salaryExpectation: { value: null, share: false },
+      },
+    });
+
+    await db.insert(talentPreferences).values([
+      {
+        profileId,
+        mode: "automatic",
+        hybridThreshold: 80,
+        targetTitles: ["Backend"],
+        jobPreferences: { relocate: true },
+        profileFields: { phone: { value: "11 90000-0000", share: true } },
+      },
+      { profileId: otherProfileId, mode: "hybrid", targetTitles: ["Foreign"] },
+    ]);
+
+    const exported = await repository.exportData(profileId);
+
+    expect(exported?.preferences).toMatchObject({
+      mode: "automatic",
+      hybridThreshold: 80,
+      targetTitles: ["Backend"],
+      jobPreferences: { relocate: true, workModels: [] },
+      profileFields: { phone: { value: "11 90000-0000", share: true } },
+    });
+    expect(JSON.stringify(exported)).not.toContain("Foreign");
   });
 
   it("exports nothing for an unknown profile", async () => {

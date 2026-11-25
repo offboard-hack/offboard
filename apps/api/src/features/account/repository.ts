@@ -10,11 +10,14 @@ import {
   publicPages,
   resumes,
   resumeSuggestions,
+  talentPreferences,
   talentProfiles,
   teamMembers,
 } from "@offboard/db/schema";
 import { and, asc, desc, eq, inArray, isNotNull, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+
+import { toPreferences } from "../../shared/talent-preferences.js";
 
 const resumeJobs = alias(jobs, "resume_jobs");
 
@@ -151,6 +154,11 @@ export function createAccountRepository(db: Database) {
       .where(eq(publicPageDailyViews.profileId, profileId))
       .orderBy(asc(publicPageDailyViews.day));
 
+    const [ownPreferences] = await db
+      .select()
+      .from(talentPreferences)
+      .where(eq(talentPreferences.profileId, profileId));
+
     return {
       profile: {
         name: profile.name,
@@ -215,6 +223,7 @@ export function createAccountRepository(db: Database) {
           }
         : null,
       pageViews: views,
+      preferences: toPreferences(ownPreferences),
     };
   }
 

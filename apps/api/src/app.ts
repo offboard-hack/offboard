@@ -30,6 +30,7 @@ import { drain, type JobHandler } from "./features/background/drain.js";
 import { accountRoutes } from "./features/account/routes.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
 import { logFailure } from "./shared/error-summary.js";
+import { preferencesRoutes } from "./features/preferences/routes.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
 import type { ResumeContent } from "@offboard/db/schema";
@@ -262,6 +263,13 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         takeLlmCall: repos.llmUsage.takeLlmCall,
         fitScore: options.generateStructured && fitScore(options.generateStructured),
         renderPdf: ownResumePdf,
+      }),
+    )
+    .use(
+      preferencesRoutes(repos.preferences, talent, async (profileId) => {
+        await repos.background
+          .enqueue("compute_matches", profileId)
+          .catch(logFailure("title re-match enqueue failed"));
       }),
     )
     .use(backgroundRoutes(repos.background, handlers, options.cronSecret, scheduleSources))

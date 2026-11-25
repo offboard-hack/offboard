@@ -89,6 +89,7 @@ const exportResponse = t.Object({
   pageViews: t.Array(
     t.Object({ day: t.String(), visits: t.Number(), recruiterVisits: t.Number() }),
   ),
+  preferences: t.Unknown(),
 });
 
 export function accountRoutes(

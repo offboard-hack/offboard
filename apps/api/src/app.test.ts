@@ -3549,6 +3549,232 @@ describe.skipIf(!url)("api", () => {
         expect(await res.json()).toEqual({ error: "Profile not found" });
       });
 
+      describe("preferences", () => {
+        const emptyField = { value: null, share: false };
+
+        const defaults = {
+          mode: "review",
+          hybridThreshold: 75,
+          targetTitles: [],
+          jobPreferences: {
+            workModels: [],
+            locations: [],
+            relocate: false,
+            salaryFloorCents: null,
+            seniorities: [],
+            excludedCompanies: [],
+          },
+          profileFields: {
+            phone: emptyField,
+            city: emptyField,
+            linkedin: emptyField,
+            portfolio: emptyField,
+            workAuthorization: emptyField,
+            availability: emptyField,
+            noticePeriod: emptyField,
+            salaryExpectation: emptyField,
+          },
+        };
+
+        type PreferencesJson =
+          | string
+          | number
+          | boolean
+          | null
+          | PreferencesJson[]
+          | { [key: string]: PreferencesJson };
+
+        const save = (
+          instance: ReturnType<typeof resumesApp>["instance"],
+          id: string,
+          json: PreferencesJson,
+        ) => request(instance, id, "/me/preferences", { method: "PUT", json });
+
+        const matchJobs = () =>
+          db
+            .select({ subject: backgroundJobs.subject })
+            .from(backgroundJobs)
+            .where(eq(backgroundJobs.kind, "compute_matches"));
+
+        it("requires an active talent session", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          expect(
+            (await request(instance, id, "/me/preferences", { session: "admin" })).status,
+          ).toBe(403);
+          expect((await save(instance, id, { mode: "hybrid" })).status).toBe(200);
+          expect(
+            (await instance.handle(new Request("http://localhost/api/me/preferences"))).status,
+          ).toBe(403);
+        });
+
+        it("returns full defaults before anything is saved", async () => {
+          const { instance } = resumesApp();
+          const res = await request(instance, await profile(), "/me/preferences");
+
+          expect(res.status).toBe(200);
+          expect(await res.json()).toEqual(defaults);
+        });
+
+        it("saves a partial update and keeps the rest", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          const first = await save(instance, id, { mode: "hybrid", hybridThreshold: 90 });
+
+          expect(first.status).toBe(200);
+          expect(await first.json()).toEqual({ ...defaults, mode: "hybrid", hybridThreshold: 90 });
+
+          const second = await save(instance, id, {
+            jobPreferences: {
+              workModels: ["remote"],
+              locations: [{ city: " Campinas ", state: "SP" }],
+              excludedCompanies: ["Acme", "acme"],
+            },
+            profileFields: { phone: { value: " 11 90000-0000 ", share: true } },
+          });
+
+          const body = await second.json();
+
+          expect(body.mode).toBe("hybrid");
+          expect(body.jobPreferences).toEqual({
+            ...defaults.jobPreferences,
+            workModels: ["remote"],
+            locations: [{ city: "Campinas", state: "SP" }],
+            excludedCompanies: ["Acme"],
+          });
+          expect(body.profileFields.phone).toEqual({ value: "11 90000-0000", share: true });
+          expect(await (await request(instance, id, "/me/preferences")).json()).toEqual(body);
+        });
+
+        it("rejects invalid input with one error body", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          const invalid: PreferencesJson[] = [
+            {},
+            { unknown: 1 },
+            { mode: "manual" },
+            { hybridThreshold: 49 },
+            { hybridThreshold: "80" },
+            { targetTitles: ["a"] },
+            { targetTitles: "Backend" },
+            { jobPreferences: { locations: [{ city: null, state: "XX" }] } },
+            { jobPreferences: { salaryFloorCents: -5 } },
+            { profileFields: { phone: { value: "x".repeat(501), share: true } } },
+            { profileFields: { phone: { value: "1" } } },
+          ];
+
+          for (const json of invalid) {
+            const res = await save(instance, id, json);
+
+            expect(res.status).toBe(422);
+            expect(await res.json()).toEqual({ error: "Invalid preferences" });
+          }
+
+          expect(await (await request(instance, id, "/me/preferences")).json()).toEqual(defaults);
+        });
+
+        it("leaves a malformed body to the framework", async () => {
+          const { instance } = resumesApp();
+
+          const res = await instance.handle(
+            new Request("http://localhost/api/me/preferences", {
+              method: "PUT",
+              headers: {
+                "x-test-session": "talent",
+                "x-test-talent-id": await profile(),
+                origin: webOrigin,
+                "content-type": "application/json",
+              },
+              body: "{",
+            }),
+          );
+
+          expect(res.status).toBe(400);
+        });
+
+        it("isolates preferences between people", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const other = await profile("outra.pessoal@example.com", 1);
+
+          await save(instance, id, { mode: "automatic", targetTitles: ["Backend"] });
+
+          expect(await (await request(instance, other, "/me/preferences")).json()).toEqual(
+            defaults,
+          );
+        });
+
+        it("enqueues matching only when the titles change", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          await save(instance, id, { mode: "hybrid" });
+          await save(instance, id, { targetTitles: [] });
+
+          expect(await matchJobs()).toEqual([]);
+
+          await save(instance, id, { targetTitles: ["Backend", "SRE"] });
+
+          expect(await matchJobs()).toEqual([{ subject: id }]);
+
+          await db.delete(backgroundJobs);
+          await save(instance, id, { targetTitles: ["sre", "BACKEND"] });
+
+          expect(await matchJobs()).toEqual([]);
+
+          await save(instance, id, { targetTitles: ["Backend"] });
+
+          expect(await matchJobs()).toEqual([{ subject: id }]);
+        });
+
+        it("still saves when enqueueing matching fails", async () => {
+          const logged = vi.spyOn(console, "error");
+
+          const instance = createApp(
+            webOrigin,
+            {
+              ...repos,
+              background: {
+                ...repos.background,
+                enqueue: async () => {
+                  throw new Error("queue down");
+                },
+              },
+            },
+            appOptions,
+          );
+
+          const id = await profile();
+          const res = await save(instance, id, { targetTitles: ["Backend"] });
+
+          expect(res.status).toBe(200);
+          expect((await res.json()).targetTitles).toEqual(["Backend"]);
+          expect(logged).toHaveBeenCalledWith("title re-match enqueue failed", {
+            name: "Error",
+            message: "queue down",
+          });
+          logged.mockRestore();
+        });
+
+        it("includes preferences in the export", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          await save(instance, id, { mode: "automatic", targetTitles: ["Backend"] });
+
+          const exported = await (await request(instance, id, "/me/export")).json();
+
+          expect(exported.preferences).toMatchObject({
+            mode: "automatic",
+            targetTitles: ["Backend"],
+            profileFields: defaults.profileFields,
+          });
+        });
+      });
+
       it("deletes the account", async () => {
         const { instance, store } = resumesApp();
         const id = await profile();
