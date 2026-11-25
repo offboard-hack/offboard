@@ -283,7 +283,7 @@ export const connectPage = async (socket: Socket, options: { commandTimeoutMs?: 
       const target = JSON.stringify(selector);
 
       const center = await evaluate(
-        `(() => { const el = document.querySelector(${target}); if (!el) return null; el.scrollIntoView({ block: "center", inline: "center" }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, width: r.width, height: r.height }; })()`,
+        `(() => { const el = document.querySelector(${target}); if (!el) return null; el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, width: r.width, height: r.height }; })()`,
         box,
       );
 
