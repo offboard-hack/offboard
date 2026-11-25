@@ -29,7 +29,10 @@ type NewAttempt = {
 
 const expiry = 7 * 24 * 60 * 60 * 1000;
 
+export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
 export type SaveAnswer = (
+  tx: Transaction,
   profileId: string,
   label: string,
   text: string,
@@ -42,6 +45,17 @@ type Confirmation = {
   rehearsal: boolean;
   entries: { label: string; text: string; sensitive: boolean }[];
 };
+
+export function draftBlock(
+  row: { state: string; reason: string | null; preparedAt: Date },
+  now: Date,
+) {
+  if (row.state !== "draft") {
+    return row.reason === "applied_manually" ? ("applied" as const) : ("in_progress" as const);
+  }
+
+  return row.preparedAt.getTime() <= now.getTime() - expiry ? ("expired" as const) : undefined;
+}
 
 const jobColumns = { id: jobs.id, title: jobs.title, company: jobs.company, url: jobs.url };
 
@@ -259,7 +273,7 @@ export function createAiApplyRepository(db: Database) {
 
       if (rows.length > 0) {
         for (const entry of confirmation.entries) {
-          await save(profileId, entry.label, entry.text, { sensitive: entry.sensitive }, now);
+          await save(tx, profileId, entry.label, entry.text, { sensitive: entry.sensitive }, now);
         }
       }
 
@@ -270,11 +284,13 @@ export function createAiApplyRepository(db: Database) {
 
     const current = await attempt(profileId, id);
 
-    if (current === undefined || current.attempt.state !== "draft") {
+    if (current === undefined || draftBlock(current.attempt, now) === "in_progress") {
       return "in_progress" as const;
     }
 
-    if (current.attempt.preparedAt.getTime() <= now.getTime() - expiry) return "expired" as const;
+    const block = draftBlock(current.attempt, now);
+
+    if (block !== undefined) return block;
 
     return (await hasApplied(profileId, current.attempt.jobId))
       ? ("applied" as const)

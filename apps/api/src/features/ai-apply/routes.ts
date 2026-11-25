@@ -9,7 +9,7 @@ import type { TalentAccessPlugin } from "../../shared/talent-access.js";
 import { confirmedAnswers, libraryEntries, needsCoverLetter } from "./confirm.js";
 import { draftAnswers } from "./draft.js";
 import type { FormResult } from "./greenhouse.js";
-import type { AiApplyRepository, SaveAnswer } from "./repository.js";
+import { draftBlock, type AiApplyRepository, type SaveAnswer } from "./repository.js";
 import { attemptResponse } from "./view.js";
 
 const params = t.Object({ jobId: t.String() });
@@ -18,9 +18,14 @@ const attemptParams = t.Object({ id: t.String() });
 const confirmBody = t.Object({
   answers: t.Array(
     t.Object({
-      questionId: t.String(),
-      value: t.Union([t.String(), t.Array(t.String()), t.Null()]),
+      questionId: t.String({ maxLength: 200 }),
+      value: t.Union([
+        t.String({ maxLength: 10_000 }),
+        t.Array(t.String({ maxLength: 10_000 }), { maxItems: 50 }),
+        t.Null(),
+      ]),
     }),
+    { maxItems: 200 },
   ),
   rehearsal: t.Optional(t.Boolean()),
 });
@@ -80,6 +85,12 @@ export function aiApplyRoutes(
     return deps.generate === undefined
       ? { refused: { code: 503 as const, error: "AI not configured" }, generate: undefined }
       : { refused: undefined, generate: deps.generate };
+  };
+
+  const conflicts = {
+    in_progress: "Already in progress",
+    expired: "Draft expired",
+    applied: "Already applied",
   };
 
   const notFound = { error: "Attempt not found" };
@@ -234,6 +245,11 @@ export function aiApplyRoutes(
 
         if (!found) return status(404, notFound);
 
+        const now = new Date();
+        const blocked = draftBlock(found.attempt, now);
+
+        if (blocked !== undefined) return status(409, { error: conflicts[blocked] });
+
         const { questions } = found.attempt.form;
         const confirmed = confirmedAnswers(questions, body.answers);
 
@@ -252,19 +268,19 @@ export function aiApplyRoutes(
           {
             confirmed,
             rehearsal: body.rehearsal ?? false,
-            entries: libraryEntries(questions, confirmed),
+            entries: libraryEntries(questions, confirmed, found.attempt.draft),
           },
-          new Date(),
+          now,
           deps.saveAnswer,
         );
 
-        if (result === "in_progress") return status(409, { error: "Already in progress" });
+        if (result === "job_closed") return status(404, { error: "Job not found" });
 
-        if (result === "expired") return status(409, { error: "Draft expired" });
+        if (result === "in_progress" || result === "expired" || result === "applied") {
+          return status(409, { error: conflicts[result] });
+        }
 
-        if (result === "applied") return status(409, { error: "Already applied" });
-
-        return result === "job_closed" ? status(404, { error: "Job not found" }) : result;
+        return result;
       },
       {
         talent: "active",

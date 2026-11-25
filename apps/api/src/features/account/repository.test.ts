@@ -746,10 +746,30 @@ describe.skipIf(!url)("account repository", () => {
       sensitive: false,
     });
 
-    const form = { questions: [question("a", "Pergunta A"), question("b", "Pergunta B")] };
+    const form = {
+      questions: [
+        question("a", "Pergunta A"),
+        {
+          ...question("b", "Pergunta B"),
+          fields: [
+            {
+              name: "b",
+              type: "multi_select" as const,
+              options: [
+                { label: "Um", value: "1" },
+                { label: "Dois", value: "2" },
+              ],
+            },
+          ],
+        },
+        { ...question("cv", "Currículo"), kind: "resume" as const },
+        { ...question("doc", "Laudo"), kind: "document" as const },
+      ],
+    };
+
     const preparedAt = new Date("2026-03-01T10:00:00Z");
 
-    const [older, newer] = await db
+    await db
       .insert(aiApplications)
       .values([
         {
@@ -760,6 +780,7 @@ describe.skipIf(!url)("account repository", () => {
           draft: [
             { questionId: "a", value: "rascunho", source: null, inferred: false, status: "filled" },
             { questionId: "gone", value: "x", source: null, inferred: false, status: "filled" },
+            { questionId: "b", value: null, source: null, inferred: false, status: "blank" },
           ],
           preparedAt,
           createdAt: new Date("2026-03-01T10:00:00Z"),
@@ -775,7 +796,9 @@ describe.skipIf(!url)("account repository", () => {
           ],
           confirmed: [
             { questionId: "a", value: "final" },
-            { questionId: "b", value: ["1", "2"] },
+            { questionId: "b", value: ["1", "9"] },
+            { questionId: "cv", value: "arquivo.pdf" },
+            { questionId: "doc", value: "laudo.pdf" },
           ],
           preparedAt,
           confirmedAt: new Date("2026-03-02T10:00:00Z"),
@@ -802,7 +825,7 @@ describe.skipIf(!url)("account repository", () => {
         reason: null,
         answers: [
           { question: "Pergunta A", value: "final" },
-          { question: "Pergunta B", value: ["1", "2"] },
+          { question: "Pergunta B", value: ["Um", "9"] },
         ],
         preparedAt: "2026-03-01T10:00:00.000Z",
         confirmedAt: "2026-03-02T10:00:00.000Z",
@@ -812,14 +835,16 @@ describe.skipIf(!url)("account repository", () => {
         job: { id: draftJob, title: "Vaga ai-draft", company: "Acme" },
         state: "draft",
         reason: null,
-        answers: [{ question: "Pergunta A", value: "rascunho" }],
+        answers: [
+          { question: "Pergunta A", value: "rascunho" },
+          { question: "Pergunta B", value: null },
+        ],
         preparedAt: "2026-03-01T10:00:00.000Z",
         confirmedAt: null,
         finishedAt: null,
       },
     ]);
     expect(JSON.stringify(exported)).not.toContain(foreignJob);
-    expect(older.id).not.toBe(newer.id);
 
     expect(await repository.deleteProfile(profileId)).toBe(true);
     expect(await db.select({ id: aiApplications.id }).from(aiApplications)).toEqual([

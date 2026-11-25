@@ -300,7 +300,28 @@ export function createAccountRepository(db: Database) {
         answers: (confirmed ?? draft).flatMap((answer) => {
           const question = form.questions.find((item) => item.id === answer.questionId);
 
-          return question === undefined ? [] : [{ question: question.label, value: answer.value }];
+          if (
+            question === undefined ||
+            ["resume", "cover_letter", "document"].includes(question.kind)
+          ) {
+            return [];
+          }
+
+          const options = question.fields[0]?.options ?? [];
+
+          const label = (value: string) =>
+            options.find((item) => item.value === value)?.label ?? value;
+
+          return [
+            {
+              question: question.label,
+              value: Array.isArray(answer.value)
+                ? answer.value.map(label)
+                : answer.value === null
+                  ? null
+                  : label(answer.value),
+            },
+          ];
         }),
         preparedAt: attempt.preparedAt.toISOString(),
         confirmedAt: attempt.confirmedAt?.toISOString() ?? null,

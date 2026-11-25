@@ -1,6 +1,6 @@
 import { normalizeQuestion } from "@offboard/db/question";
-import type { ConfirmedAnswer, FormQuestion } from "@offboard/db/schema";
-import { clipText, sanitizeText } from "../../shared/storable-text.js";
+import type { ConfirmedAnswer, DraftAnswer, FormQuestion } from "@offboard/db/schema";
+import { sanitizeText } from "../../shared/storable-text.js";
 
 export type GivenAnswer = { questionId: string; value: string | string[] | null };
 
@@ -74,14 +74,24 @@ function labels(question: FormQuestion, value: string | string[]) {
   return Array.isArray(value) ? value.map(label).join("; ") : label(value);
 }
 
-export function libraryEntries(questions: FormQuestion[], confirmed: ConfirmedAnswer[]) {
+export function libraryEntries(
+  questions: FormQuestion[],
+  confirmed: ConfirmedAnswer[],
+  draft: DraftAnswer[],
+) {
   const values = new Map(confirmed.map((answer) => [answer.questionId, answer.value]));
+
+  const withheld = new Set(
+    draft.flatMap((answer) => (answer.status === "not_shared" ? [answer.questionId] : [])),
+  );
 
   return questions.flatMap((question) => {
     const value = values.get(question.id);
-    const label = clipText(question.label, labelLimit);
+    const { label } = question;
 
     if (question.kind !== "custom" || value === null || value === undefined) return [];
+
+    if (withheld.has(question.id) || label.length > labelLimit) return [];
 
     if (normalizeQuestion(label) === "") return [];
 

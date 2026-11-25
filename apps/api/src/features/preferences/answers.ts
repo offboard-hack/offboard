@@ -8,7 +8,9 @@ import { sanitizeText } from "../../shared/storable-text.js";
 export const answerLimit = 2_000;
 export const questionLimit = 500;
 
-export function createAnswersRepository(db: Database) {
+export type AnswersExecutor = Pick<Database, "select" | "insert" | "delete">;
+
+export function createAnswersRepository(db: AnswersExecutor) {
   async function library(profileId: string) {
     const questions = await db
       .select({

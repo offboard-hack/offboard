@@ -1,4 +1,4 @@
-import type { DraftAnswer, FormQuestion } from "@offboard/db/schema";
+import type { ConfirmedAnswer, DraftAnswer, FormQuestion } from "@offboard/db/schema";
 import { aiApplicationStateEnum } from "@offboard/db/schema";
 import { t } from "elysia";
 
@@ -8,6 +8,7 @@ type AttemptRow = {
   reason: string | null;
   form: { questions: FormQuestion[] };
   draft: DraftAnswer[];
+  confirmed: ConfirmedAnswer[] | null;
   rehearsal: boolean;
   preparedAt: Date;
   confirmedAt: Date | null;
@@ -59,6 +60,8 @@ const draftAnswer = t.Object({
   status: t.UnionEnum(["filled", "blank", "not_shared", "sensitive"]),
 });
 
+const confirmedAnswer = t.Object({ questionId: t.String(), value: answerValue });
+
 export const attemptResponse = t.Object({
   id: t.String(),
   job: t.Object({ id: t.String(), title: t.String(), company: t.String(), url: t.String() }),
@@ -66,6 +69,7 @@ export const attemptResponse = t.Object({
   reason: t.Union([t.String(), t.Null()]),
   questions: t.Array(formQuestion),
   answers: t.Array(draftAnswer),
+  confirmed: t.Union([t.Array(confirmedAnswer), t.Null()]),
   rehearsal: t.Boolean(),
   preparedAt: t.String(),
   confirmedAt: t.Union([t.String(), t.Null()]),
@@ -78,6 +82,7 @@ export const toAttemptView = (row: AttemptRow, job: AttemptJob) => ({
   reason: row.reason,
   questions: row.form.questions,
   answers: row.draft,
+  confirmed: row.confirmed,
   rehearsal: row.rehearsal,
   preparedAt: row.preparedAt.toISOString(),
   confirmedAt: row.confirmedAt?.toISOString() ?? null,

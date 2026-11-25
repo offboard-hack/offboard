@@ -33,6 +33,7 @@ import { logFailure } from "./shared/error-summary.js";
 import { rejectionsRoutes } from "./features/preferences/rejections-routes.js";
 import { answersRoutes } from "./features/preferences/answers-routes.js";
 import { readGreenhouseForm } from "./features/ai-apply/greenhouse.js";
+import { createAnswersRepository } from "./features/preferences/answers.js";
 import { aiApplyRoutes } from "./features/ai-apply/routes.js";
 import { packageRoutes } from "./features/preferences/package-routes.js";
 import { preferencesRoutes } from "./features/preferences/routes.js";
@@ -314,10 +315,11 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
               ? []
               : [{ question: item.text, answer: item.answer, sensitive: item.sensitive }],
           ),
-        saveAnswer: async (profileId, label, text, { sensitive }, now) => {
-          const questionId = await repos.answers.ensureQuestion(label, now, { sensitive });
+        saveAnswer: async (tx, profileId, label, text, { sensitive }, now) => {
+          const answers = createAnswersRepository(tx);
+          const questionId = await answers.ensureQuestion(label, now, { sensitive });
 
-          await repos.answers.answer(profileId, questionId, text, now);
+          await answers.answer(profileId, questionId, text, now);
         },
       }),
     )

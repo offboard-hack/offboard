@@ -57,6 +57,7 @@ describe("libraryEntries", () => {
           { questionId: "q", value: ["1", "9"] },
           { questionId: "n", value: "texto" },
         ],
+        [],
       ),
     ).toEqual([
       { label: "Pergunta", text: "A; 9", sensitive: false },
@@ -69,6 +70,6 @@ describe("libraryEntries", () => {
       fields: [{ name: "q", type: "multi_select", options: [{ label: "", value: "1" }] }],
     });
 
-    expect(libraryEntries([multi], [{ questionId: "q", value: [] }])).toEqual([]);
+    expect(libraryEntries([multi], [{ questionId: "q", value: [] }], [])).toEqual([]);
   });
 });

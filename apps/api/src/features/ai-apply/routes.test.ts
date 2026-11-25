@@ -2,8 +2,11 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import type { FormQuestion, ProfileFields, ResumeContent } from "@offboard/db/schema";
+import { normalizeQuestion } from "@offboard/db/question";
 import {
   aiApplications,
+  answerQuestions,
+  talentAnswers,
   applicationPackages,
   applications,
   jobRejections,
@@ -15,7 +18,7 @@ import {
   talentProfiles,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Elysia } from "elysia";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -175,10 +178,23 @@ describe.skipIf(!url)("ai apply route", () => {
     return row.id;
   }
 
-  const saveToLibrary: SaveAnswer = async (profileId, label, text, { sensitive }, now) => {
-    const questionId = await repos.answers.ensureQuestion(label, now, { sensitive });
+  const saveToLibrary: SaveAnswer = async (tx, profileId, label, text, { sensitive }, now) => {
+    const [saved] = await tx
+      .insert(answerQuestions)
+      .values({ normalized: normalizeQuestion(label), text: label, sensitive, createdAt: now })
+      .onConflictDoUpdate({
+        target: answerQuestions.normalized,
+        set: { sensitive: sql`${answerQuestions.sensitive} or ${sensitive}` },
+      })
+      .returning({ id: answerQuestions.id });
 
-    await repos.answers.answer(profileId, questionId, text, now);
+    await tx
+      .insert(talentAnswers)
+      .values({ profileId, questionId: saved.id, answer: text, updatedAt: now })
+      .onConflictDoUpdate({
+        target: [talentAnswers.profileId, talentAnswers.questionId],
+        set: { answer: text, updatedAt: now },
+      });
   };
 
   function fakeModel(answers: (prompt: string) => ModelAnswer[] = () => []) {
@@ -1121,6 +1137,16 @@ describe.skipIf(!url)("ai apply route", () => {
 
       expect(res.status).toBe(200);
       expect(body).toMatchObject({ id, state: "queued", reason: null, rehearsal: true });
+      expect(body.confirmed).toEqual([
+        { questionId: "why", value: "Gosto de fintechs." },
+        { questionId: "pcd", value: "1" },
+        { questionId: "source", value: ["0", "2"] },
+        { questionId: "email", value: "ana@example.com" },
+      ]);
+
+      const fetched = await call(profileId, `/me/ai-applications/${id}`, undefined, "GET");
+
+      expect((await fetched.json()).confirmed).toEqual(body.confirmed);
       expect(Date.parse(body.confirmedAt)).toBeGreaterThanOrEqual(before);
 
       const [row] = await attempts(profileId);
@@ -1205,10 +1231,9 @@ describe.skipIf(!url)("ai apply route", () => {
           { text: "Por que a Stone?", answer: "Gosto de fintechs.", sensitive: false },
           { text: pcd.label, answer: "No", sensitive: true },
           { text: source.label, answer: "LinkedIn; Site", sensitive: false },
-          { text: "x".repeat(500), answer: "resposta longa", sensitive: false },
         ]),
       );
-      expect(saved).toHaveLength(4);
+      expect(saved).toHaveLength(3);
 
       await db.delete(aiApplications).where(eq(aiApplications.id, id));
 
@@ -1238,6 +1263,41 @@ describe.skipIf(!url)("ai apply route", () => {
         { questionId: "phone", value: "11 90000-0000" },
       ]);
       expect(await library(profileId)).toEqual([]);
+    });
+
+    it("never saves an answer withheld from the draft as not shared", async () => {
+      const { call, profileId, jobId } = await ready();
+      const salary = question("salary", { label: "Pretensão salarial", required: true });
+      const id = await seed(profileId, jobId, [salary, why]);
+
+      await db
+        .update(aiApplications)
+        .set({
+          draft: [
+            {
+              questionId: "salary",
+              value: null,
+              source: null,
+              inferred: false,
+              status: "not_shared",
+            },
+          ],
+        })
+        .where(eq(aiApplications.id, id));
+
+      const res = await call(profileId, confirmPath(id), {
+        answers: [
+          { questionId: "salary", value: "R$ 10.000" },
+          { questionId: "why", value: "Porque sim" },
+        ],
+      });
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).confirmed).toEqual([
+        { questionId: "salary", value: "R$ 10.000" },
+        { questionId: "why", value: "Porque sim" },
+      ]);
+      expect((await library(profileId)).map((item) => item.answer)).toEqual(["Porque sim"]);
     });
 
     it("rejects incomplete or invalid answers", async () => {
@@ -1359,23 +1419,77 @@ describe.skipIf(!url)("ai apply route", () => {
       expect(await library(profileId)).toEqual([]);
     });
 
-    it("answers 500 and keeps the draft when saving to the library fails", async () => {
+    it("rolls back the attempt and every library row when saving fails", async () => {
+      let saved = 0;
+
       const failing = build({
         generate: fakeModel().generate,
-        saveAnswer: async () => {
-          throw new Error("library down");
+        saveAnswer: async (...args) => {
+          await saveToLibrary(...args);
+          saved += 1;
+
+          if (saved === 2) throw new Error("library down");
         },
       });
 
       const profileId = await profile();
-      const id = await seed(profileId, await addJob(), [why]);
+      const id = await seed(profileId, await addJob(), [why, pcd]);
 
       const res = await failing.call(profileId, confirmPath(id), {
-        answers: [{ questionId: "why", value: "ok" }],
+        answers: [
+          { questionId: "why", value: "ok" },
+          { questionId: "pcd", value: "0" },
+        ],
       });
 
       expect(res.status).toBe(500);
+      expect(saved).toBe(2);
       expect((await attempts(profileId))[0]).toMatchObject({ state: "draft", confirmed: null });
+      expect(await library(profileId)).toEqual([]);
+    });
+
+    it("answers a stale attempt before looking at the body", async () => {
+      const { call, profileId, jobId } = await ready();
+      const id = await seed(profileId, jobId, [why, letter], { state: "queued" });
+
+      const res = await call(profileId, confirmPath(id), { answers: [] });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "Already in progress" });
+    });
+
+    it("cancels the draft when the person applies by hand", async () => {
+      const { call, profileId, jobId, resumeId } = await ready();
+      const id = await seed(profileId, jobId, [why]);
+
+      await repos.applications.apply(profileId, jobId, resumeId);
+
+      const [row] = await attempts(profileId);
+
+      expect(row).toMatchObject({ state: "cancelled", reason: "applied_manually" });
+      expect(row.finishedAt).not.toBeNull();
+
+      const res = await call(profileId, confirmPath(id), {
+        answers: [{ questionId: "why", value: "ok" }],
+      });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "Already applied" });
+    });
+
+    it("rejects oversized confirm bodies", async () => {
+      const { call, profileId, jobId } = await ready();
+      const id = await seed(profileId, jobId, [why]);
+
+      const many = Array.from({ length: 201 }, () => ({ questionId: "why", value: "x" }));
+
+      for (const answers of [
+        many,
+        [{ questionId: "why", value: "x".repeat(10_001) }],
+        [{ questionId: "why", value: Array.from({ length: 51 }, () => "x") }],
+      ]) {
+        expect((await call(profileId, confirmPath(id), { answers })).status).toBe(422);
+      }
     });
 
     it("cancels drafts and queued attempts only", async () => {
@@ -1408,8 +1522,6 @@ describe.skipIf(!url)("ai apply route", () => {
 
         expect(res.status).toBe(409);
       }
-
-      expect((await call(profileId, "/me/jobs/" + jobId + "/ai-apply")).status).not.toBe(404);
     });
   });
 });

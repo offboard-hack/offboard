@@ -1,5 +1,12 @@
 import type { Database } from "@offboard/db/client";
-import { applicationEvents, applications, interviews, jobs, resumes } from "@offboard/db/schema";
+import {
+  aiApplications,
+  applicationEvents,
+  applications,
+  interviews,
+  jobs,
+  resumes,
+} from "@offboard/db/schema";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL } from "drizzle-orm";
 import {
   summarize,
@@ -188,6 +195,17 @@ export function createApplicationsRepository(db: Database) {
       await tx
         .insert(applicationEvents)
         .values({ applicationId: created.id, status: "sent", createdAt: now });
+
+      await tx
+        .update(aiApplications)
+        .set({ state: "cancelled", reason: "applied_manually", finishedAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(aiApplications.profileId, profileId),
+            eq(aiApplications.jobId, jobId),
+            inArray(aiApplications.state, ["draft", "queued"]),
+          ),
+        );
 
       return { applicationId: created.id, jobUrl: job.url, publicToken };
     });
