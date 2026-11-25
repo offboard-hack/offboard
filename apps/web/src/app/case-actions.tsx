@@ -20,7 +20,8 @@ export function CaseActions() {
     mutationFn: async (record: NewCase) => {
       const { data, error } = await getApiClient().api.offboardings.post(record);
 
-      if (error) throw new Error("Failed to create offboarding");
+      if (error)
+        throw new Error(error.status === 409 ? "email-in-use" : "Failed to create offboarding");
 
       return data;
     },

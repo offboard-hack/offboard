@@ -241,6 +241,7 @@ describe.skipIf(!url)("api", () => {
           role: "Analyst",
           department: "RH",
           deadline: "2026-12-01",
+          email: `perm-${role}-${randomUUID()}@example.com`,
         }),
       }),
     );
@@ -374,19 +375,43 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("creates an offboarding", async () => {
-    const body = { name: "Ana Souza", role: "Dev", department: "Eng", deadline: "2026-12-01" };
+    const body = {
+      name: "Ana Souza",
+      role: "Dev",
+      department: "Eng",
+      deadline: "2026-12-01",
+      email: "ana.souza@example.com",
+    };
+
     const res = await call("/offboardings", "POST", body);
     const created = await res.json();
+    const { email: _, ...expected } = body;
 
     expect(res.status).toBe(201);
-    expect(created).toEqual({ id: expect.any(String), ...body, completed: 0, total: 0 });
+    expect(created).toEqual({ id: expect.any(String), ...expected, completed: 0, total: 0 });
     expect((await call(`/offboardings/${created.id}`)).status).toBe(200);
   });
 
+  it("rejects duplicate employee email on create", async () => {
+    const body = {
+      name: "Duplicate Test",
+      role: "Dev",
+      department: "Eng",
+      deadline: "2026-12-01",
+      email: "dup-create@example.com",
+    };
+
+    await call("/offboardings", "POST", body);
+    const res = await call("/offboardings", "POST", { ...body, name: "Another" });
+
+    expect(res.status).toBe(409);
+  });
+
   it.each([
-    { name: "", role: "Dev", department: "Eng", deadline: "2026-12-01" },
-    { name: "Ana", role: "Dev", department: "Eng", deadline: "tomorrow" },
+    { name: "", role: "Dev", department: "Eng", deadline: "2026-12-01", email: "a@b.com" },
+    { name: "Ana", role: "Dev", department: "Eng", deadline: "tomorrow", email: "a@b.com" },
     { name: "Ana" },
+    { name: "Ana", role: "Dev", department: "Eng", deadline: "2026-12-01" },
   ])("rejects an invalid offboarding %j", async (body) => {
     const res = await call("/offboardings", "POST", body);
 
@@ -860,6 +885,36 @@ describe.skipIf(!url)("api", () => {
 
     expect(noAction.status).toBe(422);
     expect(noPhase.status).toBe(422);
+  });
+
+  it("rethrows non-unique-violation errors from createOffboarding", async () => {
+    const failing = createApp(
+      webOrigin,
+      {
+        ...repos,
+        offboardings: {
+          ...repos.offboardings,
+          createOffboarding: () => Promise.reject(new Error("unexpected")),
+        },
+      },
+      appOptions,
+    );
+
+    const res = await failing.handle(
+      new Request("http://localhost/api/offboardings", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: webOrigin },
+        body: JSON.stringify({
+          name: "Rethrow",
+          role: "Dev",
+          department: "Eng",
+          deadline: "2026-12-01",
+          email: "rethrow@example.com",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(500);
   });
 
   it("rethrows unexpected create errors", async () => {
@@ -1427,6 +1482,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       role: "Analista",
       department: "RH",
       deadline: "2027-02-01",
+      email,
     });
 
     const second = await repos.offboardings.createOffboarding(defaultOrgId, {
@@ -1434,6 +1490,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       role: "Analista",
       department: "TI",
       deadline: "2027-02-02",
+      email: secondEmail,
     });
 
     const plan = {
@@ -1447,11 +1504,11 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       name: "RH com o mesmo e-mail",
       role: "admin",
     });
-    await repos.employee.saveSettings(defaultOrgId, first.id, { email, plan, revision: 0 });
+    await repos.employee.saveSettings(defaultOrgId, first.id, { email, plan, revision: 1 });
     await repos.employee.saveSettings(defaultOrgId, second.id, {
       email: secondEmail,
       plan: emptyEmployeePlan,
-      revision: 0,
+      revision: 1,
     });
 
     const anonymous = await sendCode(`unknown-${randomUUID()}@offboard.example`);
@@ -1619,9 +1676,9 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     });
     expect((await request("/employee/state", "PUT", cookie, different)).status).toBe(409);
 
-    await repos.employee.saveSettings(defaultOrgId, first.id, { email: null, plan, revision: 1 });
+    await repos.employee.saveSettings(defaultOrgId, first.id, { email: null, plan, revision: 2 });
     expect((await request("/employee/session", "GET", cookie)).status).toBe(401);
-    await repos.employee.saveSettings(defaultOrgId, first.id, { email, plan, revision: 2 });
+    await repos.employee.saveSettings(defaultOrgId, first.id, { email, plan, revision: 3 });
     expect((await request("/employee/session", "GET", cookie)).status).toBe(401);
     expect((await request("/employee/session", "GET", secondCookie)).status).toBe(200);
   });
@@ -1635,6 +1692,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       role: "Analista",
       department: "Produto",
       deadline: "2027-02-01",
+      email,
     });
 
     const second = await repos.offboardings.createOffboarding(defaultOrgId, {
@@ -1642,6 +1700,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       role: "Analista",
       department: "TI",
       deadline: "2027-02-02",
+      email: `other-${randomUUID()}@offboard.example`,
     });
 
     await repos.team.createTeamMember(defaultOrgId, { email: admin, name: "RH", role: "admin" });
@@ -1671,9 +1730,9 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     };
 
     expect(await (await request(target, "GET", hrCookie)).json()).toEqual({
-      email: null,
+      email,
       plan: emptyEmployeePlan,
-      revision: 0,
+      revision: 1,
     });
     expect((await request(`/employee-access/${missingCaseId}`, "GET", hrCookie)).status).toBe(404);
     expect(
@@ -1685,14 +1744,14 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         })
       ).status,
     ).toBe(404);
-    expect((await request(target, "PUT", hrCookie, { email, plan, revision: 0 })).status).toBe(200);
+    expect((await request(target, "PUT", hrCookie, { email, plan, revision: 1 })).status).toBe(200);
     expect(await (await request(target, "GET", hrCookie)).json()).toEqual({
       email,
       plan,
-      revision: 1,
+      revision: 2,
     });
-    expect((await request(target, "PUT", hrCookie, { email, plan, revision: 0 })).status).toBe(409);
-    const firstVersion = { email, plan, revision: 1 };
+    expect((await request(target, "PUT", hrCookie, { email, plan, revision: 1 })).status).toBe(409);
+    const firstVersion = { email, plan, revision: 2 };
     expect((await request(target, "PUT", hrCookie, { ...firstVersion, email: null })).status).toBe(
       200,
     );
@@ -1701,9 +1760,9 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     expect(await conflict.json()).toMatchObject({ code: "settings-changed" });
     expect(await (await request(target, "GET", hrCookie)).json()).toMatchObject({
       email: null,
-      revision: 2,
+      revision: 3,
     });
-    expect((await request(target, "PUT", hrCookie, { ...firstVersion, revision: 2 })).status).toBe(
+    expect((await request(target, "PUT", hrCookie, { ...firstVersion, revision: 3 })).status).toBe(
       200,
     );
     expect(
@@ -1715,6 +1774,16 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         })
       ).status,
     ).toBe(409);
+
+    const emailInUse = await request(`/employee-access/${second.id}`, "PUT", hrCookie, {
+      email,
+      plan,
+      revision: 1,
+    });
+
+    expect(emailInUse.status).toBe(409);
+    expect(await emailInUse.json()).toMatchObject({ code: "email-in-use" });
+
     await expect(
       repos.employee.saveSettings(defaultOrgId, "invalid-case-id", { email, plan, revision: 0 }),
     ).rejects.toThrow();
@@ -1782,7 +1851,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       (await request("/employee/state", "PUT", cookie, { ...initial, revision: 1 })).status,
     ).toBe(200);
 
-    expect((await request(target, "PUT", hrCookie, { email, plan, revision: 3 })).status).toBe(200);
+    expect((await request(target, "PUT", hrCookie, { email, plan, revision: 4 })).status).toBe(200);
     expect((await request("/employee/session", "GET", cookie)).status).toBe(200);
 
     await db.delete(employeeAccess).where(eq(employeeAccess.caseId, first.id));
@@ -1795,6 +1864,35 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     ).toBe("missing-case");
   });
 
+  it("returns email-in-use when updating employee access to a taken email", async () => {
+    const emailA = `taken-a-${randomUUID()}@offboard.example`;
+    const emailB = `taken-b-${randomUUID()}@offboard.example`;
+
+    await repos.offboardings.createOffboarding(defaultOrgId, {
+      name: "Taken A",
+      role: "Dev",
+      department: "Eng",
+      deadline: "2027-01-01",
+      email: emailA,
+    });
+
+    const caseB = await repos.offboardings.createOffboarding(defaultOrgId, {
+      name: "Taken B",
+      role: "Dev",
+      department: "Eng",
+      deadline: "2027-01-01",
+      email: emailB,
+    });
+
+    expect(
+      await repos.employee.saveSettings(defaultOrgId, caseB.id, {
+        email: emailA,
+        plan: emptyEmployeePlan,
+        revision: 1,
+      }),
+    ).toBe("email-in-use");
+  });
+
   it("rejects a previously delivered code if the case is revoked before verification", async () => {
     const email = `revoked-new-${randomUUID()}@offboard.example`;
 
@@ -1803,6 +1901,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       role: "Analista",
       department: "Produto",
       deadline: "2027-02-01",
+      email,
     });
 
     await repos.employee.saveSettings(defaultOrgId, first.id, {
@@ -1849,15 +1948,21 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       role: "Analista",
       department: "Produto",
       deadline: "2027-02-01",
+      email,
     };
 
     const first = await repos.offboardings.createOffboarding(defaultOrgId, person);
-    const second = await repos.offboardings.createOffboarding(defaultOrgId, person);
+
+    const second = await repos.offboardings.createOffboarding(defaultOrgId, {
+      ...person,
+      email: `reassigned2-${randomUUID()}@offboard.example`,
+    });
+
     const plan = emptyEmployeePlan;
 
     expect(
       await repos.employee.saveSettings(defaultOrgId, first.id, { email, plan, revision: 0 }),
-    ).toBe("saved");
+    ).toBe("changed");
     expect((await sendCode(email)).status).toBe(200);
     const priorCode = codes.get(email);
 
@@ -1867,7 +1972,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       await repos.employee.saveSettings(defaultOrgId, first.id, { email: null, plan, revision: 1 }),
     ).toBe("saved");
     expect(
-      await repos.employee.saveSettings(defaultOrgId, second.id, { email, plan, revision: 0 }),
+      await repos.employee.saveSettings(defaultOrgId, second.id, { email, plan, revision: 1 }),
     ).toBe("saved");
     expect((await signIn(email, priorCode)).status).toBe(400);
 
@@ -1890,13 +1995,9 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       role: "Analista",
       department: "Produto",
       deadline: "2027-02-01",
+      email,
     });
 
-    await repos.employee.saveSettings(defaultOrgId, record.id, {
-      email,
-      plan: emptyEmployeePlan,
-      revision: 0,
-    });
     expect((await sendCode(email)).status).toBe(200);
     const code = codes.get(email);
 
@@ -1937,10 +2038,10 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       role: "Analista",
       department: "Produto",
       deadline: "2027-02-01",
+      email,
     });
 
     const plan = emptyEmployeePlan;
-    await repos.employee.saveSettings(defaultOrgId, record.id, { email, plan, revision: 0 });
 
     const cookie = await authenticate(email);
     const consent: EmployeeState = { key: "consent", revision: 0, value: { accepted: true } };
@@ -2026,6 +2127,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       role: "Analista",
       department: "Produto",
       deadline: "2027-02-01",
+      email,
     });
 
     await repos.employee.saveSettings(defaultOrgId, record.id, {

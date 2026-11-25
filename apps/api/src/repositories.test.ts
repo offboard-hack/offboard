@@ -97,6 +97,7 @@ describe.skipIf(!url)("repositories", () => {
       role: "QA",
       department: "Tecnologia",
       deadline: "2026-12-01",
+      email: "sem-tarefas@example.com",
     });
 
     const list = await repos.offboardings.listOffboardings(defaultOrgId);
@@ -164,13 +165,15 @@ describe.skipIf(!url)("repositories", () => {
       role: "Analista",
       department: "Operações",
       deadline: "2026-12-10",
+      email: "joao.davila@example.com",
     };
 
     const first = await repos.offboardings.createOffboarding(defaultOrgId, input);
+    const { email: _, ...expected } = input;
 
     expect(first).toEqual({
       id: expect.stringMatching(uuidPattern),
-      ...input,
+      ...expected,
       completed: 0,
       total: 0,
     });
@@ -702,7 +705,14 @@ describe.skipIf(!url)("multi-tenant isolation", () => {
   });
 
   it("stores created cases under the given organization", async () => {
-    const data = { name: "Novo", role: "QA", department: "TI", deadline: "2026-12-10" };
+    const data = {
+      name: "Novo",
+      role: "QA",
+      department: "TI",
+      deadline: "2026-12-10",
+      email: "novo@example.com",
+    };
+
     const created = await repos.offboardings.createOffboarding(orgA, data);
 
     const [bulk] = await repos.offboardings.bulkCreateOffboardings(orgB, [

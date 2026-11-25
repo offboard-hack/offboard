@@ -25,32 +25,38 @@ const newCaseSchema = z.object({
   role: z.string().trim().min(1, "Informe o cargo."),
   department: z.enum(offboardingDepartments, { error: "Escolha a área." }),
   deadline: z.iso.date({ error: "Informe uma data válida." }),
+  email: z.string().trim().toLowerCase().pipe(z.email("Informe um e-mail válido.")),
 });
 
 export type NewCase = z.output<typeof newCaseSchema>;
 
 const textFields = [
-  { name: "name", label: "Nome", type: "text" },
-  { name: "role", label: "Cargo", type: "text" },
+  { name: "name", label: "Nome", type: "text", required: true },
+  { name: "role", label: "Cargo", type: "text", required: true },
+  { name: "email", label: "E-mail", type: "email", required: true },
 ] as const;
 
 export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => Promise<void> }) {
   const id = useId();
   const [open, setOpen] = useState(false);
-  const [submitError, setSubmitError] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const form = useForm({
-    defaultValues: { name: "", role: "", department: "", deadline: "" },
+    defaultValues: { name: "", role: "", department: "", deadline: "", email: "" },
     validators: { onSubmit: newCaseSchema },
     onSubmit: async ({ value }) => {
-      setSubmitError(false);
+      setSubmitError(null);
 
       try {
         await onCreate(newCaseSchema.parse(value));
         setOpen(false);
         form.reset();
-      } catch {
-        setSubmitError(true);
+      } catch (error) {
+        setSubmitError(
+          error instanceof Error && error.message === "email-in-use"
+            ? "Este e-mail já está vinculado a outro desligamento."
+            : "Não foi possível criar o desligamento. Tente novamente.",
+        );
       }
     },
   });
@@ -62,7 +68,7 @@ export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => Pro
         setOpen(next);
 
         if (!next) {
-          setSubmitError(false);
+          setSubmitError(null);
           form.reset();
         }
       }}
@@ -86,7 +92,7 @@ export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => Pro
           }}
         >
           <DialogBody className="grid gap-5 sm:grid-cols-2">
-            {textFields.map(({ name, label, type }) => (
+            {textFields.map(({ name, label, type, required }) => (
               <form.Field key={name} name={name}>
                 {(field) => {
                   const inputId = `${id}-${name}`;
@@ -105,7 +111,7 @@ export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => Pro
                         aria-invalid={Boolean(error)}
                         aria-describedby={error ? `${inputId}-error` : undefined}
                         className="min-h-11"
-                        required
+                        required={required}
                       />
                       {error && (
                         <p
@@ -184,7 +190,7 @@ export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => Pro
           </DialogBody>
           {submitError && (
             <p role="alert" className="px-5 py-2 text-sm text-destructive">
-              Não foi possível criar o desligamento. Tente novamente.
+              {submitError}
             </p>
           )}
           <DialogFooter>
