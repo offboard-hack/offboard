@@ -3,9 +3,10 @@ import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { describe, expect, it } from "vitest";
 import { createClient, createRequestScopedClient } from "../src/client.ts";
-import { eq } from "drizzle-orm";
-import { seedTalentProfiles } from "../src/talent-profile.fixture.ts";
-import { seedApplications } from "../src/application.fixture.ts";
+import { and, eq } from "drizzle-orm";
+import type { Database } from "../src/client.ts";
+import { seedCohortProfiles, seedTalentProfiles } from "../src/talent-profile.fixture.ts";
+import { seedApplications, seedCohortApplications } from "../src/application.fixture.ts";
 import { seedJobs } from "../src/job.fixture.ts";
 import {
   applicationEvents,
@@ -27,6 +28,15 @@ import {
 import { seedCases, seedDatabase, testSeedFixtures } from "../src/seed-database.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+
+const marinaProfileId = async (db: Database) => {
+  const [marina] = await db
+    .select({ id: talentProfiles.id })
+    .from(talentProfiles)
+    .where(eq(talentProfiles.name, "Marina Lopes"));
+
+  return marina.id;
+};
 
 it.skipIf(!url)(
   "allows queries and transactions only inside a database request scope",
@@ -78,10 +88,13 @@ it.skipIf(!url)(
       });
       await seedDatabase(db);
 
+      const marinaId = await marinaProfileId(db);
       const profiles = await db.select().from(talentProfiles);
-      expect(profiles).toHaveLength(seedTalentProfiles.length);
+      expect(profiles).toHaveLength(seedTalentProfiles.length + seedCohortProfiles.length);
 
-      const [profile] = profiles;
+      const profile = profiles.find((item) => item.id === marinaId);
+
+      if (!profile) throw new Error("Marina profile missing");
       expect(profile.caseId).not.toBeNull();
 
       const [other] = await db
@@ -183,9 +196,22 @@ it.skipIf(!url)("stores applications with one per job and a consistent closed re
     });
     await seedDatabase(db);
 
-    const rows = await db.select().from(applications);
+    const marinaId = await marinaProfileId(db);
+    const all = await db.select().from(applications);
+    expect(all).toHaveLength(seedApplications.length + seedCohortApplications.length);
+    const rows = all.filter((item) => item.profileId === marinaId);
     expect(rows).toHaveLength(seedApplications.length);
-    expect(await db.select().from(applicationEvents)).toHaveLength(9);
+    expect(
+      await db
+        .select()
+        .from(applicationEvents)
+        .where(
+          sql`${applicationEvents.applicationId} in (${sql.join(
+            rows.map((item) => sql`${item.id}`),
+            sql`, `,
+          )})`,
+        ),
+    ).toHaveLength(9);
     const [agenda] = await db.select().from(interviews);
     expect(agenda.startsAt.toISOString().slice(11)).toBe("13:00:00.000Z");
     expect(agenda.mode).toBe("video");
@@ -220,8 +246,7 @@ it.skipIf(!url)("stores applications with one per job and a consistent closed re
 
     await db.delete(talentProfiles).where(eq(talentProfiles.id, application.profileId));
 
-    expect(await db.select().from(applications)).toHaveLength(0);
-    expect(await db.select().from(applicationEvents)).toHaveLength(0);
+    expect(await db.select().from(applications)).toHaveLength(seedCohortApplications.length);
     expect(await db.select().from(interviews)).toHaveLength(0);
   } finally {
     await db.$client.end();
@@ -237,7 +262,11 @@ it.skipIf(!url)("stores one base résumé per profile", async () => {
     });
     await seedDatabase(db);
 
-    const [base] = await db.select().from(resumes).where(eq(resumes.kind, "base"));
+    const [base] = await db
+      .select()
+      .from(resumes)
+      .where(and(eq(resumes.kind, "base"), eq(resumes.profileId, await marinaProfileId(db))));
+
     expect(base.kind).toBe("base");
     expect(base.status).toBe("ready");
     expect(base.jobId).toBeNull();
@@ -312,7 +341,12 @@ it.skipIf(!url)("links applications to the résumé they used", async () => {
     const used = await db
       .select()
       .from(applications)
-      .where(sql`${applications.resumeId} is not null`);
+      .where(
+        and(
+          sql`${applications.resumeId} is not null`,
+          eq(applications.profileId, await marinaProfileId(db)),
+        ),
+      );
 
     expect(used.map((item) => item.resumeId)).toEqual([ready[0].id]);
     expect(used[0].jobId).toBe(ready[0].jobId);
@@ -321,9 +355,17 @@ it.skipIf(!url)("links applications to the résumé they used", async () => {
     const draftJobId = drafts[0].jobId ?? "";
     const [draftJob] = await db.select().from(jobs).where(eq(jobs.id, draftJobId));
     expect(draftJob.closedAt).toBeNull();
-    expect(await db.select().from(applications).where(eq(applications.jobId, draftJobId))).toEqual(
-      [],
-    );
+    expect(
+      await db
+        .select()
+        .from(applications)
+        .where(
+          and(
+            eq(applications.jobId, draftJobId),
+            eq(applications.profileId, await marinaProfileId(db)),
+          ),
+        ),
+    ).toEqual([]);
     expect(ready[0].updatedAt?.getTime()).toBeGreaterThan(drafts[0].updatedAt?.getTime() ?? 0);
     expect(
       tailored.every(
@@ -367,7 +409,11 @@ it.skipIf(!url)("stores jobs, suggestions and usage", async () => {
     });
     await seedDatabase(db);
 
-    const [base] = await db.select().from(resumes).where(eq(resumes.kind, "base"));
+    const [base] = await db
+      .select()
+      .from(resumes)
+      .where(and(eq(resumes.kind, "base"), eq(resumes.profileId, await marinaProfileId(db))));
+
     const suggestions = await db.select().from(resumeSuggestions);
     expect(suggestions).toHaveLength(3);
     expect(suggestions.map((item) => item.estimatedGain).sort()).toEqual([3, 4, 4]);
@@ -466,7 +512,10 @@ it.skipIf(!url)("stores public pages and daily counters", async () => {
       [6, 5, 4, 3, 2, 1, 0].map((offset) => saoPaulo(offset)),
     );
 
-    const tokens = (await db.select().from(applications)).map((item) => item.publicToken);
+    const tokens = (
+      await db.select().from(applications).where(eq(applications.profileId, page.profileId))
+    ).map((item) => item.publicToken);
+
     expect(tokens).toHaveLength(4);
     expect(new Set(tokens).size).toBe(4);
     expect(tokens.every((token) => /^[A-Za-z0-9_-]{32}$/.test(token ?? ""))).toBe(true);
@@ -545,7 +594,10 @@ it.skipIf(!url)("stores one match per profile and job", async () => {
     });
     await seedDatabase(db);
 
-    const [base] = await db.select().from(resumes).where(eq(resumes.kind, "base"));
+    const [base] = await db
+      .select()
+      .from(resumes)
+      .where(and(eq(resumes.kind, "base"), eq(resumes.profileId, await marinaProfileId(db))));
 
     const seeded = await db
       .select({ score: jobMatches.score, reasons: jobMatches.reasons, title: jobs.title })
@@ -640,4 +692,88 @@ describe("createClient", () => {
     expect(local.$client.options.ssl).toBeUndefined();
     await local.$client.end();
   });
+});
+
+it.skipIf(!url)("seeds enough people for HR aggregates", async () => {
+  const db = createClient(url ?? "");
+
+  try {
+    await migrate(db, {
+      migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
+    });
+    await seedDatabase(db);
+
+    const profiles = await db.select().from(talentProfiles);
+    expect(profiles).toHaveLength(seedTalentProfiles.length + 7);
+
+    const cohort = profiles.filter((item) => item.name !== "Marina Lopes");
+    expect(cohort).toHaveLength(7);
+    expect(cohort.every((item) => item.personalEmail.endsWith("@exemplo.com"))).toBe(true);
+    expect(cohort.every((item) => item.termsAcceptedAt !== null && item.caseId !== null)).toBe(
+      true,
+    );
+    expect(cohort.filter((item) => item.firstSignedInAt !== null)).toHaveLength(5);
+
+    const rows = await db.select().from(applications);
+
+    const reached = (stages: string[], closedReasons: string[] = []) =>
+      new Set(
+        rows
+          .filter(
+            (item) =>
+              stages.includes(item.furthestStage) ||
+              (item.closedReason !== null && closedReasons.includes(item.closedReason)),
+          )
+          .map((item) => item.profileId),
+      ).size;
+
+    expect(new Set(rows.map((item) => item.profileId)).size).toBeGreaterThanOrEqual(6);
+    expect(
+      reached(["in_review", "interview", "offer"], ["rejected", "hired"]),
+    ).toBeGreaterThanOrEqual(5);
+    expect(reached(["interview", "offer"])).toBeGreaterThanOrEqual(5);
+    expect(reached(["offer"])).toBeLessThan(5);
+
+    const hired = rows.filter((item) => item.closedReason === "hired");
+
+    const shared = new Set(
+      profiles.filter((item) => item.shareOutcomeWithHr).map((item) => item.id),
+    );
+
+    expect(hired.filter((item) => shared.has(item.profileId))).toHaveLength(2);
+    expect(hired.filter((item) => !shared.has(item.profileId))).toHaveLength(1);
+    expect(hired.every((item) => item.furthestStage === "offer")).toBe(true);
+    expect(rows.every((item) => item.furthestStage !== "closed")).toBe(true);
+    expect(rows.every((item) => (item.status === "closed") === (item.closedReason !== null))).toBe(
+      true,
+    );
+
+    const resumeRows = await db.select().from(resumes).where(eq(resumes.kind, "base"));
+    const baseByProfile = new Map(resumeRows.map((item) => [item.profileId, item.id]));
+
+    for (const item of rows.filter(
+      (row) => row.profileId !== profiles.find((p) => p.name === "Marina Lopes")?.id,
+    )) {
+      expect(item.resumeId).toBe(baseByProfile.get(item.profileId));
+    }
+
+    const events = await db.select().from(applicationEvents);
+
+    for (const item of rows) {
+      const own = events.filter((event) => event.applicationId === item.id);
+      const stages = ["sent", "in_review", "interview", "offer"];
+      const expected = stages.slice(0, stages.indexOf(item.furthestStage) + 1);
+      expect(
+        own
+          .filter((event) => event.status !== "closed")
+          .map((event) => event.status)
+          .sort(),
+      ).toEqual([...expected].sort());
+      expect(
+        own.filter((event) => event.status === "closed").map((event) => event.closedReason),
+      ).toEqual(item.closedReason ? [item.closedReason] : []);
+    }
+  } finally {
+    await db.$client.end();
+  }
 });

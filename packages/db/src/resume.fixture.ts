@@ -120,6 +120,48 @@ export const seedResumes: SeedResume[] = [
   },
 ];
 
+const cohortResume = (index: number, caseName: string, email: string) => {
+  const id = (node: number) => `6c0a000${index}-0000-4000-8000-${String(node).padStart(12, "0")}`;
+
+  return {
+    caseName,
+    score: 70 + index,
+    scoredDaysAgo: 3,
+    suggestions: [],
+    content: {
+      headline: { id: id(1), text: "Profissional de Operações" },
+      summary: {
+        id: id(2),
+        text: "Profissional com experiência em operações, atendimento e melhoria de processos.",
+      },
+      experiences: [
+        {
+          id: id(10),
+          company: "Empresa Exemplo",
+          role: "Analista de Operações",
+          start: "2021-01",
+          end: null,
+          bullets: [{ id: id(11), text: "Reduziu o tempo médio de atendimento em 20%." }],
+        },
+      ],
+      education: [],
+      skills: [{ id: id(40), name: "Gestão de processos" }],
+      languages: [{ id: id(50), name: "Português", level: "Nativo" }],
+      contact: { email, phone: null, city: "São Paulo", links: [] },
+    },
+  } satisfies SeedResume;
+};
+
+export const seedCohortResumes: SeedResume[] = [
+  ["Rafael Mendes", "rafael.mendes"],
+  ["Bianca Souza", "bianca.souza"],
+  ["André Lima", "andre.lima"],
+  ["Nina Castro", "nina.castro"],
+  ["Gustavo Ribeiro", "gustavo.ribeiro"],
+  ["Carla Mendonça", "carla.mendonca"],
+  ["Felipe Oliveira", "felipe.oliveira"],
+].map(([name, local], index) => cohortResume(index + 1, name, `${local}@exemplo.com`));
+
 export type SeedTailoredResume = {
   caseName: string;
   jobIndex: number;

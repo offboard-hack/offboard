@@ -3,6 +3,7 @@ import {
   applicationStages,
   interviewStart,
   seedApplications,
+  seedCohortApplications,
   seedInterviews,
   type SeedApplication,
   type SeedInterview,
@@ -41,6 +42,7 @@ import {
   teamMembers,
 } from "./schema/index.ts";
 import {
+  seedCohortResumes,
   seedResumes,
   seedTailoredResumes,
   type SeedResume,
@@ -52,7 +54,11 @@ import {
   seedPublicPages,
   type SeedPublicPage,
 } from "./public-page.fixture.ts";
-import { seedTalentProfiles, type SeedTalentProfile } from "./talent-profile.fixture.ts";
+import {
+  seedCohortProfiles,
+  seedTalentProfiles,
+  type SeedTalentProfile,
+} from "./talent-profile.fixture.ts";
 import { baseSeedTeamMembers, seedTeamMembers } from "./team-member.fixture.ts";
 
 const noTalentProfiles: SeedTalentProfile[] = [];
@@ -82,11 +88,11 @@ export async function seedDatabase(
   fixtures = {
     cases: seedCases,
     members: seedTeamMembers,
-    talentProfiles: seedTalentProfiles,
+    talentProfiles: [...seedTalentProfiles, ...seedCohortProfiles],
     jobs: seedJobs,
-    applications: seedApplications,
+    applications: [...seedApplications, ...seedCohortApplications],
     interviews: seedInterviews,
-    resumes: seedResumes,
+    resumes: [...seedResumes, ...seedCohortResumes],
     tailoredResumes: seedTailoredResumes,
     jobMatches: seedJobMatches,
     publicPages: seedPublicPages,
@@ -183,8 +189,15 @@ export async function seedDatabase(
     let seededProfileId: string | undefined;
     const profileIds = new Map<string, string>();
     const resumeVersions = new Map<string, Date>();
+    const baseResumeIds = new Map<string, string>();
 
-    for (const { caseName, sponsoredForDays, ...profile } of fixtures.talentProfiles) {
+    for (const {
+      caseName,
+      sponsoredForDays,
+      termsAccepted,
+      signedIn,
+      ...profile
+    } of fixtures.talentProfiles) {
       const caseId = caseIds.get(caseName);
 
       if (!caseId) continue;
@@ -195,7 +208,13 @@ export async function seedDatabase(
 
       const [inserted] = await tx
         .insert(talentProfiles)
-        .values({ caseId, sponsoredUntil, ...profile })
+        .values({
+          caseId,
+          sponsoredUntil,
+          termsAcceptedAt: termsAccepted ? new Date() : null,
+          firstSignedInAt: signedIn ? new Date() : null,
+          ...profile,
+        })
         .returning({ id: talentProfiles.id });
 
       seededProfileId ??= inserted.id;
@@ -217,6 +236,7 @@ export async function seedDatabase(
           .returning({ id: resumes.id });
 
         resumeVersions.set(caseName, scoredAt);
+        baseResumeIds.set(caseName, insertedResume.id);
 
         const nodes = [
           resume.content.headline,
@@ -301,33 +321,53 @@ export async function seedDatabase(
         throw new Error("Seeding applications requires at least one talent profile");
       }
 
+      const profileId = item.caseName ? profileIds.get(item.caseName) : seededProfileId;
+
+      if (!profileId) {
+        throw new Error(`Seed application needs a profile for ${item.caseName}`);
+      }
+
       const appliedAt = new Date(Date.now() - item.appliedDaysAgo * 86_400_000);
       const stages = applicationStages.slice(0, applicationStages.indexOf(item.status) + 1);
       const at = (stage: number) => new Date(appliedAt.getTime() + stage * 2 * 3_600_000);
+      const closedReason = item.closedReason ?? null;
+
+      const events: Omit<typeof applicationEvents.$inferInsert, "applicationId">[] = stages.map(
+        (status, stage) => ({ status, createdAt: at(stage) }),
+      );
+
+      if (closedReason) {
+        events.push({
+          status: "closed" as const,
+          closedReason,
+          createdAt: at(stages.length),
+        });
+      }
 
       const [created] = await tx
         .insert(applications)
         .values({
-          profileId: seededProfileId,
+          profileId,
           jobId: insertedJobs[item.jobIndex].id,
-          resumeId: item.usesTailoredResume ? tailoredResumeIds.get(item.jobIndex) : null,
+          resumeId: item.caseName
+            ? baseResumeIds.get(item.caseName)
+            : item.usesTailoredResume
+              ? tailoredResumeIds.get(item.jobIndex)
+              : null,
           publicToken: publicToken(),
-          status: item.status,
+          status: closedReason ? "closed" : item.status,
           furthestStage: item.status,
+          closedReason,
           appliedAt,
-          statusChangedAt: at(stages.length - 1),
+          statusChangedAt: at(closedReason ? stages.length : stages.length - 1),
         })
         .returning({ id: applications.id });
 
       applicationIds.push(created.id);
 
-      await tx.insert(applicationEvents).values(
-        stages.map((status, stage) => ({
-          applicationId: created.id,
-          status,
-          createdAt: at(stage),
-        })),
-      );
+      await tx
+        .insert(applicationEvents)
+        .values(events.map((event) => ({ ...event, applicationId: created.id })));
     }
 
     for (const item of fixtures.interviews) {
