@@ -1,3 +1,6 @@
+import { htmlToText } from "./html-text.js";
+import { discardBody, readCapped } from "./response-body.js";
+
 export type FetchPageResult =
   | { url: URL; text: string }
   | "invalid_url"
@@ -7,7 +10,6 @@ export type FetchPageResult =
 
 const maxRedirects = 3;
 const maxBytes = 2_000_000;
-const maxChars = 30_000;
 const blockedSuffixes = [".localhost", ".local", ".internal"];
 const ipv4Literal = /^\d+\.\d+\.\d+\.\d+$/;
 
@@ -40,51 +42,9 @@ export const parsePublicUrl = (raw: string) => {
   return allowed ? url : invalid;
 };
 
-const htmlToText = (html: string) =>
-  html
-    .replace(/<(script|style)\b[\s\S]*?(?:<\/\1\s*>|$)/gi, " ")
-    .replace(/<[^>]*(?:>|$)/g, " ")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&#39;", "'")
-    .replaceAll("&nbsp;", " ")
-    .replaceAll("&amp;", "&")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, maxChars);
-
-const readCapped = async (body: ReadableStream<Uint8Array>) => {
-  const decoder = new TextDecoder();
-  const parts: string[] = [];
-  let size = 0;
-
-  const reader = body.getReader();
-
-  for (let next = await reader.read(); !next.done; next = await reader.read()) {
-    size += next.value.byteLength;
-
-    if (size > maxBytes) {
-      await reader.cancel().catch(() => undefined);
-
-      return null;
-    }
-
-    parts.push(decoder.decode(next.value, { stream: true }));
-  }
-
-  parts.push(decoder.decode());
-
-  return parts.join("");
-};
-
-const discard = async (response: Response) => {
-  await response.body?.cancel().catch(() => undefined);
-};
-
 const readPage = async (url: URL, response: Response) => {
   if (!response.ok) {
-    await discard(response);
+    await discardBody(response);
 
     return "unreachable" satisfies FetchPageResult;
   }
@@ -92,20 +52,20 @@ const readPage = async (url: URL, response: Response) => {
   const mediaType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
 
   if (mediaType !== "text/html") {
-    await discard(response);
+    await discardBody(response);
 
     return "not_html" satisfies FetchPageResult;
   }
 
   if (Number(response.headers.get("content-length")) > maxBytes) {
-    await discard(response);
+    await discardBody(response);
 
     return "too_large" satisfies FetchPageResult;
   }
 
   if (response.body === null) return { url, text: "" } satisfies FetchPageResult;
 
-  const html = await readCapped(response.body);
+  const html = await readCapped(response.body, maxBytes);
 
   if (html === null) return "too_large" satisfies FetchPageResult;
 
@@ -134,7 +94,7 @@ export const fetchPageText = async (url: URL, fetchImpl: typeof fetch = fetch) =
 
       if (response.status < 300 || response.status >= 400) return await readPage(current, response);
 
-      await discard(response);
+      await discardBody(response);
 
       const next = nextLocation(response, current);
 
