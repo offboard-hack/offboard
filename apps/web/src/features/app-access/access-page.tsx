@@ -3,7 +3,12 @@ import { Shield01Icon, UserGroupIcon, UserCheck01Icon, ViewIcon } from "@hugeico
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { createTeamMember, deleteTeamMember, teamQuery } from "@/entities/team";
+import {
+  createTeamMember,
+  deleteTeamMember,
+  teamQuery,
+  updateTeamMemberRole,
+} from "@/entities/team";
 import type { MemberRole, TeamMember } from "@/entities/team";
 import { listPagination } from "@/shared/lib/list-pagination";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
@@ -12,7 +17,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/shadcn/popo
 import { classProps } from "../../shared/lib/class-props";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
-import { Badge } from "../../shared/ui/shadcn/badge";
+import { PortalFilter } from "../../shared/ui/select";
 import { portalStyles as s } from "../../shared/ui/surface.styles";
 import { AddMemberDialog } from "./add-member-dialog";
 import type { NewMember } from "./add-member-dialog";
@@ -27,6 +32,10 @@ const roleDetails = {
   gestor: { label: "Gestor", access: "Somente leitura" },
   visualizador: { label: "Visualizador", access: "Somente leitura" },
 } satisfies Record<MemberRole, { label: string; access: string }>;
+
+const memberRoles: MemberRole[] = ["admin", "rh", "gestor", "visualizador"];
+
+const roleItems = memberRoles.map((value) => ({ label: roleDetails[value].label, value }));
 
 const roleByLabel = {
   Admin: "admin",
@@ -72,27 +81,24 @@ const roleCards: {
   },
 ];
 
-const roleBadges: Record<
-  MemberRole,
-  { variant: "default" | "secondary" | "outline"; className: string }
-> = {
-  admin: { variant: "default", className: "" },
-  rh: { variant: "secondary", className: "" },
-  gestor: { variant: "outline", className: "" },
-  visualizador: { variant: "outline", className: "bg-muted text-muted-foreground" },
-};
-
+const portalRoute = getRouteApi("/_portal");
 const route = getRouteApi("/_portal/equipe");
 
 export function AccessPage() {
   const navigate = route.useNavigate();
   const client = useQueryClient();
+  const { principal } = portalRoute.useRouteContext();
   const { data: team } = useSuspenseQuery(teamQuery);
 
   const refresh = () => client.invalidateQueries(teamQuery);
 
   const add = useMutation({ mutationFn: createTeamMember, onSettled: refresh });
   const remove = useMutation({ mutationFn: deleteTeamMember, onSettled: refresh });
+
+  const updateRole = useMutation({
+    mutationFn: ({ id, role }: { id: string; role: MemberRole }) => updateTeamMemberRole(id, role),
+    onSettled: refresh,
+  });
 
   async function addMember({ name, email, role }: NewMember) {
     await add.mutateAsync({ name, email, role: roleByLabel[role] });
@@ -107,12 +113,20 @@ export function AccessPage() {
       accessorFn: ({ role }) => roleDetails[role].label,
       header: "Papel",
       cell: ({ row }) => {
-        const { variant, className } = roleBadges[row.original.role];
+        const isSelf = row.original.id === principal.id;
 
         return (
-          <Badge variant={variant} className={className}>
-            {roleDetails[row.original.role].label}
-          </Badge>
+          <PortalFilter
+            label={`Papel de ${row.original.name}`}
+            value={row.original.role}
+            items={roleItems}
+            // WARNING: items are built from memberRoles, so every emitted value is a MemberRole.
+            onChange={(role) =>
+              updateRole.mutate({ id: row.original.id, role: role as MemberRole })
+            }
+            disabled={isSelf || updateRole.variables?.id === row.original.id}
+            className="w-40"
+          />
         );
       },
     },

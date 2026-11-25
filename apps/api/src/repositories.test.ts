@@ -532,6 +532,30 @@ describe.skipIf(!url)("team members", () => {
     expect(members[0].id).toMatch(uuidPattern);
   });
 
+  it("updates a member's role", async () => {
+    const [, camila] = await repos.team.listTeamMembers(defaultOrgId);
+
+    expect(await repos.team.updateTeamMemberRole(defaultOrgId, camila.id, "gestor")).toEqual({
+      ...camila,
+      role: "gestor",
+    });
+  });
+
+  it("refuses to demote the last admin but allows it with another admin", async () => {
+    const [admin, camila] = await repos.team.listTeamMembers(defaultOrgId);
+
+    expect(await repos.team.updateTeamMemberRole(defaultOrgId, admin.id, "rh")).toBe("last-admin");
+    expect(await repos.team.updateTeamMemberRole(defaultOrgId, admin.id, "admin")).toMatchObject({
+      role: "admin",
+    });
+
+    await repos.team.updateTeamMemberRole(defaultOrgId, camila.id, "admin");
+
+    expect(await repos.team.updateTeamMemberRole(defaultOrgId, admin.id, "rh")).toMatchObject({
+      role: "rh",
+    });
+  });
+
   it("creates a member and lists it in order", async () => {
     const created = await repos.team.createTeamMember(defaultOrgId, {
       name: "Ana Souza",
@@ -732,6 +756,9 @@ describe.skipIf(!url)("multi-tenant isolation", () => {
     expect(await repos.team.listTeamMembers(orgB)).toHaveLength(2);
     expect(await repos.team.listTeamMembers(orgA)).toHaveLength(3);
     expect(await repos.team.deleteTeamMember(orgA, memberB)).toBe(false);
+    expect(await repos.team.updateTeamMemberRole(orgA, memberB, "rh")).toBeNull();
+    expect(await repos.team.updateTeamMemberRole(orgB, memberB, "rh")).toBe("last-admin");
+
     expect(await repos.team.deleteTeamMember(orgB, created.id)).toBe(true);
   });
 

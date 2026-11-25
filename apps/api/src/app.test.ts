@@ -46,7 +46,7 @@ const auth: PortalAuth = {
     return Promise.resolve({
       kind: "authenticated",
       principal: {
-        id: "test-member",
+        id: headers.get("x-test-member-id") ?? "test-member",
         name: "Test Member",
         email: "member@example.com",
         role,
@@ -807,6 +807,49 @@ describe.skipIf(!url)("api", () => {
 
   it("returns 404 when deleting unknown team member", async () => {
     const res = await call(`/team/${missingCaseId}`, "DELETE");
+
+    expect(res.status).toBe(404);
+  });
+
+  it("updates a team member's role", async () => {
+    const [, camila] = await (await call("/team")).json();
+
+    const res = await call(`/team/${camila.id}`, "PATCH", { role: "gestor" });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ...camila, role: "gestor" });
+  });
+
+  it("rejects demoting the last admin", async () => {
+    const [admin] = await (await call("/team")).json();
+
+    const res = await call(`/team/${admin.id}`, "PATCH", { role: "rh" });
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "Cannot demote the last admin" });
+  });
+
+  it("rejects changing one's own role", async () => {
+    const [, camila] = await (await call("/team")).json();
+
+    const res = await app.handle(
+      new Request(`http://localhost/api/team/${camila.id}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          origin: webOrigin,
+          "x-test-member-id": camila.id,
+        },
+        body: JSON.stringify({ role: "gestor" }),
+      }),
+    );
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "Cannot change own role" });
+  });
+
+  it("returns 404 when updating unknown team member", async () => {
+    const res = await call(`/team/${missingCaseId}`, "PATCH", { role: "rh" });
 
     expect(res.status).toBe(404);
   });

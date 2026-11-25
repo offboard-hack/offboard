@@ -51,5 +51,25 @@ export function teamRoutes(repos: TeamRepository, access: PortalAccessPlugin) {
         params: t.Object({ id: t.String({ format: "uuid" }) }),
         response: { 204: t.Void(), 404: errorResponse },
       },
+    )
+    .patch(
+      "/team/:id",
+      async ({ params, body, principal, status }) => {
+        if (params.id === principal.id) return status(422, { error: "Cannot change own role" });
+
+        const result = await repos.updateTeamMemberRole(principal.orgId, params.id, body.role);
+
+        if (result === "last-admin") return status(422, { error: "Cannot demote the last admin" });
+
+        if (!result) return status(404, { error: "Team member not found" });
+
+        return result;
+      },
+      {
+        permit: ["manage", "Team"],
+        params: t.Object({ id: t.String({ format: "uuid" }) }),
+        body: t.Object({ role: memberRole }),
+        response: { 200: teamMemberResponse, 404: errorResponse, 422: errorResponse },
+      },
     );
 }
