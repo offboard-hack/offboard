@@ -99,6 +99,13 @@ const exportResponse = t.Object({
     }),
   ),
   answers: t.Array(t.Object({ question: t.String(), answer: t.String(), updatedAt: nullable })),
+  packages: t.Array(
+    t.Object({
+      job: t.Object({ id: t.String(), title: t.String(), company: t.String() }),
+      coverLetter: t.String(),
+      updatedAt: nullable,
+    }),
+  ),
 });
 
 export function accountRoutes(

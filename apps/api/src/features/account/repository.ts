@@ -2,6 +2,7 @@ import type { Database } from "@offboard/db/client";
 import {
   answerQuestions,
   applicationEvents,
+  applicationPackages,
   applications,
   authUser,
   interviews,
@@ -174,6 +175,20 @@ export function createAccountRepository(db: Database) {
       .where(eq(jobRejections.profileId, profileId))
       .orderBy(desc(jobRejections.createdAt), asc(jobRejections.jobId));
 
+    const ownPackages = await db
+      .select({
+        job: { id: jobs.id, title: jobs.title, company: jobs.company },
+        coverLetter: applicationPackages.coverLetter,
+        updatedAt: applicationPackages.updatedAt,
+      })
+      .from(applicationPackages)
+      .innerJoin(jobs, eq(jobs.id, applicationPackages.jobId))
+      .where(eq(applicationPackages.profileId, profileId))
+      .orderBy(
+        sql`${applicationPackages.updatedAt} desc nulls last`,
+        asc(applicationPackages.jobId),
+      );
+
     const ownAnswers = await db
       .select({
         question: answerQuestions.text,
@@ -253,6 +268,10 @@ export function createAccountRepository(db: Database) {
       rejections: ownRejections.map((rejection) => ({
         ...rejection,
         createdAt: rejection.createdAt?.toISOString() ?? null,
+      })),
+      packages: ownPackages.map((item) => ({
+        ...item,
+        updatedAt: item.updatedAt?.toISOString() ?? null,
       })),
       answers: ownAnswers.map((item) => ({
         question: item.question,

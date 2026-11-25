@@ -32,6 +32,7 @@ import type { ObjectStorage } from "./shared/object-storage.js";
 import { logFailure } from "./shared/error-summary.js";
 import { rejectionsRoutes } from "./features/preferences/rejections-routes.js";
 import { answersRoutes } from "./features/preferences/answers-routes.js";
+import { packageRoutes } from "./features/preferences/package-routes.js";
 import { preferencesRoutes } from "./features/preferences/routes.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
@@ -282,6 +283,12 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     )
     .use(answersRoutes(repos.answers, talent))
     .use(rejectionsRoutes(repos.rejections, talent))
+    .use(
+      packageRoutes(repos.packages, talent, {
+        generate: options.generateStructured,
+        takeLlmCall: repos.llmUsage.takeLlmCall,
+      }),
+    )
     .use(backgroundRoutes(repos.background, handlers, options.cronSecret, scheduleSources))
     .use(accountRoutes(repos.account, talent, options.storage))
     .use(equipmentRoutes(repos.equipment, access))

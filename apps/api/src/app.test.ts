@@ -10,6 +10,8 @@ import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
 import {
+  answerQuestions,
+  applicationPackages,
   applications,
   backgroundJobs,
   interviews,
@@ -27,7 +29,7 @@ import {
   tasks,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1666,7 +1668,9 @@ describe.skipIf(!url)("api", () => {
 
       type Tailoring = { output: object; fail?: boolean };
 
-      type ModelCall = { kind: "tailor" | "match"; prompt: string };
+      type Cover = { letter: string; fail?: boolean };
+
+      type ModelCall = { kind: "tailor" | "match" | "cover"; prompt: string };
 
       const jobsInPrompt = z.array(z.object({ id: z.string(), title: z.string() }));
 
@@ -1682,6 +1686,8 @@ describe.skipIf(!url)("api", () => {
         const tailoring: Tailoring = {
           output: { rewrites: [], experienceOrder: [], bulletOrder: [], skillIds: [] },
         };
+
+        const cover: Cover = { letter: "Tenho experiência com backend." };
 
         const calls: ModelCall[] = [];
 
@@ -1704,6 +1710,14 @@ describe.skipIf(!url)("api", () => {
         };
 
         const generate: GenerateStructured = async ({ schema, system, prompt }) => {
+          if (system.startsWith("You write one cover letter")) {
+            calls.push({ kind: "cover", prompt });
+
+            if (cover.fail) throw leakyError(prompt);
+
+            return schema.parse({ coverLetter: cover.letter });
+          }
+
           if (system.startsWith("You tailor")) {
             calls.push({ kind: "tailor", prompt });
 
@@ -1783,7 +1797,7 @@ describe.skipIf(!url)("api", () => {
           throw new Error("background queue did not settle");
         }
 
-        return { instance, store, scoring, matching, tailoring, calls, kicks, settle };
+        return { instance, store, scoring, matching, tailoring, cover, calls, kicks, settle };
       }
 
       async function profile(email = personalEmail, caseIndex = 0) {
@@ -3296,6 +3310,300 @@ describe.skipIf(!url)("api", () => {
 
           expect(unscored.status).toBe(200);
           expect((await unscored.json()).version.matchScore).toBeNull();
+        });
+
+        describe("cover letter and package", () => {
+          const letterCalls = (calls: { kind: string }[]) =>
+            calls.filter((modelCall) => modelCall.kind === "cover").length;
+
+          const packageRows = (profileId: string) =>
+            db
+              .select({
+                jobId: applicationPackages.jobId,
+                coverLetter: applicationPackages.coverLetter,
+                createdAt: applicationPackages.createdAt,
+                updatedAt: applicationPackages.updatedAt,
+              })
+              .from(applicationPackages)
+              .where(eq(applicationPackages.profileId, profileId));
+
+          it("keeps non-shared fields out of the package", async () => {
+            const jobId = await openJob("pacote");
+            const { app, id, base, call } = await tailoringApp();
+
+            const [{ id: questionId }] = await db
+              .select({ id: answerQuestions.id })
+              .from(answerQuestions)
+              .where(eq(answerQuestions.common, true))
+              .orderBy(asc(answerQuestions.text))
+              .limit(1);
+
+            await db.insert(talentPreferences).values({
+              profileId: id,
+              profileFields: {
+                phone: { value: "11 90000-0000", share: false },
+                city: { value: null, share: true },
+                linkedin: { value: "linkedin.com/in/eu", share: true },
+                availability: { value: "Imediata", share: true },
+                salaryExpectation: { value: "R$ 9.000", share: false },
+              },
+            });
+            await repos.answers.answer(id, questionId, "Resposta pronta", new Date());
+
+            const res = await call(`/me/jobs/${jobId}/package`);
+            const body = await res.json();
+
+            expect(res.status).toBe(200);
+            expect(body).toEqual({
+              job: { title: "Backend", company: "Acme", url: "https://jobs.example.com/pacote" },
+              resume: { id: base.id, kind: "base" },
+              coverLetter: null,
+              profile: [
+                { field: "linkedin", value: "linkedin.com/in/eu" },
+                { field: "availability", value: "Imediata" },
+              ],
+              answers: [{ question: expect.any(String), answer: "Resposta pronta" }],
+            });
+            expect(JSON.stringify(body)).not.toContain("90000");
+            expect(JSON.stringify(body)).not.toContain("9.000");
+            expect(app.calls).toEqual([]);
+          });
+
+          it("writes, stores and replaces the cover letter", async () => {
+            const jobId = await openJob("carta");
+            const { app, id, call } = await tailoringApp();
+
+            app.cover.letter = "Primeira carta.";
+
+            const first = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(first.status).toBe(200);
+            expect(await first.json()).toEqual({ coverLetter: "Primeira carta." });
+
+            const [created] = await packageRows(id);
+
+            expect(created).toMatchObject({ jobId, coverLetter: "Primeira carta." });
+            expect(created.createdAt).toEqual(created.updatedAt);
+            expect(await usage(id)).toEqual([{ calls: expect.any(Number) }]);
+
+            app.cover.letter = "Segunda carta.";
+
+            const second = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(await second.json()).toEqual({ coverLetter: "Segunda carta." });
+
+            const [replaced] = await packageRows(id);
+
+            expect(replaced).toMatchObject({ coverLetter: "Segunda carta." });
+            expect(replaced.createdAt).toEqual(created.createdAt);
+            expect(replaced.updatedAt?.getTime()).toBeGreaterThanOrEqual(
+              created.updatedAt?.getTime() ?? 0,
+            );
+            expect((await packageRows(id)).length).toBe(1);
+
+            const shown = await (await call(`/me/jobs/${jobId}/package`)).json();
+
+            expect(shown.coverLetter).toBe("Segunda carta.");
+          });
+
+          it("rejects an invented number with 502 and stores nothing", async () => {
+            const jobId = await openJob("inventada");
+            const { app, id, call } = await tailoringApp();
+            const logged = vi.spyOn(console, "error");
+
+            app.cover.letter = "Aumentei vendas em 40%.";
+
+            const res = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(res.status).toBe(502);
+            expect(await res.json()).toEqual({ error: "Could not write the cover letter" });
+            expect(await packageRows(id)).toEqual([]);
+
+            app.cover.letter = "Segunda tentativa";
+            await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+            app.cover.letter = "Aumentei vendas em 40%.";
+
+            const kept = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(kept.status).toBe(502);
+            expect((await packageRows(id)).map((row) => row.coverLetter)).toEqual([
+              "Segunda tentativa",
+            ]);
+            logged.mockRestore();
+          });
+
+          it("allows a digit that comes from the company name", async () => {
+            const [job] = await db
+              .insert(jobs)
+              .values({
+                origin: "external",
+                source: "seed",
+                sourceKey: "noventa",
+                title: "Backend",
+                company: "99",
+                description: "Vaga de 500 pessoas",
+                url: "https://jobs.example.com/noventa",
+              })
+              .returning({ id: jobs.id });
+
+            const { app, call } = await tailoringApp();
+
+            app.cover.letter = "Quero trabalhar na 99.";
+
+            expect((await call(`/me/jobs/${job.id}/cover-letter`, { method: "POST" })).status).toBe(
+              200,
+            );
+
+            app.cover.letter = "Quero atender 500 pessoas.";
+
+            expect((await call(`/me/jobs/${job.id}/cover-letter`, { method: "POST" })).status).toBe(
+              502,
+            );
+          });
+
+          it("uses the ready tailored version and otherwise the base résumé", async () => {
+            const jobId = await openJob("versao");
+            const otherJobId = await openJob("outra-versao");
+            const { app, base, call, tailor, ready } = await tailoringApp();
+            const { version } = await (await tailor(jobId)).json();
+
+            app.calls.length = 0;
+
+            const draftPackage = await (await call(`/me/jobs/${jobId}/package`)).json();
+
+            expect(draftPackage.resume).toEqual({ id: base.id, kind: "base" });
+
+            await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(app.calls.at(-1)?.prompt).toContain("Engenheira de Software");
+
+            await ready(version.id);
+
+            expect((await (await call(`/me/jobs/${jobId}/package`)).json()).resume).toEqual({
+              id: version.id,
+              kind: "tailored",
+            });
+
+            await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(app.calls.at(-1)?.prompt).toContain("Engenheira Backend");
+            expect(app.calls.at(-1)?.prompt).not.toContain("Engenheira de Software");
+
+            expect((await (await call(`/me/jobs/${otherJobId}/package`)).json()).resume).toEqual({
+              id: base.id,
+              kind: "base",
+            });
+          });
+
+          it("shows another profile only its own package", async () => {
+            const jobId = await openJob("isolada");
+            const { app, call } = await tailoringApp();
+            const other = await tailoringApp("outra.pessoal@example.com", 1);
+
+            app.cover.letter = "Carta da primeira pessoa.";
+            await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            const theirs = await other.call(`/me/jobs/${jobId}/package`);
+
+            expect(await theirs.json()).toMatchObject({ coverLetter: null, profile: [] });
+            expect(
+              JSON.stringify(await other.call(`/me/jobs/${jobId}/package`).then((r) => r.json())),
+            ).not.toContain("primeira pessoa");
+            expect((await (await call(`/me/jobs/${jobId}/package`)).json()).coverLetter).toBe(
+              "Carta da primeira pessoa.",
+            );
+          });
+
+          it("answers 429 without generating once the cap is reached", async () => {
+            const jobId = await openJob("teto-carta");
+            const { app, id, call } = await tailoringApp();
+
+            await db.update(llmUsage).set({ calls: 30 }).where(eq(llmUsage.profileId, id));
+            app.calls.length = 0;
+
+            const res = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(res.status).toBe(429);
+            expect(await res.json()).toEqual({ error: "Daily AI limit reached" });
+            expect(letterCalls(app.calls)).toBe(0);
+            expect(await usage(id)).toEqual([{ calls: 30 }]);
+            expect(await packageRows(id)).toEqual([]);
+          });
+
+          it("answers 502 when the model fails and logs a summary", async () => {
+            const jobId = await openJob("falha-carta");
+            const { app, id, call } = await tailoringApp();
+            const logged = vi.spyOn(console, "error");
+
+            app.cover.fail = true;
+
+            const res = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(res.status).toBe(502);
+            expect(await res.json()).toEqual({ error: "Could not write the cover letter" });
+            expect(await packageRows(id)).toEqual([]);
+            expect(logged.mock.calls).toEqual([
+              ["cover letter failed", { name: "Error", message: "gateway down" }],
+            ]);
+            logged.mockRestore();
+          });
+
+          it("checks the job, the résumé and the AI before spending a call", async () => {
+            const jobId = await openJob("ordem-carta");
+            const closedId = await openJob("fechada-carta", new Date());
+            const { app, id, call } = await tailoringApp();
+            const unconfigured = resumesApp({ generate: null });
+            const bare = await profile("sem.curriculo@example.com", 1);
+
+            for (const missing of [crypto.randomUUID(), closedId, "not-a-uuid"]) {
+              for (const [path, method] of [
+                ["cover-letter", "POST"],
+                ["package", "GET"],
+              ]) {
+                const res = await call(`/me/jobs/${missing}/${path}`, { method });
+
+                expect(res.status).toBe(404);
+                expect(await res.json()).toEqual({ error: "Job not found" });
+              }
+            }
+
+            const noBase = await request(app.instance, bare, `/me/jobs/${jobId}/cover-letter`, {
+              method: "POST",
+            });
+
+            expect(noBase.status).toBe(409);
+            expect(await noBase.json()).toEqual({ error: "Upload a résumé first" });
+
+            const bareView = await request(app.instance, bare, `/me/jobs/${jobId}/package`);
+
+            expect(await bareView.json()).toMatchObject({ resume: null, coverLetter: null });
+
+            const before = await usage(id);
+
+            const noAi = await request(
+              unconfigured.instance,
+              id,
+              `/me/jobs/${jobId}/cover-letter`,
+              {
+                method: "POST",
+              },
+            );
+
+            expect(noAi.status).toBe(503);
+            expect(await noAi.json()).toEqual({ error: "AI not configured" });
+            expect(await usage(id)).toEqual(before);
+
+            for (const path of ["cover-letter", "package"]) {
+              expect(
+                (
+                  await request(app.instance, id, `/me/jobs/${jobId}/${path}`, {
+                    method: path === "package" ? "GET" : "POST",
+                    session: "admin",
+                  })
+                ).status,
+              ).toBe(403);
+            }
+          });
         });
 
         it("lists jobs with a tailored version present", async () => {

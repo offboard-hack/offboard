@@ -16,6 +16,7 @@ import {
   resumes,
   resumeSuggestions,
   answerQuestions,
+  applicationPackages,
   talentAnswers,
   talentPreferences,
   talentProfiles,
@@ -668,6 +669,53 @@ describe.skipIf(!url)("account repository", () => {
     expect(await repository.deleteProfile(profileId)).toBe(true);
     expect(await db.select().from(jobRejections)).toEqual([
       expect.objectContaining({ profileId: otherProfileId }),
+    ]);
+  });
+
+  it("exports the cover letters newest first and deletes them with the profile", async () => {
+    expect((await repository.exportData(profileId))?.packages).toEqual([]);
+
+    const older = await job("older-letter");
+    const newer = await job("newer-letter");
+    const undated = await job("undated-letter");
+    const foreign = await job("foreign-letter");
+
+    await db.insert(applicationPackages).values([
+      {
+        profileId,
+        jobId: older,
+        coverLetter: "Antiga",
+        updatedAt: new Date("2026-03-01T00:00:00Z"),
+      },
+      { profileId, jobId: newer, coverLetter: "Nova", updatedAt: new Date("2026-03-02T00:00:00Z") },
+      { profileId, jobId: undated, coverLetter: "Sem data", updatedAt: null },
+      { profileId: otherProfileId, jobId: foreign, coverLetter: "Alheia" },
+    ]);
+
+    const exported = await repository.exportData(profileId);
+
+    expect(exported?.packages).toEqual([
+      {
+        job: { id: newer, title: "Vaga newer-letter", company: expect.any(String) },
+        coverLetter: "Nova",
+        updatedAt: "2026-03-02T00:00:00.000Z",
+      },
+      {
+        job: { id: older, title: "Vaga older-letter", company: expect.any(String) },
+        coverLetter: "Antiga",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      },
+      {
+        job: { id: undated, title: "Vaga undated-letter", company: expect.any(String) },
+        coverLetter: "Sem data",
+        updatedAt: null,
+      },
+    ]);
+    expect(JSON.stringify(exported)).not.toContain("Alheia");
+
+    expect(await repository.deleteProfile(profileId)).toBe(true);
+    expect(await db.select().from(applicationPackages)).toEqual([
+      expect.objectContaining({ profileId: otherProfileId, coverLetter: "Alheia" }),
     ]);
   });
 
