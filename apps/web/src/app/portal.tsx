@@ -10,18 +10,39 @@ import {
   useLocation,
   useMatches,
   useRouter,
+  useRouterState,
 } from "@tanstack/react-router";
 import { createPortalAbility, type PortalPrincipal } from "@offboard/access";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import type { FileRoutesByTo } from "./routeTree.gen";
 import type { ReactNode } from "react";
 import { flushSync } from "react-dom";
+import { Progress } from "@/shared/ui/shadcn/progress";
 import { PortalLayout, PortalSidebarLink } from "./shell";
 import { PortalSidebarUser } from "./sidebar-user";
 import { SidebarGroup, SidebarGroupLabel, SidebarMenu } from "@/shared/ui/shadcn/sidebar";
 import { portalStyles as s } from "../shared/ui/surface.styles";
 
 const portalRoute = getRouteApi("/_portal");
+
+function NavigationProgress() {
+  const navigating = useRouterState({
+    select: ({ status, location, resolvedLocation }) =>
+      status === "pending" &&
+      resolvedLocation !== undefined &&
+      (location.pathname !== resolvedLocation.pathname ||
+        location.searchStr !== resolvedLocation.searchStr),
+  });
+
+  return navigating ? (
+    <Progress
+      value={null}
+      aria-label="Carregando página"
+      aria-valuetext="Em andamento"
+      className="navigation-progress pointer-events-none fixed inset-x-0 top-0 z-50"
+    />
+  ) : null;
+}
 
 export function Document({ children }: { children: ReactNode }) {
   return (
@@ -30,6 +51,7 @@ export function Document({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body>
+        <NavigationProgress />
         {children}
         <Scripts />
       </body>
