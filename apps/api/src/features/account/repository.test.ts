@@ -14,6 +14,8 @@ import {
   publicPages,
   resumes,
   resumeSuggestions,
+  answerQuestions,
+  talentAnswers,
   talentPreferences,
   talentProfiles,
   teamMembers,
@@ -527,6 +529,38 @@ describe.skipIf(!url)("account repository", () => {
       createdAt: null,
       updatedAt: null,
     });
+  });
+
+  it("exports the answers with their questions ordered by text", async () => {
+    expect((await repository.exportData(profileId))?.answers).toEqual([]);
+
+    const late = await repos.answers.ensureQuestion("Zzz última?");
+    const early = await repos.answers.ensureQuestion("Aaa primeira?");
+
+    await repos.answers.answer(profileId, late, "Z", new Date("2026-03-01T00:00:00Z"));
+    await repos.answers.answer(profileId, early, "A", new Date("2026-03-02T00:00:00Z"));
+    await repos.answers.answer(otherProfileId, early, "Alheia", new Date());
+
+    expect((await repository.exportData(profileId))?.answers).toEqual([
+      { question: "Aaa primeira?", answer: "A", updatedAt: "2026-03-02T00:00:00.000Z" },
+      { question: "Zzz última?", answer: "Z", updatedAt: "2026-03-01T00:00:00.000Z" },
+    ]);
+  });
+
+  it("deletes the answers with the profile and keeps the questions", async () => {
+    const question = await repos.answers.ensureQuestion("Aaa primeira?");
+
+    await repos.answers.answer(profileId, question, "A", new Date());
+    await repos.answers.answer(otherProfileId, question, "B", new Date());
+
+    expect(await repository.deleteProfile(profileId)).toBe(true);
+
+    expect(await db.select().from(talentAnswers)).toEqual([
+      expect.objectContaining({ profileId: otherProfileId, answer: "B" }),
+    ]);
+    expect(
+      await db.select().from(answerQuestions).where(eq(answerQuestions.id, question)),
+    ).toHaveLength(1);
   });
 
   it("exports default preferences without a row and the stored ones with it", async () => {

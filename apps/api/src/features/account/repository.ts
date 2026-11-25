@@ -1,5 +1,6 @@
 import type { Database } from "@offboard/db/client";
 import {
+  answerQuestions,
   applicationEvents,
   applications,
   authUser,
@@ -10,6 +11,7 @@ import {
   publicPages,
   resumes,
   resumeSuggestions,
+  talentAnswers,
   talentPreferences,
   talentProfiles,
   teamMembers,
@@ -159,6 +161,19 @@ export function createAccountRepository(db: Database) {
       .from(talentPreferences)
       .where(eq(talentPreferences.profileId, profileId));
 
+    const ownAnswers = await db
+      .select({
+        question: answerQuestions.text,
+        answer: talentAnswers.answer,
+        updatedAt: sql<Date>`coalesce(${talentAnswers.updatedAt}, now())`.mapWith(
+          talentAnswers.updatedAt,
+        ),
+      })
+      .from(talentAnswers)
+      .innerJoin(answerQuestions, eq(answerQuestions.id, talentAnswers.questionId))
+      .where(eq(talentAnswers.profileId, profileId))
+      .orderBy(asc(answerQuestions.text), asc(answerQuestions.id));
+
     return {
       profile: {
         name: profile.name,
@@ -224,6 +239,11 @@ export function createAccountRepository(db: Database) {
         : null,
       pageViews: views,
       preferences: toPreferences(ownPreferences),
+      answers: ownAnswers.map((item) => ({
+        question: item.question,
+        answer: item.answer,
+        updatedAt: item.updatedAt.toISOString(),
+      })),
     };
   }
 

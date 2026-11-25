@@ -3549,6 +3549,165 @@ describe.skipIf(!url)("api", () => {
         expect(await res.json()).toEqual({ error: "Profile not found" });
       });
 
+      describe("answers", () => {
+        type AnswerJson = { answer?: string | number | null };
+
+        const answers = (instance: ReturnType<typeof resumesApp>["instance"], id: string) =>
+          request(instance, id, "/me/answers");
+
+        const put = (
+          instance: ReturnType<typeof resumesApp>["instance"],
+          id: string,
+          questionId: string,
+          json: AnswerJson,
+        ) => request(instance, id, `/me/answers/${questionId}`, { method: "PUT", json });
+
+        it("requires an active talent session", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          expect((await request(instance, id, "/me/answers", { session: "admin" })).status).toBe(
+            403,
+          );
+          expect(
+            (await instance.handle(new Request("http://localhost/api/me/answers"))).status,
+          ).toBe(403);
+        });
+
+        it("lists the common questions unanswered", async () => {
+          const { instance } = resumesApp();
+          const res = await answers(instance, await profile());
+          const body = await res.json();
+
+          expect(res.status).toBe(200);
+          expect(body.unanswered).toBe(10);
+          expect(body.questions).toHaveLength(10);
+          expect(body.questions[0]).toEqual({
+            id: expect.any(String),
+            text: expect.any(String),
+            common: true,
+            answer: null,
+          });
+        });
+
+        it("saves, replaces and clears an answer returning the library", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const [{ id: questionId }] = (await (await answers(instance, id)).json()).questions;
+
+          const saved = await put(instance, id, questionId, { answer: "  R$ 9.000  " });
+          const body = await saved.json();
+
+          expect(saved.status).toBe(200);
+          expect(body.unanswered).toBe(9);
+          expect(body.questions[0]).toMatchObject({ id: questionId, answer: "R$ 9.000" });
+          expect(await (await answers(instance, id)).json()).toEqual(body);
+
+          const replaced = await (await put(instance, id, questionId, { answer: "Outra" })).json();
+
+          expect(replaced.questions[0].answer).toBe("Outra");
+
+          const cleared = await put(instance, id, questionId, { answer: "   " });
+
+          expect(cleared.status).toBe(200);
+          expect((await cleared.json()).unanswered).toBe(10);
+        });
+
+        it("accepts 2000 characters and rejects 2001", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const [{ id: questionId }] = (await (await answers(instance, id)).json()).questions;
+
+          expect((await put(instance, id, questionId, { answer: "a".repeat(2000) })).status).toBe(
+            200,
+          );
+
+          const res = await put(instance, id, questionId, { answer: "a".repeat(2001) });
+
+          expect(res.status).toBe(422);
+          expect(await res.json()).toEqual({ error: "Invalid answer" });
+          expect(
+            (await put(instance, id, questionId, { answer: ` ${"a".repeat(2000)} ` })).status,
+          ).toBe(200);
+        });
+
+        it("rejects malformed bodies", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const [{ id: questionId }] = (await (await answers(instance, id)).json()).questions;
+
+          for (const json of [{}, { answer: 1 }, { answer: null }]) {
+            const res = await put(instance, id, questionId, json);
+
+            expect(res.status).toBe(422);
+            expect(await res.json()).toEqual({ error: "Invalid answer" });
+          }
+
+          expect((await (await answers(instance, id)).json()).unanswered).toBe(10);
+        });
+
+        it("leaves a malformed JSON body to the framework", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const [{ id: questionId }] = (await (await answers(instance, id)).json()).questions;
+
+          const res = await instance.handle(
+            new Request(`http://localhost/api/me/answers/${questionId}`, {
+              method: "PUT",
+              headers: {
+                "x-test-session": "talent",
+                "x-test-talent-id": id,
+                origin: webOrigin,
+                "content-type": "application/json",
+              },
+              body: "{",
+            }),
+          );
+
+          expect(res.status).toBe(400);
+        });
+
+        it("answers 404 for an unknown or malformed question", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          for (const questionId of ["00000000-0000-4000-8000-000000000001", "nope"]) {
+            const res = await put(instance, id, questionId, { answer: "x" });
+
+            expect(res.status).toBe(404);
+            expect(await res.json()).toEqual({ error: "Question not found" });
+          }
+        });
+
+        it("isolates answers between people", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const other = await profile("outra.pessoal@example.com", 1);
+          const [{ id: questionId }] = (await (await answers(instance, id)).json()).questions;
+
+          await put(instance, id, questionId, { answer: "Minha" });
+
+          const body = await (await answers(instance, other)).json();
+
+          expect(body.unanswered).toBe(10);
+          expect(body.questions[0].answer).toBeNull();
+        });
+
+        it("includes answers in the export", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const [{ id: questionId, text }] = (await (await answers(instance, id)).json()).questions;
+
+          await put(instance, id, questionId, { answer: "Resposta" });
+
+          const exported = await (await request(instance, id, "/me/export")).json();
+
+          expect(exported.answers).toEqual([
+            { question: text, answer: "Resposta", updatedAt: expect.any(String) },
+          ]);
+        });
+      });
+
       describe("preferences", () => {
         const emptyField = { value: null, share: false };
 

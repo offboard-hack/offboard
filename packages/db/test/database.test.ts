@@ -1122,8 +1122,14 @@ it.skipIf(!url)("stores preferences, answers, rejections and packages", async ()
     expect(await db.select().from(jobRejections)).toHaveLength(1);
     expect(await db.select().from(talentPreferences)).toHaveLength(1);
 
-    await db.delete(answerQuestions).where(eq(answerQuestions.id, answer.questionId));
+    const [removed] = await db
+      .delete(answerQuestions)
+      .where(eq(answerQuestions.id, answer.questionId))
+      .returning();
+
     expect(await db.select().from(talentAnswers)).toHaveLength(7);
+
+    await db.insert(answerQuestions).values(removed);
 
     await db.insert(applicationPackages).values({ profileId, jobId: job.id, coverLetter: "Olá" });
     expect(await db.select().from(applicationPackages)).toHaveLength(1);

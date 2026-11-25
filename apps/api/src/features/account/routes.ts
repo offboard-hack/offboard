@@ -90,6 +90,7 @@ const exportResponse = t.Object({
     t.Object({ day: t.String(), visits: t.Number(), recruiterVisits: t.Number() }),
   ),
   preferences: t.Unknown(),
+  answers: t.Array(t.Object({ question: t.String(), answer: t.String(), updatedAt: t.String() })),
 });
 
 export function accountRoutes(
