@@ -39,6 +39,10 @@ The updated web and mobile clients send the grant identifier with employee
 requests.
 For the checklist and equipment rollout, apply `0012_connect_employee_workflows`
 to production before deploying the code that uses it.
+For the talent app rollout, apply `0013_add_talent_app` to production before
+merging, since every session lookup reads `auth_session.talent_profile_id`.
+First confirm `SELECT count(*) FROM auth_session WHERE num_nonnulls(member_id,
+employee_case_id) <> 1;` returns 0, or the widened audience check fails.
 For a disposable development database, `npm run seed -w @offboard/db` loads
 sample cases and replaces the team roster. Add a team row for an email
 address you control before requesting a link.

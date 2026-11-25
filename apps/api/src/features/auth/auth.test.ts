@@ -10,7 +10,7 @@ import {
   offboardingCases,
   talentProfiles,
 } from "@offboard/db/schema";
-import { eq, like } from "drizzle-orm";
+import { eq, like, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createAuth, createRuntimeAuth } from "./auth.js";
@@ -340,6 +340,43 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     });
 
     expect((await talent.findById(profile.id))?.firstSignedInAt).not.toBeNull();
+  });
+
+  it("refuses the session when the identity is no longer verified", async () => {
+    const email = `unverified-${randomUUID()}@offboard.example`;
+    const trigger = `unverify_${randomUUID().replaceAll("-", "")}`;
+
+    const member = await repos.createTeamMember(defaultOrgId, {
+      name: "Pessoa sem verificação",
+      email,
+      role: "rh",
+    });
+
+    await db.insert(authUser).values({ id: `user-${trigger}`, name: "Pessoa", email });
+    await db.execute(
+      sql.raw(
+        `CREATE FUNCTION ${trigger}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.email_verified := false; RETURN NEW; END $$`,
+      ),
+    );
+    await db.execute(
+      sql.raw(
+        `CREATE TRIGGER ${trigger} BEFORE UPDATE ON auth_user FOR EACH ROW WHEN (NEW.email = '${email}') EXECUTE FUNCTION ${trigger}()`,
+      ),
+    );
+
+    try {
+      expect((await requestLink(email)).status).toBe(200);
+
+      const refused = await verify(email);
+
+      expect(refused.headers.get("location")).toMatch(/error=/);
+      expect(refused.headers.getSetCookie()).toHaveLength(0);
+    } finally {
+      await db.execute(sql.raw(`DROP TRIGGER ${trigger} ON auth_user`));
+      await db.execute(sql.raw(`DROP FUNCTION ${trigger}()`));
+      await db.delete(authUser).where(eq(authUser.email, email));
+      await repos.deleteTeamMember(defaultOrgId, member.id);
+    }
   });
 
   it("separates audiences for the same email", async () => {

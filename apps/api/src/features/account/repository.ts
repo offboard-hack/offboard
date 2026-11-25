@@ -6,6 +6,8 @@ import {
   applicationPackages,
   applications,
   authUser,
+  employeeAccess,
+  employeeStates,
   interviews,
   jobMatches,
   jobRejections,
@@ -361,6 +363,18 @@ export function createAccountRepository(db: Database) {
               .select({ id: teamMembers.id })
               .from(teamMembers)
               .where(eq(sql`lower(${teamMembers.email})`, deleted.email)),
+          ),
+          notExists(
+            tx
+              .select({ caseId: employeeAccess.caseId })
+              .from(employeeAccess)
+              .where(eq(sql`lower(${employeeAccess.email})`, deleted.email)),
+          ),
+          notExists(
+            tx
+              .select({ caseId: employeeStates.caseId })
+              .from(employeeStates)
+              .where(eq(employeeStates.userId, authUser.id)),
           ),
         ),
       );

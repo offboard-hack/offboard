@@ -15,10 +15,12 @@ import {
   applicationPackages,
   applications,
   authSession,
+  authUser,
   backgroundJobs,
   checklistModels,
   defaultOrgId,
   employeeAccess,
+  employeeStates,
   equipment,
   interviews,
   jobSources,
@@ -5535,6 +5537,60 @@ describe.skipIf(!url)("api", () => {
         expect(deleted.status).toBe(204);
         expect(store.prefixes).toEqual([`resumes/${id}/`]);
         expect((await request(instance, id, "/me")).status).toBe(403);
+      });
+
+      it("keeps the employee journey of the same person when the talent account is deleted", async () => {
+        const { instance } = resumesApp();
+        const id = await profile();
+        const caseId = (await repos.talent.findById(id))?.caseId;
+
+        if (!caseId) throw new Error("missing case");
+
+        const userId = `talent-employee-${id}`;
+
+        await db.insert(authUser).values({ id: userId, name: "Ana", email: personalEmail });
+
+        const [grant] = await db
+          .insert(employeeAccess)
+          .values({ caseId, email: personalEmail.toUpperCase(), plan: {} })
+          .returning({ grantId: employeeAccess.grantId });
+
+        await db
+          .insert(employeeStates)
+          .values({ caseId, userId, key: "departure-v1", revision: 1, value: {} });
+        await db.insert(authSession).values([
+          {
+            id: `${userId}-employee`,
+            token: `${userId}-employee-token`,
+            userId,
+            employeeCaseId: caseId,
+            employeeGrantId: grant.grantId,
+            expiresAt: new Date(Date.now() + 3_600_000),
+          },
+          {
+            id: `${userId}-talent`,
+            token: `${userId}-talent-token`,
+            userId,
+            talentProfileId: id,
+            expiresAt: new Date(Date.now() + 3_600_000),
+          },
+        ]);
+
+        expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+
+        expect(await db.select().from(authUser).where(eq(authUser.id, userId))).toHaveLength(1);
+        expect(
+          await db.select().from(employeeStates).where(eq(employeeStates.userId, userId)),
+        ).toHaveLength(1);
+        expect(
+          (
+            await db
+              .select({ id: authSession.id })
+              .from(authSession)
+              .where(eq(authSession.userId, userId))
+          ).map((row) => row.id),
+        ).toEqual([`${userId}-employee`]);
+        expect(await repos.talent.findById(id)).toBeUndefined();
       });
 
       it("deletes every stored file of the profile, including unrecorded ones", async () => {

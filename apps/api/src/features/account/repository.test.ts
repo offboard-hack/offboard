@@ -10,6 +10,8 @@ import {
   authSession,
   authUser,
   defaultOrgId,
+  employeeAccess,
+  employeeStates,
   interviews,
   jobMatches,
   jobRejections,
@@ -957,6 +959,73 @@ describe.skipIf(!url)("account repository", () => {
     expect(
       await db.select().from(authAccount).where(eq(authAccount.userId, "account-mine")),
     ).toHaveLength(1);
+  });
+
+  it("keeps the identity, journey and employee sessions of a departing employee", async () => {
+    await identity("account-mine", "pessoa@exemplo.com");
+
+    const [grant] = await db
+      .insert(employeeAccess)
+      .values({ caseId, email: "Pessoa@Exemplo.com", plan: {} })
+      .returning({ grantId: employeeAccess.grantId });
+
+    await db.insert(employeeStates).values({
+      caseId,
+      userId: "account-mine",
+      key: "departure-v1",
+      revision: 1,
+      value: {},
+    });
+    await db.insert(authSession).values([
+      {
+        id: "account-employee-session",
+        token: "token-account-employee-session",
+        userId: "account-mine",
+        employeeCaseId: caseId,
+        employeeGrantId: grant.grantId,
+        expiresAt: new Date(Date.now() + 3_600_000),
+      },
+      {
+        id: "account-talent-session",
+        token: "token-account-talent-session",
+        userId: "account-mine",
+        talentProfileId: profileId,
+        expiresAt: new Date(Date.now() + 3_600_000),
+      },
+    ]);
+
+    expect(await repository.deleteProfile(profileId)).toBe(true);
+
+    expect(await identities("account-mine")).toHaveLength(1);
+    expect(
+      await db.select().from(employeeStates).where(eq(employeeStates.userId, "account-mine")),
+    ).toHaveLength(1);
+    expect(
+      (
+        await db
+          .select({ id: authSession.id })
+          .from(authSession)
+          .where(eq(authSession.userId, "account-mine"))
+      ).map((row) => row.id),
+    ).toEqual(["account-employee-session"]);
+    expect(await db.select().from(talentProfiles).where(eq(talentProfiles.id, profileId))).toEqual(
+      [],
+    );
+  });
+
+  it("keeps the identity of a person who still has employee journey state", async () => {
+    await identity("account-mine", "pessoa@exemplo.com");
+    await db.insert(employeeStates).values({
+      caseId,
+      userId: "account-mine",
+      key: "consent",
+      revision: 1,
+      value: {},
+    });
+
+    expect(await repository.deleteProfile(profileId)).toBe(true);
+
+    expect(await identities("account-mine")).toHaveLength(1);
   });
 
   it("reports when there was no profile to delete", async () => {

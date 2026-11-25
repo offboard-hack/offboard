@@ -293,6 +293,8 @@ export function createAuth({
               .from(authUser)
               .where(and(eq(authUser.id, session.userId), eq(authUser.emailVerified, true)));
 
+            if (!user) return false;
+
             const invitee = await invitees[audience](user.email, id);
 
             if (!invitee) return false;
