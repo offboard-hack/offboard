@@ -15,8 +15,8 @@ import {
   interviews,
   jobMatches,
   jobs,
-  offboardingCases,
   llmUsage,
+  offboardingCases,
   publicPageDailyViews,
   publicPages,
   resumes,
@@ -508,13 +508,23 @@ describe.skipIf(!url)("api", () => {
       const mine = await enable(firstCase.id, personalEmail);
       const other = await enable(secondCase.id, "outra@example.com");
 
-      await repos.talent.acceptTerms(mine.id);
-
       const asMine = { "x-test-talent-id": mine.id };
 
       expect(
         (await asSession("rh", "/me/consent", "PUT", { shareOutcomeWithHr: true })).status,
       ).toBe(403);
+      expect((await repos.talent.findById(mine.id))?.shareOutcomeWithHr).toBe(false);
+
+      const early = await asSession(
+        "talent",
+        "/me/consent",
+        "PUT",
+        { shareOutcomeWithHr: true },
+        asMine,
+      );
+
+      expect(early.status).toBe(200);
+      expect(await early.json()).toMatchObject({ termsAccepted: false, shareOutcomeWithHr: true });
 
       const shared = await asSession(
         "talent",
@@ -540,6 +550,28 @@ describe.skipIf(!url)("api", () => {
       );
 
       expect(await withdrawn.json()).toMatchObject({ shareOutcomeWithHr: false });
+
+      await repos.talent.setConsent(mine.id, true, new Date());
+
+      const subscription = await repos.billing.getSubscription();
+
+      if (!subscription) throw new Error("missing subscription");
+
+      await repos.billing.updateSubscription(subscription.id, { status: "canceled" });
+
+      const lapsed = await asSession(
+        "talent",
+        "/me/consent",
+        "PUT",
+        { shareOutcomeWithHr: false },
+        asMine,
+      );
+
+      expect(lapsed.status).toBe(200);
+      expect(await lapsed.json()).toMatchObject({
+        entitlement: { kind: "lapsed" },
+        shareOutcomeWithHr: false,
+      });
       expect(
         (await asSession("talent", "/me/consent", "PUT", { shareOutcomeWithHr: "yes" }, asMine))
           .status,

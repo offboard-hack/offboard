@@ -142,7 +142,7 @@ export function talentRoutes(
       async ({ me, entitlement, body }) =>
         toMe(await repos.setConsent(me.id, body.shareOutcomeWithHr, new Date()), entitlement),
       {
-        talent: "active",
+        talent: "signed-in",
         body: t.Object({ shareOutcomeWithHr: t.Boolean() }),
         response: { 200: meResponse },
       },
