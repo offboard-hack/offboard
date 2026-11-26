@@ -29,7 +29,7 @@ import { Dropzone } from "@/shared/ui/shadcn/dropzone";
 import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { Spinner } from "@/shared/ui/shadcn/spinner";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "../ui";
-import { careerDate } from "./labels";
+import { careerDate, criterionLabel, resumeScoreState, scoreCriteria } from "./labels";
 
 const maxResumeBytes = 5_242_880;
 
@@ -133,6 +133,53 @@ function ResumeContent({ resume }: { resume: CareerResume }) {
   );
 }
 
+function ResumeScore({ resume }: { resume: CareerResume }) {
+  const { score } = resume;
+  const state = resumeScoreState(resume);
+  const criteria = scoreCriteria(resume.scoreBreakdown);
+
+  return (
+    <div className="grid gap-2">
+      <div className="flex items-baseline justify-between gap-4">
+        <span className="text-sm font-medium">Nota do currículo</span>
+        <span className="flex items-baseline gap-2">
+          {state === "recalculating" ? (
+            <span role="status" className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Spinner className="size-3.5" /> Recalculando…
+            </span>
+          ) : null}
+          <span className="text-2xl font-bold">
+            {score === null ? "–" : Math.round(score)}
+            <span className="text-sm font-normal text-muted-foreground">/100</span>
+          </span>
+        </span>
+      </div>
+      {score === null ? (
+        <p className="text-sm text-muted-foreground">A nota aparece assim que a IA avaliar.</p>
+      ) : (
+        <ProgressBar label="Nota do currículo" value={Math.round(score)} max={100} />
+      )}
+      {criteria.length ? (
+        <ul className="grid gap-1.5 text-sm" aria-label="Nota por critério">
+          {criteria.map((item) => (
+            <li key={item.criterion} className="grid gap-0.5">
+              <span className="flex justify-between gap-4">
+                <span className="font-medium">{item.label}</span>
+                <span className="tabular-nums text-muted-foreground">
+                  {item.points}/{item.max}
+                </span>
+              </span>
+              {item.reason ? (
+                <span className="text-muted-foreground wrap-anywhere">{item.reason}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function Suggestions({ account }: { account: EmployeeAccount }) {
   const suggestions = useQuery(resumeSuggestionsQuery(account));
   const action = useSuggestionAction(account);
@@ -160,6 +207,9 @@ function Suggestions({ account }: { account: EmployeeAccount }) {
                   className="size-4 text-primary"
                 />
                 <p className="font-medium wrap-anywhere">{suggestion.rationale}</p>
+                {criterionLabel(suggestion.criterion) ? (
+                  <Badge variant="secondary">{criterionLabel(suggestion.criterion)}</Badge>
+                ) : null}
                 <Badge variant="status-success">+{suggestion.estimatedGain} pontos</Badge>
               </div>
               <p className="text-sm text-muted-foreground line-through wrap-anywhere">
@@ -230,28 +280,13 @@ export function ResumeCareer({ account }: { account: EmployeeAccount }) {
     );
   }
 
-  const { score } = resume.data;
-
   return (
     <div className="space-y-5">
       <EmployeePanel
         title="Seu currículo"
         description={`Atualizado em ${careerDate(resume.data.updatedAt)}`}
       >
-        <div className="grid gap-2">
-          <div className="flex items-baseline justify-between gap-4">
-            <span className="text-sm font-medium">Nota do currículo</span>
-            <span className="text-2xl font-bold">
-              {score === null ? "–" : Math.round(score)}
-              <span className="text-sm font-normal text-muted-foreground">/100</span>
-            </span>
-          </div>
-          {score === null ? (
-            <p className="text-sm text-muted-foreground">A nota aparece assim que a IA avaliar.</p>
-          ) : (
-            <ProgressBar label="Nota do currículo" value={Math.round(score)} max={100} />
-          )}
-        </div>
+        <ResumeScore resume={resume.data} />
         <ResumeContent resume={resume.data} />
         <div className="flex flex-wrap gap-2">
           <a

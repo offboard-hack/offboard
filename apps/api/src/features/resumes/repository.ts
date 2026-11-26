@@ -1,6 +1,6 @@
 import type { Database } from "@offboard/db/client";
-import { resumes } from "@offboard/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { resumes, type ResumeScoreBreakdown } from "@offboard/db/schema";
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import type { ResumeContent } from "./content.js";
 
 export type ResumeView = {
@@ -8,6 +8,7 @@ export type ResumeView = {
   kind: "base";
   content: ResumeContent;
   score: number | null;
+  scoreBreakdown: ResumeScoreBreakdown | null;
   scoredAt: string | null;
   updatedAt: string;
 };
@@ -16,6 +17,7 @@ export const resumeColumns = {
   id: resumes.id,
   content: resumes.content,
   score: resumes.score,
+  scoreBreakdown: resumes.scoreBreakdown,
   scoredAt: resumes.scoredAt,
   updatedAt: sql<Date>`coalesce(${resumes.updatedAt}, ${resumes.createdAt})`.mapWith(
     resumes.updatedAt,
@@ -26,6 +28,7 @@ export function toResumeView(row: {
   id: string;
   content: ResumeContent;
   score: number | null;
+  scoreBreakdown: ResumeScoreBreakdown | null;
   scoredAt: Date | null;
   updatedAt: Date;
 }) {
@@ -34,6 +37,7 @@ export function toResumeView(row: {
     kind: "base",
     content: row.content,
     score: row.score,
+    scoreBreakdown: row.scoreBreakdown,
     scoredAt: row.scoredAt?.toISOString() ?? null,
     updatedAt: row.updatedAt.toISOString(),
   } satisfies ResumeView;
@@ -73,7 +77,14 @@ export function createResumesRepository(db: Database) {
         .onConflictDoUpdate({
           target: resumes.profileId,
           targetWhere: sql`${resumes.kind} = 'base'`,
-          set: { content, sourceFileKey, score: null, scoredAt: null, updatedAt: now },
+          set: {
+            content,
+            sourceFileKey,
+            score: null,
+            scoreBreakdown: null,
+            scoredAt: null,
+            updatedAt: now,
+          },
         })
         .returning(resumeColumns);
 
@@ -84,7 +95,7 @@ export function createResumesRepository(db: Database) {
   async function updateBaseContent(profileId: string, content: ResumeContent) {
     const [row] = await db
       .update(resumes)
-      .set({ content, score: null, scoredAt: null, updatedAt: new Date() })
+      .set({ content, scoredAt: null, updatedAt: new Date() })
       .where(baseOf(profileId))
       .returning(resumeColumns);
 
@@ -96,13 +107,31 @@ export function createResumesRepository(db: Database) {
       .select({
         profileId: resumes.profileId,
         content: resumes.content,
-        score: resumes.score,
+        scoreBreakdown: resumes.scoreBreakdown,
+        scoredAt: resumes.scoredAt,
         updatedAt: resumeColumns.updatedAt,
       })
       .from(resumes)
       .where(eq(resumes.id, resumeId));
 
     return row;
+  }
+
+  async function expireLegacyScore(profileId: string) {
+    const expired = await db
+      .update(resumes)
+      .set({ scoredAt: null })
+      .where(
+        and(
+          baseOf(profileId),
+          isNotNull(resumes.score),
+          isNull(resumes.scoreBreakdown),
+          isNotNull(resumes.scoredAt),
+        ),
+      )
+      .returning({ id: resumes.id });
+
+    return expired.at(0)?.id;
   }
 
   async function contentOf(profileId: string, id: string) {
@@ -114,7 +143,7 @@ export function createResumesRepository(db: Database) {
     return row?.content;
   }
 
-  return { getBase, replaceBase, updateBaseContent, forScoring, contentOf };
+  return { getBase, replaceBase, updateBaseContent, forScoring, expireLegacyScore, contentOf };
 }
 
 export type ResumesRepository = ReturnType<typeof createResumesRepository>;

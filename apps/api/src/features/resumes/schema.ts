@@ -47,6 +47,10 @@ export const resumeResponse = t.Object({
   kind: t.Literal("base"),
   content: resumeContent,
   score: t.Union([t.Number(), t.Null()]),
+  scoreBreakdown: t.Union([
+    t.Record(t.String(), t.Object({ points: t.Number(), max: t.Number(), reason: t.String() })),
+    t.Null(),
+  ]),
   scoredAt: nullable,
   updatedAt: t.String(),
 });
@@ -57,6 +61,7 @@ export const suggestionResponse = t.Object({
   originalText: t.String(),
   suggestedText: t.String(),
   rationale: t.String(),
+  criterion: nullable,
   estimatedGain: t.Number(),
   extraGainWithFacts: t.Number(),
 });

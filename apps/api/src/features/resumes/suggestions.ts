@@ -1,7 +1,8 @@
 import type { Database } from "@offboard/db/client";
-import { resumes, resumeSuggestions } from "@offboard/db/schema";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { resumes, resumeSuggestions, type ResumeScoreBreakdown } from "@offboard/db/schema";
+import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
 import { resumeContentSchema, type ResumeContent } from "./content.js";
+import { provisionalScore } from "./criteria.js";
 import { baseOf, resumeColumns, toResumeView } from "./repository.js";
 import { textNodes, type ScoredSuggestion } from "./score.js";
 
@@ -11,11 +12,18 @@ export type SuggestionView = {
   originalText: string;
   suggestedText: string;
   rationale: string;
+  criterion: string | null;
   estimatedGain: number;
   extraGainWithFacts: number;
 };
 
-type ScoreResult = { score: number; suggestions: ScoredSuggestion[] };
+type ScoreResult = {
+  score: number;
+  breakdown: ResumeScoreBreakdown;
+  suggestions: ScoredSuggestion[];
+};
+
+const historyLimit = 20;
 
 const viewColumns = {
   id: resumeSuggestions.id,
@@ -23,6 +31,7 @@ const viewColumns = {
   originalText: resumeSuggestions.originalText,
   suggestedText: resumeSuggestions.suggestedText,
   rationale: resumeSuggestions.rationale,
+  criterion: resumeSuggestions.criterion,
   estimatedGain: resumeSuggestions.estimatedGain,
   extraGainWithFacts: resumeSuggestions.extraGainWithFacts,
 };
@@ -81,7 +90,7 @@ export function createSuggestionsRepository(db: Database) {
 
       await tx
         .update(resumes)
-        .set({ score: result.score, scoredAt: now })
+        .set({ score: result.score, scoreBreakdown: result.breakdown, scoredAt: now })
         .where(eq(resumes.id, resumeId));
 
       await tx
@@ -125,7 +134,12 @@ export function createSuggestionsRepository(db: Database) {
   async function apply(profileId: string, suggestionId: string, now: Date) {
     return db.transaction(async (tx) => {
       const [resume] = await tx
-        .select({ id: resumes.id, content: resumes.content })
+        .select({
+          id: resumes.id,
+          content: resumes.content,
+          score: resumes.score,
+          breakdown: resumes.scoreBreakdown,
+        })
         .from(resumes)
         .where(baseOf(profileId))
         .for("update");
@@ -137,6 +151,8 @@ export function createSuggestionsRepository(db: Database) {
           targetNodeId: resumeSuggestions.targetNodeId,
           originalText: resumeSuggestions.originalText,
           suggestedText: resumeSuggestions.suggestedText,
+          criterion: resumeSuggestions.criterion,
+          estimatedGain: resumeSuggestions.estimatedGain,
         })
         .from(resumeSuggestions)
         .where(
@@ -161,11 +177,14 @@ export function createSuggestionsRepository(db: Database) {
         .set({ status: "applied", updatedAt: now })
         .where(eq(resumeSuggestions.id, suggestionId));
 
+      const provisional = provisionalScore(resume, suggestion.criterion, suggestion.estimatedGain);
+
       const [row] = await tx
         .update(resumes)
         .set({
           content: rewrite(resume.content, suggestion.targetNodeId, suggestion.suggestedText),
-          score: null,
+          score: provisional.score,
+          scoreBreakdown: provisional.breakdown,
           scoredAt: null,
           updatedAt: now,
         })
@@ -195,7 +214,22 @@ export function createSuggestionsRepository(db: Database) {
     return dismissed.length > 0;
   }
 
-  return { listOpen, saveScore, apply, dismiss };
+  async function history(resumeId: string) {
+    return db
+      .select({
+        targetNodeId: resumeSuggestions.targetNodeId,
+        originalText: resumeSuggestions.originalText,
+        suggestedText: resumeSuggestions.suggestedText,
+        criterion: resumeSuggestions.criterion,
+        status: resumeSuggestions.status,
+      })
+      .from(resumeSuggestions)
+      .where(and(eq(resumeSuggestions.resumeId, resumeId), ne(resumeSuggestions.status, "open")))
+      .orderBy(desc(resumeSuggestions.updatedAt), desc(resumeSuggestions.id))
+      .limit(historyLimit);
+  }
+
+  return { listOpen, saveScore, apply, dismiss, history };
 }
 
 export type SuggestionsRepository = ReturnType<typeof createSuggestionsRepository>;

@@ -3042,7 +3042,43 @@ describe.skipIf(!url)("api", () => {
         failRemove: boolean;
       };
 
-      type Scoring = { output: object; calls: number };
+      type Scoring = { output: object; calls: number; prompts: string[] };
+
+      const rubric = [
+        ["length", 5],
+        ["consistency", 10],
+        ["summary", 10],
+        ["actionVerbs", 10],
+        ["structure", 15],
+        ["clarity", 15],
+        ["keywords", 15],
+        ["results", 20],
+      ] as const;
+
+      function assessed(total: number) {
+        let left = total;
+
+        return Object.fromEntries(
+          rubric.map(([criterion, max]) => {
+            const points = Math.min(max, left);
+
+            left -= points;
+
+            return [criterion, { points, reason: `Nota de ${criterion}` }];
+          }),
+        );
+      }
+
+      function breakdown(total: number) {
+        const max = Object.fromEntries(rubric);
+
+        return Object.fromEntries(
+          Object.entries(assessed(total)).map(([criterion, entry]) => [
+            criterion,
+            { ...entry, max: max[criterion] },
+          ]),
+        );
+      }
 
       type Matching = {
         scores: Record<string, number>;
@@ -3065,7 +3101,11 @@ describe.skipIf(!url)("api", () => {
       ) {
         const store: Store = { puts: [], removed: [], prefixes: [], failRemove: false };
 
-        const scoring: Scoring = { output: { score: 0, suggestions: [] }, calls: 0 };
+        const scoring: Scoring = {
+          output: { criteria: assessed(0), suggestions: [] },
+          calls: 0,
+          prompts: [],
+        };
 
         const matching: Matching = { scores: {}, batches: [] };
 
@@ -3145,6 +3185,7 @@ describe.skipIf(!url)("api", () => {
           }
 
           scoring.calls += 1;
+          scoring.prompts.push(prompt);
 
           return schema.parse(scoring.output);
         };
@@ -3585,10 +3626,11 @@ describe.skipIf(!url)("api", () => {
         const bullet = created.content.experiences[0].bullets[0];
 
         app.scoring.output = {
-          score: 72,
+          criteria: assessed(72),
           suggestions: [
             {
               targetNodeId: bullet.id,
+              criterion: "results",
               suggestedText: "Reduziu o tempo de deploy com X",
               rationale: "Mostra o impacto",
               estimatedGain: 6,
@@ -3596,6 +3638,7 @@ describe.skipIf(!url)("api", () => {
             },
             {
               targetNodeId: created.content.headline.id,
+              criterion: "keywords",
               suggestedText: "Engenheira de Software Sênior",
               rationale: "Destaca a senioridade",
               estimatedGain: 4,
@@ -3620,6 +3663,7 @@ describe.skipIf(!url)("api", () => {
         expect(await (await request(instance, id, "/me/resume")).json()).toMatchObject({
           id: created.id,
           score: 72,
+          scoreBreakdown: breakdown(72),
           scoredAt: expect.any(String),
         });
         expect(suggestions).toEqual([
@@ -3629,6 +3673,7 @@ describe.skipIf(!url)("api", () => {
             originalText: "Fez X",
             suggestedText: "Reduziu o tempo de deploy com X",
             rationale: "Mostra o impacto",
+            criterion: "results",
             estimatedGain: 6,
             extraGainWithFacts: 5,
           },
@@ -3638,6 +3683,7 @@ describe.skipIf(!url)("api", () => {
             originalText: "Engenheira de Software",
             suggestedText: "Engenheira de Software Sênior",
             rationale: "Destaca a senioridade",
+            criterion: "keywords",
             estimatedGain: 4,
             extraGainWithFacts: 0,
           },
@@ -3666,7 +3712,7 @@ describe.skipIf(!url)("api", () => {
       });
 
       it("applies a suggestion and scores the new text", async () => {
-        const { instance, id, bullet, suggestions, settle } = await scoredResume();
+        const { instance, id, bullet, suggestions, settle, scoring } = await scoredResume();
 
         expect(
           (
@@ -3697,7 +3743,15 @@ describe.skipIf(!url)("api", () => {
 
         const resume = await applied.json();
 
-        expect(resume.score).toBeNull();
+        expect(resume).toMatchObject({
+          score: 78,
+          scoreBreakdown: {
+            ...breakdown(72),
+            results: { points: 6, max: 20, reason: expect.any(String) },
+          },
+          scoredAt: null,
+        });
+        expect(await (await request(instance, id, "/me/resume")).json()).toEqual(resume);
         expect(resume.content.experiences[0].bullets[0]).toEqual({
           id: bullet.id,
           text: "Reduziu o tempo de deploy com X",
@@ -3716,11 +3770,56 @@ describe.skipIf(!url)("api", () => {
           ),
         ).toEqual([suggestions[1].id]);
 
+        scoring.output = {
+          criteria: { ...assessed(72), results: { points: 7, reason: "Um número" } },
+          suggestions: [],
+        };
+
+        await settle();
+
+        expect(await (await request(instance, id, "/me/resume")).json()).toMatchObject({
+          score: 79,
+          scoreBreakdown: { results: { points: 7, max: 20, reason: "Um número" } },
+          scoredAt: expect.any(String),
+        });
+
+        const anchored = scoring.prompts.at(-1) ?? "";
+
+        expect(anchored).toContain('"points": 6');
+        expect(anchored).toContain("<previous>");
+        expect(anchored).toContain('"after": "Reduziu o tempo de deploy com X"');
+      });
+
+      it("rescores a résumé scored before the criteria when it is read", async () => {
+        const { instance, id, created, scoring, kicks, settle } = await scoredResume();
+
+        await db
+          .update(resumes)
+          .set({ scoreBreakdown: null, score: 64 })
+          .where(eq(resumes.id, created.id));
+
+        const first = await (await request(instance, id, "/me/resume")).json();
+        const again = await (await request(instance, id, "/me/resume")).json();
+
+        expect(first).toMatchObject({ score: 64, scoreBreakdown: null, scoredAt: null });
+        expect(again).toEqual(first);
+        expect(await scoreJobs()).toMatchObject([
+          { status: "done" },
+          { subject: created.id, status: "pending" },
+        ]);
+        expect(await matchJobs()).toMatchObject([{ status: "done" }]);
+        expect(await kicks()).toBe(1);
+        expect(scoring.calls).toBe(2);
+        expect(scoring.prompts[1]).not.toContain("<previous>");
+
         await settle();
 
         expect(await (await request(instance, id, "/me/resume")).json()).toMatchObject({
           score: 72,
+          scoreBreakdown: breakdown(72),
+          scoredAt: expect.any(String),
         });
+        expect(await scoreJobs()).toHaveLength(2);
       });
 
       it("refuses to apply a suggestion whose text was edited", async () => {
@@ -3948,10 +4047,49 @@ describe.skipIf(!url)("api", () => {
         const uploaded = await upload(instance, id);
 
         expect(uploaded.status).toBe(200);
-        expect(await request(instance, id, "/me/resume").then((res) => res.json())).toEqual(
-          await uploaded.json(),
-        );
+
+        const view = await uploaded.json();
+
+        expect(await request(instance, id, "/me/resume").then((res) => res.json())).toEqual(view);
+
+        await db
+          .update(resumes)
+          .set({ score: 50, scoredAt: new Date() })
+          .where(eq(resumes.id, view.id));
+
+        expect(await request(instance, id, "/me/resume").then((res) => res.json())).toMatchObject({
+          score: 50,
+          scoredAt: null,
+        });
         expect(await scoreJobs()).toEqual([]);
+      });
+
+      it("reports a legacy score as pending when another read already expired it", async () => {
+        const id = await profile();
+        const created = await (await upload(resumesApp().instance, id)).json();
+        const jobs = await scoreJobs();
+
+        await db
+          .update(resumes)
+          .set({ score: 50, scoredAt: new Date() })
+          .where(eq(resumes.id, created.id));
+
+        const instance = createApp(
+          webOrigin,
+          { ...repos, resumes: { ...repos.resumes, expireLegacyScore: async () => undefined } },
+          {
+            ...appOptions,
+            runInBackground: () => {
+              throw new Error("should not kick a drain");
+            },
+          },
+        );
+
+        expect(await request(instance, id, "/me/resume").then((res) => res.json())).toMatchObject({
+          score: 50,
+          scoredAt: null,
+        });
+        expect(await scoreJobs()).toEqual(jobs);
       });
 
       it("drains due jobs from the cron route", async () => {
@@ -5255,10 +5393,11 @@ describe.skipIf(!url)("api", () => {
         const created = await (await upload(instance, id)).json();
 
         scoring.output = {
-          score: 64,
+          criteria: assessed(64),
           suggestions: [
             {
               targetNodeId: created.content.experiences[0].bullets[0].id,
+              criterion: "results",
               suggestedText: "Fez X com impacto",
               rationale: "Mostra o impacto",
               estimatedGain: 5,

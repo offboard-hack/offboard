@@ -1,5 +1,5 @@
 import { brazilTimezone } from "@offboard/employee";
-import type { AiAttempt, CareerApplication, CareerJob } from "@/entities/career";
+import type { AiAttempt, CareerApplication, CareerJob, CareerResume } from "@/entities/career";
 
 const dateFormat = new Intl.DateTimeFormat("pt-BR", {
   day: "numeric",
@@ -127,4 +127,33 @@ export function evidenceValue(value: string | string[] | null) {
 
 export function isLongText(text: string) {
   return text.length > 400 || text.split("\n").length > 6;
+}
+
+const criterionLabels = new Map([
+  ["results", "Resultados"],
+  ["keywords", "Palavras-chave"],
+  ["clarity", "Clareza"],
+  ["structure", "Estrutura"],
+  ["actionVerbs", "Verbos de ação"],
+  ["summary", "Resumo"],
+  ["consistency", "Consistência"],
+  ["length", "Tamanho"],
+]);
+
+export function criterionLabel(criterion: string | null) {
+  return criterion === null ? null : (criterionLabels.get(criterion) ?? null);
+}
+
+export function scoreCriteria(breakdown: CareerResume["scoreBreakdown"]) {
+  return [...criterionLabels].flatMap(([criterion, label]) => {
+    const entry = breakdown?.[criterion];
+
+    return entry ? [{ criterion, label, ...entry }] : [];
+  });
+}
+
+export function resumeScoreState(resume: Pick<CareerResume, "score" | "scoredAt">) {
+  if (resume.score === null) return "pending";
+
+  return resume.scoredAt === null ? "recalculating" : "ready";
 }

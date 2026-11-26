@@ -103,7 +103,7 @@ function resumeSource(account: EmployeeAccount) {
       const resume = settle(result, "Não foi possível abrir seu currículo.");
       const previous = queryClient.getQueryData<CareerResume | null>(queryKey);
 
-      if (scoreArrived(previous?.score, resume.score)) {
+      if (scoreArrived(previous?.scoredAt, resume.scoredAt)) {
         void refreshAfterScore(queryClient, account);
       }
 

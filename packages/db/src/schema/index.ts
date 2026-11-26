@@ -47,6 +47,8 @@ export type ResumeContent = {
   };
 };
 
+export type ResumeScoreBreakdown = Record<string, { points: number; max: number; reason: string }>;
+
 export type JobPreferences = {
   workModels?: ("remote" | "hybrid" | "onsite")[];
   locations?: { city: string | null; state: string }[];
@@ -752,6 +754,7 @@ export const resumes = pgTable(
     content: jsonb("content").$type<ResumeContent>().notNull(),
     score: integer("score"),
     scoredAt: timestamp("scored_at"),
+    scoreBreakdown: jsonb("score_breakdown").$type<ResumeScoreBreakdown>(),
     matchScore: integer("match_score"),
     sourceFileKey: varchar("source_file_key", { length: 512 }),
     createdAt: timestamp("created_at").defaultNow(),
@@ -823,6 +826,7 @@ export const resumeSuggestions = pgTable(
     rationale: text("rationale").notNull(),
     estimatedGain: integer("estimated_gain").notNull(),
     extraGainWithFacts: integer("extra_gain_with_facts").notNull().default(0),
+    criterion: varchar("criterion", { length: 30 }),
     status: resumeSuggestionStatusEnum("status").notNull().default("open"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),

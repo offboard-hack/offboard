@@ -8,6 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createRepositories } from "../../repositories.js";
 import type { ResumeContent } from "./content.js";
+import type { Criterion } from "./criteria.js";
 import type { ScoredSuggestion } from "./score.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -46,19 +47,42 @@ function scored(
   suggestedText: string,
   estimatedGain = 4,
   extraGainWithFacts = 0,
+  criterion: Criterion = "results",
 ) {
   return {
     targetNodeId,
     originalText,
     suggestedText,
     rationale: "Mostra impacto.",
+    criterion,
     estimatedGain,
     extraGainWithFacts,
   } satisfies ScoredSuggestion;
 }
 
 const migration = scored("b1", "Liderou a migração", "Liderou a migração de 12 serviços", 6, 5);
-const headline = scored("headline", "Engenheira de Software", "Engenheira Backend Sênior", 3);
+
+const headline = scored(
+  "headline",
+  "Engenheira de Software",
+  "Engenheira Backend Sênior",
+  3,
+  0,
+  "keywords",
+);
+
+function breakdownFor(score: number) {
+  const points = Math.min(score, 10);
+
+  return {
+    results: { points, max: 20, reason: "Resultados." },
+    keywords: { points: score - points, max: 90, reason: "Palavras-chave." },
+  };
+}
+
+function result(score: number, suggestions: ScoredSuggestion[]) {
+  return { score, breakdown: breakdownFor(score), suggestions };
+}
 
 describe.skipIf(!url)("resume suggestions repository", () => {
   const db = createClient(url ?? "");
@@ -109,6 +133,7 @@ describe.skipIf(!url)("resume suggestions repository", () => {
       .select({
         content: resumes.content,
         score: resumes.score,
+        scoreBreakdown: resumes.scoreBreakdown,
         scoredAt: resumes.scoredAt,
         updatedAt: resumes.updatedAt,
       })
@@ -120,6 +145,7 @@ describe.skipIf(!url)("resume suggestions repository", () => {
         id: resumeSuggestions.id,
         targetNodeId: resumeSuggestions.targetNodeId,
         suggestedText: resumeSuggestions.suggestedText,
+        criterion: resumeSuggestions.criterion,
         status: resumeSuggestions.status,
         createdAt: resumeSuggestions.createdAt,
         updatedAt: resumeSuggestions.updatedAt,
@@ -136,7 +162,9 @@ describe.skipIf(!url)("resume suggestions repository", () => {
 
     if (!read) throw new Error("expected a résumé");
 
-    expect(await repository.saveScore(id, read.updatedAt, { score, suggestions }, now)).toBe(true);
+    expect(await repository.saveScore(id, read.updatedAt, result(score, suggestions), now)).toBe(
+      true,
+    );
   }
 
   async function openIds(id: string) {
@@ -167,15 +195,10 @@ describe.skipIf(!url)("resume suggestions repository", () => {
       const before = await snapshot(resumeId);
 
       expect(
-        await repository.saveScore(
-          resumeId,
-          read.updatedAt,
-          { score: 90, suggestions: [migration] },
-          now,
-        ),
+        await repository.saveScore(resumeId, read.updatedAt, result(90, [migration]), now),
       ).toBe(false);
       expect(await snapshot(resumeId)).toEqual(before);
-      expect(before.resume).toMatchObject({ score: null, scoredAt: null });
+      expect(before.resume).toMatchObject({ score: null, scoreBreakdown: null, scoredAt: null });
       expect(before.suggestions).toEqual([]);
     });
 
@@ -188,19 +211,38 @@ describe.skipIf(!url)("resume suggestions repository", () => {
 
       expect(read?.updatedAt.toISOString()).toBe("2026-11-24T12:00:00.123Z");
 
-      const result = { score: 64, suggestions: [migration] };
+      const scoredResult = result(64, [migration]);
 
       expect(
-        await repository.saveScore(resumeId, new Date("2026-11-24T12:00:00.124Z"), result, now),
+        await repository.saveScore(
+          resumeId,
+          new Date("2026-11-24T12:00:00.124Z"),
+          scoredResult,
+          now,
+        ),
       ).toBe(false);
       expect(
-        await repository.saveScore(resumeId, new Date("2026-11-24T12:00:00.122Z"), result, now),
+        await repository.saveScore(
+          resumeId,
+          new Date("2026-11-24T12:00:00.122Z"),
+          scoredResult,
+          now,
+        ),
       ).toBe(false);
       expect((await snapshot(resumeId)).resume.score).toBeNull();
       expect(
-        await repository.saveScore(resumeId, new Date("2026-11-24T12:00:00.123Z"), result, now),
+        await repository.saveScore(
+          resumeId,
+          new Date("2026-11-24T12:00:00.123Z"),
+          scoredResult,
+          now,
+        ),
       ).toBe(true);
-      expect((await snapshot(resumeId)).resume).toMatchObject({ score: 64, scoredAt: now });
+      expect((await snapshot(resumeId)).resume).toMatchObject({
+        score: 64,
+        scoreBreakdown: breakdownFor(64),
+        scoredAt: now,
+      });
     });
 
     it("compares against the creation time when the résumé was never updated", async () => {
@@ -215,7 +257,7 @@ describe.skipIf(!url)("resume suggestions repository", () => {
         await repository.saveScore(
           resumeId,
           new Date("2026-11-20T08:00:00.500Z"),
-          { score: 55, suggestions: [] },
+          result(55, []),
           now,
         ),
       ).toBe(true);
@@ -243,7 +285,7 @@ describe.skipIf(!url)("resume suggestions repository", () => {
         await repository.saveScore(
           resumeId,
           read.updatedAt,
-          { score: 83, suggestions: [migration, headline] },
+          result(83, [migration, headline]),
           later,
         ),
       ).toBe(true);
@@ -253,6 +295,7 @@ describe.skipIf(!url)("resume suggestions repository", () => {
       expect(after.resume).toEqual({
         ...before.resume,
         score: 83,
+        scoreBreakdown: breakdownFor(83),
         scoredAt: later,
       });
       expect(after.suggestions).toEqual([
@@ -270,6 +313,7 @@ describe.skipIf(!url)("resume suggestions repository", () => {
           id: expect.any(String),
           targetNodeId: "headline",
           suggestedText: "Engenheira Backend Sênior",
+          criterion: "keywords",
           status: "open",
           createdAt: later,
           updatedAt: later,
@@ -321,12 +365,7 @@ describe.skipIf(!url)("resume suggestions repository", () => {
 
     it("writes nothing for an unknown résumé", async () => {
       expect(
-        await repository.saveScore(
-          crypto.randomUUID(),
-          now,
-          { score: 50, suggestions: [migration] },
-          now,
-        ),
+        await repository.saveScore(crypto.randomUUID(), now, result(50, [migration]), now),
       ).toBe(false);
       expect(await db.select().from(resumeSuggestions)).toEqual([]);
     });
@@ -353,10 +392,16 @@ describe.skipIf(!url)("resume suggestions repository", () => {
           originalText: "Liderou a migração",
           suggestedText: "Liderou a migração de 12 serviços",
           rationale: "Mostra impacto.",
+          criterion: "results",
           estimatedGain: 6,
           extraGainWithFacts: 5,
         },
-        expect.objectContaining({ id: ids.headline, extraGainWithFacts: 0, estimatedGain: 3 }),
+        expect.objectContaining({
+          id: ids.headline,
+          criterion: "keywords",
+          extraGainWithFacts: 0,
+          estimatedGain: 3,
+        }),
         expect.objectContaining({ id: ids.b2, estimatedGain: 2 }),
       ]);
     });
@@ -414,7 +459,7 @@ describe.skipIf(!url)("resume suggestions repository", () => {
   });
 
   describe("apply", () => {
-    it("writes the suggested text, marks it applied and resets the score", async () => {
+    it("writes the suggested text, adds its gain to the score and asks for a rescore", async () => {
       await scoreNow(resumeId, [migration, headline]);
 
       const ids = await openIds(resumeId);
@@ -428,7 +473,11 @@ describe.skipIf(!url)("resume suggestions repository", () => {
         id: resumeId,
         kind: "base",
         content: expected,
-        score: null,
+        score: 76,
+        scoreBreakdown: {
+          results: { points: 16, max: 20, reason: "Resultados." },
+          keywords: { points: 60, max: 90, reason: "Palavras-chave." },
+        },
         scoredAt: null,
         updatedAt: later.toISOString(),
       });
@@ -441,6 +490,55 @@ describe.skipIf(!url)("resume suggestions repository", () => {
         expect.objectContaining({ targetNodeId: "b1", status: "applied", updatedAt: later }),
       ]);
       expect(await repository.apply(profileId, ids.b1 ?? "", later)).toBe("not_found");
+    });
+
+    it("caps the provisional gain at its criterion maximum", async () => {
+      await scoreNow(resumeId, [migration, headline], 50);
+      await db
+        .update(resumes)
+        .set({
+          score: 47,
+          scoreBreakdown: {
+            results: { points: 17, max: 20, reason: "Quase todos." },
+            keywords: { points: 30, max: 80, reason: "Algumas." },
+          },
+        })
+        .where(eq(resumes.id, resumeId));
+
+      const ids = await openIds(resumeId);
+
+      expect(await repository.apply(profileId, ids.b1 ?? "", now)).toMatchObject({
+        score: 50,
+        scoreBreakdown: { results: { points: 20, max: 20, reason: "Quase todos." } },
+        scoredAt: null,
+      });
+      expect(await repository.apply(profileId, ids.headline ?? "", now)).toMatchObject({
+        score: 53,
+        scoreBreakdown: { results: { points: 20 }, keywords: { points: 33, max: 80 } },
+      });
+    });
+
+    it("adds the gain to the total for a score or suggestion without criteria", async () => {
+      await scoreNow(resumeId, [migration, headline], 70);
+      await db
+        .update(resumes)
+        .set({ scoreBreakdown: null, score: 97 })
+        .where(eq(resumes.id, resumeId));
+
+      const ids = await openIds(resumeId);
+
+      expect(await repository.apply(profileId, ids.headline ?? "", now)).toMatchObject({
+        score: 100,
+        scoreBreakdown: null,
+        scoredAt: null,
+      });
+
+      await db.update(resumes).set({ score: null }).where(eq(resumes.id, resumeId));
+
+      expect(await repository.apply(profileId, ids.b1 ?? "", now)).toMatchObject({
+        score: null,
+        scoreBreakdown: null,
+      });
     });
 
     it("applies headline and summary rewrites", async () => {
@@ -520,6 +618,66 @@ describe.skipIf(!url)("resume suggestions repository", () => {
       const ids = await openIds(resumeId);
 
       expect(await repository.apply(otherProfileId, ids.b1 ?? "", now)).toBe("not_found");
+    });
+  });
+
+  describe("history", () => {
+    it("lists applied and dismissed suggestions of the résumé, latest first", async () => {
+      await scoreNow(resumeId, [
+        migration,
+        headline,
+        scored("b2", "Cuidou do faturamento", "Faturamento mensal", 2, 0, "clarity"),
+        scored("summary", "Dez anos de backend.", "Resumo", 2, 0, "summary"),
+      ]);
+      await scoreNow(otherResumeId, [migration]);
+
+      const ids = await openIds(resumeId);
+      const theirs = await openIds(otherResumeId);
+
+      await db
+        .update(resumeSuggestions)
+        .set({ status: "dismissed", updatedAt: new Date(now.getTime() + 1_000) })
+        .where(eq(resumeSuggestions.id, ids.b2 ?? ""));
+      await repository.apply(profileId, ids.b1 ?? "", new Date(now.getTime() + 2_000));
+      await markStatus(theirs.b1 ?? "", "applied");
+      await db
+        .update(resumeSuggestions)
+        .set({ criterion: null })
+        .where(eq(resumeSuggestions.id, ids.b1 ?? ""));
+
+      expect(await repository.history(resumeId)).toEqual([
+        {
+          targetNodeId: "b1",
+          originalText: "Liderou a migração",
+          suggestedText: "Liderou a migração de 12 serviços",
+          criterion: null,
+          status: "applied",
+        },
+        {
+          targetNodeId: "b2",
+          originalText: "Cuidou do faturamento",
+          suggestedText: "Faturamento mensal",
+          criterion: "clarity",
+          status: "dismissed",
+        },
+      ]);
+    });
+
+    it("keeps only the twenty latest", async () => {
+      await db.insert(resumeSuggestions).values(
+        Array.from({ length: 25 }, (_, index) => ({
+          ...scored("b1", "Liderou a migração", `Versão ${index}`),
+          resumeId,
+          status: "dismissed" as const,
+          updatedAt: new Date(now.getTime() + index * 1_000),
+        })),
+      );
+
+      const history = await repository.history(resumeId);
+
+      expect(history).toHaveLength(20);
+      expect(history[0]?.suggestedText).toBe("Versão 24");
+      expect(history[19]?.suggestedText).toBe("Versão 5");
     });
   });
 

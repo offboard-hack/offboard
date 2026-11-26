@@ -45,6 +45,7 @@ export function resumesRoutes(
     storage: ObjectStorage | undefined;
     suggestions: SuggestionsRepository;
     rescore: (resumeId: string, profileId: string) => Promise<void>;
+    requestScore: (resumeId: string) => Promise<void>;
     versions: VersionsRepository;
     takeLlmCall: UsageRepository["takeLlmCall"];
     fitScore: ((content: ResumeContent, job: TailoringJob) => Promise<number | null>) | undefined;
@@ -122,8 +123,19 @@ export function resumesRoutes(
     )
     .get(
       "/me/resume",
-      async ({ me, status }) =>
-        (await repos.getBase(me.id)) ?? status(404, { error: "Résumé not found" }),
+      async ({ me, status }) => {
+        const resume = await repos.getBase(me.id);
+
+        if (!resume) return status(404, { error: "Résumé not found" });
+
+        if (resume.scoredAt === null || resume.scoreBreakdown !== null) return resume;
+
+        const expired = await repos.expireLegacyScore(me.id);
+
+        if (expired) await deps.requestScore(expired);
+
+        return { ...resume, scoredAt: null };
+      },
       {
         talent: "active",
         response: { 200: resumeResponse, 404: errorResponse },

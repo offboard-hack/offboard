@@ -175,7 +175,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     score_resume: async (job) => {
       const resume = await repos.resumes.forScoring(job.subject);
 
-      if (!resume || resume.score !== null) return;
+      if (!resume || resume.scoredAt !== null) return;
 
       if (!options.generateStructured) throw new Error("AI not configured");
 
@@ -183,7 +183,10 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
       if (taken !== true) return { postponeUntil: taken.retryAt };
 
-      const result = await scoreResume(options.generateStructured, resume.content);
+      const result = await scoreResume(options.generateStructured, resume.content, {
+        previous: resume.scoreBreakdown,
+        history: await repos.resumeSuggestions.history(job.subject),
+      });
 
       await repos.resumeSuggestions.saveScore(job.subject, resume.updatedAt, result, new Date());
     },
@@ -234,19 +237,25 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     }
   }
 
-  async function rescore(resumeId: string, profileId: string) {
-    const scoring = await enqueued("score_resume", resumeId);
-
-    await enqueued("compute_matches", profileId);
-
-    if (!scoring) return;
-
+  function kickScore(resumeId: string) {
     runInBackground(async () => {
       await drain(repos.background, handlers, {
         limit: 1,
         target: { kind: "score_resume", subject: resumeId },
       });
     });
+  }
+
+  async function requestScore(resumeId: string) {
+    if (await enqueued("score_resume", resumeId)) kickScore(resumeId);
+  }
+
+  async function rescore(resumeId: string, profileId: string) {
+    const scoring = await enqueued("score_resume", resumeId);
+
+    await enqueued("compute_matches", profileId);
+
+    if (scoring) kickScore(resumeId);
   }
 
   const fitScore = (model: GenerateStructured) => async (content: ResumeContent, job: MatchJob) =>
@@ -361,6 +370,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         storage: options.storage,
         suggestions: repos.resumeSuggestions,
         rescore,
+        requestScore,
         versions: repos.resumeVersions,
         takeLlmCall: repos.llmUsage.takeLlmCall,
         fitScore: options.generateStructured && fitScore(options.generateStructured),

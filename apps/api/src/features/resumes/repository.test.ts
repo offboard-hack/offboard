@@ -64,8 +64,13 @@ describe.skipIf(!url)("resumes repository", () => {
     return identified.parse(profile).id;
   }
 
-  function score(id: string, value: number) {
-    return db.update(resumes).set({ score: value, scoredAt: new Date() }).where(eq(resumes.id, id));
+  const breakdown = { results: { points: 12, max: 20, reason: "Alguns números." } };
+
+  function score(id: string, value: number, scoreBreakdown: typeof breakdown | null = breakdown) {
+    return db
+      .update(resumes)
+      .set({ score: value, scoreBreakdown, scoredAt: new Date() })
+      .where(eq(resumes.id, id));
   }
 
   it("has no base résumé until one is stored", async () => {
@@ -80,6 +85,7 @@ describe.skipIf(!url)("resumes repository", () => {
       kind: "base",
       content: content("Primeira"),
       score: null,
+      scoreBreakdown: null,
       scoredAt: null,
     });
     expect(new Date(first.resume.updatedAt).toISOString()).toBe(first.resume.updatedAt);
@@ -93,14 +99,22 @@ describe.skipIf(!url)("resumes repository", () => {
     expect(await db.select().from(resumes).where(eq(resumes.profileId, profileId))).toHaveLength(1);
   });
 
-  it("resets the score on replace and on update", async () => {
+  it("clears the score on replace and keeps it as the previous one on update", async () => {
     const { resume } = await repository.replaceBase(profileId, content("A"), "resumes/a.pdf");
 
     await score(resume.id, 80);
-    expect(await repository.getBase(profileId)).toMatchObject({ score: 80 });
+    expect(await repository.getBase(profileId)).toMatchObject({
+      score: 80,
+      scoreBreakdown: breakdown,
+      scoredAt: expect.any(String),
+    });
 
     await repository.replaceBase(profileId, content("B"), "resumes/b.pdf");
-    expect(await repository.getBase(profileId)).toMatchObject({ score: null, scoredAt: null });
+    expect(await repository.getBase(profileId)).toMatchObject({
+      score: null,
+      scoreBreakdown: null,
+      scoredAt: null,
+    });
 
     await score(resume.id, 70);
 
@@ -109,10 +123,31 @@ describe.skipIf(!url)("resumes repository", () => {
     expect(updated).toMatchObject({
       id: resume.id,
       content: content("C"),
-      score: null,
+      score: 70,
+      scoreBreakdown: breakdown,
       scoredAt: null,
     });
     expect(await repository.getBase(profileId)).toEqual(updated);
+  });
+
+  it("expires only a score stored before the breakdown existed", async () => {
+    expect(await repository.expireLegacyScore(profileId)).toBeUndefined();
+
+    const { resume } = await repository.replaceBase(profileId, content("A"), "resumes/a.pdf");
+
+    expect(await repository.expireLegacyScore(profileId)).toBeUndefined();
+
+    await score(resume.id, 80);
+    expect(await repository.expireLegacyScore(profileId)).toBeUndefined();
+
+    await score(resume.id, 75, null);
+
+    const before = await repository.getBase(profileId);
+
+    expect(await repository.expireLegacyScore(otherProfileId)).toBeUndefined();
+    expect(await repository.expireLegacyScore(profileId)).toBe(resume.id);
+    expect(await repository.getBase(profileId)).toEqual({ ...before, scoredAt: null });
+    expect(await repository.expireLegacyScore(profileId)).toBeUndefined();
   });
 
   it("keeps the stored file key when content is updated", async () => {
@@ -151,13 +186,17 @@ describe.skipIf(!url)("resumes repository", () => {
     expect(await repository.forScoring(resume.id)).toEqual({
       profileId,
       content: content("A"),
-      score: null,
+      scoreBreakdown: null,
+      scoredAt: null,
       updatedAt: new Date("2026-11-24T12:00:00.987Z"),
     });
 
-    await db.update(resumes).set({ score: 64 }).where(eq(resumes.id, resume.id));
+    await score(resume.id, 64);
 
-    expect(await repository.forScoring(resume.id)).toMatchObject({ score: 64 });
+    expect(await repository.forScoring(resume.id)).toMatchObject({
+      scoreBreakdown: breakdown,
+      scoredAt: expect.any(Date),
+    });
     expect(await repository.forScoring(crypto.randomUUID())).toBeUndefined();
   });
 });
