@@ -19,7 +19,7 @@ import {
   employeeJourneyQuery,
   employeeStateQuery,
 } from "@/entities/employee";
-import { Career, ResumePreview } from "@/features/employee/career";
+import { Career } from "@/features/employee/career";
 import { ResumeCareer } from "@/features/employee/career/resume";
 import {
   DepartureOverview,
@@ -72,7 +72,6 @@ const titles = {
   exame: "Exame demissional",
   rescisao: "Termo de rescisão",
   feedback: "Avaliar minha saída",
-  previa: "Prévia do currículo",
 } satisfies Record<EmployeeScreen, string>;
 
 const navigation = [
@@ -100,8 +99,6 @@ function parentScreen(screen: EmployeeScreen) {
     case "rescisao":
     case "feedback":
       return "saida";
-    case "previa":
-      return "curriculo";
     case "privacidade":
       return "perfil";
     default:
@@ -420,21 +417,11 @@ function CareerContent({ account, screen }: { account: EmployeeAccount; screen: 
 
   return (
     <EmployeeScreenPage screen={screen} metrics={metrics}>
-      {screen === "previa" ? (
-        <CareerPreview account={account} />
-      ) : screen === "curriculo" ? (
+      {screen === "curriculo" ? (
         <ResumeCareer account={account} />
       ) : (
         <Career account={account} view={carreira} />
       )}
     </EmployeeScreenPage>
   );
-}
-
-function CareerPreview({ account }: { account: EmployeeAccount }) {
-  const { data: state } = useSuspenseQuery(employeeStateQuery(account, "career"));
-
-  if (state.key !== "career") throw new Error("Não foi possível abrir sua carreira.");
-
-  return <ResumePreview state={state} />;
 }

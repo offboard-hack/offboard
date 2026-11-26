@@ -21,7 +21,6 @@ const screens = z.enum([
   "exame",
   "rescisao",
   "feedback",
-  "previa",
 ]);
 
 export const Route = createFileRoute("/colaborador")({
@@ -51,7 +50,6 @@ export const Route = createFileRoute("/colaborador")({
         queryClient.ensureQueryData(employeeJourneyQuery(account)),
         queryClient.ensureQueryData(employeeStateQuery(account, "consent")),
         queryClient.ensureQueryData(employeeStateQuery(account, "departure-v1")),
-        queryClient.ensureQueryData(employeeStateQuery(account, "career")),
       ]);
     } catch (error) {
       if (!(error instanceof EmployeeAccessChanged)) throw error;
