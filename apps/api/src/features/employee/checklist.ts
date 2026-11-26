@@ -91,6 +91,56 @@ export function setWorkflowTasks(
     .returning(actionFields);
 }
 
+const collectStepId = "collect";
+
+export async function readTrackingCode(tx: Transaction, orgId: string, caseId: string) {
+  const [row] = await tx
+    .select({ trackingCode: tasks.trackingCode })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.orgId, orgId),
+        eq(tasks.caseId, caseId),
+        eq(tasks.checklistStepId, collectStepId),
+      ),
+    );
+
+  return row?.trackingCode ?? null;
+}
+
+export async function setTrackingCode(
+  tx: Transaction,
+  orgId: string,
+  caseId: string,
+  code: string,
+) {
+  const conditions = and(
+    eq(tasks.orgId, orgId),
+    eq(tasks.caseId, caseId),
+    eq(tasks.checklistStepId, collectStepId),
+  );
+
+  const [task] = await tx
+    .select({ id: tasks.id, status: tasks.status })
+    .from(tasks)
+    .where(conditions)
+    .for("update");
+
+  if (!task) return null;
+
+  const [updated] = await tx
+    .update(tasks)
+    .set({
+      trackingCode: code,
+      status: task.status === "done" ? "todo" : task.status,
+      updatedAt: new Date(),
+    })
+    .where(conditions)
+    .returning({ id: tasks.id, trackingCode: tasks.trackingCode });
+
+  return updated ?? null;
+}
+
 export async function syncDepartureTasks(
   tx: Transaction,
   orgId: string,

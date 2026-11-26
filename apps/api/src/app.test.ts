@@ -7798,7 +7798,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       | EmployeeState
       | EmployeeSettings
       | { done: boolean }
-      | { code: string; received: boolean },
+      | { code: string; received: boolean }
+      | { code: string },
     origin = webOrigin,
     nativeOrigin?: string,
     grantId = cookie ? grants.get(cookie) : undefined,
@@ -8075,6 +8076,22 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       );
     }
 
+    expect(journey.trackingCode).toBeNull();
+
+    expect(
+      (await request("/employee/tracking-code", "PATCH", cookie, { code: "INVALID!" })).status,
+    ).toBe(422);
+
+    const trackingResult = await (
+      await request("/employee/tracking-code", "PATCH", cookie, { code: "AB123456789BR" })
+    ).json();
+
+    expect(trackingResult.trackingCode).toBe("AB123456789BR");
+
+    const journeyAfterTracking = await (await request("/employee/journey", "GET", cookie)).json();
+
+    expect(journeyAfterTracking.trackingCode).toBe("AB123456789BR");
+
     const booking = {
       method: "pickup",
       address: "Rua do Teste, 45, São Paulo",
@@ -8114,6 +8131,13 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     expect((await portal(inventory + "/address", "GET", undefined, "visualizador")).status).toBe(
       403,
     );
+
+    const resetResult = await (
+      await request("/employee/tracking-code", "PATCH", cookie, { code: "CD987654321BR" })
+    ).json();
+
+    expect(resetResult.trackingCode).toBe("CD987654321BR");
+
     expect(
       (await request(inventory + "/receipt", "PATCH", cookie, { code: "QA-1", received: true }))
         .status,

@@ -164,3 +164,33 @@ export function useEmployeeChecklistWrite(account: EmployeeAccount) {
     },
   });
 }
+
+export function useEmployeeTrackingCode(account: EmployeeAccount) {
+  const client = useQueryClient();
+
+  return useMutation({
+    async mutationFn(code: string) {
+      const result = await getApiClient().api.employee["tracking-code"].patch(
+        {
+          code: code
+            .trim()
+            .toUpperCase()
+            .replace(/[^A-Z0-9]/g, ""),
+        },
+        { headers: accessHeaders(account) },
+      );
+
+      checkEmployeeAccess(result.status);
+
+      if (result.error) throw new Error("Não foi possível salvar o código de rastreio.");
+
+      return result.data;
+    },
+    onSuccess(data) {
+      client.setQueryData(
+        employeeJourneyQuery(account).queryKey,
+        (journey) => journey && { ...journey, trackingCode: data.trackingCode },
+      );
+    },
+  });
+}

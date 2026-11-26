@@ -21,6 +21,7 @@ import {
   type EmployeeAccount,
   type EmployeeJourney,
   useEmployeeChecklistWrite,
+  useEmployeeTrackingCode,
   useEmployeeWrite,
 } from "@/entities/employee";
 import { todayAtWorkspace } from "@/entities/offboarding";
@@ -338,6 +339,9 @@ export function Equipment({ account, journey, state }: DepartureProps) {
           ) : null}
         </EmployeePanel>
       ) : null}
+      {pending > 0 && !allReceived ? (
+        <TrackingCodeInput account={account} trackingCode={journey.trackingCode} />
+      ) : null}
       <EmployeePanel title={`Bens vinculados (${equipment.length})`}>
         {equipment.length === 0 ? (
           <EmployeeEmpty>Nenhum equipamento informado pelo RH.</EmployeeEmpty>
@@ -373,6 +377,59 @@ export function Equipment({ account, journey, state }: DepartureProps) {
         </p>
       ) : null}
     </div>
+  );
+}
+
+function TrackingCodeInput({
+  account,
+  trackingCode,
+}: {
+  account: EmployeeAccount;
+  trackingCode: string | null;
+}) {
+  const write = useEmployeeTrackingCode(account);
+  const [code, setCode] = useState(trackingCode ?? "");
+  const saved = trackingCode !== null;
+
+  return (
+    <EmployeePanel
+      title="Código de rastreio"
+      description="Informe o código da transportadora para acompanhar a entrega."
+    >
+      {saved ? (
+        <p className="font-mono font-bold">{trackingCode}</p>
+      ) : (
+        <form
+          className="flex flex-col gap-3 sm:flex-row sm:items-end"
+          onSubmit={(event) => {
+            event.preventDefault();
+
+            const normalized = code
+              .trim()
+              .toUpperCase()
+              .replace(/[^A-Z0-9]/g, "");
+
+            if (normalized) write.mutate(normalized, { onSuccess: () => setCode(normalized) });
+          }}
+        >
+          <div className="grid flex-1 gap-1.5">
+            <Label htmlFor="tracking-code">Código</Label>
+            <Input
+              id="tracking-code"
+              value={code}
+              maxLength={30}
+              placeholder="Ex: MM123456789BR"
+              disabled={write.isPending}
+              onChange={(event) => setCode(event.target.value)}
+            />
+          </div>
+          <Button type="submit" disabled={write.isPending || !code.trim()}>
+            {write.isPending ? "Salvando…" : "Salvar"}
+          </Button>
+        </form>
+      )}
+      <EmployeeError message={write.error?.message} />
+    </EmployeePanel>
   );
 }
 

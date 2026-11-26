@@ -236,7 +236,7 @@ export function createAuth({
     rateLimit: { enabled: true, storage: "database" },
     session: {
       expiresIn: 12 * 60 * 60,
-      disableSessionRefresh: true,
+      updateAge: 60 * 60,
       additionalFields: {
         memberId: { type: "string", required: false, input: false },
         employeeCaseId: { type: "string", required: false, input: false },

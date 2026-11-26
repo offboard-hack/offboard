@@ -111,6 +111,29 @@ export function employeeRoutes(
                 body: t.Object({ done: t.Boolean() }),
               },
             )
+            .patch(
+              "/tracking-code",
+              async ({ employee, body, status }) => {
+                const result = await repo.withAccess(employee, "write", async (data) => {
+                  const consent = await data.readState("consent");
+
+                  if (consent?.key !== "consent" || !consent.value.accepted)
+                    return status(403, { error: "Consent required" });
+
+                  return (
+                    (await data.setTrackingCode(body.code)) ??
+                    status(404, { error: "Tracking task unavailable" })
+                  );
+                });
+
+                return result ?? status(401, { error: "Unauthorized" });
+              },
+              {
+                body: t.Object({
+                  code: t.String({ minLength: 1, maxLength: 30, pattern: "^[A-Z0-9]+$" }),
+                }),
+              },
+            )
             .get(
               "/state/:key",
               async ({ employee, params, status }) => {
