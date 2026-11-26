@@ -199,7 +199,7 @@ describe.skipIf(!url)("preferences repository", () => {
     );
   });
 
-  it("fills only unset profile fields as shared and keeps the rest", async () => {
+  it("fills only unset profile values, keeping a stored share choice", async () => {
     await repository.save(
       profileId,
       {
@@ -223,13 +223,38 @@ describe.skipIf(!url)("preferences repository", () => {
 
     expect(filled.mode).toBe("hybrid");
     expect(filled.profileFields.phone).toEqual({ value: "11 1111-1111", share: false });
-    expect(filled.profileFields.city).toEqual({ value: "São Paulo, SP", share: true });
+    expect(filled.profileFields.city).toEqual({ value: "São Paulo, SP", share: false });
     expect(filled.profileFields.cpf).toEqual({ value: "52998224725", share: true });
     expect(filled.profileFields.linkedin).toEqual({ value: null, share: true });
 
     const [row] = await db.select().from(talentPreferences);
 
     expect(row).toMatchObject({ createdAt: first, updatedAt: second });
+  });
+
+  it("never flips an explicit choice not to share, and shares a field never set", async () => {
+    await repository.save(
+      profileId,
+      {
+        profileFields: {
+          phone: { value: null, share: false },
+          linkedin: { value: null, share: true },
+        },
+      },
+      first,
+    );
+
+    await repository.fillUnset(
+      profileId,
+      { phone: "11 2222-2222", linkedin: "linkedin.com/in/eu", portfolio: "eu.dev" },
+      second,
+    );
+
+    const { profileFields } = await repository.get(profileId);
+
+    expect(profileFields.phone).toEqual({ value: "11 2222-2222", share: false });
+    expect(profileFields.linkedin).toEqual({ value: "linkedin.com/in/eu", share: true });
+    expect(profileFields.portfolio).toEqual({ value: "eu.dev", share: true });
   });
 
   it("creates the row when filling a profile without preferences, and ignores an empty fill", async () => {

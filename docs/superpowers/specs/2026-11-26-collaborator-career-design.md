@@ -28,7 +28,7 @@ To show and use AI Apply where the person already is. Samuel, 2026-11-26: "preci
   - Elysia slices, no cross-feature imports;
   - Eden-typed web client;
   - the main app's existing screens are untouched outside the Carreira tab.
-- **Isolation:** a collaborator session reaches only its own case's profile. Portal and member sessions keep 403 on `/me/*`.
+- **Isolation:** a collaborator session reaches only its own case's profile. On `/me/*`, a forbidden session without a collaborator grant gets 401 (one "sign in again" status for the web) and a member principal gets 403.
 - **Live view:**
   - The Browserbase live-view URL gives access to the browser, so only the owner gets it, and only while the run is `running`/`submitting`.
   - The web shows it in a non-interactive iframe.

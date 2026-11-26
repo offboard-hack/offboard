@@ -81,7 +81,7 @@ export function draftFor(attempt: Pick<AiAttempt, "answers">, question: Question
   return attempt.answers.find((answer) => answer.questionId === question.id);
 }
 
-export function initialAnswer(question: Question, draft: DraftAnswer | undefined) {
+export function initialAnswer(question: Question, draft: Pick<DraftAnswer, "value"> | undefined) {
   const value = draft?.value ?? null;
   const control = answerControl(question);
   const options = new Set(answerOptions(question).map((option) => option.value));
@@ -95,6 +95,15 @@ export function initialAnswer(question: Question, draft: DraftAnswer | undefined
   if (value === null || Array.isArray(value)) return "";
 
   return control === "single" && !options.has(value) ? "" : value;
+}
+
+export function reviewAnswer(
+  attempt: Pick<AiAttempt, "answers" | "confirmed">,
+  question: Question,
+) {
+  const confirmed = attempt.confirmed?.find((answer) => answer.questionId === question.id);
+
+  return initialAnswer(question, confirmed ?? draftFor(attempt, question));
 }
 
 export function answerNote(draft: DraftAnswer | undefined) {

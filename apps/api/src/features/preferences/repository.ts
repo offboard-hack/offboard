@@ -67,7 +67,7 @@ export function createPreferencesRepository(db: Pick<Database, "select" | "inser
       .onConflictDoUpdate({
         target: talentPreferences.profileId,
         set: {
-          profileFields: sql`${talentPreferences.profileFields} || (select coalesce(jsonb_object_agg(fill.key, fill.value), '{}'::jsonb) from jsonb_each(excluded.profile_fields) as fill where ${talentPreferences.profileFields} -> fill.key ->> 'value' is null)`,
+          profileFields: sql`${talentPreferences.profileFields} || (select coalesce(jsonb_object_agg(fill.key, coalesce(${talentPreferences.profileFields} -> fill.key, fill.value) || jsonb_build_object('value', fill.value -> 'value')), '{}'::jsonb) from jsonb_each(excluded.profile_fields) as fill where ${talentPreferences.profileFields} -> fill.key ->> 'value' is null)`,
           updatedAt: now,
         },
       });

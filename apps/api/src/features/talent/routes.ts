@@ -93,7 +93,8 @@ export function talentRoutes(
           return status(409, { error: conflicts[created] });
         }
 
-        await sendWelcome(created);
+        if (!(await repos.signsInAsCollaborator(params.id))) await sendWelcome(created);
+
         set.status = 201;
 
         return toTalentAccess(created);

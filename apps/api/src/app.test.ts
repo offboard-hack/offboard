@@ -358,6 +358,38 @@ describe.skipIf(!url)("api", () => {
       expect(await read.json()).toEqual({ personalEmail, sponsoredUntil, signedIn: false });
     });
 
+    it("enables talent access without inviting a person who signs in as a collaborator", async () => {
+      const cases: { id: string }[] = await (await call("/offboardings")).json();
+      const [first, second] = cases;
+      const body = { sponsoredUntil };
+
+      await db.insert(employeeAccess).values([
+        {
+          caseId: first.id,
+          orgId: defaultOrgId,
+          email: "bia@example.com",
+          plan: emptyEmployeePlan,
+        },
+        { caseId: second.id, orgId: defaultOrgId, email: null, plan: emptyEmployeePlan },
+      ]);
+
+      const granted = await asSession("rh", `/offboardings/${first.id}/talent-access`, "POST", {
+        ...body,
+        personalEmail,
+      });
+
+      expect(granted.status).toBe(201);
+      expect(invitedEmails).toEqual([]);
+
+      const revoked = await asSession("rh", `/offboardings/${second.id}/talent-access`, "POST", {
+        ...body,
+        personalEmail: "outra@example.com",
+      });
+
+      expect(revoked.status).toBe(201);
+      expect(invitedEmails).toEqual(["outra@example.com"]);
+    });
+
     it("rejects a duplicate personal email and invalid input without inviting", async () => {
       const cases: { id: string }[] = await (await call("/offboardings")).json();
       const [first, second] = cases;

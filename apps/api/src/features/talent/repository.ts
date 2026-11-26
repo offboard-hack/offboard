@@ -5,7 +5,7 @@ import {
   offboardingCases,
   talentProfiles,
 } from "@offboard/db/schema";
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { aiApplyConsentVersion } from "../../shared/ai-apply-access.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
@@ -106,6 +106,15 @@ export function createTalentRepository(db: Database) {
 
       throw error;
     }
+  }
+
+  async function signsInAsCollaborator(caseId: string) {
+    const [row] = await db
+      .select({ caseId: employeeAccess.caseId })
+      .from(employeeAccess)
+      .where(and(eq(employeeAccess.caseId, caseId), isNotNull(employeeAccess.email)));
+
+    return row !== undefined;
   }
 
   async function profileOfCase(caseId: string) {
@@ -309,6 +318,7 @@ export function createTalentRepository(db: Database) {
     findByCase,
     updateAccess,
     findForSignIn,
+    signsInAsCollaborator,
     markSignedIn,
     findById,
     acceptTerms,

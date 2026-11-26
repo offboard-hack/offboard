@@ -11,6 +11,7 @@ import {
   fileQuestionLabel,
   fileQuestions,
   initialAnswer,
+  reviewAnswer,
   savesToProfile,
 } from "./ai-apply-form";
 
@@ -104,6 +105,33 @@ describe("AI application form", () => {
     expect(initialAnswer(text, draftFor(attempt, text))).toBe("Ana");
     expect(initialAnswer(single, draftFor(attempt, single))).toBe("");
     expect(initialAnswer(long, draftFor(attempt, long))).toBe("");
+  });
+
+  it("starts a re-review from the confirmed answers, falling back to the draft", () => {
+    const drafted = (questionId: string, value: string) => ({
+      questionId,
+      value,
+      source: "resume" as const,
+      inferred: true,
+      status: "filled" as const,
+    });
+
+    const answers = [drafted("text", "Ana"), drafted("single", "yes"), drafted("long", "Rascunho")];
+
+    expect(reviewAnswer({ answers, confirmed: null }, text)).toBe("Ana");
+
+    const attempt = {
+      answers,
+      confirmed: [
+        { questionId: "text", value: "Ana Souza" },
+        { questionId: "single", value: null },
+      ],
+    } satisfies Pick<AiAttempt, "answers" | "confirmed">;
+
+    expect(reviewAnswer(attempt, text)).toBe("Ana Souza");
+    expect(reviewAnswer(attempt, single)).toBe("");
+    expect(reviewAnswer(attempt, long)).toBe("Rascunho");
+    expect(reviewAnswer(attempt, multi)).toEqual([]);
   });
 
   it("keeps only known options in select answers", () => {

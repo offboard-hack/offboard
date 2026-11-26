@@ -1362,6 +1362,19 @@ describe.skipIf(!url)("ai apply runner", () => {
       expect((await stateOf(unchanged.id)).state).toBe("submitted");
     });
 
+    it("runs when the confirm itself saved the profile, at the confirm instant", async () => {
+      const { id, profileId } = await attempt();
+      const { confirmedAt } = await stateOf(id);
+
+      await db
+        .insert(talentPreferences)
+        .values({ profileId, createdAt: earlier(), updatedAt: confirmedAt ?? earlier() });
+
+      await runAiApplication(rig().deps, id, now);
+
+      expect((await stateOf(id)).state).toBe("submitted");
+    });
+
     it("hands a foreign phone number back before a browser", async () => {
       const phone = question("phone", "Telefone", "phone", [text("phone")]);
       const questions = [...baseQuestions, phone];

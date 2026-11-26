@@ -47,7 +47,7 @@ import {
   draftFor,
   fileQuestionLabel,
   fileQuestions,
-  initialAnswer,
+  reviewAnswer,
   savesToProfile,
 } from "./ai-apply-form";
 import { AttemptProgress } from "./attempt-result";
@@ -248,7 +248,7 @@ function Review({
 
   const form = useForm({
     defaultValues: {
-      answers: asked.map((question) => initialAnswer(question, draftFor(attempt, question))),
+      answers: asked.map((question) => reviewAnswer(attempt, question)),
     },
     validationLogic: revalidateLogic({ mode: "submit", modeAfterSubmission: "change" }),
     onSubmit: ({ value }) => {

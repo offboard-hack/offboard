@@ -907,6 +907,23 @@ describe("fills each field kind", () => {
     ]);
   });
 
+  it('types only the city of a "Cidade - UF" answer and checks the state of the suggestion', async () => {
+    const [location] = (await stoneQuestions()).filter((item) => item.id === "location");
+
+    if (location === undefined) throw new Error("location");
+
+    const piaui = fakePage({ suggestions: ["Bom Jesus, Piauí, Brazil"] });
+    const gaucho = fakePage({ suggestions: ["Bom Jesus, Rio Grande do Sul, Brazil"] });
+
+    expect(
+      await fill(piaui.page, [location], answers({ location: "Bom Jesus - PI" })),
+    ).toBeUndefined();
+    expect(steps(piaui.actions)).toContain("type Bom Jesus");
+    expect(await fill(gaucho.page, [location], answers({ location: "Bom Jesus, PI" }))).toEqual(
+      changed("location"),
+    );
+  });
+
   it("reports a first suggestion for another city", async () => {
     const location = {
       ...question("location", "text"),
@@ -1273,6 +1290,33 @@ describe("checks the chosen city", () => {
         { ...state, location: "São Paulo, State of São Paulo, Brazil" },
       ]),
     ).toBe(true);
+  });
+
+  it("requires the state of a city answer that names one", () => {
+    const at = (location: string) => [{ ...state, location }];
+
+    const bomJesus = "Bom Jesus, Piauí, Brazil";
+    const gaucho = "Bom Jesus, Rio Grande do Sul, Brazil";
+    const capital = "São Paulo, State of São Paulo, Brazil";
+    const brasilia = "Brasília, Federal District, Brazil";
+
+    expect(locationMatches("Bom Jesus, PI", bomJesus, at(bomJesus))).toBe(true);
+    expect(locationMatches("Bom Jesus - pi", bomJesus, at(bomJesus))).toBe(true);
+    expect(locationMatches("Bom Jesus, Piaui", bomJesus, at(bomJesus))).toBe(true);
+    expect(locationMatches("Bom Jesus, PI", gaucho, at(gaucho))).toBe(false);
+    expect(locationMatches("Bom Jesus - Piauí", gaucho, at(gaucho))).toBe(false);
+    expect(locationMatches("Bom Jesus, PI", "Bom Jesus, Brazil", at("Bom Jesus, Brazil"))).toBe(
+      false,
+    );
+    expect(locationMatches("Bom Jesus", gaucho, at(gaucho))).toBe(true);
+    expect(locationMatches("Bom Jesus, Brasil", gaucho, at(gaucho))).toBe(true);
+    expect(locationMatches("São Paulo, SP", capital, at(capital))).toBe(true);
+    expect(locationMatches("Brasília - DF", brasilia, at(brasilia))).toBe(true);
+    expect(
+      locationMatches("Campo Grande, MT", "Campo Grande, Mato Grosso do Sul, Brazil", [
+        { ...state, location: "Campo Grande, Mato Grosso do Sul, Brazil" },
+      ]),
+    ).toBe(false);
   });
 
   it("rejects another city, no value, a stale state or missing coordinates", () => {
