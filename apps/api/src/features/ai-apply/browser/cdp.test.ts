@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   CdpError,
@@ -530,6 +530,61 @@ describe("workerSocket", () => {
     expect(received).toEqual(["pong"]);
     expect(closes).toBe(1);
     expect(fake.closed()).toBe(1);
+  });
+
+  describe("upgrade timeout", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("clears the timer once the response arrives so it cannot abort the live socket", async () => {
+      vi.useFakeTimers();
+
+      const fake = fakeWorkerWebSocket();
+      const signals: (AbortSignal | null | undefined)[] = [];
+
+      const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+        signals.push(init?.signal);
+
+        return Object.assign(new Response("", { status: 200 }), { webSocket: fake.webSocket });
+      };
+
+      await workerSocket(fetchImpl, "wss://connect.test/s1");
+
+      expect(vi.getTimerCount()).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(signals[0]?.aborted).toBe(false);
+    });
+
+    it("clears the timer when the upgrade fails", async () => {
+      vi.useFakeTimers();
+
+      const fetchImpl = async () => {
+        throw new Error("refused");
+      };
+
+      await expect(workerSocket(fetchImpl, "wss://connect.test/s1")).rejects.toThrow("refused");
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("aborts an upgrade that never answers after 30 seconds", async () => {
+      vi.useFakeTimers();
+
+      const fetchImpl = (_input: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        });
+
+      const pending = expect(workerSocket(fetchImpl, "wss://connect.test/s1")).rejects.toThrow(
+        "aborted",
+      );
+
+      await vi.advanceTimersByTimeAsync(29_999);
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+    });
   });
 
   it("fails without a websocket", async () => {

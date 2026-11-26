@@ -51,10 +51,13 @@ export const workerSocket = async (
   fetchImpl: (input: string, init: RequestInit) => Promise<UpgradeResponse>,
   url: string,
 ) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+
   const response = await fetchImpl(url.replace(/^wss:/, "https:"), {
     headers: { Upgrade: "websocket" },
-    signal: AbortSignal.timeout(30_000),
-  });
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer));
 
   const webSocket = response.webSocket;
 
