@@ -56,7 +56,7 @@ import { z } from "zod";
 import { createApp } from "./app.ts";
 import type { TrackingConfig } from "./features/offboardings/correios.ts";
 import { codeAudienceHeader, createAuth, createRuntimeAuth } from "./features/auth/auth.js";
-import type { CatalogSource } from "./features/sources/catalog.js";
+import { catalogSources, type CatalogSource } from "./features/sources/catalog.js";
 import type { GenerateStructured } from "./shared/ai.js";
 import { diskStorage } from "./shared/disk-storage.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
@@ -6552,15 +6552,22 @@ describe.skipIf(!url)("api", () => {
     it("syncs the reviewed catalog by default", async () => {
       const app = sourcesApp(undefined);
 
-      expect(await app.drainNow()).toEqual({ processed: 2, failed: 0 });
-      expect(app.fetched.sort()).toEqual([
-        "https://boards-api.greenhouse.io/v1/boards/quintoandar/jobs?content=true",
-        "https://boards-api.greenhouse.io/v1/boards/stone/jobs?content=true",
-      ]);
-      expect((await registry()).map((source) => [source.target, source.enabled])).toEqual([
-        ["quintoandar", true],
-        ["stone", true],
-      ]);
+      const drained = Math.min(catalogSources.length, 5);
+
+      expect(await app.drainNow()).toEqual({ processed: drained, failed: 0 });
+      expect(app.fetched).toHaveLength(drained);
+
+      const urls = catalogSources.map((source) =>
+        source.kind === "greenhouse"
+          ? `https://boards-api.greenhouse.io/v1/boards/${source.target}/jobs?content=true`
+          : `https://api.lever.co/v0/postings/${source.target}?mode=json`,
+      );
+
+      for (const url of app.fetched) expect(urls).toContain(url);
+
+      expect((await registry()).map((source) => [source.target, source.enabled]).sort()).toEqual(
+        catalogSources.map((source) => [source.target, true]).sort(),
+      );
     });
 
     it("schedules only due enabled sources before draining", async () => {
