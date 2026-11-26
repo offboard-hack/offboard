@@ -73,8 +73,12 @@ export function Preferences({
           </Link>
         ))}
       </nav>
-      {section === "perfil" ? <ProfileSection account={account} /> : null}
-      {section === "vagas" ? <JobPreferencesSection account={account} /> : null}
+      <div hidden={section !== "perfil"}>
+        <ProfileSection account={account} />
+      </div>
+      <div hidden={section !== "vagas"}>
+        <JobPreferencesSection account={account} />
+      </div>
       {section === "respostas" ? <AnswersSection account={account} /> : null}
       {section === "dispensadas" ? <RejectionsSection account={account} /> : null}
     </div>
@@ -201,6 +205,7 @@ function ProfileForm({
         <ShareSwitch
           id="address-share"
           checked={draft.address.share}
+          disabled={addressFields.every(({ key }) => draft.address[key].trim() === "")}
           onChange={(share) => setAddress({ ...draft.address, share })}
         />
         <EmployeeError id="address-error" message={checked ? addressError : undefined} />
@@ -273,7 +278,7 @@ function TextRow({
         id={id}
         value={value.value}
         aria-invalid={error !== undefined}
-        aria-describedby={`${id}-hint ${id}-error`}
+        aria-describedby={hint ? `${id}-hint ${id}-error` : `${id}-error`}
         onChange={(event) => onChange({ ...value, value: event.target.value })}
       />
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -287,6 +292,7 @@ function TextRow({
         <ShareSwitch
           id={`${id}-share`}
           checked={value.share}
+          disabled={value.value.trim() === ""}
           onChange={(share) => onChange({ ...value, share })}
         />
       </div>
@@ -298,15 +304,17 @@ function TextRow({
 function ShareSwitch({
   id,
   checked,
+  disabled,
   onChange,
 }: {
   id: string;
   checked: boolean;
+  disabled: boolean;
   onChange: (checked: boolean) => void;
 }) {
   return (
     <div className="flex items-center gap-2">
-      <Switch id={id} size="sm" checked={checked} onCheckedChange={onChange} />
+      <Switch id={id} size="sm" checked={checked} disabled={disabled} onCheckedChange={onChange} />
       <Label htmlFor={id} className="text-xs font-normal text-muted-foreground">
         {shareLabel}
       </Label>
