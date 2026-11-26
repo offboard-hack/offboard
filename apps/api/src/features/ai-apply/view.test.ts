@@ -59,12 +59,15 @@ describe("toAttemptView", () => {
     const view = toAttemptView({ ...row, evidence, screenshotKey: "ai-applications/p/a.png" }, job);
 
     expect(view).toMatchObject({
-      evidence: { ...evidence, failedField: null },
+      evidence: { ...evidence, failedField: null, formErrors: [] },
       hasScreenshot: true,
     });
     expect(
-      toAttemptView({ ...row, evidence: { ...evidence, failedField: "Telefone" } }, job).evidence,
-    ).toEqual({ ...evidence, failedField: "Telefone" });
+      toAttemptView(
+        { ...row, evidence: { ...evidence, failedField: "Telefone", formErrors: ["Obrigatório"] } },
+        job,
+      ).evidence,
+    ).toEqual({ ...evidence, failedField: "Telefone", formErrors: ["Obrigatório"] });
     expect(JSON.stringify(view)).not.toContain("ai-applications/p/a.png");
   });
 

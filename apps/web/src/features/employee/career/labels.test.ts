@@ -52,6 +52,10 @@ describe("career labels", () => {
     expect(attemptReason("document_required")).toBe(
       "A vaga pede um documento. Candidate-se pelo site da vaga.",
     );
+    expect(attemptReason("form_rejected")).toBe(
+      "O site da vaga recusou o envio. Confira as mensagens abaixo.",
+    );
+    expect(attemptReason("foreign_phone")).toContain("(+55)");
     expect(attemptReason("unknown")).toBeNull();
     expect(attemptReason(null)).toBeNull();
   });
@@ -81,10 +85,14 @@ describe("career labels", () => {
       files: [],
       finalUrl: null,
       failedField,
+      formErrors: [],
     });
 
     expect(failedFieldNote({ reason: "form_changed", evidence: evidence("Telefone") })).toBe(
       "O campo “Telefone” não pôde ser preenchido (o formulário da vaga mudou).",
+    );
+    expect(failedFieldNote({ reason: "fill_failed", evidence: evidence("Telefone") })).toBe(
+      "O campo “Telefone” não aceitou a resposta.",
     );
     expect(failedFieldNote({ reason: "upload_failed", evidence: evidence("Currículo") })).toBe(
       "O campo “Currículo” não pôde ser preenchido.",

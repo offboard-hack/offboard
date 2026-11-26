@@ -21,7 +21,7 @@ type FillInput = {
   attach: boolean;
 };
 
-type Failure = { failed: "upload_failed" | "form_changed"; field: string };
+type Failure = { failed: "upload_failed" | "fill_failed"; field: string };
 
 type Answer = string | string[] | null;
 
@@ -372,14 +372,14 @@ const typeInto = async (page: Page, id: string, text: string, same = sameText) =
   const selector = byId(id);
   const tag = await page.evaluate(`${found(selector)}?.tagName ?? null`, z.string().nullable());
 
-  if (tag === null || (tag === "INPUT" && /[\r\n]/.test(text))) return fail("form_changed", id);
+  if (tag === null || (tag === "INPUT" && /[\r\n]/.test(text))) return fail("fill_failed", id);
 
   await page.click(selector);
   await page.type(text);
 
   const kept = await valueOf(page, selector);
 
-  return kept !== null && same(text, kept) ? undefined : fail("form_changed", id);
+  return kept !== null && same(text, kept) ? undefined : fail("fill_failed", id);
 };
 
 type Choice = {
@@ -392,7 +392,7 @@ type Choice = {
 const choose = async (page: Page, id: string, choice: Choice) => {
   const selector = byId(id);
 
-  if (!(await exists(page, selector))) return fail("form_changed", choice.field);
+  if (!(await exists(page, selector))) return fail("fill_failed", choice.field);
 
   await page.click(selector);
   await page.type(choice.search);
@@ -400,7 +400,7 @@ const choose = async (page: Page, id: string, choice: Choice) => {
   if (!(await page.waitFor(`${found(listbox(id))} !== null`, menuMs))) {
     await page.press("Escape");
 
-    return fail("form_changed", choice.field);
+    return fail("fill_failed", choice.field);
   }
 
   const options = await page.evaluate(
@@ -413,7 +413,7 @@ const choose = async (page: Page, id: string, choice: Choice) => {
   if (match === undefined) {
     await page.press("Escape");
 
-    return fail("form_changed", choice.field);
+    return fail("fill_failed", choice.field);
   }
 
   await page.click(byId(match.id));
@@ -422,7 +422,7 @@ const choose = async (page: Page, id: string, choice: Choice) => {
 
   const shown = await shownIn(page, id);
 
-  return shown !== null && choice.shows(shown) ? undefined : fail("form_changed", choice.field);
+  return shown !== null && choice.shows(shown) ? undefined : fail("fill_failed", choice.field);
 };
 
 const chooseLabel = (page: Page, id: string, label: string, field = id) =>
@@ -447,7 +447,7 @@ const chooseLabels = async (page: Page, field: FormField, values: string[]) => {
   const labels = values.map((value) => labelOf(field, value));
 
   for (const label of labels) {
-    if (label === undefined) return fail("form_changed", field.name);
+    if (label === undefined) return fail("fill_failed", field.name);
 
     const failure = await choose(page, id, {
       field: field.name,
@@ -466,7 +466,7 @@ const chooseLabels = async (page: Page, field: FormField, values: string[]) => {
     shown.length === labels.length &&
     labels.every((label) => shown.some((text) => label !== undefined && sameText(label, text)));
 
-  return same ? undefined : fail("form_changed", field.name);
+  return same ? undefined : fail("fill_failed", field.name);
 };
 
 const fillPhone = async (page: Page, number: string, country: FillInput["phoneCountry"]) => {
@@ -490,7 +490,7 @@ const fillLocation = async (page: Page, city: string) => {
   const selector = byId(locationControl);
   const first = byId(`react-select-${locationControl}-option-0`);
 
-  if (!(await exists(page, selector))) return fail("form_changed", "location");
+  if (!(await exists(page, selector))) return fail("fill_failed", "location");
 
   await page.click(selector);
   await page.type(cityName(city));
@@ -498,7 +498,7 @@ const fillLocation = async (page: Page, city: string) => {
   if (!(await page.waitFor(`${found(first)} !== null`, suggestionMs))) {
     await page.press("Escape");
 
-    return fail("form_changed", "location");
+    return fail("fill_failed", "location");
   }
 
   await page.click(first);
@@ -510,7 +510,7 @@ const fillLocation = async (page: Page, city: string) => {
   const shown = await shownIn(page, locationControl);
   const states = await page.evaluate(locationStatesExpression, locationStates);
 
-  return locationMatches(city, shown, states) ? undefined : fail("form_changed", "location");
+  return locationMatches(city, shown, states) ? undefined : fail("fill_failed", "location");
 };
 
 const tick = async (page: Page, name: string, values: string[]) => {
@@ -522,7 +522,7 @@ const tick = async (page: Page, name: string, values: string[]) => {
       z.boolean().nullable(),
     );
 
-    if (checked === null) return fail("form_changed", name);
+    if (checked === null) return fail("fill_failed", name);
 
     if (!checked) await page.click(selector);
   }
@@ -530,14 +530,14 @@ const tick = async (page: Page, name: string, values: string[]) => {
   const ticked = await tickedIn(page, name);
   const same = ticked.length === values.length && values.every((value) => ticked.includes(value));
 
-  return same ? undefined : fail("form_changed", name);
+  return same ? undefined : fail("fill_failed", name);
 };
 
 const attachFile = async (page: Page, name: string, path: string) => {
   const selector = byId(name);
   const file = path.slice(path.lastIndexOf("/") + 1);
 
-  if (!(await exists(page, selector))) return fail("form_changed", name);
+  if (!(await exists(page, selector))) return fail("fill_failed", name);
 
   await page.setFiles(selector, [path]);
 
@@ -558,7 +558,7 @@ const fillCoverLetter = async (page: Page, question: FormQuestion, input: FillIn
       if (await exists(page, letterReveal)) await page.click(letterReveal);
 
       if (!(await page.waitFor(`${found(byId(letterField))} !== null`, revealMs))) {
-        return fail("form_changed", letterField);
+        return fail("fill_failed", letterField);
       }
     }
 
@@ -584,7 +584,7 @@ const fillAnswer = (page: Page, question: FormQuestion, value: Answer, input: Fi
 
   if (first.type === "multi_select") return tick(page, first.name, many);
 
-  if (single === undefined) return fail("form_changed", first.name);
+  if (single === undefined) return fail("fill_failed", first.name);
 
   if (first.name === "phone") return fillPhone(page, single, input.phoneCountry);
 
@@ -595,7 +595,7 @@ const fillAnswer = (page: Page, question: FormQuestion, value: Answer, input: Fi
   const label = labelOf(first, single);
 
   return label === undefined
-    ? fail("form_changed", first.name)
+    ? fail("fill_failed", first.name)
     : chooseLabel(page, controlOf(first.name), label, first.name);
 };
 
@@ -669,20 +669,31 @@ export const fillGreenhouse = async (page: Page, input: FillInput) => {
   for (const question of input.questions) {
     if ((values.get(question.id) ?? null) !== null) continue;
 
-    if (!(await untouched(page, question))) return fail("form_changed", question.id);
+    if (!(await untouched(page, question))) return fail("fill_failed", question.id);
   }
 };
 
 export const submitGreenhouse = async (page: Page) => {
   const before = await page.evaluate(outcomeExpression, outcomePage);
 
-  if (challengeVisible(before) || errorsVisible(before)) return "not_clicked";
+  if (challengeVisible(before)) return "challenge";
 
-  if (!(await page.evaluate(liftExpression, z.boolean()))) return "not_clicked";
+  if (errorsVisible(before)) return "errors";
+
+  if (!(await page.evaluate(liftExpression, z.boolean()))) return "unguarded";
 
   await page.click(submitButton);
 
   return "clicked";
+};
+
+const errorLimit = 5;
+
+export const visibleErrors = async (page: Page) => {
+  const { errors } = await page.evaluate(outcomeExpression, outcomePage);
+  const texts = errors.flatMap((error) => (error.visible && error.text !== "" ? [error.text] : []));
+
+  return [...new Set(texts)].slice(0, errorLimit);
 };
 
 export const awaitOutcome = async (page: Page, timeoutMs: number) => {

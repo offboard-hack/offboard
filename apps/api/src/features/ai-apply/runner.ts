@@ -19,6 +19,7 @@ import {
   fillGreenhouse,
   readLiveForm,
   submitGreenhouse,
+  visibleErrors,
 } from "./browser/greenhouse-form.js";
 import { splitName } from "./draft.js";
 import { stuckMs, type AiApplyRepository } from "./repository.js";
@@ -87,7 +88,7 @@ const requeued = { state: "queued", reason: null } satisfies Outcome;
 const afterClick = {
   confirmed: { state: "submitted", reason: null },
   blocked: needsCheck,
-  invalid: assisted("form_changed"),
+  invalid: assisted("form_rejected"),
   timeout: needsCheck,
 } satisfies Record<Awaited<ReturnType<typeof awaitOutcome>>, Outcome>;
 
@@ -206,7 +207,7 @@ async function rendered(ready: Run, letter: string | null) {
 function failedAt(
   progress: Progress,
   questions: FormQuestion[],
-  failure: { failed: "upload_failed" | "form_changed"; field: string },
+  failure: { failed: "upload_failed" | "fill_failed"; field: string },
 ) {
   const label = failedLabel(questions, failure.field);
 
@@ -268,6 +269,8 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
 
   if (live.blocked) return assisted("blocked");
 
+  if (!live.ready) return assisted("page_not_ready");
+
   if (checkForm(live, questions, confirmed) !== "ok") return assisted("form_changed");
 
   const names = splitName(run.profile.name);
@@ -313,9 +316,21 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
 
   progress.submitting = true;
 
-  if ((await submitGreenhouse(page)) === "not_clicked") return assisted("form_changed");
+  const submitted = await submitGreenhouse(page);
+
+  if (submitted === "challenge") return assisted("blocked");
+
+  if (submitted === "unguarded") return assisted("error");
+
+  if (submitted === "errors") {
+    progress.evidence.formErrors = await visibleErrors(page);
+
+    return assisted("form_rejected");
+  }
 
   const seen = await awaitOutcome(page, deps.outcomeMs);
+
+  if (seen === "invalid") progress.evidence.formErrors = await visibleErrors(page).catch(() => []);
 
   progress.screenshotKey = await capture(deps, page, key).catch((cause) => {
     logFailure("AI application screenshot failed")(cause);
@@ -455,7 +470,7 @@ export async function runAiApplication(deps: RunnerDeps, attemptId: string, now:
   }
 
   if (foreignPhone(run.attempt.form.questions, confirmed)) {
-    await deps.repo.finish(attemptId, ["queued", "running"], assisted("form_changed"), now());
+    await deps.repo.finish(attemptId, ["queued", "running"], assisted("foreign_phone"), now());
 
     return skipped;
   }

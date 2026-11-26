@@ -97,6 +97,13 @@ const attemptReasons = new Map([
   ["login_required", "O site da vaga pede login. Candidate-se por lá."],
   ["upload_failed", "Não foi possível anexar o currículo."],
   ["error", "O preenchimento falhou."],
+  ["page_not_ready", "A página da vaga demorou demais para carregar. Tente de novo."],
+  ["fill_failed", "Um campo do formulário não aceitou a resposta. Candidate-se pelo site da vaga."],
+  ["form_rejected", "O site da vaga recusou o envio. Confira as mensagens abaixo."],
+  [
+    "foreign_phone",
+    "A IA só preenche telefones do Brasil (+55). Corrija o telefone e prepare de novo.",
+  ],
 ]);
 
 export function attemptReason(reason: string | null) {
@@ -111,6 +118,8 @@ export function failedFieldNote(attempt: Pick<AiAttempt, "reason" | "evidence">)
   if (attempt.reason === "form_changed") {
     return `O campo “${field}” não pôde ser preenchido (o formulário da vaga mudou).`;
   }
+
+  if (attempt.reason === "fill_failed") return `O campo “${field}” não aceitou a resposta.`;
 
   return attempt.reason === "upload_failed" ? `O campo “${field}” não pôde ser preenchido.` : null;
 }
