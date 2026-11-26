@@ -46,6 +46,9 @@ const browserEndpoints = new Set([
 ]);
 
 const nativeEndpoints = new Set([codeRequestPath, codeSignInPath, "/sign-out"]);
+const codeEndpoints = new Set([codeRequestPath, codeSignInPath]);
+
+export const codeAudienceHeader = "x-offboard-audience";
 
 const memberFields = {
   id: teamMembers.id,
@@ -157,9 +160,13 @@ export function createAuth({
 
   const normalizedEmployeeEmail = sql<string>`lower(${employeeAccess.email})`;
 
-  const employeeOtp = new AsyncLocalStorage<{
+  type CodeScope = {
+    audience: "employee" | "member";
     grant: Awaited<ReturnType<typeof findEmployee>>;
-  }>();
+    member: Awaited<ReturnType<typeof findMember>> | undefined;
+  };
+
+  const codeScope = new AsyncLocalStorage<CodeScope>();
 
   async function findEmployee(email: string, binding?: { caseId: string; grantId: string }) {
     const [employee] = await db
@@ -182,17 +189,35 @@ export function createAuth({
     return employee?.email ? { ...employee, email: employee.email } : null;
   }
 
-  function requireOtpGrant() {
-    const grant = employeeOtp.getStore()?.grant;
-
-    if (!grant) throw new APIError("BAD_REQUEST", { code: "INVALID_OTP", message: "Invalid OTP" });
-
-    return grant;
+  function invalidCode() {
+    return new APIError("BAD_REQUEST", { code: "INVALID_OTP", message: "Invalid OTP" });
   }
 
-  async function finalizeEmployeeSession() {
-    const grant = requireOtpGrant();
+  function requireCodeSubject() {
+    const scope = codeScope.getStore();
 
+    if (scope?.audience === "member" && scope.member) {
+      return { audience: "member" as const, member: scope.member };
+    }
+
+    if (scope?.audience === "employee" && scope.grant) {
+      return { audience: "employee" as const, grant: scope.grant };
+    }
+
+    throw invalidCode();
+  }
+
+  async function codeRecipient(email: string) {
+    const scope = codeScope.getStore();
+
+    return scope?.audience === "member"
+      ? scope.member && findMember(email, scope.member.id)
+      : scope?.grant && findEmployee(email, scope.grant);
+  }
+
+  async function finalizeEmployeeSession(
+    grant: NonNullable<Awaited<ReturnType<typeof findEmployee>>>,
+  ) {
     return db.transaction(async (tx) => {
       const [active] = await tx
         .select({ caseId: employeeAccess.caseId })
@@ -250,13 +275,16 @@ export function createAuth({
         }
 
         if (context.path === codeRequestPath || context.path === codeSignInPath) {
-          const scope = employeeOtp.getStore();
+          const scope = codeScope.getStore();
           const parsed = otpEmail.safeParse(context.body);
 
-          if (scope && parsed.success) scope.grant = await findEmployee(parsed.data.email);
+          if (scope && parsed.success) {
+            if (scope.audience === "member") scope.member = await findMember(parsed.data.email);
+            else scope.grant = await findEmployee(parsed.data.email);
+          }
         }
 
-        if (context.path === codeSignInPath) requireOtpGrant();
+        if (context.path === codeSignInPath) requireCodeSubject();
       }),
     },
     databaseHooks: {
@@ -264,9 +292,10 @@ export function createAuth({
         create: {
           async before(user, context) {
             if (context?.path === codeSignInPath) {
-              const grant = requireOtpGrant();
+              const subject = requireCodeSubject();
+              const name = subject.audience === "member" ? subject.member.name : subject.grant.name;
 
-              return { data: { name: grant.name, image: null } };
+              return { data: { name, image: null } };
             }
 
             const { audience, id } = callbackContext.parse(context).query.token;
@@ -280,9 +309,17 @@ export function createAuth({
         create: {
           async before(session, context) {
             if (context?.path === codeSignInPath) {
-              const grant = requireOtpGrant();
+              const subject = requireCodeSubject();
 
-              return { data: { employeeCaseId: grant.caseId, employeeGrantId: grant.grantId } };
+              return {
+                data:
+                  subject.audience === "member"
+                    ? { memberId: subject.member.id }
+                    : {
+                        employeeCaseId: subject.grant.caseId,
+                        employeeGrantId: subject.grant.grantId,
+                      },
+              };
             }
 
             const { audience, id } = callbackContext.parse(context).query.token;
@@ -317,17 +354,18 @@ export function createAuth({
         allowedAttempts: 3,
         storeOTP: {
           async hash(otp) {
-            const grantId = employeeOtp.getStore()?.grant?.grantId ?? "unassigned";
+            const scope = codeScope.getStore();
 
-            return createHmac("sha256", secret)
-              .update(`offboard:employee-otp:${grantId}:${otp}`)
-              .digest("hex");
+            const binding =
+              scope?.audience === "member"
+                ? `member-otp:${scope.member?.id ?? "unassigned"}`
+                : `employee-otp:${scope?.grant?.grantId ?? "unassigned"}`;
+
+            return createHmac("sha256", secret).update(`offboard:${binding}:${otp}`).digest("hex");
           },
         },
         async sendVerificationOTP({ email, otp, type }) {
-          const grant = employeeOtp.getStore()?.grant;
-
-          if (type === "sign-in" && sendCode && grant && (await findEmployee(email, grant))) {
+          if (type === "sign-in" && sendCode && (await codeRecipient(email))) {
             await sendCode({ email, code: otp });
           }
         },
@@ -363,7 +401,14 @@ export function createAuth({
 
       const native = nativeEndpoints.has(path) && isEmployeeApp(request, origin);
 
+      const codeAudience =
+        request.headers.get(codeAudienceHeader) === "member" ? "member" : "employee";
+
       if (request.method === "POST" && request.headers.get("origin") !== origin && !native) {
+        return new Response(null, { status: 403 });
+      }
+
+      if (native && codeAudience === "member" && codeEndpoints.has(path)) {
         return new Response(null, { status: 403 });
       }
 
@@ -389,12 +434,18 @@ export function createAuth({
       }
 
       const audience = await requestAudience(request, url.pathname);
+      const scope: CodeScope = { audience: codeAudience, grant: null, member: undefined };
 
       const response = await audienceScope.run(audience, () =>
-        employeeOtp.run({ grant: null }, async () => {
+        codeScope.run(scope, async () => {
           const result = await auth.handler(authRequest);
 
-          if (path === codeSignInPath && result.ok && !(await finalizeEmployeeSession())) {
+          if (
+            path === codeSignInPath &&
+            result.ok &&
+            scope.grant &&
+            !(await finalizeEmployeeSession(scope.grant))
+          ) {
             return Response.json({ code: "INVALID_OTP", message: "Invalid OTP" }, { status: 400 });
           }
 

@@ -54,7 +54,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { z } from "zod";
 import { createApp } from "./app.ts";
 import type { TrackingConfig } from "./features/offboardings/correios.ts";
-import { createAuth, createRuntimeAuth } from "./features/auth/auth.js";
+import { codeAudienceHeader, createAuth, createRuntimeAuth } from "./features/auth/auth.js";
 import type { CatalogSource } from "./features/sources/catalog.js";
 import type { GenerateStructured } from "./shared/ai.js";
 import { diskStorage } from "./shared/disk-storage.js";
@@ -9343,6 +9343,158 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       key: "consent",
       revision: 1,
       value: { accepted: true },
+    });
+  });
+
+  describe("HR sign-in with a code", () => {
+    function memberRequest(
+      path: string,
+      body: { email: string; type: "sign-in" } | { email: string; otp: string },
+      { audience = "member", native = false }: { audience?: string; native?: boolean } = {},
+    ) {
+      requests += 1;
+
+      const headers = new Headers({
+        "x-test-employee-ip": `198.51.100.${requests % 250}`,
+        "content-type": "application/json",
+        [codeAudienceHeader]: audience,
+      });
+
+      if (native) headers.set("expo-origin", "offboard://");
+      else headers.set("origin", webOrigin);
+
+      return app.handle(
+        new Request(`${webOrigin}/api/auth${path}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        }),
+      );
+    }
+
+    function sendMemberCode(email: string, options?: { audience?: string; native?: boolean }) {
+      return memberRequest("/email-otp/send-verification-otp", { email, type: "sign-in" }, options);
+    }
+
+    function signInMember(
+      email: string,
+      otp: string,
+      options?: { audience?: string; native?: boolean },
+    ) {
+      return memberRequest("/sign-in/email-otp", { email, otp }, options);
+    }
+
+    function sessionCookie(response: Response) {
+      return (
+        response.headers
+          .getSetCookie()
+          .find((value) => value.includes("session_token="))
+          ?.split(";")[0] ?? ""
+      );
+    }
+
+    function deliveredCode(email: string) {
+      const code = codes.get(email);
+
+      if (!code) throw new Error("No code delivered");
+
+      codes.delete(email);
+
+      return code;
+    }
+
+    it("signs a team member into the portal and never into the employee journey", async () => {
+      const email = `member-${randomUUID()}@offboard.example`;
+
+      const member = await repos.team.createTeamMember(defaultOrgId, {
+        email: email.toUpperCase(),
+        name: "Pessoa do RH",
+        role: "rh",
+      });
+
+      expect((await sendMemberCode(email)).status).toBe(200);
+
+      const response = await signInMember(email, deliveredCode(email));
+      expect(response.status).toBe(200);
+
+      const cookie = sessionCookie(response);
+      expect(cookie).not.toBe("");
+
+      const session = await request("/session", "GET", cookie);
+      expect(session.status).toBe(200);
+      expect(await session.json()).toMatchObject({ id: member.id, email });
+      expect((await request("/employee/session", "GET", cookie)).status).toBe(401);
+    });
+
+    it("sends nothing to unknown emails and rejects any code for them", async () => {
+      const email = `nobody-${randomUUID()}@offboard.example`;
+
+      expect((await sendMemberCode(email)).status).toBe(200);
+      expect(codes.has(email)).toBe(false);
+      expect((await signInMember(email, "123456")).status).toBe(400);
+    });
+
+    it("keeps employee and member codes apart for an email that has both accesses", async () => {
+      const email = `both-${randomUUID()}@offboard.example`;
+
+      const record = await repos.offboardings.createOffboarding(defaultOrgId, {
+        name: "Pessoa com dois acessos",
+        role: "Analista",
+        department: "RH",
+        deadline: "2027-02-01",
+        email,
+      });
+
+      await repos.team.createTeamMember(defaultOrgId, { email, name: "RH", role: "admin" });
+      await repos.employee.saveSettings(defaultOrgId, record.id, {
+        email,
+        plan: emptyEmployeePlan,
+        revision: 0,
+      });
+
+      expect((await sendMemberCode(email, { audience: "employee" })).status).toBe(200);
+      const employeeCode = deliveredCode(email);
+      const asMember = await signInMember(email, employeeCode);
+      expect(asMember.status).toBe(400);
+      expect(sessionCookie(asMember)).toBe("");
+
+      expect((await sendMemberCode(email)).status).toBe(200);
+      const memberCode = deliveredCode(email);
+      const asEmployee = await signInMember(email, memberCode, { audience: "employee" });
+      expect(asEmployee.status).toBe(400);
+      expect(sessionCookie(asEmployee)).toBe("");
+
+      expect((await sendMemberCode(email)).status).toBe(200);
+      const response = await signInMember(email, deliveredCode(email));
+      expect(response.status).toBe(200);
+      expect((await request("/session", "GET", sessionCookie(response))).status).toBe(200);
+    });
+
+    it("rejects a delivered code once the member is removed", async () => {
+      const email = `removed-${randomUUID()}@offboard.example`;
+
+      const member = await repos.team.createTeamMember(defaultOrgId, {
+        email,
+        name: "Pessoa removida",
+        role: "rh",
+      });
+
+      expect((await sendMemberCode(email)).status).toBe(200);
+      const code = deliveredCode(email);
+
+      await repos.team.deleteTeamMember(defaultOrgId, member.id);
+
+      expect((await signInMember(email, code)).status).toBe(400);
+    });
+
+    it("refuses member codes from the native app", async () => {
+      const email = `native-${randomUUID()}@offboard.example`;
+
+      await repos.team.createTeamMember(defaultOrgId, { email, name: "RH", role: "rh" });
+
+      expect((await sendMemberCode(email, { native: true })).status).toBe(403);
+      expect(codes.has(email)).toBe(false);
+      expect((await signInMember(email, "123456", { native: true })).status).toBe(403);
     });
   });
 
