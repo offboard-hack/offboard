@@ -88,6 +88,9 @@ const confirmedPage: OutcomePage = {
 
 type Setup = {
   missing?: string[];
+  multi?: string[];
+  chips?: Record<string, string[]>;
+  dropped?: string[];
   menus?: Record<string, string[]>;
   suggestions?: string[];
   coordinates?: boolean;
@@ -119,6 +122,7 @@ const fakePage = (setup: Setup = {}) => {
   const checked = new Set(setup.checked ?? []);
   const attached = new Map<string, string>();
   const menus = new Map(Object.entries({ country: countries, ...setup.menus }));
+  const chips = new Map(Object.entries(setup.chips ?? {}));
   const pages = setup.pages ?? [quiet];
   let revealed = !setup.hiddenLetter;
   let focused = "";
@@ -203,6 +207,8 @@ const fakePage = (setup: Setup = {}) => {
 
     if (expression.endsWith(" !== null")) return present(id);
 
+    if (expression.includes(".select__multi-value__label")) return chips.get(id) ?? [];
+
     if (expression.includes(".select__single-value")) {
       return setup.shownAs?.[id] ?? shown.get(id) ?? null;
     }
@@ -278,6 +284,15 @@ const fakePage = (setup: Setup = {}) => {
 
       if (option?.[1] !== undefined && option[2] !== undefined) {
         const owner = option[1];
+        const label = labelsOf(owner)[Number(option[2])] ?? "";
+
+        if ((setup.multi ?? []).includes(owner)) {
+          const kept = (setup.dropped ?? []).includes(label) ? [] : [label];
+
+          chips.set(owner, [...(chips.get(owner) ?? []), ...kept]);
+
+          return;
+        }
 
         shown.set(owner, labelsOf(owner)[Number(option[2])] ?? "");
         located = owner === "candidate-location";
@@ -533,6 +548,39 @@ describe("reads the live form", () => {
       "question_2",
       "resume",
     ]);
+  });
+
+  it("reads the demographic questions the form keeps apart", () => {
+    const form = liveFormFrom({
+      ...stonePage,
+      questions: [],
+      demographics: [
+        { id: 7, required: false, answer_options: [{ id: 70 }, { id: "71" }] },
+        { id: "8", required: true, answer_options: null },
+      ],
+      required: [control("8")],
+    });
+
+    expect(form.fields).toEqual([
+      { name: "demographic:7", required: false, options: ["70", "71"] },
+      { name: "demographic:8", required: true, options: [] },
+    ]);
+  });
+
+  it("matches answered demographic questions", () => {
+    const pronoun = {
+      ...question("demographic:7", "single_select", ["He/him", "She/her"], false),
+      section: "demographic" as const,
+    };
+
+    const form = liveFormFrom({
+      ...stonePage,
+      questions: [],
+      demographics: [{ id: 7, required: false, answer_options: [{ id: 1 }, { id: 2 }] }],
+      required: [],
+    });
+
+    expect(checkForm(form, [pronoun], answers({ "demographic:7": "2" }))).toBe("ok");
   });
 
   it("reports a required control rendered outside the form data", async () => {
@@ -1005,6 +1053,77 @@ describe("fills each field kind", () => {
     expect(actions).toContain('setFiles [id="resume"] /tmp/.uploads/curriculo.pdf');
     expect(actions).toContain('click [id="question_35399738003[]_173418910003"]');
     expect(actions.some((action) => action.startsWith("press Enter"))).toBe(false);
+  });
+});
+
+describe("fills demographic questions", () => {
+  const demographic = (type: "single_select" | "multi_select", options: string[]) =>
+    ({
+      ...question("demographic:7", type, options, false),
+      section: "demographic",
+      sensitive: true,
+    }) satisfies FormQuestion;
+
+  const genders = ["Female", "Male", "Non-binary"];
+
+  it("picks a single option in the control named after the question id", async () => {
+    const { page, actions } = fakePage({ menus: { "7": genders } });
+    const field = demographic("single_select", genders);
+
+    expect(await fill(page, [field], answers({ "demographic:7": "2" }))).toBeUndefined();
+    expect(steps(actions)).toEqual([
+      'click [id="7"]',
+      "type Male",
+      'click [id="react-select-7-option-1"]',
+    ]);
+  });
+
+  it("names the question when its control is missing", async () => {
+    const { page } = fakePage({ missing: ["7"] });
+    const field = demographic("single_select", genders);
+
+    expect(await fill(page, [field], answers({ "demographic:7": "2" }))).toEqual(
+      changed("demographic:7"),
+    );
+  });
+
+  it("picks every chosen option of a multi-select and checks the chips", async () => {
+    const { page, actions } = fakePage({ menus: { "7": genders }, multi: ["7"] });
+    const field = demographic("multi_select", genders);
+
+    expect(await fill(page, [field], answers({ "demographic:7": ["1", "3"] }))).toBeUndefined();
+    expect(steps(actions)).toEqual([
+      'click [id="7"]',
+      "type Female",
+      'click [id="react-select-7-option-0"]',
+      'click [id="7"]',
+      "type Non-binary",
+      'click [id="react-select-7-option-2"]',
+      "press Escape",
+    ]);
+  });
+
+  it("reports a multi-select that dropped a choice, lacks an option or never opens", async () => {
+    const field = demographic("multi_select", genders);
+    const chosen = answers({ "demographic:7": ["1", "3"] });
+    const dropped = fakePage({ menus: { "7": genders }, multi: ["7"], dropped: ["Non-binary"] });
+    const missing = fakePage({ menus: { "7": ["Female"] }, multi: ["7"] });
+    const unknown = answers({ "demographic:7": ["9"] });
+
+    expect(await fill(dropped.page, [field], chosen)).toEqual(changed("demographic:7"));
+    expect(await fill(missing.page, [field], chosen)).toEqual(changed("demographic:7"));
+    expect(await fill(fakePage().page, [field], unknown)).toEqual(changed("demographic:7"));
+  });
+
+  it("reports an unanswered demographic question that shows a value", async () => {
+    const single = demographic("single_select", genders);
+    const multi = demographic("multi_select", genders);
+    const selected = fakePage({ shownAs: { "7": "Male" } });
+    const chipped = fakePage({ chips: { "7": ["Male"] } });
+
+    expect(await fill(fakePage().page, [single], [])).toBeUndefined();
+    expect(await fill(selected.page, [single], [])).toEqual(changed("demographic:7"));
+    expect(await fill(chipped.page, [multi], [])).toEqual(changed("demographic:7"));
   });
 });
 
