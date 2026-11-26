@@ -2707,6 +2707,36 @@ describe.skipIf(!url)("api", () => {
           expect((await visit("/public/pages/ana-dev")).status).toBe(404);
         });
 
+        it("keeps the page public while the person has an active Carreira Pro", async () => {
+          const headers = await publicProfile();
+          const profileId = headers["x-test-talent-id"];
+
+          await publish(headers, "ana-dev");
+          await db
+            .update(talentProfiles)
+            .set({ sponsoredUntil: "2000-01-01" })
+            .where(eq(talentProfiles.id, profileId));
+
+          expect((await visit("/public/pages/ana-dev")).status).toBe(404);
+
+          await db.insert(talentSubscriptions).values({
+            profileId,
+            status: "active",
+            currentPeriodEnd: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+
+          expect((await visit("/public/pages/ana-dev")).status).toBe(200);
+
+          await db
+            .update(talentSubscriptions)
+            .set({ status: "past_due" })
+            .where(eq(talentSubscriptions.profileId, profileId));
+
+          expect((await visit("/public/pages/ana-dev")).status).toBe(404);
+        });
+
         it("links applications to the page and counts recruiter visits", async () => {
           const headers = await publicProfile();
           const resume = await baseResume(headers);
@@ -6937,6 +6967,32 @@ describe.skipIf(!url)("api", () => {
         orgId: defaultOrgId,
         email: `colaboradora-${randomUUID()}@example.com`,
         plan: emptyEmployeePlan,
+      });
+
+      await sourcesApp([acme]).drainNow();
+
+      expect((await queued("compute_matches")).map((row) => row.subject)).toEqual([profileId]);
+    });
+
+    it("fans out matching to a person with an active Carreira Pro and no sponsorship", async () => {
+      const profileId = await matchingProfile();
+
+      await db
+        .update(talentProfiles)
+        .set({ sponsoredUntil: "2000-01-01" })
+        .where(eq(talentProfiles.id, profileId));
+
+      const subscription = await repos.billing.getSubscription(defaultOrgId);
+
+      if (!subscription) throw new Error("missing subscription");
+
+      await repos.billing.updateSubscription(defaultOrgId, subscription.id, { status: "canceled" });
+      await db.insert(talentSubscriptions).values({
+        profileId,
+        status: "active",
+        currentPeriodEnd: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
       });
 
       await sourcesApp([acme]).drainNow();

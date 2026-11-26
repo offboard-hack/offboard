@@ -273,7 +273,11 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     const profiles = await repos.matches.profilesForMatching(new Date());
 
     const sponsors = [
-      ...new Set(profiles.flatMap((profile) => (profile.collaborator ? [] : [profile.orgId]))),
+      ...new Set(
+        profiles.flatMap((profile) =>
+          profile.collaborator || profile.individual ? [] : [profile.orgId],
+        ),
+      ),
     ];
 
     const active = new Set(
@@ -287,7 +291,9 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     await repos.background.enqueueMany(
       "compute_matches",
       profiles
-        .filter((profile) => profile.collaborator || active.has(profile.orgId))
+        .filter(
+          (profile) => profile.collaborator || profile.individual || active.has(profile.orgId),
+        )
         .map((profile) => profile.profileId),
     );
   }

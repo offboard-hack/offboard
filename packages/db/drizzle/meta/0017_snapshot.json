@@ -1,5 +1,5 @@
 {
-  "id": "e393b3bb-5ab5-426d-93e3-7bf7365e4fc2",
+  "id": "06439d19-6b54-473d-a767-5fe5d4a10adf",
   "prevId": "3aac62e3-1c2e-47d8-a8f8-3a9ae72587be",
   "version": "7",
   "dialect": "postgresql",
@@ -1319,6 +1319,31 @@
           "with": {}
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.billing_webhook_events": {
+      "name": "billing_webhook_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(255)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "received_at": {
+          "name": "received_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

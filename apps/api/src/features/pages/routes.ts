@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { entitlementOf } from "../../shared/entitlement.js";
+import { entitlementOf, individualEntitlement } from "../../shared/entitlement.js";
 import { logFailure } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import type { PortalAuth } from "../../shared/portal-auth.js";
@@ -70,7 +70,9 @@ export function pagesRoutes(
 
     const entitlement = entitlementOf({ sponsoredUntil: page.sponsoredUntil, companyActive, now });
 
-    return entitlement.kind === "lapsed" ? undefined : page;
+    if (entitlement.kind !== "lapsed") return page;
+
+    return individualEntitlement(page.individual, now).kind === "lapsed" ? undefined : page;
   }
 
   async function owns(headers: Headers, profileId: string) {

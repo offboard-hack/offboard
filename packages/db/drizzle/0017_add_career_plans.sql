@@ -1,4 +1,9 @@
 CREATE TYPE "public"."talent_subscription_status" AS ENUM('pending', 'active', 'past_due', 'canceled');--> statement-breakpoint
+CREATE TABLE "billing_webhook_events" (
+	"id" varchar(255) PRIMARY KEY NOT NULL,
+	"received_at" timestamp NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "talent_subscriptions" (
 	"profile_id" uuid PRIMARY KEY NOT NULL,
 	"plan" varchar(50) DEFAULT 'carreira-pro' NOT NULL,

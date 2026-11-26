@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -199,6 +199,26 @@ describe.skipIf(!url)("billing", () => {
       method: "POST",
       body: JSON.stringify({ id: "log_1", event, apiVersion: 2, data: eventData(overrides) }),
     });
+  }
+
+  function talentWebhook(
+    event: string,
+    overrides: Partial<WebhookData> = {},
+    headers: Record<string, string> = {},
+    id: string | null = randomUUID(),
+  ) {
+    return app.handle(
+      new Request(`http://localhost/api/billing/webhook?webhookSecret=${webhookSecret}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          id: id ?? undefined,
+          event,
+          apiVersion: 2,
+          data: eventData(overrides),
+        }),
+      }),
+    );
   }
 
   function allInvoices() {
@@ -545,14 +565,14 @@ describe.skipIf(!url)("billing", () => {
     const today = saoPauloDate(new Date());
     const talent = { ...talentCheckout(profileId), subscription: { id: "subs_t", amount: 7900 } };
 
-    expect((await webhook("subscription.completed", talent)).status).toBe(200);
+    expect((await talentWebhook("subscription.completed", talent)).status).toBe(200);
     expect(await talentRow(profileId)).toEqual({
       status: "active",
       providerSubscriptionId: "subs_t",
       currentPeriodEnd: monthAfter(today),
     });
 
-    await webhook("subscription.renewed", talent);
+    await talentWebhook("subscription.renewed", talent);
 
     expect(await talentRow(profileId)).toEqual({
       status: "active",
@@ -560,7 +580,7 @@ describe.skipIf(!url)("billing", () => {
       currentPeriodEnd: monthAfter(monthAfter(today)),
     });
 
-    await webhook("subscription.cancelled", talent);
+    await talentWebhook("subscription.cancelled", talent);
 
     expect((await talentRow(profileId)).status).toBe("canceled");
     expect(await currentSubscription()).toEqual(company);
@@ -571,7 +591,7 @@ describe.skipIf(!url)("billing", () => {
     const today = saoPauloDate(new Date());
     const open = await pendingTalent();
 
-    await webhook("subscription.renewed", talentCheckout(open));
+    await talentWebhook("subscription.renewed", talentCheckout(open));
 
     expect((await talentRow(open)).currentPeriodEnd).toBe(monthAfter(today));
 
@@ -580,7 +600,7 @@ describe.skipIf(!url)("billing", () => {
       .set({ currentPeriodEnd: "2020-01-15" })
       .where(eq(talentSubscriptions.profileId, open));
 
-    await webhook("subscription.renewed", talentCheckout(open));
+    await talentWebhook("subscription.renewed", talentCheckout(open));
 
     expect((await talentRow(open)).currentPeriodEnd).toBe(monthAfter(today));
   });
@@ -590,19 +610,19 @@ describe.skipIf(!url)("billing", () => {
     const company = await currentSubscription();
     const today = saoPauloDate(new Date());
 
-    await webhook("subscription.completed", {
+    await talentWebhook("subscription.completed", {
       ...talentCheckout(profileId),
       subscription: { id: "subs_t", amount: 7900 },
     });
 
-    await webhook("subscription.renewed", {
+    await talentWebhook("subscription.renewed", {
       checkout: undefined,
       subscription: { id: "subs_t", amount: 7900 },
     });
 
     expect((await talentRow(profileId)).currentPeriodEnd).toBe(monthAfter(monthAfter(today)));
 
-    await webhook("subscription.cancelled", {
+    await talentWebhook("subscription.cancelled", {
       checkout: { id: "bill_talent", externalId: null },
       subscription: { id: "subs_t", amount: 7900 },
     });
@@ -627,6 +647,53 @@ describe.skipIf(!url)("billing", () => {
     expect(await talentRow(profileId)).toEqual(talent);
   });
 
+  it("applies a redelivered Carreira Pro event only once", async () => {
+    const profileId = await pendingTalent();
+    const today = saoPauloDate(new Date());
+
+    await talentWebhook("subscription.completed", talentCheckout(profileId), {}, "log_once");
+    await talentWebhook("subscription.renewed", talentCheckout(profileId), {}, "log_renew");
+    await talentWebhook("subscription.renewed", talentCheckout(profileId), {}, "log_renew");
+
+    expect((await talentRow(profileId)).currentPeriodEnd).toBe(monthAfter(monthAfter(today)));
+
+    const delivery = { "webhook-id": "msg_renew" };
+
+    await talentWebhook("subscription.renewed", talentCheckout(profileId), delivery, null);
+    await talentWebhook("subscription.renewed", talentCheckout(profileId), delivery, null);
+
+    expect((await talentRow(profileId)).currentPeriodEnd).toBe(
+      monthAfter(monthAfter(monthAfter(today))),
+    );
+  });
+
+  it("extends on every renewal that carries no event id", async () => {
+    const profileId = await pendingTalent();
+    const today = saoPauloDate(new Date());
+
+    await talentWebhook("subscription.renewed", talentCheckout(profileId), {}, null);
+    await talentWebhook("subscription.renewed", talentCheckout(profileId), {}, null);
+
+    expect((await talentRow(profileId)).currentPeriodEnd).toBe(monthAfter(monthAfter(today)));
+  });
+
+  it("marks a Carreira Pro past due when a payment fails and stops AI Apply", async () => {
+    const profileId = await pendingTalent();
+    const company = await currentSubscription();
+    const before = await allInvoices();
+
+    await talentWebhook("subscription.completed", talentCheckout(profileId));
+
+    expect(await repos.careerPlan.allowedBy(profileId, new Date())).toBe("individual");
+
+    await talentWebhook("subscription.payment_failed", talentCheckout(profileId));
+
+    expect((await talentRow(profileId)).status).toBe("past_due");
+    expect(await repos.careerPlan.allowedBy(profileId, new Date())).toBeNull();
+    expect(await currentSubscription()).toEqual(company);
+    expect(await allInvoices()).toEqual(before);
+  });
+
   it("ignores talent events for unknown profiles or events it does not act on", async () => {
     const logged = vi.spyOn(console, "error");
     const company = await currentSubscription();
@@ -635,9 +702,9 @@ describe.skipIf(!url)("billing", () => {
 
     try {
       const responses = [
-        await webhook("subscription.completed", talentCheckout(missingId)),
-        await webhook("subscription.completed", talentCheckout(withoutRow)),
-        await webhook("subscription.completed", {
+        await talentWebhook("subscription.completed", talentCheckout(missingId)),
+        await talentWebhook("subscription.completed", talentCheckout(withoutRow)),
+        await talentWebhook("subscription.completed", {
           checkout: { id: "bill_talent", externalId: "talent:not-a-uuid" },
         }),
       ];
@@ -654,7 +721,7 @@ describe.skipIf(!url)("billing", () => {
     const pending = await pendingTalent(1);
 
     const quiet = [
-      await webhook("subscription.payment_failed", talentCheckout(pending)),
+      await talentWebhook("subscription.plan_changed", talentCheckout(pending)),
       await call(`/billing/webhook?webhookSecret=${webhookSecret}`, {
         method: "POST",
         body: JSON.stringify({ data: eventData(talentCheckout(pending)) }),

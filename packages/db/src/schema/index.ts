@@ -341,6 +341,11 @@ export const talentSubscriptions = pgTable("talent_subscriptions", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const billingWebhookEvents = pgTable("billing_webhook_events", {
+  id: varchar("id", { length: 255 }).primaryKey(),
+  receivedAt: timestamp("received_at").notNull(),
+});
+
 export const jobOriginEnum = pgEnum("job_origin", ["external", "hr", "recruiter"]);
 
 export const jobWorkModelEnum = pgEnum("job_work_model", ["remote", "hybrid", "onsite"]);

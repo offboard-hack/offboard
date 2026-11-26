@@ -1,5 +1,11 @@
 import type { Database } from "@offboard/db/client";
-import { invoices, plans, subscriptions, talentSubscriptions } from "@offboard/db/schema";
+import {
+  billingWebhookEvents,
+  invoices,
+  plans,
+  subscriptions,
+  talentSubscriptions,
+} from "@offboard/db/schema";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
 type InvoiceStatus = (typeof invoices.$inferSelect)["status"];
@@ -191,11 +197,27 @@ export function createBillingRepository(db: Database) {
       providerSubscriptionId?: string;
       currentPeriodEnd?: string;
     },
+    eventId: string | null,
+    now: Date,
   ) {
-    await db
-      .update(talentSubscriptions)
-      .set({ ...patch, updatedAt: new Date() })
-      .where(eq(talentSubscriptions.profileId, profileId));
+    return db.transaction(async (tx) => {
+      if (eventId !== null) {
+        const [fresh] = await tx
+          .insert(billingWebhookEvents)
+          .values({ id: eventId, receivedAt: now })
+          .onConflictDoNothing()
+          .returning({ id: billingWebhookEvents.id });
+
+        if (!fresh) return false;
+      }
+
+      await tx
+        .update(talentSubscriptions)
+        .set({ ...patch, updatedAt: now })
+        .where(eq(talentSubscriptions.profileId, profileId));
+
+      return true;
+    });
   }
 
   return {

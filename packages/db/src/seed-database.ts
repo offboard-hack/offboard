@@ -36,6 +36,7 @@ import {
   applicationEvents,
   applications,
   backgroundJobs,
+  billingWebhookEvents,
   defaultOrgId,
   equipment,
   exitSurveys,
@@ -136,6 +137,7 @@ export async function seedDatabase(
 ) {
   await db.transaction(async (tx) => {
     await tx.delete(backgroundJobs);
+    await tx.delete(billingWebhookEvents);
     await tx.delete(answerQuestions).where(eq(answerQuestions.common, false));
     await tx.delete(publicPageDailyViews);
     await tx.delete(publicPages);

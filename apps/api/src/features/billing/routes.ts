@@ -109,7 +109,7 @@ export function billingRoutes(
 
         if (!event) return status(422, { error: "Invalid webhook event" });
 
-        await applyWebhookEvent(repos, event);
+        await applyWebhookEvent(repos, event, request.headers.get("webhook-id"));
 
         return { ok: true } satisfies { ok: true };
       },

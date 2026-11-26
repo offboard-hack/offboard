@@ -71,27 +71,18 @@ async function talentSubscriptionOf(repos: BillingRepository, externalId: string
   return parsed.success ? repos.findTalentSubscription(parsed.data) : null;
 }
 
-async function applyTalentEvent(
-  repos: BillingRepository,
-  name: string | undefined,
-  event: SubscriptionEvent,
-  talent: { profileId: string; currentPeriodEnd: string | null } | null,
-) {
-  if (!talent) {
-    console.error("talent webhook ignored", { event: name });
+type TalentTarget = { profileId: string; currentPeriodEnd: string | null };
 
-    return;
-  }
-
+function talentPatch(name: string | undefined, event: SubscriptionEvent, talent: TalentTarget) {
   const today = saoPauloDate(new Date());
   const providerSubscriptionId = event.data.subscription.id;
 
   if (name === "subscription.completed") {
-    await repos.updateTalentSubscription(talent.profileId, {
+    return {
       status: "active",
       providerSubscriptionId,
       currentPeriodEnd: addOneMonth(today),
-    });
+    } as const;
   }
 
   if (name === "subscription.renewed") {
@@ -100,16 +91,38 @@ async function applyTalentEvent(
         ? talent.currentPeriodEnd
         : today;
 
-    await repos.updateTalentSubscription(talent.profileId, {
+    return {
       status: "active",
       providerSubscriptionId,
       currentPeriodEnd: addOneMonth(from),
-    });
+    } as const;
   }
 
-  if (name === "subscription.cancelled") {
-    await repos.updateTalentSubscription(talent.profileId, { status: "canceled" });
+  if (name === "subscription.payment_failed") return { status: "past_due" } as const;
+
+  if (name === "subscription.cancelled") return { status: "canceled" } as const;
+
+  return null;
+}
+
+async function applyTalentEvent(
+  repos: BillingRepository,
+  name: string | undefined,
+  event: SubscriptionEvent,
+  deliveryId: string | null,
+  talent: TalentTarget | null,
+) {
+  if (!talent) {
+    console.error("talent webhook ignored", { event: name });
+
+    return;
   }
+
+  const patch = talentPatch(name, event, talent);
+
+  if (!patch) return;
+
+  await repos.updateTalentSubscription(talent.profileId, patch, event.id ?? deliveryId, new Date());
 }
 
 async function openInvoice(
@@ -125,18 +138,24 @@ async function openInvoice(
   return repos.createInvoice(orgId, subscriptionId, amount, new Date().toISOString().slice(0, 10));
 }
 
-export async function applyWebhookEvent(repos: BillingRepository, event: SubscriptionEvent) {
+export async function applyWebhookEvent(
+  repos: BillingRepository,
+  event: SubscriptionEvent,
+  deliveryId: string | null,
+) {
   const name = event.event ?? event.type;
   const subscriptionId = event.data.checkout?.externalId;
 
   if (subscriptionId?.startsWith(talentPrefix)) {
-    return applyTalentEvent(repos, name, event, await talentSubscriptionOf(repos, subscriptionId));
+    const talent = await talentSubscriptionOf(repos, subscriptionId);
+
+    return applyTalentEvent(repos, name, event, deliveryId, talent);
   }
 
   if (!subscriptionId) {
     const talent = await repos.findTalentSubscriptionByProvider(event.data.subscription.id);
 
-    if (talent) return applyTalentEvent(repos, name, event, talent);
+    if (talent) return applyTalentEvent(repos, name, event, deliveryId, talent);
   }
 
   if (!name || !subscriptionId) return;
