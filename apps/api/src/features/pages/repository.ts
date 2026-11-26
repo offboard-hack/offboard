@@ -6,6 +6,7 @@ import {
   publicPages,
   resumes,
   talentProfiles,
+  talentSubscriptions,
 } from "@offboard/db/schema";
 import { and, between, eq, exists, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -147,11 +148,16 @@ export function createPagesRepository(db: Database) {
         name: talentProfiles.name,
         sponsoredUntil: talentProfiles.sponsoredUntil,
         collaborator: sql<boolean>`${employeeAccess.email} is not null`,
+        individual: {
+          status: talentSubscriptions.status,
+          currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
+        },
         content: resumes.content,
       })
       .from(publicPages)
       .innerJoin(talentProfiles, eq(talentProfiles.id, publicPages.profileId))
       .leftJoin(employeeAccess, eq(employeeAccess.caseId, talentProfiles.caseId))
+      .leftJoin(talentSubscriptions, eq(talentSubscriptions.profileId, talentProfiles.id))
       .innerJoin(
         resumes,
         and(

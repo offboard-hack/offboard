@@ -11,6 +11,7 @@ import {
   applicationPackages,
   applications,
   defaultOrgId,
+  employeeAccess,
   jobRejections,
   jobs,
   llmUsage,
@@ -21,8 +22,10 @@ import {
   talentAnswers,
   talentPreferences,
   talentProfiles,
+  talentSubscriptions,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
+import { emptyEmployeePlan } from "@offboard/employee";
 import { eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Elysia } from "elysia";
@@ -30,11 +33,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { createRepositories } from "../../repositories.js";
 import type { GenerateStructured } from "../../shared/ai.js";
 import type { ObjectStorage } from "../../shared/object-storage.js";
+import { companySponsors } from "../../shared/entitlement.js";
 import type { PortalAuth } from "../../shared/portal-auth.js";
 import { talentAccess } from "../../shared/talent-access.js";
 import type { SaveAnswer, SaveProfile } from "./repository.js";
 import { aiApplyRoutes } from "./routes.js";
 import { readGreenhouseForm } from "./greenhouse.js";
+import { saoPauloDate, saoPauloDayStart } from "../../shared/sao-paulo-date.js";
 import type { Page } from "./browser/cdp.js";
 import { runAiApplication, type RunnerDeps } from "./runner.js";
 
@@ -104,7 +109,7 @@ type Body = {
 
 type Setup = {
   takeLlmCall?: () => Promise<true | { retryAt: Date }>;
-  companyPlan?: RunnerDeps["companyPlan"];
+  allowedBy?: RunnerDeps["allowedBy"];
   consent?: boolean;
   generate?: GenerateStructured | null;
   runnerConfigured?: boolean;
@@ -252,10 +257,12 @@ describe.skipIf(!url)("ai apply route", () => {
           auth,
           webOrigin,
           talent: repos.talent,
-          companyActive: async () => true,
+          companyActive: async (orgId) =>
+            companySponsors((await repos.billing.getSubscription(orgId))?.status),
+          individualPlan: repos.careerPlan.individual,
         }),
         {
-          companyPlan: setup.companyPlan ?? repos.billing.companyPlan,
+          allowedBy: setup.allowedBy ?? repos.careerPlan.allowedBy,
           generate: setup.generate === null ? undefined : setup.generate,
           runnerConfigured: setup.runnerConfigured ?? true,
           takeLlmCall: setup.takeLlmCall ?? repos.llmUsage.takeLlmCall,
@@ -369,8 +376,8 @@ describe.skipIf(!url)("ai apply route", () => {
 
       const canceled = await open.post(profileId, jobId);
 
-      expect(canceled.status).toBe(403);
-      expect(await canceled.json()).toEqual({ error: "AI Apply not available" });
+      expect(canceled.status).toBe(402);
+      expect(await canceled.json()).toEqual({ error: "Access lapsed" });
 
       await onPlan("platinum-premium", "trialing");
       await repos.talent.setAiApplyConsent(profileId, false, new Date());
@@ -389,6 +396,49 @@ describe.skipIf(!url)("ai apply route", () => {
       expect(await unavailable.json()).toEqual({ error: "AI not configured" });
       expect([open.fetched, off.fetched]).toEqual([[], []]);
       expect(await attempts(profileId)).toEqual([]);
+    });
+
+    it("grants AI Apply by company sponsorship or Carreira Pro", async () => {
+      const { post, profileId, jobId } = await ready();
+      const [first] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
+      const yesterday = saoPauloDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
+
+      await db.insert(employeeAccess).values({
+        caseId: first.id,
+        orgId: defaultOrgId,
+        email: "bia@example.com",
+        plan: emptyEmployeePlan,
+        careerSponsoredUntil: yesterday,
+      });
+
+      const expired = await post(profileId, jobId);
+
+      expect(expired.status).toBe(403);
+      expect(await expired.json()).toEqual({ error: "AI Apply not available" });
+
+      await db.delete(subscriptions).where(eq(subscriptions.orgId, defaultOrgId));
+      await db.insert(talentSubscriptions).values({
+        profileId,
+        status: "active",
+        currentPeriodEnd: "2099-01-01",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const pro = await post(profileId, jobId);
+
+      expect(pro.status).toBe(201);
+      expect(await attempts(profileId)).toHaveLength(1);
+
+      await db
+        .update(talentSubscriptions)
+        .set({ status: "canceled" })
+        .where(eq(talentSubscriptions.profileId, profileId));
+
+      const canceled = await post(profileId, jobId);
+
+      expect(canceled.status).toBe(402);
+      expect(await canceled.json()).toEqual({ error: "Access lapsed" });
     });
 
     it("lets a consenting person of a top-plan company in", async () => {
@@ -1166,7 +1216,7 @@ describe.skipIf(!url)("ai apply route", () => {
         ["POST", runPath(id)],
       ];
 
-      const offPlan = build({ companyPlan: async () => null, generate: fakeModel().generate });
+      const offPlan = build({ allowedBy: async () => null, generate: fakeModel().generate });
       const off = build({ generate: null });
 
       for (const [method, path, body] of routes) {
@@ -1200,7 +1250,7 @@ describe.skipIf(!url)("ai apply route", () => {
       await repos.talent.setAiApplyConsent(profileId, false, new Date());
 
       const closed = build({
-        companyPlan: async () => null,
+        allowedBy: async () => null,
         generate: null,
         storage: files.storage,
       });
@@ -1268,6 +1318,85 @@ describe.skipIf(!url)("ai apply route", () => {
 
       expect(again.status).toBe(409);
       expect(await again.json()).toEqual({ error: "Already in progress" });
+    });
+
+    describe("the daily limit on real sends", () => {
+      const day = 24 * 60 * 60 * 1000;
+
+      const keys = { next: 700 };
+
+      async function sentToday(profileId: string, count: number, extra = {}) {
+        for (let index = 0; index < count; index += 1) {
+          keys.next += 1;
+
+          await seed(profileId, await addJob(`stone:${keys.next}`), [why], {
+            state: "submitted",
+            confirmedAt: saoPauloDayStart(new Date()),
+            ...extra,
+          });
+        }
+      }
+
+      it("refuses the 11th real send of a São Paulo day and keeps rehearsals open", async () => {
+        const { call, profileId, id } = await setup();
+
+        await sentToday(profileId, 10);
+
+        const refused = await call(profileId, confirmPath(id), { answers: complete });
+
+        expect(refused.status).toBe(429);
+        expect(await refused.json()).toEqual({ error: "Daily AI application limit reached" });
+        expect((await attempts(profileId)).find((row) => row.id === id)).toMatchObject({
+          state: "draft",
+          confirmed: null,
+        });
+
+        const rehearsal = await call(profileId, confirmPath(id), {
+          answers: complete,
+          rehearsal: true,
+        });
+
+        expect(rehearsal.status).toBe(200);
+        expect(await rehearsal.json()).toMatchObject({ state: "queued", rehearsal: true });
+
+        await db
+          .update(aiApplications)
+          .set({ state: "rehearsed", finishedAt: new Date() })
+          .where(eq(aiApplications.id, id));
+
+        const again = await call(profileId, confirmPath(id), { answers: complete });
+
+        expect(again.status).toBe(429);
+        expect(await again.json()).toEqual({ error: "Daily AI application limit reached" });
+      });
+
+      it("counts only real sends confirmed today, in any state", async () => {
+        const { call, profileId, id } = await setup();
+
+        await sentToday(profileId, 5, { state: "cancelled" });
+        await sentToday(profileId, 4, { state: "needs_check" });
+        await sentToday(profileId, 3, { rehearsal: true, state: "rehearsed" });
+        await sentToday(profileId, 3, {
+          confirmedAt: new Date(saoPauloDayStart(new Date()).getTime() - 1),
+        });
+        await sentToday(profileId, 1, { confirmedAt: null, state: "draft" });
+
+        const otherId = await profile("outra@example.com", 1);
+
+        await sentToday(otherId, 10);
+
+        const sent = await call(profileId, confirmPath(id), { answers: complete });
+
+        expect(sent.status).toBe(200);
+
+        const next = await seed(profileId, await addJob("stone:9"), [why, pcd, source, mail, cv], {
+          preparedAt: new Date(Date.now() - day),
+        });
+
+        const eleventh = await call(profileId, confirmPath(next), { answers: complete });
+
+        expect(eleventh.status).toBe(429);
+      });
     });
 
     it("enqueues the run once the confirm is stored", async () => {
@@ -1960,7 +2089,7 @@ describe.skipIf(!url)("ai apply route", () => {
 
         const deps: RunnerDeps = {
           repo: repos.aiApply,
-          companyPlan: repos.billing.companyPlan,
+          allowedBy: repos.careerPlan.allowedBy,
           browserbase: {
             createSession: async () => {
               sessions.push("s1");
@@ -2343,7 +2472,7 @@ describe.skipIf(!url)("ai apply route", () => {
 
         await repos.talent.setAiApplyConsent(profileId, false, new Date());
 
-        const closed = build({ companyPlan: async () => null, generate: null });
+        const closed = build({ allowedBy: async () => null, generate: null });
 
         expect((await closed.call(profileId, checkPath(first), { sent: true })).status).toBe(200);
         expect((await closed.call(profileId, checkPath(second), { sent: false })).status).toBe(200);

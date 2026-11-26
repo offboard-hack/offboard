@@ -48,6 +48,12 @@ export const employeeAccessSchema = z.object({
   email: z.string().trim().toLowerCase().pipe(z.email()).nullable(),
   plan: employeePlanSchema,
   revision: z.int().min(0).max(2_147_483_646),
+  careerSponsoredUntil: z.iso.date().nullable().optional(),
+});
+
+export const employeeAccessSettingsSchema = employeeAccessSchema.extend({
+  careerSponsoredUntil: z.iso.date(),
+  careerSponsoredIsDefault: z.boolean(),
 });
 
 export const employeeGrantHeader = "x-offboard-employee-grant";

@@ -1,10 +1,24 @@
 import type { Database } from "@offboard/db/client";
-import { invoices, plans, subscriptions } from "@offboard/db/schema";
+import {
+  billingWebhookEvents,
+  invoices,
+  plans,
+  subscriptions,
+  talentSubscriptions,
+} from "@offboard/db/schema";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
 type InvoiceStatus = (typeof invoices.$inferSelect)["status"];
 
 type SubscriptionStatus = (typeof subscriptions.$inferSelect)["status"];
+
+type TalentSubscriptionStatus = (typeof talentSubscriptions.$inferSelect)["status"];
+
+const talentSubscriptionColumns = {
+  profileId: talentSubscriptions.profileId,
+  providerSubscriptionId: talentSubscriptions.providerSubscriptionId,
+  currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
+};
 
 const invoiceColumns = {
   id: invoices.id,
@@ -58,12 +72,6 @@ export function createBillingRepository(db: Database) {
       .limit(1);
 
     return row ?? null;
-  }
-
-  async function companyPlan(orgId: string) {
-    const subscription = await getSubscription(orgId);
-
-    return subscription && { slug: subscription.plan.slug, status: subscription.status };
   }
 
   async function listInvoices(orgId: string) {
@@ -164,10 +172,58 @@ export function createBillingRepository(db: Database) {
     return row ? serializeInvoice(row) : null;
   }
 
+  async function findTalentSubscription(profileId: string) {
+    const [row] = await db
+      .select(talentSubscriptionColumns)
+      .from(talentSubscriptions)
+      .where(eq(talentSubscriptions.profileId, profileId));
+
+    return row ?? null;
+  }
+
+  async function findTalentSubscriptionByProvider(providerSubscriptionId: string) {
+    const [row] = await db
+      .select(talentSubscriptionColumns)
+      .from(talentSubscriptions)
+      .where(eq(talentSubscriptions.providerSubscriptionId, providerSubscriptionId))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async function updateTalentSubscription(
+    profileId: string,
+    patch: {
+      status: TalentSubscriptionStatus;
+      providerSubscriptionId?: string;
+      currentPeriodEnd?: string;
+    },
+    eventId: string | null,
+    now: Date,
+  ) {
+    return db.transaction(async (tx) => {
+      if (eventId !== null) {
+        const [fresh] = await tx
+          .insert(billingWebhookEvents)
+          .values({ id: eventId, receivedAt: now })
+          .onConflictDoNothing()
+          .returning({ id: billingWebhookEvents.id });
+
+        if (!fresh) return false;
+      }
+
+      await tx
+        .update(talentSubscriptions)
+        .set({ ...patch, updatedAt: now })
+        .where(eq(talentSubscriptions.profileId, profileId));
+
+      return true;
+    });
+  }
+
   return {
     listPlans,
     getSubscription,
-    companyPlan,
     listInvoices,
     findOpenInvoice,
     getSubscriptionById,
@@ -175,6 +231,9 @@ export function createBillingRepository(db: Database) {
     getInvoiceByBillingId,
     createInvoice,
     updateInvoiceStatus,
+    findTalentSubscription,
+    findTalentSubscriptionByProvider,
+    updateTalentSubscription,
   };
 }
 

@@ -188,6 +188,7 @@ export const employeeAccess = pgTable(
     revision: integer("revision").notNull().default(1),
     grantId: uuid("grant_id").notNull().defaultRandom(),
     orgId: orgIdColumn(),
+    careerSponsoredUntil: date("career_sponsored_until"),
   },
   (table) => [
     uniqueIndex("employee_access_email_idx").on(sql`lower(${table.email})`),
@@ -320,6 +321,30 @@ export const talentProfiles = pgTable(
     uniqueIndex("talent_profiles_email_lower_idx").on(sql`lower(${table.personalEmail})`),
   ],
 );
+
+export const talentSubscriptionStatusEnum = pgEnum("talent_subscription_status", [
+  "pending",
+  "active",
+  "past_due",
+  "canceled",
+]);
+
+export const talentSubscriptions = pgTable("talent_subscriptions", {
+  profileId: uuid("profile_id")
+    .primaryKey()
+    .references(() => talentProfiles.id, { onDelete: "cascade" }),
+  plan: varchar("plan", { length: 50 }).notNull().default("carreira-pro"),
+  status: talentSubscriptionStatusEnum("status").notNull().default("pending"),
+  providerSubscriptionId: varchar("provider_subscription_id", { length: 255 }),
+  currentPeriodEnd: date("current_period_end"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const billingWebhookEvents = pgTable("billing_webhook_events", {
+  id: varchar("id", { length: 255 }).primaryKey(),
+  receivedAt: timestamp("received_at").notNull(),
+});
 
 export const jobOriginEnum = pgEnum("job_origin", ["external", "hr", "recruiter"]);
 

@@ -1,6 +1,7 @@
 import {
   brazilTimezone,
   employeeAccessSchema,
+  employeeAccessSettingsSchema,
   employeeGrantHeader,
   employeeStateSchema,
   stateKindSchema,
@@ -248,7 +249,7 @@ export function employeeRoutes(
       {
         params: caseParams,
         permit: ["update", "Offboarding"],
-        response: { 200: employeeAccessSchema, 404: errorResponse },
+        response: { 200: employeeAccessSettingsSchema, 404: errorResponse },
       },
     )
     .put(
@@ -267,7 +268,10 @@ export function employeeRoutes(
         if (result === "changed")
           return status(409, { error: "Employee settings changed", code: "settings-changed" });
 
-        return { ...body, revision: body.revision + 1 };
+        return (
+          (await repo.readSettings(principal.orgId, params.caseId)) ??
+          status(404, { error: "Case not found" })
+        );
       },
       { params: caseParams, body: employeeAccessSchema, permit: ["update", "Offboarding"] },
     );

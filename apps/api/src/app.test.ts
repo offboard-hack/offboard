@@ -39,6 +39,7 @@ import {
   subscriptions,
   talentPreferences,
   talentProfiles,
+  talentSubscriptions,
   tasks,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
@@ -1023,6 +1024,25 @@ describe.skipIf(!url)("api", () => {
         aiApply: { eligible: false, consented: true, available: false },
       });
 
+      await db.insert(talentSubscriptions).values({
+        profileId: mine.id,
+        status: "active",
+        currentPeriodEnd: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      expect(await (await call(gated, "talent", "/me", "GET", mine.id)).json()).toMatchObject({
+        aiApply: { eligible: true, consented: true, available: true },
+      });
+      expect(await (await call(gated, "talent", "/me/plan", "GET", mine.id)).json()).toEqual({
+        company: { name: "Gold", includesAiApply: false, sponsoredUntil },
+        individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+        aiApply: { allowedBy: "individual" },
+        upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
+      });
+
+      await db.delete(talentSubscriptions).where(eq(talentSubscriptions.profileId, mine.id));
       await onPlan("platinum-premium");
 
       const stored = await consentOf(mine.id);
@@ -2683,6 +2703,36 @@ describe.skipIf(!url)("api", () => {
             .update(employeeAccess)
             .set({ email: null })
             .where(eq(employeeAccess.caseId, profile.caseId));
+
+          expect((await visit("/public/pages/ana-dev")).status).toBe(404);
+        });
+
+        it("keeps the page public while the person has an active Carreira Pro", async () => {
+          const headers = await publicProfile();
+          const profileId = headers["x-test-talent-id"];
+
+          await publish(headers, "ana-dev");
+          await db
+            .update(talentProfiles)
+            .set({ sponsoredUntil: "2000-01-01" })
+            .where(eq(talentProfiles.id, profileId));
+
+          expect((await visit("/public/pages/ana-dev")).status).toBe(404);
+
+          await db.insert(talentSubscriptions).values({
+            profileId,
+            status: "active",
+            currentPeriodEnd: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+
+          expect((await visit("/public/pages/ana-dev")).status).toBe(200);
+
+          await db
+            .update(talentSubscriptions)
+            .set({ status: "past_due" })
+            .where(eq(talentSubscriptions.profileId, profileId));
 
           expect((await visit("/public/pages/ana-dev")).status).toBe(404);
         });
@@ -6924,6 +6974,32 @@ describe.skipIf(!url)("api", () => {
       expect((await queued("compute_matches")).map((row) => row.subject)).toEqual([profileId]);
     });
 
+    it("fans out matching to a person with an active Carreira Pro and no sponsorship", async () => {
+      const profileId = await matchingProfile();
+
+      await db
+        .update(talentProfiles)
+        .set({ sponsoredUntil: "2000-01-01" })
+        .where(eq(talentProfiles.id, profileId));
+
+      const subscription = await repos.billing.getSubscription(defaultOrgId);
+
+      if (!subscription) throw new Error("missing subscription");
+
+      await repos.billing.updateSubscription(defaultOrgId, subscription.id, { status: "canceled" });
+      await db.insert(talentSubscriptions).values({
+        profileId,
+        status: "active",
+        currentPeriodEnd: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      await sourcesApp([acme]).drainNow();
+
+      expect((await queued("compute_matches")).map((row) => row.subject)).toEqual([profileId]);
+    });
+
     it("fans out matching only to people whose sponsor is active", async () => {
       const inactiveSponsor = await matchingProfile();
 
@@ -9157,6 +9233,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       email,
       plan: emptyEmployeePlan,
       revision: 1,
+      careerSponsoredUntil: "2027-05-01",
+      careerSponsoredIsDefault: true,
     });
     expect((await request(`/employee-access/${missingCaseId}`, "GET", hrCookie)).status).toBe(404);
     expect(
@@ -9173,6 +9251,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       email,
       plan,
       revision: 2,
+      careerSponsoredUntil: "2027-05-01",
+      careerSponsoredIsDefault: true,
     });
     expect((await request(target, "PUT", hrCookie, { email, plan, revision: 1 })).status).toBe(409);
     const firstVersion = { email, plan, revision: 2 };

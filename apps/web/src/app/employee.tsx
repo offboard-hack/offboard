@@ -396,7 +396,7 @@ function DepartureContent({
 }
 
 function CareerContent({ account, screen }: { account: EmployeeAccount; screen: EmployeeScreen }) {
-  const { carreira } = route.useSearch();
+  const { carreira, plano } = route.useSearch();
   const tracking = screen === "carreira" && carreira === "candidaturas";
   const { data: summary } = useQuery({ ...applicationsSummaryQuery(account), enabled: tracking });
 
@@ -420,7 +420,7 @@ function CareerContent({ account, screen }: { account: EmployeeAccount; screen: 
       {screen === "curriculo" ? (
         <ResumeCareer account={account} />
       ) : (
-        <Career account={account} view={carreira} />
+        <Career account={account} view={carreira} paid={plano === "ok"} />
       )}
     </EmployeeScreenPage>
   );

@@ -735,6 +735,66 @@ describe.skipIf(!url)("ai apply repository", () => {
       expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save)).toBe("expired");
     });
 
+    it("limits real sends per São Paulo day, from 03:00 UTC", async () => {
+      const { id, profileId } = await rehearsed(new Date(now.getTime() - day));
+      const dayStart = new Date("2026-11-25T03:00:00.000Z");
+
+      const sent = (confirmedAt: Date, count: number) =>
+        Promise.all(
+          Array.from({ length: count }, async (_, index) => {
+            const [job] = await db
+              .insert(jobs)
+              .values({
+                origin: "external",
+                source: "greenhouse",
+                sourceKey: `acme:${confirmedAt.getTime()}${index}`,
+                title: "Backend",
+                company: "Acme",
+                url: `https://example.com/${confirmedAt.getTime()}${index}`,
+              })
+              .returning({ id: jobs.id });
+
+            await db.insert(aiApplications).values({
+              profileId,
+              jobId: job.id,
+              state: "submitted",
+              form: { questions: [] },
+              draft: [],
+              preparedAt: confirmedAt,
+              confirmedAt,
+            });
+          }),
+        );
+
+      await sent(new Date(dayStart.getTime() - 1), 10);
+      await sent(dayStart, 9);
+
+      expect(
+        await repos.aiApply.confirm(profileId, id, { ...confirmation, rehearsal: true }, now, save),
+      ).toMatchObject({ state: "queued", rehearsal: true });
+
+      await db
+        .update(aiApplications)
+        .set({ state: "rehearsed", finishedAt: now })
+        .where(eq(aiApplications.id, id));
+
+      await sent(new Date(dayStart.getTime() + day - 1), 1);
+
+      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save)).toBe(
+        "daily_limit",
+      );
+      expect((await stateOf(id)).state).toBe("rehearsed");
+      expect(
+        await repos.aiApply.confirm(
+          profileId,
+          id,
+          confirmation,
+          new Date(dayStart.getTime() + day),
+          save,
+        ),
+      ).toMatchObject({ state: "queued", rehearsal: false });
+    });
+
     it("refuses a rehearsed attempt of someone who already applied", async () => {
       const { id, profileId, jobId } = await rehearsed(new Date(now.getTime() - day));
 

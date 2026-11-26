@@ -15,6 +15,8 @@ export { jobsRefetchInterval } from "./refresh";
 
 type Me = ApiClient["api"]["me"];
 
+export type CareerPlan = Treaty.Data<Me["plan"]["get"]>;
+
 export type CareerProfile = Treaty.Data<Me["get"]>;
 
 export type CareerResume = Treaty.Data<Me["resume"]["get"]>;
@@ -109,6 +111,19 @@ function resumeSource(account: EmployeeAccount) {
 
       return resume;
     },
+  });
+}
+
+export function careerPlanQuery(account: EmployeeAccount) {
+  return queryOptions({
+    queryKey: [...careerKey(account), "plan"],
+    staleTime: freshness,
+    retry: retryEmployeeRead,
+    queryFn: async ({ signal }) =>
+      settle(
+        await client().plan.get({ headers: employeeAccessHeaders(account), fetch: { signal } }),
+        "Não foi possível abrir seu plano.",
+      ),
   });
 }
 
@@ -245,6 +260,27 @@ function runPendingScore(queryClient: QueryClient, account: EmployeeAccount) {
     .resume.score.run.post(undefined, { headers: employeeAccessHeaders(account) })
     .catch(() => undefined)
     .then(() => queryClient.invalidateQueries({ queryKey: careerResumeQuery(account).queryKey }));
+}
+
+export function useUpgradeCheckout(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    async mutationFn() {
+      const result = await client().plan.checkout.post(undefined, {
+        headers: employeeAccessHeaders(account),
+      });
+
+      if (result.status === 409) {
+        await queryClient.invalidateQueries({ queryKey: careerPlanQuery(account).queryKey });
+      }
+
+      return settle(result, "Não foi possível abrir o pagamento. Tente de novo.");
+    },
+    onSuccess(checkout) {
+      window.location.assign(checkout.url);
+    },
+  });
 }
 
 export function useResumeUpload(account: EmployeeAccount) {

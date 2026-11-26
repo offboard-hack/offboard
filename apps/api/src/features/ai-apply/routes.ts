@@ -1,6 +1,7 @@
 import type { FormQuestion, ResumeContent } from "@offboard/db/schema";
 import { Elysia, t } from "elysia";
-import { aiApplyAccess, type CompanyPlan } from "../../shared/ai-apply-access.js";
+import { aiApplyAccess } from "../../shared/ai-apply-access.js";
+import type { AllowedBy } from "../../shared/career-pro.js";
 import type { GenerateStructured } from "../../shared/ai.js";
 import { logFailure, logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
@@ -40,7 +41,7 @@ export function aiApplyRoutes(
   repos: AiApplyRepository,
   talentAccess: TalentAccessPlugin,
   deps: {
-    companyPlan: (orgId: string) => Promise<CompanyPlan | null>;
+    allowedBy: (profileId: string, now: Date) => Promise<AllowedBy>;
     generate: GenerateStructured | undefined;
     runnerConfigured: boolean;
     takeLlmCall: UsageRepository["takeLlmCall"];
@@ -80,8 +81,8 @@ export function aiApplyRoutes(
     };
   }
 
-  const gate = async (me: { orgId: string; aiApplyConsentAt: string | null }) => {
-    const access = aiApplyAccess(me, await deps.companyPlan(me.orgId));
+  const gate = async (me: { id: string; aiApplyConsentAt: string | null }) => {
+    const access = aiApplyAccess(me, await deps.allowedBy(me.id, new Date()));
 
     if (access !== "allowed") {
       return {
@@ -274,6 +275,10 @@ export function aiApplyRoutes(
 
         if (result === "job_closed") return status(404, { error: "Job not found" });
 
+        if (result === "daily_limit") {
+          return status(429, { error: "Daily AI application limit reached" });
+        }
+
         if (result === "in_progress" || result === "expired" || result === "applied") {
           return status(409, { error: conflicts[result] });
         }
@@ -300,6 +305,7 @@ export function aiApplyRoutes(
           404: errorResponse,
           409: errorResponse,
           422: errorResponse,
+          429: errorResponse,
           503: errorResponse,
         },
       },

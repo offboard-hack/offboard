@@ -1,6 +1,11 @@
 import { Elysia } from "elysia";
 import type { PortalAuth } from "./portal-auth.js";
-import { entitlementOf, type Entitlement } from "./entitlement.js";
+import {
+  entitlementOf,
+  individualEntitlement,
+  type Entitlement,
+  type IndividualPlan,
+} from "./entitlement.js";
 import type { TalentProfile } from "./talent-profile.js";
 
 const collaboratorEntitlement: Entitlement = { kind: "sponsored", until: null };
@@ -16,6 +21,7 @@ export function talentAccess(deps: {
     ): Promise<TalentProfile | "email_taken">;
   };
   companyActive: (orgId: string) => Promise<boolean>;
+  individualPlan: (profileId: string) => Promise<IndividualPlan | null>;
   now?: () => Date;
 }) {
   const now = deps.now ?? (() => new Date());
@@ -52,11 +58,18 @@ export function talentAccess(deps: {
 
         if (!me) return status(403, { error: "Forbidden" });
 
-        const entitlement: Entitlement = entitlementOf({
+        const at = now();
+
+        const sponsored: Entitlement = entitlementOf({
           sponsoredUntil: me.sponsoredUntil,
           companyActive: await deps.companyActive(me.orgId),
-          now: now(),
+          now: at,
         });
+
+        const entitlement: Entitlement =
+          sponsored.kind === "lapsed"
+            ? individualEntitlement(await deps.individualPlan(me.id), at)
+            : sponsored;
 
         if (mode === "active") {
           if (me.termsAcceptedAt === null) return status(403, { error: "Terms not accepted" });

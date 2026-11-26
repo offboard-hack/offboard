@@ -4,7 +4,8 @@ import { errorResponse } from "../../shared/http.js";
 import type { Entitlement } from "../../shared/entitlement.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
 import type { TalentProfile } from "../../shared/talent-profile.js";
-import { aiApplyAccess, onTopPlan, type CompanyPlan } from "../../shared/ai-apply-access.js";
+import { aiApplyAccess } from "../../shared/ai-apply-access.js";
+import type { AllowedBy } from "../../shared/career-pro.js";
 import type { TalentRepository } from "./repository.js";
 
 const talentAccessResponse = t.Object({
@@ -21,7 +22,7 @@ const meResponse = t.Object({
   shareOutcomeWithHr: t.Boolean(),
   aiApply: t.Object({ eligible: t.Boolean(), consented: t.Boolean(), available: t.Boolean() }),
   entitlement: t.Object({
-    kind: t.Union([t.Literal("sponsored"), t.Literal("lapsed")]),
+    kind: t.Union([t.Literal("sponsored"), t.Literal("individual"), t.Literal("lapsed")]),
     until: t.Union([t.String(), t.Null()]),
   }),
 });
@@ -39,13 +40,13 @@ function toTalentAccess(profile: TalentProfile) {
 }
 
 type AiApply = {
-  companyPlan: (orgId: string) => Promise<CompanyPlan | null>;
+  allowedBy: (profileId: string, now: Date) => Promise<AllowedBy>;
   configured: boolean;
 };
 
 async function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: AiApply) {
-  const plan = await aiApply.companyPlan(profile.orgId);
-  const access = aiApplyAccess(profile, plan);
+  const allowedBy = await aiApply.allowedBy(profile.id, new Date());
+  const access = aiApplyAccess(profile, allowedBy);
 
   return {
     id: profile.id,
@@ -54,7 +55,7 @@ async function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: A
     termsAccepted: profile.termsAcceptedAt !== null,
     shareOutcomeWithHr: profile.shareOutcomeWithHr,
     aiApply: {
-      eligible: onTopPlan(plan),
+      eligible: allowedBy !== null,
       consented: profile.aiApplyConsentAt !== null,
       available: access === "allowed" && aiApply.configured,
     },

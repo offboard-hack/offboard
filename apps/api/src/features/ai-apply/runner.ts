@@ -5,7 +5,8 @@ import type {
   FormQuestion,
   ResumeContent,
 } from "@offboard/db/schema";
-import { aiApplyAccess, type CompanyPlan } from "../../shared/ai-apply-access.js";
+import { aiApplyAccess } from "../../shared/ai-apply-access.js";
+import type { AllowedBy } from "../../shared/career-pro.js";
 import { logFailure, logFailureCode } from "../../shared/error-summary.js";
 import type { ObjectStorage } from "../../shared/object-storage.js";
 import { renderLetterPdf } from "../../shared/resume-pdf.js";
@@ -24,7 +25,7 @@ import { stuckMs, type AiApplyRepository } from "./repository.js";
 
 export type RunnerDeps = {
   repo: AiApplyRepository;
-  companyPlan: (orgId: string) => Promise<CompanyPlan | null>;
+  allowedBy: (profileId: string, now: Date) => Promise<AllowedBy>;
   browserbase: ReturnType<typeof createBrowserbase> | undefined;
   openPage: (connectUrl: string) => Promise<Page>;
   storage: ObjectStorage | undefined;
@@ -108,14 +109,14 @@ function foreignPhone(questions: FormQuestion[], confirmed: ConfirmedAnswer[]) {
   return [value ?? ""].flat().some((item) => /^\+(?!55)/.test(item));
 }
 
-async function refusal(run: Runnable, deps: RunnerDeps) {
+async function refusal(run: Runnable, deps: RunnerDeps, at: Date) {
   const { profile } = run;
 
   if (profile.consentAt === null) return cancelled("consent_withdrawn");
 
   const access = aiApplyAccess(
     { aiApplyConsentAt: profile.consentAt.toISOString() },
-    await deps.companyPlan(profile.orgId),
+    await deps.allowedBy(run.attempt.profileId, at),
   );
 
   if (access !== "allowed") return cancelled("not_allowed");
@@ -305,7 +306,9 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
   if (!(await deps.repo.markSubmitting(attemptId, now()))) {
     const fresh = await deps.repo.runnable(attemptId);
 
-    return (fresh === undefined ? undefined : await refusal(fresh, deps)) ?? assisted("error");
+    return (
+      (fresh === undefined ? undefined : await refusal(fresh, deps, now())) ?? assisted("error")
+    );
   }
 
   progress.submitting = true;
@@ -414,7 +417,7 @@ export async function runAiApplication(deps: RunnerDeps, attemptId: string, now:
 
   if (state !== "queued" && state !== "running") return skipped;
 
-  const refused = await refusal(run, deps);
+  const refused = await refusal(run, deps, now());
 
   if (refused !== undefined) {
     await deps.repo.finish(attemptId, ["queued", "running"], refused, now());

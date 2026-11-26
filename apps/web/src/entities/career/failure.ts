@@ -3,8 +3,18 @@ import { z } from "zod";
 const failureBody = z.object({ value: z.object({ error: z.string() }) });
 
 const reasons = new Map([
-  ["AI Apply not available", "Disponível no plano Platinum Premium da sua empresa."],
+  [
+    "AI Apply not available",
+    "Disponível no plano Platinum Premium da sua empresa ou no Carreira Pro.",
+  ],
   ["Email already in use", "Este e-mail já está ligado a outra conta de carreira."],
+  [
+    "Daily AI application limit reached",
+    "Você atingiu o limite de 10 candidaturas com IA hoje. Tente amanhã.",
+  ],
+  ["Already subscribed", "Você já tem um pagamento em andamento. Tente de novo em alguns minutos."],
+  ["Billing not configured", "Indisponível no momento."],
+  ["Could not start the checkout", "Não foi possível abrir o pagamento. Tente de novo."],
   ["Access lapsed", "Seu acesso à carreira terminou."],
   ["Upload a résumé first", "Envie seu currículo antes de continuar."],
   ["Already applied", "Você já se candidatou a esta vaga."],

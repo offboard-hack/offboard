@@ -22,20 +22,15 @@ describe("onTopPlan", () => {
 
 describe("aiApplyAccess", () => {
   const consented = { aiApplyConsentAt: "2026-11-25T00:00:00.000Z" };
-  const top = { slug: "platinum-premium", status: "active" };
 
-  it("allows a consenting person whose company is on the top plan", () => {
-    expect(aiApplyAccess(consented, top)).toBe("allowed");
+  it("allows a consenting person whom the company or Carreira Pro grants", () => {
+    expect(aiApplyAccess(consented, "company")).toBe("allowed");
+    expect(aiApplyAccess(consented, "individual")).toBe("allowed");
   });
 
-  it("rejects another plan, a lapsed subscription or none", () => {
-    expect(aiApplyAccess(consented, { slug: "gold", status: "active" })).toBe("not_allowed");
-    expect(aiApplyAccess(consented, { ...top, status: "canceled" })).toBe("not_allowed");
+  it("rejects a person nothing grants, or a missing consent", () => {
     expect(aiApplyAccess(consented, null)).toBe("not_allowed");
-  });
-
-  it("rejects a missing consent", () => {
-    expect(aiApplyAccess({ aiApplyConsentAt: null }, top)).toBe("not_allowed");
+    expect(aiApplyAccess({ aiApplyConsentAt: null }, "company")).toBe("not_allowed");
   });
 });
 

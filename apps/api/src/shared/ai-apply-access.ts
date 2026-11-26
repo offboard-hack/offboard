@@ -1,3 +1,4 @@
+import type { AllowedBy } from "./career-pro.js";
 import { companySponsors } from "./entitlement.js";
 
 export const aiApplyConsentVersion = "2026-11-25";
@@ -10,11 +11,8 @@ export function onTopPlan(plan: CompanyPlan | null) {
   return plan !== null && plan.slug === topPlanSlug && companySponsors(plan.status);
 }
 
-export function aiApplyAccess(
-  profile: { aiApplyConsentAt: string | null },
-  plan: CompanyPlan | null,
-) {
-  return profile.aiApplyConsentAt !== null && onTopPlan(plan)
+export function aiApplyAccess(profile: { aiApplyConsentAt: string | null }, allowedBy: AllowedBy) {
+  return profile.aiApplyConsentAt !== null && allowedBy !== null
     ? ("allowed" as const)
     : ("not_allowed" as const);
 }

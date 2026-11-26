@@ -11,6 +11,7 @@ import {
   resumes,
   talentPreferences,
   talentProfiles,
+  talentSubscriptions,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { emptyEmployeePlan } from "@offboard/employee";
@@ -267,7 +268,7 @@ describe.skipIf(!url)("matches repository", () => {
     await repos.talent.acceptTerms(otherProfileId);
 
     expect(await repository.profilesForMatching(lastDay)).toEqual([
-      { profileId: otherProfileId, orgId: defaultOrgId, collaborator: false },
+      { profileId: otherProfileId, orgId: defaultOrgId, collaborator: false, individual: false },
     ]);
     expect(await repository.profilesForMatching(lapsed)).toEqual([]);
 
@@ -275,7 +276,7 @@ describe.skipIf(!url)("matches repository", () => {
     await db.delete(resumes).where(eq(resumes.profileId, otherProfileId));
 
     expect(await repository.profilesForMatching(lastDay)).toEqual([
-      { profileId, orgId: defaultOrgId, collaborator: false },
+      { profileId, orgId: defaultOrgId, collaborator: false, individual: false },
     ]);
   });
 
@@ -297,10 +298,40 @@ describe.skipIf(!url)("matches repository", () => {
     });
 
     expect(await repository.profilesForMatching(lapsed)).toEqual([
-      { profileId, orgId: defaultOrgId, collaborator: true },
+      { profileId, orgId: defaultOrgId, collaborator: true, individual: false },
     ]);
 
     await db.update(employeeAccess).set({ email: null });
+
+    expect(await repository.profilesForMatching(lapsed)).toEqual([]);
+  });
+
+  it("keeps matching a person with an active Carreira Pro after the sponsorship lapses", async () => {
+    const lapsed = new Date("2027-01-01T03:00:00.000Z");
+
+    await base(profileId);
+    await repos.talent.acceptTerms(profileId);
+    await db.insert(talentSubscriptions).values({
+      profileId,
+      status: "active",
+      currentPeriodEnd: "2027-01-01",
+      createdAt: lapsed,
+      updatedAt: lapsed,
+    });
+
+    expect(await repository.profilesForMatching(lapsed)).toEqual([
+      { profileId, orgId: defaultOrgId, collaborator: false, individual: true },
+    ]);
+
+    await db.update(talentSubscriptions).set({ currentPeriodEnd: null });
+
+    expect(await repository.profilesForMatching(lapsed)).toHaveLength(1);
+
+    await db.update(talentSubscriptions).set({ currentPeriodEnd: "2026-12-31" });
+
+    expect(await repository.profilesForMatching(lapsed)).toEqual([]);
+
+    await db.update(talentSubscriptions).set({ status: "past_due", currentPeriodEnd: null });
 
     expect(await repository.profilesForMatching(lapsed)).toEqual([]);
   });

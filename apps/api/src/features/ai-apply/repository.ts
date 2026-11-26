@@ -19,10 +19,12 @@ import {
 import {
   and,
   asc,
+  count,
   desc,
   eq,
   exists,
   gt,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -33,7 +35,9 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { greenhouseKey } from "../../shared/ai-apply-access.js";
+import { careerPro } from "../../shared/career-pro.js";
 import { uniqueViolation } from "../../shared/http.js";
+import { saoPauloDayStart } from "../../shared/sao-paulo-date.js";
 import { type ProfileFill, toPreferences } from "../../shared/talent-preferences.js";
 import { toAttemptView } from "./view.js";
 
@@ -56,7 +60,8 @@ type NewAttempt = {
   resumeId: string;
 };
 
-const expiry = 7 * 24 * 60 * 60 * 1000;
+const day = 24 * 60 * 60 * 1000;
+const expiry = 7 * day;
 const liveRunMs = 5 * 60_000;
 export const stuckMs = 15 * 60_000;
 
@@ -341,6 +346,30 @@ export function createAiApplyRepository(db: Database) {
 
     const queued = await db
       .transaction(async (tx) => {
+        if (!confirmation.rehearsal) {
+          await tx
+            .select({ id: talentProfiles.id })
+            .from(talentProfiles)
+            .where(eq(talentProfiles.id, profileId))
+            .for("update");
+
+          const dayStart = saoPauloDayStart(now);
+
+          const [sent] = await tx
+            .select({ count: count() })
+            .from(aiApplications)
+            .where(
+              and(
+                eq(aiApplications.profileId, profileId),
+                eq(aiApplications.rehearsal, false),
+                gte(aiApplications.confirmedAt, dayStart),
+                lt(aiApplications.confirmedAt, new Date(dayStart.getTime() + day)),
+              ),
+            );
+
+          if (sent.count >= careerPro.aiDailyLimit) return "daily_limit" as const;
+        }
+
         const rows = await tx
           .update(aiApplications)
           .set({
@@ -402,7 +431,7 @@ export function createAiApplyRepository(db: Database) {
         throw error;
       });
 
-    if (queued === "in_progress") return queued;
+    if (queued === "in_progress" || queued === "daily_limit") return queued;
 
     if (queued !== undefined) return withJob(queued);
 
@@ -457,7 +486,6 @@ export function createAiApplyRepository(db: Database) {
         attempt: aiApplications,
         job: { sourceKey: jobs.sourceKey, closedAt: jobs.closedAt },
         profile: {
-          orgId: talentProfiles.orgId,
           name: talentProfiles.name,
           email: talentProfiles.personalEmail,
           consentAt: talentProfiles.aiApplyConsentAt,
