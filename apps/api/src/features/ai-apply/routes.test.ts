@@ -1110,16 +1110,12 @@ describe.skipIf(!url)("ai apply route", () => {
       ).toMatchObject({ state: "draft" });
     });
 
-    it("applies the gate to every attempt route", async () => {
+    it("applies the gate to preparing and confirming only", async () => {
       const { profileId, jobId } = await ready();
       const id = await seed(profileId, jobId, [why]);
 
       const routes: [string, string, Body?][] = [
-        ["GET", "/me/ai-applications"],
-        ["GET", `/me/ai-applications/${id}`],
         ["POST", confirmPath(id), { answers: [{ questionId: "why", value: "x" }] }],
-        ["POST", cancelPath(id)],
-        ["GET", shotPath(id)],
       ];
 
       const unlisted = build({ allowlist: [], generate: fakeModel().generate });
@@ -1138,6 +1134,43 @@ describe.skipIf(!url)("ai apply route", () => {
       }
 
       expect((await attempts(profileId))[0]).toMatchObject({ state: "draft", confirmed: null });
+    });
+
+    it("lets a person without access still read and cancel their attempts", async () => {
+      const profileId = await profile();
+      const jobId = await addJob();
+      const evidence = { fields: [], files: ["curriculo.pdf"], finalUrl: null };
+      const shot = `ai-applications/${profileId}/shot.png`;
+      const files = memoryStorage({ [shot]: new Uint8Array([1, 2]) });
+
+      const id = await seed(profileId, jobId, [why], {
+        state: "assisted",
+        evidence,
+        screenshotKey: shot,
+      });
+
+      await repos.talent.setAiApplyConsent(profileId, false, new Date());
+
+      const closed = build({ allowlist: [], generate: null, storage: files.storage });
+
+      const listed = await closed.call(profileId, "/me/ai-applications", undefined, "GET");
+
+      expect(listed.status).toBe(200);
+      expect((await listed.json()).items[0]).toMatchObject({ id, evidence, hasScreenshot: true });
+
+      const one = await closed.call(profileId, `/me/ai-applications/${id}`, undefined, "GET");
+
+      expect(one.status).toBe(200);
+      expect(await one.json()).toMatchObject({ evidence, hasScreenshot: true });
+
+      const image = await closed.call(profileId, shotPath(id), undefined, "GET");
+
+      expect(image.status).toBe(200);
+      expect(new Uint8Array(await image.arrayBuffer())).toEqual(new Uint8Array([1, 2]));
+
+      const draft = await seed(profileId, await addJob("stone:9"), [why]);
+
+      expect((await closed.call(profileId, cancelPath(draft))).status).toBe(200);
     });
 
     it("refuses to confirm when Browserbase is not configured", async () => {

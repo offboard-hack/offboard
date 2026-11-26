@@ -204,41 +204,22 @@ export function aiApplyRoutes(
         },
       },
     )
-    .get(
-      "/me/ai-applications",
-      async ({ me, status }) => {
-        const open = gate(me);
-
-        if (open.refused) return status(open.refused.code, { error: open.refused.error });
-
-        return { items: await repos.list(me.id) };
+    .get("/me/ai-applications", async ({ me }) => ({ items: await repos.list(me.id) }), {
+      talent: "active",
+      response: {
+        200: t.Object({ items: t.Array(attemptResponse) }),
       },
-      {
-        talent: "active",
-        response: {
-          200: t.Object({ items: t.Array(attemptResponse) }),
-          403: errorResponse,
-          503: errorResponse,
-        },
-      },
-    )
+    })
     .get(
       "/me/ai-applications/:id",
-      async ({ me, params, status }) => {
-        const open = gate(me);
-
-        if (open.refused) return status(open.refused.code, { error: open.refused.error });
-
-        return (await repos.get(me.id, params.id)) ?? status(404, notFound);
-      },
+      async ({ me, params, status }) =>
+        (await repos.get(me.id, params.id)) ?? status(404, notFound),
       {
         talent: "active",
         params: attemptParams,
         response: {
           200: attemptResponse,
-          403: errorResponse,
           404: errorResponse,
-          503: errorResponse,
         },
       },
     )
@@ -311,10 +292,6 @@ export function aiApplyRoutes(
     .get(
       "/me/ai-applications/:id/screenshot",
       async ({ me, params, status }) => {
-        const open = gate(me);
-
-        if (open.refused) return status(open.refused.code, { error: open.refused.error });
-
         const key = (await repos.attempt(me.id, params.id))?.attempt.screenshotKey;
         const bytes = key && deps.storage ? await deps.storage.get(key) : null;
 
@@ -327,7 +304,7 @@ export function aiApplyRoutes(
       {
         talent: "active",
         params: attemptParams,
-        response: { 403: errorResponse, 404: errorResponse, 503: errorResponse },
+        response: { 404: errorResponse },
       },
     )
     .post(
@@ -349,10 +326,6 @@ export function aiApplyRoutes(
     .post(
       "/me/ai-applications/:id/cancel",
       async ({ me, params, status }) => {
-        const open = gate(me);
-
-        if (open.refused) return status(open.refused.code, { error: open.refused.error });
-
         const result = await repos.cancel(me.id, params.id, new Date());
 
         if (result === "not_found") return status(404, notFound);
@@ -364,10 +337,8 @@ export function aiApplyRoutes(
         params: attemptParams,
         response: {
           200: attemptResponse,
-          403: errorResponse,
           404: errorResponse,
           409: errorResponse,
-          503: errorResponse,
         },
       },
     );
