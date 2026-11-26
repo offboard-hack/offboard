@@ -9,6 +9,8 @@ const reasons = new Map([
     "Daily AI application limit reached",
     "Você atingiu o limite de 10 candidaturas com IA hoje. Tente amanhã.",
   ],
+  ["Billing not configured", "Indisponível no momento."],
+  ["Could not start the checkout", "Não foi possível abrir o pagamento. Tente de novo."],
   ["Access lapsed", "Seu acesso à carreira terminou."],
   ["Upload a résumé first", "Envie seu currículo antes de continuar."],
   ["Already applied", "Você já se candidatou a esta vaga."],

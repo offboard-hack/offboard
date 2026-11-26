@@ -1,7 +1,7 @@
 import { brazilTimezone } from "@offboard/employee";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { careerPlanQuery } from "@/entities/career";
+import { careerPlanQuery, useUpgradeCheckout } from "@/entities/career";
 import type { EmployeeAccount } from "@/entities/employee";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
@@ -22,9 +22,8 @@ const dayFormat = new Intl.DateTimeFormat("en-CA", {
   timeZone: brazilTimezone,
 });
 
-function startCheckout() {}
-
 export function PlanSection({ account, paid }: { account: EmployeeAccount; paid: boolean }) {
+  const checkout = useUpgradeCheckout(account);
   const [openedAt] = useState(() => Date.now());
 
   const plan = useQuery({
@@ -44,8 +43,9 @@ export function PlanSection({ account, paid }: { account: EmployeeAccount; paid:
       plan={plan.data}
       today={dayFormat.format(new Date())}
       paid={paid}
-      upgrading={false}
-      onUpgrade={startCheckout}
+      upgrading={checkout.isPending || checkout.isSuccess}
+      error={checkout.error?.message}
+      onUpgrade={() => checkout.mutate()}
     />
   );
 }

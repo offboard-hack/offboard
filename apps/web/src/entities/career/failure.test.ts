@@ -14,6 +14,15 @@ describe("careerFailure", () => {
     ).toBe("Você atingiu o limite de 10 candidaturas com IA hoje. Tente amanhã.");
   });
 
+  it("explains checkout failures", () => {
+    expect(careerFailure(503, { status: 503, value: { error: "Billing not configured" } })).toBe(
+      "Indisponível no momento.",
+    );
+    expect(
+      careerFailure(502, { status: 502, value: { error: "Could not start the checkout" } }),
+    ).toBe("Não foi possível abrir o pagamento. Tente de novo.");
+  });
+
   it("falls back to the status when the reason is unknown", () => {
     expect(careerFailure(429, { status: 429, value: { error: "Something else" } })).toBe(
       "Limite diário de uso da IA atingido. Tente de novo amanhã.",

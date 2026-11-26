@@ -262,6 +262,29 @@ function runPendingScore(queryClient: QueryClient, account: EmployeeAccount) {
     .then(() => queryClient.invalidateQueries({ queryKey: careerResumeQuery(account).queryKey }));
 }
 
+export function useUpgradeCheckout(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    async mutationFn() {
+      const result = await client().plan.checkout.post(undefined, {
+        headers: employeeAccessHeaders(account),
+      });
+
+      if (result.status === 409) {
+        await queryClient.invalidateQueries({ queryKey: careerPlanQuery(account).queryKey });
+
+        return null;
+      }
+
+      return settle(result, "Não foi possível abrir o pagamento. Tente de novo.");
+    },
+    onSuccess(checkout) {
+      if (checkout) window.location.assign(checkout.url);
+    },
+  });
+}
+
 export function useResumeUpload(account: EmployeeAccount) {
   const queryClient = useQueryClient();
 
