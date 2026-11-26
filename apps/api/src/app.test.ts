@@ -1955,7 +1955,18 @@ describe.skipIf(!url)("api", () => {
 
         await repos.talent.acceptTerms(created.id);
 
-        const listed = await asSession("talent", "/me/jobs", "GET", undefined, talentHeaders);
+        const compatible = await asSession("talent", "/me/jobs", "GET", undefined, talentHeaders);
+
+        expect(await compatible.json()).toMatchObject({ items: [], total: 0, matching: false });
+
+        const listed = await asSession(
+          "talent",
+          "/me/jobs?view=all",
+          "GET",
+          undefined,
+          talentHeaders,
+        );
+
         const body = await listed.json();
 
         expect(listed.status).toBe(200);
@@ -1970,7 +1981,7 @@ describe.skipIf(!url)("api", () => {
 
         const remote = await asSession(
           "talent",
-          "/me/jobs?workModel=remote",
+          "/me/jobs?view=all&workModel=remote",
           "GET",
           undefined,
           talentHeaders,
@@ -1990,6 +2001,9 @@ describe.skipIf(!url)("api", () => {
         expect(
           (await asSession("talent", "/me/jobs?workModel=moon", "GET", undefined, talentHeaders))
             .status,
+        ).toBe(422);
+        expect(
+          (await asSession("talent", "/me/jobs?view=none", "GET", undefined, talentHeaders)).status,
         ).toBe(422);
         expect((await asSession("admin", "/me/jobs")).status).toBe(403);
 
@@ -4048,7 +4062,7 @@ describe.skipIf(!url)("api", () => {
         instance: ReturnType<typeof resumesApp>["instance"],
         talentId: string,
       ) {
-        const listed = await (await request(instance, talentId, "/me/jobs")).json();
+        const listed = await (await request(instance, talentId, "/me/jobs?view=all")).json();
 
         return listed.items.map((item: { title: string; match: { score: number } | null }) => [
           item.title,
@@ -4077,9 +4091,9 @@ describe.skipIf(!url)("api", () => {
           ["Analista de Dados", 70],
           ["Engenheira de Software", 40],
         ]);
-        expect((await (await request(app.instance, id, "/me/jobs")).json()).items[0].match).toEqual(
-          { score: 90, reasons: ["Combina com Designer"] },
-        );
+        expect(
+          (await (await request(app.instance, id, "/me/jobs?view=all")).json()).items[0].match,
+        ).toEqual({ score: 90, reasons: ["Combina com Designer"] });
       });
 
       it("does not score jobs the person rejected", async () => {
@@ -5458,7 +5472,7 @@ describe.skipIf(!url)("api", () => {
         }
 
         async function listed(instance: ReturnType<typeof resumesApp>["instance"], id: string) {
-          const body = await (await request(instance, id, "/me/jobs")).json();
+          const body = await (await request(instance, id, "/me/jobs?view=all")).json();
 
           return body.items.map((item: { title: string }) => item.title);
         }
@@ -5509,7 +5523,7 @@ describe.skipIf(!url)("api", () => {
           expect(await res.text()).toBe("");
           expect(await listed(instance, id)).toEqual(["Fica"]);
           expect(await listed(instance, other)).toEqual(["Fica", "Some"]);
-          expect((await (await request(instance, id, "/me/jobs")).json()).total).toBe(1);
+          expect((await (await request(instance, id, "/me/jobs?view=all")).json()).total).toBe(1);
 
           expect((await unreject(instance, id, drop)).status).toBe(204);
           expect((await unreject(instance, id, drop)).status).toBe(204);
@@ -5690,7 +5704,7 @@ describe.skipIf(!url)("api", () => {
             jobPreferences: { locations: [{ state: "SP", city: null }] },
           });
 
-          const body = await (await request(instance, id, "/me/jobs")).json();
+          const body = await (await request(instance, id, "/me/jobs?view=all")).json();
 
           expect(
             body.items.map((item: { fitsPreferences: boolean }) => item.fitsPreferences),
@@ -5707,7 +5721,7 @@ describe.skipIf(!url)("api", () => {
             .insert(talentPreferences)
             .values({ profileId: id, jobPreferences: { excludedCompanies: ["bad"] } });
 
-          const body = await (await request(instance, id, "/me/jobs")).json();
+          const body = await (await request(instance, id, "/me/jobs?view=all")).json();
 
           expect(
             body.items.map((item: { title: string; fitsPreferences: boolean }) => [

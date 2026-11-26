@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import {
   applications,
+  backgroundJobs,
   defaultOrgId,
   jobMatches,
   jobRejections,
@@ -279,6 +280,97 @@ describe.skipIf(!url)("jobs repository", () => {
 
       expect(second.total).toBe(3);
       expect(second.items.map((job) => job.title)).toEqual(["old"]);
+    });
+
+    it("lists only compatible jobs in the compatible view", async () => {
+      await insert("best", { workModel: "remote" });
+      await insert("edge", { workModel: "remote" });
+      await insert("weak", { workModel: "remote" });
+      await insert("stale", { workModel: "remote" });
+      await insert("hybrid", { workModel: "hybrid" });
+      await insert("rejected", { workModel: "remote" });
+      await insert("theirs", { workModel: "remote" });
+      await insert("unmatched", { workModel: "remote" });
+
+      await match(profileId, "best", 90);
+      await match(profileId, "edge", 50);
+      await match(profileId, "weak", 49);
+      await match(profileId, "stale", 99, new Date("2020-01-01T00:00:00Z"));
+      await match(profileId, "hybrid", 80);
+      const rejectedId = await match(profileId, "rejected", 95);
+      await match(otherProfileId, "theirs", 99);
+      await db.insert(jobRejections).values({ profileId, jobId: rejectedId, reason: "salary" });
+
+      const compatible = await repository.listForTalent(profileId, {
+        view: "compatible",
+        page: 1,
+        pageSize: 10,
+      });
+
+      expect(compatible.total).toBe(3);
+      expect(compatible.items.map((job) => job.title)).toEqual(["best", "hybrid", "edge"]);
+
+      const remote = await repository.listForTalent(profileId, {
+        view: "compatible",
+        workModel: "remote",
+        page: 1,
+        pageSize: 10,
+      });
+
+      expect(remote.total).toBe(2);
+      expect(remote.items.map((job) => job.title)).toEqual(["best", "edge"]);
+
+      const second = await repository.listForTalent(profileId, {
+        view: "compatible",
+        page: 2,
+        pageSize: 2,
+      });
+
+      expect(second.total).toBe(3);
+      expect(second.items.map((job) => job.title)).toEqual(["edge"]);
+
+      const all = await repository.listForTalent(profileId, {
+        view: "all",
+        page: 1,
+        pageSize: 20,
+      });
+
+      expect(all.total).toBe(7);
+    });
+
+    it("reports whether matches are being computed for this profile", async () => {
+      const idle = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
+
+      expect(idle.matching).toBe(false);
+
+      await db.insert(backgroundJobs).values([
+        { kind: "compute_matches", subject: otherProfileId, runAfter: new Date() },
+        { kind: "compute_matches", subject: profileId, status: "done", runAfter: new Date() },
+        { kind: "score_resume", subject: profileId, runAfter: new Date() },
+      ]);
+
+      const other = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
+
+      expect(other.matching).toBe(false);
+
+      await db
+        .insert(backgroundJobs)
+        .values({ kind: "compute_matches", subject: profileId, runAfter: new Date() });
+
+      const pending = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
+
+      expect(pending.matching).toBe(true);
+
+      await db
+        .update(backgroundJobs)
+        .set({ status: "running" })
+        .where(eq(backgroundJobs.subject, profileId));
+
+      const running = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
+
+      expect(running.matching).toBe(true);
+
+      await db.delete(backgroundJobs);
     });
 
     describe("rejections and preferences", () => {

@@ -9,6 +9,7 @@ export default defineConfig({
         "src/features/checklist/action-config.ts",
         "src/entities/career/failure.ts",
         "src/entities/career/refresh.ts",
+        "src/features/employee/career/jobs-view.ts",
         "src/features/employee/career/labels.ts",
         "src/features/employee/career/ai-apply-form.ts",
       ],

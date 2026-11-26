@@ -5,13 +5,14 @@ import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02I
 import LinkSquare02Icon from "@hugeicons/core-free-icons/LinkSquare02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   type CareerJob,
   careerJobsQuery,
   careerProfileQuery,
   careerResumeQuery,
-  jobsRefetchInterval,
+  type JobsView,
   useMarkApplied,
   type WorkModel,
 } from "@/entities/career";
@@ -48,6 +49,7 @@ import {
 import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "../ui";
 import { AiApplyDialog } from "./ai-apply";
+import { jobsEmpty, jobsSummary, jobsViews } from "./jobs-view";
 import { careerDate, isLongText, jobPlace, matchScore, salaryRange } from "./labels";
 import { CareerRetry } from "./resume";
 
@@ -237,6 +239,7 @@ function JobRow({ job, open }: { job: CareerJob; open: () => void }) {
 }
 
 export function CareerJobs({ account }: { account: EmployeeAccount }) {
+  const [view, setView] = useState<JobsView>("compatible");
   const [model, setModel] = useState<WorkModel | "all">("all");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<CareerJob | null>(null);
@@ -244,7 +247,13 @@ export function CareerJobs({ account }: { account: EmployeeAccount }) {
   const resume = useQuery(careerResumeQuery(account));
 
   const jobs = useQuery({
-    ...careerJobsQuery(account, model === "all" ? undefined : model, page, Boolean(resume.data)),
+    ...careerJobsQuery(
+      account,
+      view,
+      model === "all" ? undefined : model,
+      page,
+      Boolean(resume.data),
+    ),
     placeholderData: keepPreviousData,
   });
 
@@ -254,18 +263,40 @@ export function CareerJobs({ account }: { account: EmployeeAccount }) {
 
   const pages = jobs.data ? Math.max(1, Math.ceil(jobs.data.total / jobs.data.pageSize)) : 1;
   const current = selected && jobs.data?.items.find((job) => job.id === selected.id);
-  const calculating = jobsRefetchInterval(jobs.data, Boolean(resume.data)) !== false;
+  const hasResume = Boolean(resume.data);
+  const matching = hasResume && jobs.data?.matching === true;
+
+  const empty = jobsEmpty({
+    view,
+    matching: jobs.data?.matching === true,
+    hasResume,
+    filtered: model !== "all",
+  });
 
   return (
     <div className="space-y-5">
       <EmployeePanel
         title="Vagas para você"
         description={
-          jobs.data
-            ? `${jobs.data.total} ${jobs.data.total === 1 ? "vaga" : "vagas"}${resume.data ? ", das mais compatíveis às menos." : "."}`
-            : undefined
+          jobs.data ? jobsSummary({ view, total: jobs.data.total, hasResume }) : undefined
         }
       >
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Vagas exibidas">
+          {jobsViews.map((item) => (
+            <Button
+              key={item.value}
+              type="button"
+              variant={view === item.value ? "default" : "outline"}
+              aria-pressed={view === item.value}
+              onClick={() => {
+                setPage(1);
+                setView(item.value);
+              }}
+            >
+              {item.label}
+            </Button>
+          ))}
+        </div>
         <div className="grid w-full max-w-56 gap-2">
           <Label htmlFor="career-mode">Modalidade</Label>
           <PortalFilter
@@ -280,7 +311,7 @@ export function CareerJobs({ account }: { account: EmployeeAccount }) {
             }}
           />
         </div>
-        {calculating && jobs.data?.items.length ? (
+        {matching && jobs.data?.items.length ? (
           <p className="text-sm text-muted-foreground">
             Calculando a compatibilidade com seu currículo… pode levar alguns minutos.
           </p>
@@ -288,7 +319,26 @@ export function CareerJobs({ account }: { account: EmployeeAccount }) {
         {jobs.isPending ? <Skeleton className="h-48 w-full" /> : null}
         {jobs.data?.items.length === 0 ? (
           <EmployeeEmpty>
-            Nenhuma vaga {model === "all" ? "disponível no momento." : "nessa modalidade."}
+            {empty === "calculating"
+              ? "Calculando a compatibilidade com seu currículo… pode levar alguns minutos."
+              : null}
+            {empty === "no-resume" ? (
+              <>
+                Envie seu currículo para ver as vagas compatíveis.{" "}
+                <Link
+                  to="/colaborador"
+                  search={{ tela: "curriculo" }}
+                  className="underline underline-offset-4"
+                >
+                  Ir para Currículo
+                </Link>
+              </>
+            ) : null}
+            {empty === "no-compatible"
+              ? "Nenhuma vaga compatível agora. Veja todas as vagas ou volte mais tarde — novas vagas chegam todo dia."
+              : null}
+            {empty === "no-model" ? "Nenhuma vaga nessa modalidade." : null}
+            {empty === "none" ? "Nenhuma vaga disponível no momento." : null}
           </EmployeeEmpty>
         ) : null}
         <ul className="divide-y" aria-busy={jobs.isPlaceholderData}>

@@ -1,11 +1,20 @@
 import type { Database } from "@offboard/db/client";
-import { applications, jobMatches, jobs, resumes, talentPreferences } from "@offboard/db/schema";
+import {
+  applications,
+  backgroundJobs,
+  jobMatches,
+  jobs,
+  resumes,
+  talentPreferences,
+} from "@offboard/db/schema";
 import { and, count, desc, eq, getTableColumns, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { aiApplyCapable } from "../../shared/ai-apply-access.js";
 import { notRejectedBy } from "../../shared/not-rejected.js";
 import { toPreferences } from "../../shared/talent-preferences.js";
 
 type WorkModel = "remote" | "hybrid" | "onsite";
+
+const compatibleScore = 50;
 
 export type JobView = {
   id: string;
@@ -85,7 +94,12 @@ function fitsExpression(preferences: ReturnType<typeof toPreferences>["jobPrefer
 export function createJobsRepository(db: Database) {
   async function listForTalent(
     profileId: string,
-    filter: { workModel?: WorkModel; page: number; pageSize: number },
+    filter: {
+      workModel?: WorkModel;
+      view?: "compatible" | "all";
+      page: number;
+      pageSize: number;
+    },
   ) {
     const [stored] = await db
       .select()
@@ -98,6 +112,7 @@ export function createJobsRepository(db: Database) {
       isNull(jobs.closedAt),
       notRejectedBy(profileId),
       filter.workModel === undefined ? undefined : eq(jobs.workModel, filter.workModel),
+      filter.view === "compatible" ? gte(jobMatches.score, compatibleScore) : undefined,
     );
 
     const baseVersion = db
@@ -107,7 +122,13 @@ export function createJobsRepository(db: Database) {
       .from(resumes)
       .where(and(eq(resumes.profileId, profileId), eq(resumes.kind, "base")));
 
-    const [rows, [totals]] = await Promise.all([
+    const matchJoin = and(
+      eq(jobMatches.jobId, jobs.id),
+      eq(jobMatches.profileId, profileId),
+      sql`${jobMatches.resumeUpdatedAt} = (${baseVersion})`,
+    );
+
+    const [rows, [totals], [computing]] = await Promise.all([
       db
         .select({
           job: getTableColumns(jobs),
@@ -117,14 +138,7 @@ export function createJobsRepository(db: Database) {
           applied: sql<boolean>`exists (select 1 from ${applications} where ${applications.profileId} = ${profileId} and ${applications.jobId} = ${jobs.id})`,
         })
         .from(jobs)
-        .leftJoin(
-          jobMatches,
-          and(
-            eq(jobMatches.jobId, jobs.id),
-            eq(jobMatches.profileId, profileId),
-            sql`${jobMatches.resumeUpdatedAt} = (${baseVersion})`,
-          ),
-        )
+        .leftJoin(jobMatches, matchJoin)
         .where(where)
         .orderBy(
           sql`${fits} desc`,
@@ -136,7 +150,17 @@ export function createJobsRepository(db: Database) {
         )
         .limit(filter.pageSize)
         .offset((filter.page - 1) * filter.pageSize),
-      db.select({ total: count() }).from(jobs).where(where),
+      db.select({ total: count() }).from(jobs).leftJoin(jobMatches, matchJoin).where(where),
+      db
+        .select({ total: count() })
+        .from(backgroundJobs)
+        .where(
+          and(
+            eq(backgroundJobs.kind, "compute_matches"),
+            eq(backgroundJobs.subject, profileId),
+            inArray(backgroundJobs.status, ["pending", "running"]),
+          ),
+        ),
     ]);
 
     const items = rows.map(({ job, score, reasons, applied, fits }) => ({
@@ -148,7 +172,7 @@ export function createJobsRepository(db: Database) {
       description: job.description,
     })) satisfies TalentJobView[];
 
-    return { items, total: totals.total };
+    return { items, total: totals.total, matching: computing.total > 0 };
   }
 
   return { listForTalent };

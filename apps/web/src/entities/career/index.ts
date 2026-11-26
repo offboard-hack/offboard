@@ -23,6 +23,8 @@ export type ResumeSuggestion = Treaty.Data<Me["resume"]["suggestions"]["get"]>[n
 
 export type CareerJobsPage = Treaty.Data<Me["jobs"]["get"]>;
 
+export type JobsView = "compatible" | "all";
+
 export type CareerJob = CareerJobsPage["items"][number];
 
 export type WorkModel = NonNullable<CareerJob["workModel"]>;
@@ -133,15 +135,20 @@ export function resumeSuggestionsQuery(account: EmployeeAccount) {
   });
 }
 
-function jobsSource(account: EmployeeAccount, workModel: WorkModel | undefined, page: number) {
+function jobsSource(
+  account: EmployeeAccount,
+  view: JobsView,
+  workModel: WorkModel | undefined,
+  page: number,
+) {
   return queryOptions({
-    queryKey: [...careerKey(account), "jobs", workModel ?? "all", page],
+    queryKey: [...careerKey(account), "jobs", view, workModel ?? "all", page],
     staleTime: freshness,
     retry: retryEmployeeRead,
     queryFn: async ({ signal }) =>
       settle(
         await client().jobs.get({
-          query: { workModel, page },
+          query: { view, workModel, page },
           headers: employeeAccessHeaders(account),
           fetch: { signal },
         }),
@@ -152,12 +159,13 @@ function jobsSource(account: EmployeeAccount, workModel: WorkModel | undefined, 
 
 export function careerJobsQuery(
   account: EmployeeAccount,
+  view: JobsView,
   workModel: WorkModel | undefined,
   page: number,
   hasResume = false,
 ) {
   return queryOptions({
-    ...jobsSource(account, workModel, page),
+    ...jobsSource(account, view, workModel, page),
     refetchInterval: (query) => jobsRefetchInterval(query.state.data, hasResume),
   });
 }
