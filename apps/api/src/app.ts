@@ -115,9 +115,12 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     webOrigin,
     talent: repos.talent,
     companyActive,
+    individualPlan: repos.careerPlan.individual,
   });
 
   const fetchGreenhouse = options.fetchGreenhouseImpl ?? fetch;
+
+  const abacatepay = options.abacatepay ?? createAbacatePayGateway(undefined);
 
   const pageOrigin = (options.publicPageOrigin || webOrigin).replace(/\/$/, "");
 
@@ -359,7 +362,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         },
       ),
     )
-    .use(careerPlanRoutes(repos.careerPlan, talent))
+    .use(careerPlanRoutes(repos.careerPlan, talent, abacatepay, webOrigin))
     .use(jobsRoutes(repos.jobs, talent))
     .use(applicationsRoutes(repos.applications, talent, publicPageUrl))
     .use(
@@ -449,13 +452,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     .use(exitSurveysRoutes(repos.exitSurveys, access))
     .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret))
     .use(
-      billingRoutes(
-        repos.billing,
-        access,
-        options.abacatepay ?? createAbacatePayGateway(undefined),
-        webOrigin,
-        options.abacatepayWebhookSecret,
-      ),
+      billingRoutes(repos.billing, access, abacatepay, webOrigin, options.abacatepayWebhookSecret),
     );
 }
 

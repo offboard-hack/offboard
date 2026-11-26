@@ -1035,8 +1035,6 @@ describe.skipIf(!url)("api", () => {
       expect(await (await call(gated, "talent", "/me", "GET", mine.id)).json()).toMatchObject({
         aiApply: { eligible: true, consented: true, available: true },
       });
-      await repos.talent.acceptTerms(mine.id);
-
       expect(await (await call(gated, "talent", "/me/plan", "GET", mine.id)).json()).toEqual({
         company: { name: "Gold", includesAiApply: false, sponsoredUntil },
         individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
@@ -9179,6 +9177,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       email,
       plan: emptyEmployeePlan,
       revision: 1,
+      careerSponsoredUntil: "2027-05-01",
+      careerSponsoredIsDefault: true,
     });
     expect((await request(`/employee-access/${missingCaseId}`, "GET", hrCookie)).status).toBe(404);
     expect(
@@ -9195,6 +9195,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       email,
       plan,
       revision: 2,
+      careerSponsoredUntil: "2027-05-01",
+      careerSponsoredIsDefault: true,
     });
     expect((await request(target, "PUT", hrCookie, { email, plan, revision: 1 })).status).toBe(409);
     const firstVersion = { email, plan, revision: 2 };

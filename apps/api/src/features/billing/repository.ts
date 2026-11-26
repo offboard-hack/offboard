@@ -1,10 +1,17 @@
 import type { Database } from "@offboard/db/client";
-import { invoices, plans, subscriptions } from "@offboard/db/schema";
+import { invoices, plans, subscriptions, talentSubscriptions } from "@offboard/db/schema";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
 type InvoiceStatus = (typeof invoices.$inferSelect)["status"];
 
 type SubscriptionStatus = (typeof subscriptions.$inferSelect)["status"];
+
+type TalentSubscriptionStatus = (typeof talentSubscriptions.$inferSelect)["status"];
+
+const talentSubscriptionColumns = {
+  profileId: talentSubscriptions.profileId,
+  currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
+};
 
 const invoiceColumns = {
   id: invoices.id,
@@ -158,6 +165,39 @@ export function createBillingRepository(db: Database) {
     return row ? serializeInvoice(row) : null;
   }
 
+  async function findTalentSubscription(profileId: string) {
+    const [row] = await db
+      .select(talentSubscriptionColumns)
+      .from(talentSubscriptions)
+      .where(eq(talentSubscriptions.profileId, profileId));
+
+    return row ?? null;
+  }
+
+  async function findTalentSubscriptionByProvider(providerSubscriptionId: string) {
+    const [row] = await db
+      .select(talentSubscriptionColumns)
+      .from(talentSubscriptions)
+      .where(eq(talentSubscriptions.providerSubscriptionId, providerSubscriptionId))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async function updateTalentSubscription(
+    profileId: string,
+    patch: {
+      status: TalentSubscriptionStatus;
+      providerSubscriptionId?: string;
+      currentPeriodEnd?: string;
+    },
+  ) {
+    await db
+      .update(talentSubscriptions)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(eq(talentSubscriptions.profileId, profileId));
+  }
+
   return {
     listPlans,
     getSubscription,
@@ -168,6 +208,9 @@ export function createBillingRepository(db: Database) {
     getInvoiceByBillingId,
     createInvoice,
     updateInvoiceStatus,
+    findTalentSubscription,
+    findTalentSubscriptionByProvider,
+    updateTalentSubscription,
   };
 }
 

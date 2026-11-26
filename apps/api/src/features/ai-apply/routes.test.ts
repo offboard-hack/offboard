@@ -33,6 +33,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { createRepositories } from "../../repositories.js";
 import type { GenerateStructured } from "../../shared/ai.js";
 import type { ObjectStorage } from "../../shared/object-storage.js";
+import { companySponsors } from "../../shared/entitlement.js";
 import type { PortalAuth } from "../../shared/portal-auth.js";
 import { talentAccess } from "../../shared/talent-access.js";
 import type { SaveAnswer, SaveProfile } from "./repository.js";
@@ -256,7 +257,9 @@ describe.skipIf(!url)("ai apply route", () => {
           auth,
           webOrigin,
           talent: repos.talent,
-          companyActive: async () => true,
+          companyActive: async (orgId) =>
+            companySponsors((await repos.billing.getSubscription(orgId))?.status),
+          individualPlan: repos.careerPlan.individual,
         }),
         {
           allowedBy: setup.allowedBy ?? repos.careerPlan.allowedBy,
@@ -373,8 +376,8 @@ describe.skipIf(!url)("ai apply route", () => {
 
       const canceled = await open.post(profileId, jobId);
 
-      expect(canceled.status).toBe(403);
-      expect(await canceled.json()).toEqual({ error: "AI Apply not available" });
+      expect(canceled.status).toBe(402);
+      expect(await canceled.json()).toEqual({ error: "Access lapsed" });
 
       await onPlan("platinum-premium", "trialing");
       await repos.talent.setAiApplyConsent(profileId, false, new Date());
@@ -413,7 +416,7 @@ describe.skipIf(!url)("ai apply route", () => {
       expect(expired.status).toBe(403);
       expect(await expired.json()).toEqual({ error: "AI Apply not available" });
 
-      await onPlan("gold");
+      await db.delete(subscriptions).where(eq(subscriptions.orgId, defaultOrgId));
       await db.insert(talentSubscriptions).values({
         profileId,
         status: "active",
@@ -426,6 +429,16 @@ describe.skipIf(!url)("ai apply route", () => {
 
       expect(pro.status).toBe(201);
       expect(await attempts(profileId)).toHaveLength(1);
+
+      await db
+        .update(talentSubscriptions)
+        .set({ status: "canceled" })
+        .where(eq(talentSubscriptions.profileId, profileId));
+
+      const canceled = await post(profileId, jobId);
+
+      expect(canceled.status).toBe(402);
+      expect(await canceled.json()).toEqual({ error: "Access lapsed" });
     });
 
     it("lets a consenting person of a top-plan company in", async () => {

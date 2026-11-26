@@ -3,15 +3,22 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
-import { defaultOrgId, invoices, subscriptions } from "@offboard/db/schema";
+import {
+  defaultOrgId,
+  invoices,
+  offboardingCases,
+  subscriptions,
+  talentSubscriptions,
+} from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.ts";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRepositories } from "./repositories.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
+import { saoPauloDate } from "./shared/sao-paulo-date.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const webOrigin = "http://localhost:5173";
@@ -38,7 +45,7 @@ const auth: PortalAuth = {
 
 type WebhookData = {
   subscription: { id: string; amount: number };
-  checkout?: { id: string; externalId: string };
+  checkout?: { id: string; externalId: string | null };
   payment?: { id: string };
 };
 
@@ -467,6 +474,200 @@ describe.skipIf(!url)("billing", () => {
     ];
 
     expect(responses.map((res) => res.status)).toEqual([200, 200, 200, 200]);
+    expect(await allInvoices()).toEqual(before);
+  });
+
+  async function talentProfile(index = 0) {
+    const [chosen] = await db
+      .select({ id: offboardingCases.id })
+      .from(offboardingCases)
+      .orderBy(offboardingCases.id)
+      .offset(index)
+      .limit(1);
+
+    const created = await repos.talent.enable({
+      orgId: defaultOrgId,
+      caseId: chosen.id,
+      personalEmail: `pessoa-${index}@exemplo.com`,
+      sponsoredUntil: "2099-12-31",
+    });
+
+    if (
+      created === "case_not_found" ||
+      created === "already_enabled" ||
+      created === "email_taken"
+    ) {
+      throw new Error(created);
+    }
+
+    return created.id;
+  }
+
+  async function pendingTalent(index = 0) {
+    const profileId = await talentProfile(index);
+    const now = new Date();
+
+    await db
+      .insert(talentSubscriptions)
+      .values({ profileId, status: "pending", createdAt: now, updatedAt: now });
+
+    return profileId;
+  }
+
+  async function talentRow(profileId: string) {
+    const [row] = await db
+      .select({
+        status: talentSubscriptions.status,
+        providerSubscriptionId: talentSubscriptions.providerSubscriptionId,
+        currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
+      })
+      .from(talentSubscriptions)
+      .where(eq(talentSubscriptions.profileId, profileId));
+
+    return row;
+  }
+
+  function monthAfter(date: string) {
+    const next = new Date(`${date}T00:00:00Z`);
+    next.setUTCMonth(next.getUTCMonth() + 1);
+
+    return next.toISOString().slice(0, 10);
+  }
+
+  function talentCheckout(profileId: string) {
+    return { checkout: { id: "bill_talent", externalId: `talent:${profileId}` } };
+  }
+
+  it("activates, renews and cancels a Carreira Pro without touching the company", async () => {
+    const profileId = await pendingTalent();
+    const company = await currentSubscription();
+    const before = await allInvoices();
+    const today = saoPauloDate(new Date());
+    const talent = { ...talentCheckout(profileId), subscription: { id: "subs_t", amount: 7900 } };
+
+    expect((await webhook("subscription.completed", talent)).status).toBe(200);
+    expect(await talentRow(profileId)).toEqual({
+      status: "active",
+      providerSubscriptionId: "subs_t",
+      currentPeriodEnd: monthAfter(today),
+    });
+
+    await webhook("subscription.renewed", talent);
+
+    expect(await talentRow(profileId)).toEqual({
+      status: "active",
+      providerSubscriptionId: "subs_t",
+      currentPeriodEnd: monthAfter(monthAfter(today)),
+    });
+
+    await webhook("subscription.cancelled", talent);
+
+    expect((await talentRow(profileId)).status).toBe("canceled");
+    expect(await currentSubscription()).toEqual(company);
+    expect(await allInvoices()).toEqual(before);
+  });
+
+  it("renews from today when the Carreira Pro period has no end or already ended", async () => {
+    const today = saoPauloDate(new Date());
+    const open = await pendingTalent();
+
+    await webhook("subscription.renewed", talentCheckout(open));
+
+    expect((await talentRow(open)).currentPeriodEnd).toBe(monthAfter(today));
+
+    await db
+      .update(talentSubscriptions)
+      .set({ currentPeriodEnd: "2020-01-15" })
+      .where(eq(talentSubscriptions.profileId, open));
+
+    await webhook("subscription.renewed", talentCheckout(open));
+
+    expect((await talentRow(open)).currentPeriodEnd).toBe(monthAfter(today));
+  });
+
+  it("routes renewals without a checkout to the Carreira Pro holding that subscription", async () => {
+    const profileId = await pendingTalent();
+    const company = await currentSubscription();
+    const today = saoPauloDate(new Date());
+
+    await webhook("subscription.completed", {
+      ...talentCheckout(profileId),
+      subscription: { id: "subs_t", amount: 7900 },
+    });
+
+    await webhook("subscription.renewed", {
+      checkout: undefined,
+      subscription: { id: "subs_t", amount: 7900 },
+    });
+
+    expect((await talentRow(profileId)).currentPeriodEnd).toBe(monthAfter(monthAfter(today)));
+
+    await webhook("subscription.cancelled", {
+      checkout: { id: "bill_talent", externalId: null },
+      subscription: { id: "subs_t", amount: 7900 },
+    });
+
+    expect((await talentRow(profileId)).status).toBe("canceled");
+    expect(await currentSubscription()).toEqual(company);
+  });
+
+  it("keeps Carreira Pro untouched by company events sharing its subscription id", async () => {
+    const profileId = await pendingTalent();
+
+    await db
+      .update(talentSubscriptions)
+      .set({ providerSubscriptionId: "subs_1" })
+      .where(eq(talentSubscriptions.profileId, profileId));
+
+    const talent = await talentRow(profileId);
+
+    await webhook("subscription.cancelled");
+
+    expect((await currentSubscription()).status).toBe("canceled");
+    expect(await talentRow(profileId)).toEqual(talent);
+  });
+
+  it("ignores talent events for unknown profiles or events it does not act on", async () => {
+    const logged = vi.spyOn(console, "error");
+    const company = await currentSubscription();
+    const before = await allInvoices();
+    const withoutRow = await talentProfile();
+
+    try {
+      const responses = [
+        await webhook("subscription.completed", talentCheckout(missingId)),
+        await webhook("subscription.completed", talentCheckout(withoutRow)),
+        await webhook("subscription.completed", {
+          checkout: { id: "bill_talent", externalId: "talent:not-a-uuid" },
+        }),
+      ];
+
+      expect(responses.map((res) => res.status)).toEqual([200, 200, 200]);
+      expect(logged).toHaveBeenCalledWith("talent webhook ignored", {
+        event: "subscription.completed",
+      });
+      expect(await db.select().from(talentSubscriptions)).toEqual([]);
+    } finally {
+      logged.mockRestore();
+    }
+
+    const pending = await pendingTalent(1);
+
+    const quiet = [
+      await webhook("subscription.payment_failed", talentCheckout(pending)),
+      await call(`/billing/webhook?webhookSecret=${webhookSecret}`, {
+        method: "POST",
+        body: JSON.stringify({ data: eventData(talentCheckout(pending)) }),
+      }),
+    ];
+
+    expect(quiet.map((res) => res.status)).toEqual([200, 200]);
+    expect(await talentRow(pending)).toEqual({
+      status: "pending",
+      providerSubscriptionId: null,
+      currentPeriodEnd: null,
+    });
+    expect(await currentSubscription()).toEqual(company);
     expect(await allInvoices()).toEqual(before);
   });
 

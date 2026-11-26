@@ -11,6 +11,7 @@ import {
 import {
   emptyEmployeePlan,
   employeeAccessSchema,
+  employeeAccessSettingsSchema,
   employeePlanSchema,
   employeeStateSchema,
   type EmployeeState,
@@ -69,16 +70,27 @@ export function createEmployeeRepository(db: Database) {
         email: employeeAccess.email,
         plan: employeeAccess.plan,
         revision: employeeAccess.revision,
+        careerSponsoredUntil: employeeAccess.careerSponsoredUntil,
+        defaultCareerSponsoredUntil: sql<string>`(${offboardingCases.deadline} + interval '3 months')::date`,
       })
       .from(offboardingCases)
-      .leftJoin(employeeAccess, eq(offboardingCases.id, employeeAccess.caseId))
+      .leftJoin(
+        employeeAccess,
+        and(
+          eq(offboardingCases.id, employeeAccess.caseId),
+          eq(offboardingCases.orgId, employeeAccess.orgId),
+        ),
+      )
       .where(and(eq(offboardingCases.orgId, orgId), eq(offboardingCases.id, caseId)));
 
     return settings
-      ? employeeAccessSchema.parse({
+      ? employeeAccessSettingsSchema.parse({
           email: settings.email,
           plan: settings.plan ?? emptyEmployeePlan,
           revision: settings.revision ?? 0,
+          careerSponsoredUntil:
+            settings.careerSponsoredUntil ?? settings.defaultCareerSponsoredUntil,
+          careerSponsoredIsDefault: settings.careerSponsoredUntil === null,
         })
       : null;
   }
@@ -99,12 +111,12 @@ export function createEmployeeRepository(db: Database) {
         if (!owned) return "missing-case";
 
         const revision = settings.revision + 1;
-        const { email, plan } = settings;
+        const { email, plan, careerSponsoredUntil } = settings;
 
         if (settings.revision === 0) {
           const [created] = await tx
             .insert(employeeAccess)
-            .values({ orgId, caseId, email, plan, revision })
+            .values({ orgId, caseId, email, plan, revision, careerSponsoredUntil })
             .onConflictDoNothing({ target: employeeAccess.caseId })
             .returning({ caseId: employeeAccess.caseId });
 
@@ -140,7 +152,13 @@ export function createEmployeeRepository(db: Database) {
 
         await tx
           .update(employeeAccess)
-          .set({ email, plan, revision, grantId: changedEmail ? randomUUID() : undefined })
+          .set({
+            email,
+            plan,
+            revision,
+            careerSponsoredUntil,
+            grantId: changedEmail ? randomUUID() : undefined,
+          })
           .where(and(eq(employeeAccess.orgId, orgId), eq(employeeAccess.caseId, caseId)));
 
         await syncPlanEquipment(tx, orgId, caseId, plan.equipment);

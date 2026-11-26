@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import { describe, expect, it, vi } from "vitest";
 import type { EmployeePrincipal } from "./employee-auth.js";
+import type { IndividualPlan } from "./entitlement.js";
 import type { PortalAccess, PortalAuth } from "./portal-auth.js";
 import { talentAccess } from "./talent-access.js";
 import type { TalentProfile } from "./talent-profile.js";
@@ -45,6 +46,7 @@ function build(options: {
   access?: PortalAccess;
   found?: TalentProfile | undefined;
   companyActive?: boolean;
+  individual?: IndividualPlan;
   handler?: () => void;
   realClock?: boolean;
   employee?: () => Promise<EmployeePrincipal | null>;
@@ -78,6 +80,7 @@ function build(options: {
 
           return options.companyActive ?? true;
         },
+        individualPlan: async () => options.individual ?? null,
         now: options.realClock ? undefined : () => now,
       }),
     )
@@ -212,6 +215,42 @@ describe("talentAccess", () => {
     expect(response.status).toBe(402);
     expect(await response.json()).toEqual({ error: "Access lapsed" });
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("lets an active Carreira Pro keep access once the company sponsorship lapses", async () => {
+    const until = await build({
+      companyActive: false,
+      individual: { status: "active", currentPeriodEnd: "2026-06-15" },
+    }).handle(new Request("http://localhost/entitlement"));
+
+    expect(until.status).toBe(200);
+    expect(await until.json()).toEqual({ kind: "individual", until: "2026-06-15" });
+
+    const open = await build({
+      companyActive: false,
+      individual: { status: "active", currentPeriodEnd: null },
+    }).handle(new Request("http://localhost/entitlement"));
+
+    expect(await open.json()).toEqual({ kind: "individual", until: null });
+  });
+
+  it("answers 402 once the Carreira Pro is canceled or its period ended", async () => {
+    const statuses = [
+      (
+        await build({
+          companyActive: false,
+          individual: { status: "canceled", currentPeriodEnd: "2099-01-01" },
+        }).handle(new Request("http://localhost/active"))
+      ).status,
+      (
+        await build({
+          companyActive: false,
+          individual: { status: "active", currentPeriodEnd: "2026-06-14" },
+        }).handle(new Request("http://localhost/active"))
+      ).status,
+    ];
+
+    expect(statuses).toEqual([402, 402]);
   });
 
   it("lets signed-in mode through for lapsed profiles without terms", async () => {

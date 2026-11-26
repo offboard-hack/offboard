@@ -13,7 +13,7 @@ import { emptyEmployeePlan } from "@offboard/employee";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Elysia } from "elysia";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRepositories } from "../../repositories.js";
 import type { PortalAuth } from "../../shared/portal-auth.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
@@ -32,21 +32,82 @@ const auth: PortalAuth = {
     }),
 };
 
+type CheckoutParams = {
+  externalId: string;
+  planSlug: string;
+  returnUrl: string;
+  completionUrl: string;
+};
+
 describe.skipIf(!url)("career plan route", () => {
   const db = createClient(url ?? "");
   const repos = createRepositories(db);
+  const checkouts: CheckoutParams[] = [];
 
-  const app = new Elysia().use(
-    careerPlanRoutes(
-      repos.careerPlan,
-      talentAccess({ auth, webOrigin, talent: repos.talent, companyActive: async () => true }),
-    ),
-  );
+  const gateway = {
+    configured: true,
+    async createSubscriptionCheckout(params: CheckoutParams) {
+      checkouts.push(params);
 
-  const get = (profileId: string) =>
-    app.handle(
+      return { id: "bill_pro", url: "https://pay.example/bill_pro" };
+    },
+  };
+
+  function planApp(checkout = gateway, companyActive = true) {
+    return new Elysia().use(
+      careerPlanRoutes(
+        repos.careerPlan,
+        talentAccess({
+          auth,
+          webOrigin,
+          talent: repos.talent,
+          companyActive: async () => companyActive,
+          individualPlan: repos.careerPlan.individual,
+        }),
+        checkout,
+        webOrigin,
+      ),
+    );
+  }
+
+  const app = planApp();
+
+  const get = (profileId: string, target = app) =>
+    target.handle(
       new Request("http://localhost/me/plan", { headers: { "x-test-talent-id": profileId } }),
     );
+
+  const checkout = (profileId: string, target = app) =>
+    target.handle(
+      new Request("http://localhost/me/plan/checkout", {
+        method: "POST",
+        headers: { "x-test-talent-id": profileId, origin: webOrigin },
+      }),
+    );
+
+  async function subscription(profileId: string) {
+    const [row] = await db
+      .select({
+        status: talentSubscriptions.status,
+        providerSubscriptionId: talentSubscriptions.providerSubscriptionId,
+        currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
+      })
+      .from(talentSubscriptions)
+      .where(eq(talentSubscriptions.profileId, profileId));
+
+    return row;
+  }
+
+  async function subscribed(profileId: string, status: "active" | "canceled", end: string | null) {
+    await db.insert(talentSubscriptions).values({
+      profileId,
+      status,
+      providerSubscriptionId: "subs_pro",
+      currentPeriodEnd: end,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
 
   beforeAll(async () => {
     await migrate(db, {
@@ -58,6 +119,7 @@ describe.skipIf(!url)("career plan route", () => {
 
   beforeEach(async () => {
     await seedDatabase(db, testSeedFixtures);
+    checkouts.length = 0;
   });
 
   afterAll(async () => {
@@ -168,7 +230,15 @@ describe.skipIf(!url)("career plan route", () => {
     const vanishing = new Elysia().use(
       careerPlanRoutes(
         { ...repos.careerPlan, plan: async () => undefined },
-        talentAccess({ auth, webOrigin, talent: repos.talent, companyActive: async () => true }),
+        talentAccess({
+          auth,
+          webOrigin,
+          talent: repos.talent,
+          companyActive: async () => true,
+          individualPlan: repos.careerPlan.individual,
+        }),
+        gateway,
+        webOrigin,
       ),
     );
 
@@ -182,9 +252,114 @@ describe.skipIf(!url)("career plan route", () => {
     expect(await response.json()).toEqual({ error: "Profile not found" });
   });
 
-  it("needs accepted terms", async () => {
+  it("shows the plan before the terms are accepted", async () => {
     const profileId = await profile("2099-12-31", false);
 
-    expect((await get(profileId)).status).toBe(403);
+    expect((await get(profileId)).status).toBe(200);
+  });
+
+  it("shows the plan and offers the upgrade to a person whose access lapsed", async () => {
+    const profileId = await profile("2020-01-01");
+    const response = await get(profileId, planApp(gateway, false));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      aiApply: { allowedBy: null },
+      upgrade: { offered: true },
+    });
+  });
+
+  it("starts a Carreira Pro checkout as a pending subscription", async () => {
+    const profileId = await profile("2020-01-01", false);
+    const response = await checkout(profileId, planApp(gateway, false));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ url: "https://pay.example/bill_pro" });
+    expect(checkouts).toEqual([
+      {
+        externalId: `talent:${profileId}`,
+        planSlug: "carreira-pro",
+        returnUrl: `${webOrigin}/colaborador?tela=carreira`,
+        completionUrl: `${webOrigin}/colaborador?tela=carreira&plano=ok`,
+      },
+    ]);
+    expect(await subscription(profileId)).toEqual({
+      status: "pending",
+      providerSubscriptionId: null,
+      currentPeriodEnd: null,
+    });
+  });
+
+  it("restarts the checkout of a canceled or expired Carreira Pro", async () => {
+    const profileId = await profile("2099-12-31");
+
+    await subscribed(profileId, "canceled", "2099-01-01");
+
+    expect((await checkout(profileId)).status).toBe(200);
+    expect(await subscription(profileId)).toEqual({
+      status: "pending",
+      providerSubscriptionId: "subs_pro",
+      currentPeriodEnd: "2099-01-01",
+    });
+
+    await db
+      .update(talentSubscriptions)
+      .set({ status: "active", currentPeriodEnd: "2020-01-01" })
+      .where(eq(talentSubscriptions.profileId, profileId));
+
+    expect((await checkout(profileId)).status).toBe(200);
+    expect((await subscription(profileId)).status).toBe("pending");
+    expect(checkouts).toHaveLength(2);
+  });
+
+  it("refuses a second checkout while Carreira Pro is active", async () => {
+    const profileId = await profile("2099-12-31");
+
+    await subscribed(profileId, "active", null);
+
+    const open = await checkout(profileId);
+
+    expect(open.status).toBe(409);
+    expect(await open.json()).toEqual({ error: "Already subscribed" });
+
+    await db
+      .update(talentSubscriptions)
+      .set({ currentPeriodEnd: saoPauloDate(new Date()) })
+      .where(eq(talentSubscriptions.profileId, profileId));
+
+    expect((await checkout(profileId)).status).toBe(409);
+    expect((await subscription(profileId)).status).toBe("active");
+    expect(checkouts).toEqual([]);
+  });
+
+  it("answers 503 without AbacatePay and stores nothing", async () => {
+    const profileId = await profile("2099-12-31");
+    const response = await checkout(profileId, planApp({ ...gateway, configured: false }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "Billing not configured" });
+    expect(await subscription(profileId)).toBeUndefined();
+  });
+
+  it("answers 502 when AbacatePay fails and logs only the error name", async () => {
+    const logged = vi.spyOn(console, "error");
+    const profileId = await profile("2099-12-31");
+
+    const failing = planApp({
+      configured: true,
+      createSubscriptionCheckout: async () => {
+        throw new TypeError("secret provider detail");
+      },
+    });
+
+    try {
+      const response = await checkout(profileId, failing);
+
+      expect(response.status).toBe(502);
+      expect(await response.json()).toEqual({ error: "Could not start the checkout" });
+      expect(logged).toHaveBeenCalledWith("Carreira Pro checkout failed", { name: "TypeError" });
+    } finally {
+      logged.mockRestore();
+    }
   });
 });

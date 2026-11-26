@@ -7,8 +7,9 @@ import {
   talentProfiles,
   talentSubscriptions,
 } from "@offboard/db/schema";
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, lt, ne, or, sql } from "drizzle-orm";
 import { careerPlanOf } from "../../shared/career-pro.js";
+import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 
 export function createCareerPlanRepository(db: Database) {
   async function companyOf(orgId: string) {
@@ -36,9 +37,19 @@ export function createCareerPlanRepository(db: Database) {
       .from(talentProfiles)
       .leftJoin(
         employeeAccess,
-        and(eq(employeeAccess.caseId, talentProfiles.caseId), isNotNull(employeeAccess.email)),
+        and(
+          eq(employeeAccess.caseId, talentProfiles.caseId),
+          eq(employeeAccess.orgId, talentProfiles.orgId),
+          isNotNull(employeeAccess.email),
+        ),
       )
-      .leftJoin(offboardingCases, eq(offboardingCases.id, talentProfiles.caseId))
+      .leftJoin(
+        offboardingCases,
+        and(
+          eq(offboardingCases.id, talentProfiles.caseId),
+          eq(offboardingCases.orgId, talentProfiles.orgId),
+        ),
+      )
       .leftJoin(talentSubscriptions, eq(talentSubscriptions.profileId, talentProfiles.id))
       .where(eq(talentProfiles.id, profileId));
 
@@ -53,7 +64,36 @@ export function createCareerPlanRepository(db: Database) {
     return (await plan(profileId, now))?.aiApply.allowedBy ?? null;
   }
 
-  return { plan, allowedBy };
+  async function individual(profileId: string) {
+    const [row] = await db
+      .select({
+        status: talentSubscriptions.status,
+        currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
+      })
+      .from(talentSubscriptions)
+      .where(eq(talentSubscriptions.profileId, profileId));
+
+    return row ?? null;
+  }
+
+  async function startCheckout(profileId: string, now: Date) {
+    const [row] = await db
+      .insert(talentSubscriptions)
+      .values({ profileId, status: "pending", createdAt: now, updatedAt: now })
+      .onConflictDoUpdate({
+        target: talentSubscriptions.profileId,
+        set: { status: "pending", updatedAt: now },
+        setWhere: or(
+          ne(talentSubscriptions.status, "active"),
+          lt(talentSubscriptions.currentPeriodEnd, saoPauloDate(now)),
+        ),
+      })
+      .returning({ profileId: talentSubscriptions.profileId });
+
+    return row ?? null;
+  }
+
+  return { plan, allowedBy, individual, startCheckout };
 }
 
 export type CareerPlanRepository = ReturnType<typeof createCareerPlanRepository>;

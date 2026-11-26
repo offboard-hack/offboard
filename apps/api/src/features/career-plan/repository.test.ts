@@ -189,6 +189,46 @@ describe.skipIf(!url)("career plan repository", () => {
     expect(await repos.careerPlan.allowedBy(profileId, now)).toBeNull();
   });
 
+  it("ignores collaborator access recorded under another organization", async () => {
+    const { profileId, caseId } = await profile("2026-11-30", "2026-12-20");
+
+    const [other] = await db
+      .insert(organizations)
+      .values({ name: "Outra", slug: `outra-${randomUUID()}` })
+      .returning({ id: organizations.id });
+
+    await db.insert(employeeAccess).values({
+      caseId,
+      orgId: other.id,
+      email: "bia@example.com",
+      plan: emptyEmployeePlan,
+      careerSponsoredUntil: "2030-01-01",
+    });
+
+    expect((await repos.careerPlan.plan(profileId, now))?.company.sponsoredUntil).toBe(
+      "2026-12-20",
+    );
+  });
+
+  it("reads the person's Carreira Pro for the access check", async () => {
+    const { profileId } = await profile("2026-11-30");
+
+    expect(await repos.careerPlan.individual(profileId)).toBeNull();
+
+    await db.insert(talentSubscriptions).values({
+      profileId,
+      status: "active",
+      currentPeriodEnd: "2027-01-01",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    expect(await repos.careerPlan.individual(profileId)).toEqual({
+      status: "active",
+      currentPeriodEnd: "2027-01-01",
+    });
+  });
+
   it("has no plan for an unknown profile", async () => {
     const missing = "00000000-0000-4000-8000-000000000001";
 

@@ -1,5 +1,5 @@
 import { onTopPlan, type CompanyPlan } from "./ai-apply-access.js";
-import { companySponsors } from "./entitlement.js";
+import { companySponsors, individualActive, type IndividualPlan } from "./entitlement.js";
 import { saoPauloDate } from "./sao-paulo-date.js";
 
 export const careerPro = {
@@ -14,10 +14,7 @@ const upgradeWindowMs = 30 * 24 * 60 * 60_000;
 export type CareerStanding = {
   sponsoredUntil: string;
   company: (CompanyPlan & { name: string }) | null;
-  individual: {
-    status: "pending" | "active" | "past_due" | "canceled";
-    currentPeriodEnd: string | null;
-  } | null;
+  individual: IndividualPlan | null;
 };
 
 export type AllowedBy = "company" | "individual" | null;
@@ -32,9 +29,7 @@ export function careerPlanOf(standing: CareerStanding, now: Date) {
   const includesAiApply = onTopPlan(company);
   const companyGrant = includesAiApply && today <= sponsoredUntil;
 
-  const individualGrant =
-    individual?.status === "active" &&
-    (individual.currentPeriodEnd === null || today <= individual.currentPeriodEnd);
+  const individualGrant = individualActive(individual, today);
 
   const allowedBy: AllowedBy = companyGrant ? "company" : individualGrant ? "individual" : null;
 

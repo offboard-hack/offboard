@@ -1,6 +1,10 @@
 import { equipmentReturnsQuery } from "@/entities/equipment-returns";
 import { offboardingsQuery } from "@/entities/offboarding";
-import { employeeAccessSchema, employeePlanSchema } from "@offboard/employee";
+import {
+  employeeAccessSchema,
+  employeeAccessSettingsSchema,
+  employeePlanSchema,
+} from "@offboard/employee";
 import { useForm } from "@tanstack/react-form";
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -117,6 +121,7 @@ const settingsSchema = z
       .string()
       .trim()
       .pipe(z.email("Informe um e-mail válido.").or(z.literal(""))),
+    careerSponsoredUntil: optionalDate,
     company: shortText,
     officeAddress: z.string().trim().max(350),
     lastDay: optionalDate,
@@ -172,6 +177,7 @@ const settingsSchema = z
 
 const fields = [
   { key: "email", label: "E-mail para acesso", type: "email" },
+  { key: "careerSponsoredUntil", label: "Carreira patrocinada até", type: "date" },
   { key: "company", label: "Empresa", type: "text" },
   { key: "lastDay", label: "Último dia de trabalho", type: "date" },
   { key: "officeAddress", label: "Endereço para devolver equipamentos", type: "text" },
@@ -208,6 +214,12 @@ const equipmentConflict = z.object({ code: z.literal("equipment-in-use") });
 
 const settingsConflict = z.object({ code: z.literal("settings-changed") });
 
+function sponsorshipToSave(value: string, baseline: z.infer<typeof employeeAccessSettingsSchema>) {
+  const keepsDefault = baseline.careerSponsoredIsDefault && value === baseline.careerSponsoredUntil;
+
+  return !value || keepsDefault ? null : value;
+}
+
 class EmployeeSettingsChanged extends Error {
   constructor() {
     super("O acesso mudou enquanto você editava. Confira a versão atual antes de salvar.");
@@ -222,7 +234,7 @@ function AccessForm({
   reloadFailed,
 }: {
   caseId: string;
-  settings: z.infer<typeof employeeAccessSchema>;
+  settings: z.infer<typeof employeeAccessSettingsSchema>;
   reload: () => Promise<void>;
   reloading: boolean;
   reloadFailed: boolean;
@@ -263,6 +275,7 @@ function AccessForm({
   const form = useForm({
     defaultValues: {
       email: baseline.email ?? "",
+      careerSponsoredUntil: baseline.careerSponsoredUntil,
       company: plan.company ?? "",
       lastDay: plan.lastDay ?? "",
       officeAddress: plan.officeAddress ?? "",
@@ -334,6 +347,7 @@ function AccessForm({
         email: parsed.email || null,
         plan: nextPlan,
         revision: baseline.revision,
+        careerSponsoredUntil: sponsorshipToSave(parsed.careerSponsoredUntil, baseline),
       });
 
       write.mutate(next);

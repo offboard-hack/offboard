@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { z } from "zod";
 import { matchesSecret } from "../../shared/machine-auth.js";
+import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 import type { BillingRepository } from "./repository.js";
 
 const subscriptionEvent = z.object({
@@ -60,6 +61,57 @@ function addOneMonth(date: string) {
 
 type SubscriptionEvent = NonNullable<ReturnType<typeof parseWebhookEvent>>;
 
+const talentPrefix = "talent:";
+
+const talentProfileId = z.uuid();
+
+async function talentSubscriptionOf(repos: BillingRepository, externalId: string) {
+  const parsed = talentProfileId.safeParse(externalId.slice(talentPrefix.length));
+
+  return parsed.success ? repos.findTalentSubscription(parsed.data) : null;
+}
+
+async function applyTalentEvent(
+  repos: BillingRepository,
+  name: string | undefined,
+  event: SubscriptionEvent,
+  talent: { profileId: string; currentPeriodEnd: string | null } | null,
+) {
+  if (!talent) {
+    console.error("talent webhook ignored", { event: name });
+
+    return;
+  }
+
+  const today = saoPauloDate(new Date());
+  const providerSubscriptionId = event.data.subscription.id;
+
+  if (name === "subscription.completed") {
+    await repos.updateTalentSubscription(talent.profileId, {
+      status: "active",
+      providerSubscriptionId,
+      currentPeriodEnd: addOneMonth(today),
+    });
+  }
+
+  if (name === "subscription.renewed") {
+    const from =
+      talent.currentPeriodEnd !== null && talent.currentPeriodEnd > today
+        ? talent.currentPeriodEnd
+        : today;
+
+    await repos.updateTalentSubscription(talent.profileId, {
+      status: "active",
+      providerSubscriptionId,
+      currentPeriodEnd: addOneMonth(from),
+    });
+  }
+
+  if (name === "subscription.cancelled") {
+    await repos.updateTalentSubscription(talent.profileId, { status: "canceled" });
+  }
+}
+
 async function openInvoice(
   repos: BillingRepository,
   orgId: string,
@@ -76,6 +128,16 @@ async function openInvoice(
 export async function applyWebhookEvent(repos: BillingRepository, event: SubscriptionEvent) {
   const name = event.event ?? event.type;
   const subscriptionId = event.data.checkout?.externalId;
+
+  if (subscriptionId?.startsWith(talentPrefix)) {
+    return applyTalentEvent(repos, name, event, await talentSubscriptionOf(repos, subscriptionId));
+  }
+
+  if (!subscriptionId) {
+    const talent = await repos.findTalentSubscriptionByProvider(event.data.subscription.id);
+
+    if (talent) return applyTalentEvent(repos, name, event, talent);
+  }
 
   if (!name || !subscriptionId) return;
 

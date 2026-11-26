@@ -22,7 +22,7 @@ const meResponse = t.Object({
   shareOutcomeWithHr: t.Boolean(),
   aiApply: t.Object({ eligible: t.Boolean(), consented: t.Boolean(), available: t.Boolean() }),
   entitlement: t.Object({
-    kind: t.Union([t.Literal("sponsored"), t.Literal("lapsed")]),
+    kind: t.Union([t.Literal("sponsored"), t.Literal("individual"), t.Literal("lapsed")]),
     until: t.Union([t.String(), t.Null()]),
   }),
 });
