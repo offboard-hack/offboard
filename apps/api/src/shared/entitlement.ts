@@ -1,6 +1,8 @@
 import { saoPauloDate } from "./sao-paulo-date.js";
 
-export type Entitlement = { kind: "sponsored"; until: string } | { kind: "lapsed"; until: null };
+export type Entitlement =
+  | { kind: "sponsored"; until: string | null }
+  | { kind: "lapsed"; until: null };
 
 export function entitlementOf(input: {
   sponsoredUntil: string;

@@ -1,12 +1,20 @@
 import { Elysia } from "elysia";
 import type { PortalAuth } from "./portal-auth.js";
-import { entitlementOf } from "./entitlement.js";
+import { entitlementOf, type Entitlement } from "./entitlement.js";
 import type { TalentProfile } from "./talent-profile.js";
+
+const collaboratorEntitlement: Entitlement = { kind: "sponsored", until: null };
 
 export function talentAccess(deps: {
   auth: PortalAuth;
   webOrigin: string;
-  talent: { findById(id: string): Promise<TalentProfile | undefined> };
+  talent: {
+    findById(id: string): Promise<TalentProfile | undefined>;
+    ensureForCollaborator(
+      principal: { caseId: string; name: string; email: string },
+      now: Date,
+    ): Promise<TalentProfile | "email_taken">;
+  };
   companyActive: (orgId: string) => Promise<boolean>;
   now?: () => Date;
 }) {
@@ -20,19 +28,30 @@ export function talentAccess(deps: {
 
         if (access.kind === "anonymous") return status(401, { error: "Unauthorized" });
 
-        if (access.kind !== "talent") return status(403, { error: "Forbidden" });
-
         const isRead = request.method === "GET" || request.method === "HEAD";
 
         if (!isRead && request.headers.get("origin") !== deps.webOrigin) {
           return status(403, { error: "Forbidden" });
         }
 
+        if (access.kind !== "talent") {
+          const collaborator =
+            access.kind === "forbidden" ? await deps.auth.resolveEmployee?.(request.headers) : null;
+
+          if (!collaborator) return status(403, { error: "Forbidden" });
+
+          const me = await deps.talent.ensureForCollaborator(collaborator, now());
+
+          if (me === "email_taken") return status(403, { error: "Forbidden" });
+
+          return { me, entitlement: collaboratorEntitlement };
+        }
+
         const me = await deps.talent.findById(access.profile.id);
 
         if (!me) return status(403, { error: "Forbidden" });
 
-        const entitlement = entitlementOf({
+        const entitlement: Entitlement = entitlementOf({
           sponsoredUntil: me.sponsoredUntil,
           companyActive: await deps.companyActive(me.orgId),
           now: now(),

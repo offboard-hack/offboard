@@ -61,6 +61,7 @@ import type { ObjectStorage } from "./shared/object-storage.js";
 import { zipSync } from "fflate";
 import { PDFArray, PDFDocument, PDFRawStream, decodePDFRawStream } from "pdf-lib";
 import type { PortalAuth } from "./shared/portal-auth.js";
+import { saoPauloDate } from "./shared/sao-paulo-date.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const webOrigin = "http://localhost:5173";
@@ -7791,7 +7792,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       | EmployeeState
       | EmployeeSettings
       | { done: boolean }
-      | { code: string; received: boolean },
+      | { code: string; received: boolean }
+      | { shareOutcomeWithHr: boolean },
     origin = webOrigin,
     nativeOrigin?: string,
     grantId = cookie ? grants.get(cookie) : undefined,
@@ -8931,6 +8933,222 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     expect((await send({ "expo-origin": "exp://localhost:8103/--/" })).status).toBe(403);
     expect((await send({ "expo-origin": "offboard:///" })).status).toBe(200);
     expect(delivered[0]).toMatch(/\b\d{6}\b/);
+  });
+
+  describe("collaborator career routes", () => {
+    const orgIds: string[] = [];
+
+    afterAll(async () => {
+      for (const orgId of orgIds) {
+        await db.delete(talentProfiles).where(eq(talentProfiles.orgId, orgId));
+        await db.delete(offboardingCases).where(eq(offboardingCases.orgId, orgId));
+        await db.delete(organizations).where(eq(organizations.id, orgId));
+      }
+    });
+
+    async function organization() {
+      const orgId = randomUUID();
+      await db.insert(organizations).values({ id: orgId, slug: orgId, name: "Org " + orgId });
+      orgIds.push(orgId);
+
+      return orgId;
+    }
+
+    async function collaboratorCase(
+      orgId: string,
+      email = `career-${randomUUID()}@offboard.example`,
+    ) {
+      const record = await repos.offboardings.createOffboarding(orgId, {
+        name: "Pessoa da carreira",
+        role: "Analista",
+        department: "Produto",
+        deadline: "2027-02-01",
+        email,
+      });
+
+      expect(
+        await repos.employee.saveSettings(orgId, record.id, {
+          email,
+          plan: emptyEmployeePlan,
+          revision: 0,
+        }),
+      ).not.toBe("email-in-use");
+
+      return { caseId: record.id, email };
+    }
+
+    function profilesOf(caseId: string) {
+      return db.select().from(talentProfiles).where(eq(talentProfiles.caseId, caseId));
+    }
+
+    it("lets a collaborator use the career routes with their session", async () => {
+      const orgId = await organization();
+      const { caseId, email } = await collaboratorCase(orgId);
+      const cookie = await authenticate(email);
+
+      const foreign = await request(
+        "/me/consent",
+        "PUT",
+        cookie,
+        { shareOutcomeWithHr: true },
+        "https://foreign.example",
+      );
+
+      expect(foreign.status).toBe(403);
+      expect(await profilesOf(caseId)).toEqual([]);
+
+      const before = new Date();
+      const me = await request("/me", "GET", cookie);
+      const after = new Date();
+      expect(me.status).toBe(200);
+      expect(me.headers.get("cache-control")).toBe("no-store");
+      expect(await me.json()).toMatchObject({
+        name: "Pessoa da carreira",
+        email,
+        termsAccepted: true,
+        entitlement: { kind: "sponsored", until: null },
+      });
+
+      const [row] = await profilesOf(caseId);
+      expect(row).toMatchObject({
+        orgId,
+        caseId,
+        personalEmail: email,
+        name: "Pessoa da carreira",
+        sponsoredUntil: saoPauloDate(before),
+      });
+
+      for (const at of [row.termsAcceptedAt, row.firstSignedInAt]) {
+        expect(at?.getTime()).toBeGreaterThanOrEqual(before.getTime());
+        expect(at?.getTime()).toBeLessThanOrEqual(after.getTime());
+      }
+
+      const jobs = await request("/me/jobs", "GET", cookie);
+      expect(jobs.status).toBe(200);
+      expect(await jobs.json()).toMatchObject({ page: 1 });
+
+      const listed = await request("/me/applications", "GET", cookie);
+      expect(listed.status).toBe(200);
+      expect(await listed.json()).toEqual([]);
+
+      const consent = await request("/me/consent", "PUT", cookie, { shareOutcomeWithHr: true });
+      expect(consent.status).toBe(200);
+      expect(await consent.json()).toMatchObject({ id: row.id, shareOutcomeWithHr: true });
+      expect(await profilesOf(caseId)).toHaveLength(1);
+
+      expect((await request("/offboardings", "GET", cookie)).status).toBe(403);
+    });
+
+    it("creates the profile once", async () => {
+      const orgId = await organization();
+      const { caseId, email } = await collaboratorCase(orgId);
+      const cookie = await authenticate(email);
+
+      const responses = await Promise.all(
+        Array.from({ length: 6 }, () => request("/me", "GET", cookie)),
+      );
+
+      expect(responses.map((response) => response.status)).toEqual(Array(6).fill(200));
+
+      const ids = new Set(
+        await Promise.all(
+          responses.map(
+            async (response) => z.object({ id: z.uuid() }).parse(await response.json()).id,
+          ),
+        ),
+      );
+
+      expect(ids.size).toBe(1);
+      expect(await profilesOf(caseId)).toHaveLength(1);
+    });
+
+    it("isolates collaborators by case", async () => {
+      const firstOrg = await organization();
+      const secondOrg = await organization();
+      const first = await collaboratorCase(firstOrg);
+      const second = await collaboratorCase(secondOrg);
+      const firstCookie = await authenticate(first.email);
+      const secondCookie = await authenticate(second.email);
+
+      const shared = await request("/me/consent", "PUT", firstCookie, { shareOutcomeWithHr: true });
+      expect(shared.status).toBe(200);
+
+      const other = await request("/me", "GET", secondCookie);
+      expect(other.status).toBe(200);
+      const otherMe = await other.json();
+      expect(otherMe).toMatchObject({ email: second.email, shareOutcomeWithHr: false });
+      expect(otherMe.id).not.toBe((await shared.json()).id);
+
+      const [firstRow] = await profilesOf(first.caseId);
+      const [secondRow] = await profilesOf(second.caseId);
+      expect(firstRow).toMatchObject({ orgId: firstOrg, shareOutcomeWithHr: true });
+      expect(secondRow).toMatchObject({ orgId: secondOrg, id: otherMe.id });
+    });
+
+    it("keeps a collaborator active on a lapsed profile without accepted terms", async () => {
+      const orgId = await organization();
+      const { caseId, email } = await collaboratorCase(orgId);
+
+      const enabled = z.object({ id: z.uuid() }).parse(
+        await repos.talent.enable({
+          orgId,
+          caseId,
+          personalEmail: `hr-${randomUUID()}@offboard.example`,
+          sponsoredUntil: "2020-01-01",
+        }),
+      );
+
+      const cookie = await authenticate(email);
+      expect((await request("/me/jobs", "GET", cookie)).status).toBe(200);
+      expect((await request("/me/applications", "GET", cookie)).status).toBe(200);
+      expect(await (await request("/me", "GET", cookie)).json()).toMatchObject({
+        id: enabled.id,
+        termsAccepted: false,
+        entitlement: { kind: "sponsored", until: null },
+      });
+      expect(await profilesOf(caseId)).toHaveLength(1);
+    });
+
+    it("forbids a collaborator whose email another case's profile holds", async () => {
+      const orgId = await organization();
+      const holder = await collaboratorCase(orgId);
+      const { caseId, email } = await collaboratorCase(orgId);
+
+      expect(
+        await repos.talent.enable({
+          orgId,
+          caseId: holder.caseId,
+          personalEmail: email.toUpperCase(),
+          sponsoredUntil: "2099-01-01",
+        }),
+      ).toMatchObject({ caseId: holder.caseId });
+
+      const cookie = await authenticate(email);
+      const response = await request("/me", "GET", cookie);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "Forbidden" });
+      expect(await profilesOf(caseId)).toEqual([]);
+    });
+
+    it("keeps member sessions out of the career routes", async () => {
+      const orgId = await organization();
+      const { caseId, email } = await collaboratorCase(orgId);
+      const cookie = await authenticate(email);
+
+      const composed = createApp(webOrigin, repos, {
+        ...appOptions,
+        auth: { ...auth, resolveEmployee: employeeAuth.resolveEmployee },
+      });
+
+      const response = await composed.handle(
+        new Request(webOrigin + "/api/me", {
+          headers: { cookie, "x-test-session": "admin", "x-test-org-id": orgId },
+        }),
+      );
+
+      expect(response.status).toBe(403);
+      expect(await profilesOf(caseId)).toEqual([]);
+    });
   });
 
   describe("signup", () => {

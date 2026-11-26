@@ -3,6 +3,7 @@ import { aiApplications, offboardingCases, talentProfiles } from "@offboard/db/s
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { aiApplyConsentVersion } from "../../shared/ai-apply-access.js";
+import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 import type { TalentProfile } from "../../shared/talent-profile.js";
 
 const caseViolation = z.object({
@@ -100,6 +101,44 @@ export function createTalentRepository(db: Database) {
 
       throw error;
     }
+  }
+
+  async function ensureForCollaborator(
+    principal: { caseId: string; name: string; email: string },
+    now: Date,
+  ) {
+    const at = sql<Date>`${now.toISOString()}::timestamp`;
+
+    await db
+      .insert(talentProfiles)
+      .select(
+        db
+          .select({
+            id: sql<string>`gen_random_uuid()`.as("id"),
+            orgId: sql<string>`${offboardingCases.orgId}`.as("org_id"),
+            caseId: sql<string>`${offboardingCases.id}`.as("case_id"),
+            personalEmail: sql<string>`${normalizeEmail(principal.email)}`.as("personal_email"),
+            name: sql<string>`${principal.name}`.as("name"),
+            sponsoredUntil: sql<string>`${saoPauloDate(now)}::date`.as("sponsored_until"),
+            termsAcceptedAt: at.as("terms_accepted_at"),
+            firstSignedInAt: at.as("first_signed_in_at"),
+            shareOutcomeWithHr: sql<boolean>`false`.as("share_outcome_with_hr"),
+            aiApplyConsentAt: sql<null>`null::timestamp`.as("ai_apply_consent_at"),
+            aiApplyConsentVersion: sql<null>`null::varchar`.as("ai_apply_consent_version"),
+            createdAt: at.as("created_at"),
+            updatedAt: at.as("updated_at"),
+          })
+          .from(offboardingCases)
+          .where(eq(offboardingCases.id, principal.caseId)),
+      )
+      .onConflictDoNothing();
+
+    const [row] = await db
+      .select()
+      .from(talentProfiles)
+      .where(eq(talentProfiles.caseId, principal.caseId));
+
+    return row ? toProfile(row) : ("email_taken" as const);
   }
 
   async function updateAccess(
@@ -214,6 +253,7 @@ export function createTalentRepository(db: Database) {
 
   return {
     enable,
+    ensureForCollaborator,
     findByCase,
     updateAccess,
     findForSignIn,
