@@ -93,6 +93,7 @@ export function careerPlanRoutes(
           return { url: checkout.url };
         } catch (cause) {
           logFailureCode("Carreira Pro checkout failed")(cause);
+          await repos.releaseCheckout(row.profileId);
 
           return status(502, { error: "Could not start the checkout" });
         }

@@ -273,14 +273,12 @@ export function useUpgradeCheckout(account: EmployeeAccount) {
 
       if (result.status === 409) {
         await queryClient.invalidateQueries({ queryKey: careerPlanQuery(account).queryKey });
-
-        return null;
       }
 
       return settle(result, "Não foi possível abrir o pagamento. Tente de novo.");
     },
     onSuccess(checkout) {
-      if (checkout) window.location.assign(checkout.url);
+      window.location.assign(checkout.url);
     },
   });
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type CareerPlan,
   isProActive,
+  pastDueNote,
   planCardView,
   planDate,
   planPrice,
@@ -31,6 +32,7 @@ describe("plan card view", () => {
       sponsorLine: "Patrocinado pela empresa até 10/03/2027",
       proLine: null,
       paymentNote: false,
+      pastDueNote: null,
       upgrade: "hidden",
       upgradeLabel: "Fazer upgrade · R$ 79/mês",
     });
@@ -89,17 +91,7 @@ describe("plan card view", () => {
     ).toBe("Carreira Pro ativo");
   });
 
-  it("keeps offering the upgrade while Carreira Pro is not active", () => {
-    const plan: CareerPlan = {
-      ...base,
-      aiApply: { allowedBy: null },
-      individual: { plan: "carreira-pro", status: "past_due", currentPeriodEnd: "2026-11-01" },
-    };
-
-    expect(planCardView(plan, today, false)).toMatchObject({ proLine: null, upgrade: "available" });
-  });
-
-  it("hides the upgrade while a checkout is pending or the payment was just made", () => {
+  it("hides the upgrade when the payment was just made but keeps it for a pending checkout", () => {
     const pending: CareerPlan = {
       ...base,
       aiApply: { allowedBy: null },
@@ -108,34 +100,51 @@ describe("plan card view", () => {
 
     const none: CareerPlan = { ...base, aiApply: { allowedBy: null } };
 
-    expect(planCardView(pending, today, false).upgrade).toBe("hidden");
+    expect(planCardView(pending, today, false).upgrade).toBe("available");
     expect(planCardView(none, today, true)).toMatchObject({ upgrade: "hidden", paymentNote: true });
   });
 
-  it("does not call an expired Carreira Pro active and drops the payment note once active", () => {
-    const expired: CareerPlan = {
+  it("keeps Carreira Pro active when the company also sponsors, until the period ends", () => {
+    const sponsored: CareerPlan = {
       ...base,
-      aiApply: { allowedBy: null },
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-11-01" },
+      company: { ...base.company, sponsoredUntil: "2026-12-01" },
+      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-11-26" },
     };
 
-    const active: CareerPlan = {
-      ...expired,
-      aiApply: { allowedBy: "individual" },
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-12-26" },
+    expect(planCardView(sponsored, today, false)).toMatchObject({
+      proLine: "Carreira Pro ativo · renova em 26/11/2026",
+      upgrade: "hidden",
+    });
+    expect(planCardView(sponsored, today, true).paymentNote).toBe(false);
+
+    const lapsed: CareerPlan = {
+      ...sponsored,
+      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-11-25" },
     };
 
-    expect(planCardView(expired, today, false)).toMatchObject({
+    expect(planCardView(lapsed, today, false)).toMatchObject({
       proLine: null,
       upgrade: "available",
     });
-    expect(planCardView(active, today, true).paymentNote).toBe(false);
+  });
+
+  it("explains a past-due Carreira Pro instead of offering the upgrade", () => {
+    const plan: CareerPlan = {
+      ...base,
+      aiApply: { allowedBy: null },
+      individual: { plan: "carreira-pro", status: "past_due", currentPeriodEnd: "2026-11-01" },
+    };
+
+    expect(planCardView(plan, today, false)).toMatchObject({
+      proLine: null,
+      pastDueNote,
+      upgrade: "hidden",
+    });
   });
 
   it("polls until Carreira Pro is active", () => {
     const active: CareerPlan = {
       ...base,
-      aiApply: { allowedBy: "individual" },
       individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
     };
 
@@ -144,10 +153,10 @@ describe("plan card view", () => {
       individual: { plan: "carreira-pro", status: "pending", currentPeriodEnd: null },
     };
 
-    expect(isProActive(active)).toBe(true);
-    expect(isProActive(base)).toBe(false);
-    expect(shouldPollPlan(undefined)).toBe(true);
-    expect(shouldPollPlan(pending)).toBe(true);
-    expect(shouldPollPlan(active)).toBe(false);
+    expect(isProActive(active, today)).toBe(true);
+    expect(isProActive(base, today)).toBe(false);
+    expect(shouldPollPlan(undefined, today)).toBe(true);
+    expect(shouldPollPlan(pending, today)).toBe(true);
+    expect(shouldPollPlan(active, today)).toBe(false);
   });
 });

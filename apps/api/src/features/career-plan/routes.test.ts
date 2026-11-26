@@ -215,7 +215,7 @@ describe.skipIf(!url)("career plan route", () => {
       company: { name: null, includesAiApply: false, sponsoredUntil: "2099-12-31" },
       individual: { plan: "carreira-pro", status: "pending", currentPeriodEnd: null },
       aiApply: { allowedBy: null },
-      upgrade: { offered: true, priceCents: 7900, dailyLimit: 10 },
+      upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
 
     await db
@@ -229,6 +229,28 @@ describe.skipIf(!url)("career plan route", () => {
       aiApply: { allowedBy: "individual" },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
+  });
+
+  it("does not offer the upgrade while a checkout is in flight or payment is past due", async () => {
+    const profileId = await profile("2020-01-01");
+
+    await subscribed(profileId, "past_due", "2099-01-01");
+
+    expect(await (await get(profileId)).json()).toMatchObject({ upgrade: { offered: false } });
+
+    await db
+      .update(talentSubscriptions)
+      .set({ status: "pending", updatedAt: new Date() })
+      .where(eq(talentSubscriptions.profileId, profileId));
+
+    expect(await (await get(profileId)).json()).toMatchObject({ upgrade: { offered: false } });
+
+    await db
+      .update(talentSubscriptions)
+      .set({ updatedAt: new Date(Date.now() - 61 * 60_000) })
+      .where(eq(talentSubscriptions.profileId, profileId));
+
+    expect(await (await get(profileId)).json()).toMatchObject({ upgrade: { offered: true } });
   });
 
   it("does not offer the upgrade while billing is not configured", async () => {
@@ -401,6 +423,7 @@ describe.skipIf(!url)("career plan route", () => {
       expect(response.status).toBe(502);
       expect(await response.json()).toEqual({ error: "Could not start the checkout" });
       expect(logged).toHaveBeenCalledWith("Carreira Pro checkout failed", { name: "TypeError" });
+      expect((await checkout(profileId)).status).toBe(200);
     } finally {
       logged.mockRestore();
     }

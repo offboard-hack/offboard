@@ -106,6 +106,20 @@ describe("careerPlanOf", () => {
     });
   });
 
+  it("holds back the upgrade while a checkout is in flight", () => {
+    const offered = (individual: CareerStanding["individual"]) =>
+      careerPlanOf(standing({ company: null, individual }), now).upgrade.offered;
+
+    const recent = new Date(now.getTime() - 30 * 60_000);
+    const old = new Date(now.getTime() - 61 * 60_000);
+
+    expect(offered({ status: "past_due", currentPeriodEnd: null })).toBe(false);
+    expect(offered({ status: "pending", currentPeriodEnd: null, updatedAt: recent })).toBe(false);
+    expect(offered({ status: "pending", currentPeriodEnd: null, updatedAt: old })).toBe(true);
+    expect(offered({ status: "pending", currentPeriodEnd: null })).toBe(true);
+    expect(offered({ status: "canceled", currentPeriodEnd: null })).toBe(true);
+  });
+
   it("names the company first when both grant AI Apply, without offering the upgrade", () => {
     const both = standing({
       sponsoredUntil: "2026-12-01",

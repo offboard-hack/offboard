@@ -9,18 +9,32 @@ export const careerPro = {
   aiDailyLimit: 10,
 } as const;
 
+export const checkoutRetryMs = 60 * 60_000;
+
 const upgradeWindowMs = 30 * 24 * 60 * 60_000;
 
 export type CareerStanding = {
   sponsoredUntil: string;
   company: (CompanyPlan & { name: string }) | null;
-  individual: IndividualPlan | null;
+  individual: (IndividualPlan & { updatedAt?: Date | null }) | null;
 };
 
 export type AllowedBy = "company" | "individual" | null;
 
 function upgradeWindowEnd(today: string) {
   return new Date(Date.parse(`${today}T00:00:00Z`) + upgradeWindowMs).toISOString().slice(0, 10);
+}
+
+export function checkoutInFlight(individual: CareerStanding["individual"], now: Date) {
+  if (individual === null) return false;
+
+  if (individual.status === "past_due") return true;
+
+  return (
+    individual.status === "pending" &&
+    individual.updatedAt instanceof Date &&
+    individual.updatedAt.getTime() > now.getTime() - checkoutRetryMs
+  );
 }
 
 export function careerPlanOf(standing: CareerStanding, now: Date) {
@@ -46,7 +60,10 @@ export function careerPlanOf(standing: CareerStanding, now: Date) {
     },
     aiApply: { allowedBy },
     upgrade: {
-      offered: !individualGrant && (!companyGrant || sponsoredUntil <= upgradeWindowEnd(today)),
+      offered:
+        !individualGrant &&
+        !checkoutInFlight(individual, now) &&
+        (!companyGrant || sponsoredUntil <= upgradeWindowEnd(today)),
       priceCents: careerPro.priceCents,
       dailyLimit: careerPro.aiDailyLimit,
     },

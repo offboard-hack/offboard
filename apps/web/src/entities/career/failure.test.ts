@@ -18,6 +18,9 @@ describe("careerFailure", () => {
     expect(careerFailure(503, { status: 503, value: { error: "Billing not configured" } })).toBe(
       "Indisponível no momento.",
     );
+    expect(careerFailure(409, { status: 409, value: { error: "Already subscribed" } })).toBe(
+      "Você já tem um pagamento em andamento. Tente de novo em alguns minutos.",
+    );
     expect(
       careerFailure(502, { status: 502, value: { error: "Could not start the checkout" } }),
     ).toBe("Não foi possível abrir o pagamento. Tente de novo.");

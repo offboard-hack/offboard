@@ -8,10 +8,8 @@ import {
   talentSubscriptions,
 } from "@offboard/db/schema";
 import { and, desc, eq, isNotNull, lt, or, sql } from "drizzle-orm";
-import { careerPlanOf } from "../../shared/career-pro.js";
+import { careerPlanOf, checkoutRetryMs } from "../../shared/career-pro.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
-
-const checkoutRetryMs = 60 * 60_000;
 
 export function createCareerPlanRepository(db: Database) {
   async function companyOf(orgId: string) {
@@ -34,6 +32,7 @@ export function createCareerPlanRepository(db: Database) {
         individual: {
           status: talentSubscriptions.status,
           currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
+          updatedAt: talentSubscriptions.updatedAt,
         },
       })
       .from(talentProfiles)
@@ -102,7 +101,19 @@ export function createCareerPlanRepository(db: Database) {
     return row ?? null;
   }
 
-  return { plan, allowedBy, individual, startCheckout };
+  async function releaseCheckout(profileId: string) {
+    await db
+      .update(talentSubscriptions)
+      .set({ updatedAt: new Date(0) })
+      .where(
+        and(
+          eq(talentSubscriptions.profileId, profileId),
+          eq(talentSubscriptions.status, "pending"),
+        ),
+      );
+  }
+
+  return { plan, allowedBy, individual, startCheckout, releaseCheckout };
 }
 
 export type CareerPlanRepository = ReturnType<typeof createCareerPlanRepository>;

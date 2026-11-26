@@ -32,12 +32,19 @@ export function planPrice(cents: number) {
   return `R$ ${Number.isInteger(reais) ? reais : reais.toFixed(2).replace(".", ",")}/mês`;
 }
 
-export function isProActive(plan: Pick<CareerPlan, "aiApply">) {
-  return plan.aiApply.allowedBy === "individual";
+export const pastDueNote = "Pagamento do Carreira Pro pendente. Verifique seu método de pagamento.";
+
+export function isProActive(plan: Pick<CareerPlan, "individual">, today: string) {
+  const { individual } = plan;
+
+  return (
+    individual?.status === "active" &&
+    (individual.currentPeriodEnd === null || individual.currentPeriodEnd >= today)
+  );
 }
 
-export function shouldPollPlan(plan: CareerPlan | undefined) {
-  return plan === undefined || !isProActive(plan);
+export function shouldPollPlan(plan: CareerPlan | undefined, today: string) {
+  return plan === undefined || !isProActive(plan, today);
 }
 
 function daysUntil(day: string, today: string) {
@@ -65,11 +72,11 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
     aiApply.allowedBy === "company" &&
     daysUntil(company.sponsoredUntil, today) <= sponsorshipWarningDays;
 
-  const proActive = isProActive(plan);
-  const checkoutOpen = paid || individual?.status === "pending";
+  const proActive = isProActive(plan, today);
+  const pastDue = individual?.status === "past_due";
 
   const wantsUpgrade =
-    !proActive && !checkoutOpen && (aiApply.allowedBy === null || sponsorshipEnding);
+    !proActive && !paid && !pastDue && (aiApply.allowedBy === null || sponsorshipEnding);
 
   return {
     companyPlan: company.name ?? "Sua empresa não tem plano",
@@ -79,7 +86,8 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
         ? null
         : `Patrocinado pela empresa até ${planDate(company.sponsoredUntil)}`,
     paymentNote: paid && !proActive,
-    proLine: proLabel(individual, isProActive(plan)),
+    pastDueNote: pastDue ? pastDueNote : null,
+    proLine: proLabel(individual, proActive),
     upgrade: upgradeState(wantsUpgrade, upgrade.offered),
     upgradeLabel: `Fazer upgrade · ${planPrice(upgrade.priceCents)}`,
   };

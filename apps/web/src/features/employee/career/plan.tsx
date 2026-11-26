@@ -30,7 +30,7 @@ export function PlanSection({ account, paid }: { account: EmployeeAccount; paid:
   const plan = useQuery({
     ...careerPlanQuery(account),
     refetchInterval: (query) =>
-      paid && Date.now() - openedAt < planPollTimeout && shouldPollPlan(query.state.data)
+      paid && Date.now() - openedAt < planPollTimeout && shouldPollPlan(query.state.data, today)
         ? planPollInterval
         : false,
   });
@@ -85,6 +85,7 @@ export function PlanCard({
           {paymentReceivedNote}
         </p>
       ) : null}
+      {view.pastDueNote ? <p className="text-sm text-destructive">{view.pastDueNote}</p> : null}
       {view.upgrade === "available" ? (
         <div>
           <Button onClick={onUpgrade} disabled={upgrading}>
