@@ -10,16 +10,17 @@ import Package01Icon from "@hugeicons/core-free-icons/Package01Icon";
 import UserCircleIcon from "@hugeicons/core-free-icons/UserCircleIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { employeeDate } from "@offboard/employee";
-import { applicationCounts } from "@offboard/employee/career";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, type ErrorComponentProps } from "@tanstack/react-router";
 import { useCallback, type ReactNode } from "react";
+import { applicationsSummaryQuery } from "@/entities/career";
 import {
   type EmployeeAccount,
   employeeJourneyQuery,
   employeeStateQuery,
 } from "@/entities/employee";
-import { Career, ResumePage, ResumePreview } from "@/features/employee/career";
+import { Career } from "@/features/employee/career";
+import { ResumeCareer } from "@/features/employee/career/resume";
 import {
   DepartureOverview,
   EmployeeChecklist,
@@ -71,7 +72,6 @@ const titles = {
   exame: "Exame demissional",
   rescisao: "Termo de rescisão",
   feedback: "Avaliar minha saída",
-  previa: "Prévia do currículo",
 } satisfies Record<EmployeeScreen, string>;
 
 const navigation = [
@@ -99,8 +99,6 @@ function parentScreen(screen: EmployeeScreen) {
     case "rescisao":
     case "feedback":
       return "saida";
-    case "previa":
-      return "curriculo";
     case "privacidade":
       return "perfil";
     default:
@@ -399,31 +397,30 @@ function DepartureContent({
 
 function CareerContent({ account, screen }: { account: EmployeeAccount; screen: EmployeeScreen }) {
   const { carreira } = route.useSearch();
-  const { data: journey } = useSuspenseQuery(employeeJourneyQuery(account));
-  const { data: state } = useSuspenseQuery(employeeStateQuery(account, "career"));
+  const tracking = screen === "carreira" && carreira === "candidaturas";
+  const { data: summary } = useQuery({ ...applicationsSummaryQuery(account), enabled: tracking });
 
-  if (state.key !== "career") throw new Error("Não foi possível abrir sua carreira.");
-
-  const counts = applicationCounts(state.value.applications);
-
-  const metrics: ListMetric[] = [
-    { label: "Candidaturas", icon: Briefcase01Icon, tone: "primary", value: counts.all },
-    { label: "Respostas", icon: Mail01Icon, tone: "primary", value: counts.replied },
-    { label: "Entrevistas", icon: Calendar01Icon, tone: "primary", value: counts.interviews },
-    { label: "Ofertas", icon: Contact01Icon, tone: "success", value: counts.offers },
-  ];
+  const metrics: ListMetric[] | undefined =
+    tracking && summary
+      ? [
+          { label: "Enviadas", icon: Briefcase01Icon, tone: "primary", value: summary.sent },
+          { label: "Respostas", icon: Mail01Icon, tone: "primary", value: summary.responded },
+          {
+            label: "Entrevistas",
+            icon: Calendar01Icon,
+            tone: "primary",
+            value: summary.interviews,
+          },
+          { label: "Ofertas", icon: Contact01Icon, tone: "success", value: summary.offers },
+        ]
+      : undefined;
 
   return (
-    <EmployeeScreenPage
-      screen={screen}
-      metrics={screen === "carreira" && carreira === "candidaturas" ? metrics : undefined}
-    >
-      {screen === "previa" ? (
-        <ResumePreview state={state} />
-      ) : screen === "curriculo" ? (
-        <ResumePage account={account} state={state} />
+    <EmployeeScreenPage screen={screen} metrics={metrics}>
+      {screen === "curriculo" ? (
+        <ResumeCareer account={account} />
       ) : (
-        <Career account={account} state={state} jobs={journey.plan.jobs} view={carreira} />
+        <Career account={account} view={carreira} />
       )}
     </EmployeeScreenPage>
   );

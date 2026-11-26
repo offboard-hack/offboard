@@ -3,14 +3,17 @@ import { createClient } from "@offboard/db/client";
 import {
   type ResumeContent,
   defaultOrgId,
+  employeeAccess,
   jobMatches,
   jobRejections,
   jobs,
   offboardingCases,
   resumes,
   talentPreferences,
+  talentProfiles,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
+import { emptyEmployeePlan } from "@offboard/employee";
 import { asc, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -264,7 +267,7 @@ describe.skipIf(!url)("matches repository", () => {
     await repos.talent.acceptTerms(otherProfileId);
 
     expect(await repository.profilesForMatching(lastDay)).toEqual([
-      { profileId: otherProfileId, orgId: defaultOrgId },
+      { profileId: otherProfileId, orgId: defaultOrgId, collaborator: false },
     ]);
     expect(await repository.profilesForMatching(lapsed)).toEqual([]);
 
@@ -272,8 +275,34 @@ describe.skipIf(!url)("matches repository", () => {
     await db.delete(resumes).where(eq(resumes.profileId, otherProfileId));
 
     expect(await repository.profilesForMatching(lastDay)).toEqual([
-      { profileId, orgId: defaultOrgId },
+      { profileId, orgId: defaultOrgId, collaborator: false },
     ]);
+  });
+
+  it("keeps matching collaborators whose case still has a grant", async () => {
+    const lapsed = new Date("2027-01-01T03:00:00.000Z");
+
+    const [profile] = await db
+      .select()
+      .from(talentProfiles)
+      .where(eq(talentProfiles.id, profileId));
+
+    await base(profileId);
+    await repos.talent.acceptTerms(profileId);
+    await db.insert(employeeAccess).values({
+      caseId: profile.caseId ?? "",
+      orgId: defaultOrgId,
+      email: "colaboradora@exemplo.com",
+      plan: emptyEmployeePlan,
+    });
+
+    expect(await repository.profilesForMatching(lapsed)).toEqual([
+      { profileId, orgId: defaultOrgId, collaborator: true },
+    ]);
+
+    await db.update(employeeAccess).set({ email: null });
+
+    expect(await repository.profilesForMatching(lapsed)).toEqual([]);
   });
 
   it("reads the target titles with defaults", async () => {

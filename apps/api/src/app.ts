@@ -41,6 +41,7 @@ import { createBrowserbase } from "./features/ai-apply/browser/browserbase.js";
 import { openPage } from "./features/ai-apply/browser/cdp.js";
 import { runAiApplication, type RunnerDeps } from "./features/ai-apply/runner.js";
 import { packageRoutes } from "./features/preferences/package-routes.js";
+import { createPreferencesRepository } from "./features/preferences/repository.js";
 import { preferencesRoutes } from "./features/preferences/routes.js";
 import type { TrackingConfig } from "./features/offboardings/correios.js";
 import { teamRoutes } from "./features/team/routes.js";
@@ -53,6 +54,7 @@ import { renderResumePdf } from "./shared/resume-pdf.js";
 
 const matchCandidates = 30;
 const matchBatch = 10;
+const aiApplyBudgetMs = 210_000;
 
 type AppOptions = {
   adapter?: NonNullable<ConstructorParameters<typeof Elysia>[0]>["adapter"];
@@ -72,7 +74,6 @@ type AppOptions = {
   storage?: ObjectStorage;
   runInBackground?: (task: () => Promise<void>) => void;
   publicPageOrigin?: string;
-  aiApplyAllowlist?: string[];
   browserbase?: { apiKey: string; projectId: string };
 };
 
@@ -134,7 +135,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
   const runner = {
     repo: repos.aiApply,
-    allowlist: options.aiApplyAllowlist ?? [],
+    companyPlan: repos.billing.companyPlan,
     browserbase: options.browserbase && createBrowserbase(fetchBrowser, options.browserbase),
     openPage: (connectUrl: string) => openPage(fetchBrowser, connectUrl),
     storage: options.storage,
@@ -254,7 +255,10 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
   async function matchNewJob() {
     const profiles = await repos.matches.profilesForMatching(new Date());
-    const sponsors = [...new Set(profiles.map((profile) => profile.orgId))];
+
+    const sponsors = [
+      ...new Set(profiles.flatMap((profile) => (profile.collaborator ? [] : [profile.orgId]))),
+    ];
 
     const active = new Set(
       (
@@ -266,7 +270,9 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
     await repos.background.enqueueMany(
       "compute_matches",
-      profiles.filter((profile) => active.has(profile.orgId)).map((profile) => profile.profileId),
+      profiles
+        .filter((profile) => profile.collaborator || active.has(profile.orgId))
+        .map((profile) => profile.profileId),
     );
   }
 
@@ -335,7 +341,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         talent,
         (profile) => options.sendEmail(welcomeEmail(profile, webOrigin)),
         {
-          allowlist: options.aiApplyAllowlist ?? [],
+          companyPlan: repos.billing.companyPlan,
           configured: options.generateStructured !== undefined && options.browserbase !== undefined,
         },
       ),
@@ -378,7 +384,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     )
     .use(
       aiApplyRoutes(repos.aiApply, talent, {
-        allowlist: options.aiApplyAllowlist ?? [],
+        companyPlan: repos.billing.companyPlan,
         generate: options.generateStructured,
         runnerConfigured: options.browserbase !== undefined,
         takeLlmCall: repos.llmUsage.takeLlmCall,
@@ -390,6 +396,21 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
               : [{ question: item.text, answer: item.answer, sensitive: item.sensitive }],
           ),
         enqueueRun: (attemptId) => repos.background.enqueue("ai_apply", attemptId),
+        runNow: async (attemptId) => {
+          const target = { kind: "ai_apply", subject: attemptId };
+
+          if (!(await repos.background.scheduled(target))) {
+            await repos.background.enqueue(target.kind, target.subject);
+          }
+
+          const drained = await drain(repos.background, handlers, {
+            limit: 1,
+            budgetMs: aiApplyBudgetMs,
+            target,
+          });
+
+          return drained.processed + drained.failed > 0;
+        },
         storage: options.storage,
         saveAnswer: async (tx, profileId, label, text, { sensitive }, now) => {
           const answers = createAnswersRepository(tx);
@@ -397,12 +418,14 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
           await answers.answer(profileId, questionId, text, now);
         },
+        saveProfile: (tx, profileId, values, now) =>
+          createPreferencesRepository(tx).fillUnset(profileId, values, now),
       }),
     )
     .use(
       backgroundRoutes(repos.background, handlers, options.cronSecret, {
         beforeDrain,
-        isolated: { kind: "ai_apply", budgetMs: 210_000 },
+        isolated: { kind: "ai_apply", budgetMs: aiApplyBudgetMs },
       }),
     )
     .use(accountRoutes(repos.account, talent, options.storage))

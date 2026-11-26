@@ -131,6 +131,7 @@ export type AttemptEvidence = {
   fields: { question: string; value: string | string[] | null }[];
   files: string[];
   finalUrl: string | null;
+  failedField?: string;
 };
 
 export type ConfigValue =
@@ -1016,6 +1017,7 @@ export const aiApplications = pgTable(
     resumeId: uuid("resume_id").references(() => resumes.id, { onDelete: "set null" }),
     evidence: jsonb("evidence").$type<AttemptEvidence>(),
     screenshotKey: varchar("screenshot_key", { length: 512 }),
+    liveUrl: varchar("live_url", { length: 2048 }),
     preparedAt: timestamp("prepared_at").notNull(),
     confirmedAt: timestamp("confirmed_at"),
     finishedAt: timestamp("finished_at"),

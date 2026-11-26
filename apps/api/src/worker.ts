@@ -5,8 +5,8 @@ import { createApp } from "./app.js";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
 import { emailProvider, type CloudflareEmailBinding } from "./features/auth/email.js";
-import { browserbaseConfig, parseAllowlist } from "./shared/ai-apply-access.js";
-import { createGenerateStructured, gatewayModel } from "./shared/ai.js";
+import { browserbaseConfig } from "./shared/ai-apply-access.js";
+import { createGenerateStructured, resolveModel } from "./shared/ai.js";
 import { r2Storage, type R2BucketLike } from "./shared/object-storage.js";
 import { createRepositories } from "./repositories.js";
 
@@ -23,7 +23,7 @@ const runtimeConfig = z.object({
   ABACATEPAY_API_KEY: z.string().min(1).optional(),
   ABACATEPAY_WEBHOOK_SECRET: z.string().min(1).optional(),
   AI_GATEWAY_API_KEY: z.string().min(1).optional(),
-  AI_APPLY_ALLOWLIST: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
   BROWSERBASE_API_KEY: z.string().min(1).optional(),
   BROWSERBASE_PROJECT_ID: z.string().min(1).optional(),
   PUBLIC_PAGE_ORIGIN: z.string().min(1).optional(),
@@ -70,7 +70,10 @@ export function createWorkerApi(
     deferMagicLinkDelivery: waitUntil,
   });
 
-  const aiKey = config.data.AI_GATEWAY_API_KEY;
+  const aiModel = resolveModel({
+    gatewayKey: config.data.AI_GATEWAY_API_KEY,
+    anthropicKey: config.data.ANTHROPIC_API_KEY,
+  });
 
   const app = createApp(origin, repos, {
     adapter: CloudflareAdapter,
@@ -87,10 +90,9 @@ export function createWorkerApi(
     slackSigningSecret: config.data.SLACK_SIGNING_SECRET,
     abacatepay: createAbacatePayGateway(config.data.ABACATEPAY_API_KEY),
     abacatepayWebhookSecret: config.data.ABACATEPAY_WEBHOOK_SECRET,
-    generateStructured: aiKey ? createGenerateStructured(gatewayModel(aiKey)) : undefined,
+    generateStructured: aiModel ? createGenerateStructured(aiModel) : undefined,
     storage: bindings.RESUMES && r2Storage(bindings.RESUMES),
     publicPageOrigin: config.data.PUBLIC_PAGE_ORIGIN,
-    aiApplyAllowlist: parseAllowlist(config.data.AI_APPLY_ALLOWLIST),
     browserbase: browserbaseConfig(
       config.data.BROWSERBASE_API_KEY,
       config.data.BROWSERBASE_PROJECT_ID,

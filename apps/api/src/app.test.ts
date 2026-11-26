@@ -1,4 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
+import { EventEmitter, once } from "node:events";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -61,6 +62,7 @@ import type { ObjectStorage } from "./shared/object-storage.js";
 import { zipSync } from "fflate";
 import { PDFArray, PDFDocument, PDFRawStream, decodePDFRawStream } from "pdf-lib";
 import type { PortalAuth } from "./shared/portal-auth.js";
+import { saoPauloDate } from "./shared/sao-paulo-date.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const webOrigin = "http://localhost:5173";
@@ -290,6 +292,18 @@ describe.skipIf(!url)("api", () => {
     await seedDatabase(db, testSeedFixtures);
   });
 
+  async function onPlan(
+    slug: string,
+    status: (typeof subscriptions.$inferInsert)["status"] = "active",
+  ) {
+    const [plan] = await db.select({ id: plans.id }).from(plans).where(eq(plans.slug, slug));
+
+    await db
+      .update(subscriptions)
+      .set({ planId: plan.id, status })
+      .where(eq(subscriptions.orgId, defaultOrgId));
+  }
+
   describe("talent access", () => {
     const personalEmail = "ana.pessoal@example.com";
     const sponsoredUntil = "2099-12-31";
@@ -341,6 +355,38 @@ describe.skipIf(!url)("api", () => {
 
       expect(read.status).toBe(200);
       expect(await read.json()).toEqual({ personalEmail, sponsoredUntil, signedIn: false });
+    });
+
+    it("enables talent access without inviting a person who signs in as a collaborator", async () => {
+      const cases: { id: string }[] = await (await call("/offboardings")).json();
+      const [first, second] = cases;
+      const body = { sponsoredUntil };
+
+      await db.insert(employeeAccess).values([
+        {
+          caseId: first.id,
+          orgId: defaultOrgId,
+          email: "bia@example.com",
+          plan: emptyEmployeePlan,
+        },
+        { caseId: second.id, orgId: defaultOrgId, email: null, plan: emptyEmployeePlan },
+      ]);
+
+      const granted = await asSession("rh", `/offboardings/${first.id}/talent-access`, "POST", {
+        ...body,
+        personalEmail,
+      });
+
+      expect(granted.status).toBe(201);
+      expect(invitedEmails).toEqual([]);
+
+      const revoked = await asSession("rh", `/offboardings/${second.id}/talent-access`, "POST", {
+        ...body,
+        personalEmail: "outra@example.com",
+      });
+
+      expect(revoked.status).toBe(201);
+      expect(invitedEmails).toEqual(["outra@example.com"]);
     });
 
     it("rejects a duplicate personal email and invalid input without inviting", async () => {
@@ -703,7 +749,7 @@ describe.skipIf(!url)("api", () => {
         email: personalEmail,
         termsAccepted: false,
         shareOutcomeWithHr: false,
-        aiApply: { consented: false, available: false },
+        aiApply: { eligible: false, consented: false, available: false },
         entitlement: { kind: "sponsored", until: sponsoredUntil },
       });
 
@@ -854,16 +900,16 @@ describe.skipIf(!url)("api", () => {
       const mine = await enable(firstCase.id, personalEmail);
       const other = await enable(secondCase.id, "outra@example.com");
 
+      await onPlan("platinum-premium");
+
       const gated = createApp(webOrigin, repos, {
         ...appOptions,
-        aiApplyAllowlist: ["ANA.PESSOAL@example.com", "outra@example.com"],
         generateStructured: async ({ schema }) => schema.parse({}),
         browserbase,
       });
 
       const withoutBrowser = createApp(webOrigin, repos, {
         ...appOptions,
-        aiApplyAllowlist: ["ANA.PESSOAL@example.com"],
         generateStructured: async ({ schema }) => schema.parse({}),
       });
 
@@ -926,6 +972,7 @@ describe.skipIf(!url)("api", () => {
             state: aiApplications.state,
             reason: aiApplications.reason,
             finishedAt: aiApplications.finishedAt,
+            liveUrl: aiApplications.liveUrl,
           })
           .from(aiApplications)
           .where(eq(aiApplications.id, id));
@@ -952,7 +999,7 @@ describe.skipIf(!url)("api", () => {
       expect((await put(gated, "talent", mine.id, "yes")).status).toBe(422);
 
       expect(await (await call(gated, "talent", "/me", "GET", mine.id)).json()).toMatchObject({
-        aiApply: { consented: false, available: false },
+        aiApply: { eligible: true, consented: false, available: false },
       });
 
       const accepted = await put(gated, "talent", mine.id, true);
@@ -960,21 +1007,29 @@ describe.skipIf(!url)("api", () => {
       expect(accepted.status).toBe(200);
       expect(await accepted.json()).toMatchObject({
         id: mine.id,
-        aiApply: { consented: true, available: true },
+        aiApply: { eligible: true, consented: true, available: true },
       });
 
       expect(
         await (await call(withoutBrowser, "talent", "/me", "GET", mine.id)).json(),
       ).toMatchObject({
-        aiApply: { consented: true, available: false },
+        aiApply: { eligible: true, consented: true, available: false },
       });
+
+      await onPlan("gold");
+
+      expect(await (await call(gated, "talent", "/me", "GET", mine.id)).json()).toMatchObject({
+        aiApply: { eligible: false, consented: true, available: false },
+      });
+
+      await onPlan("platinum-premium");
 
       const stored = await consentOf(mine.id);
 
       expect(stored.at).toBeInstanceOf(Date);
       expect(stored.version).toBe("2026-11-25");
       expect(await (await call(app, "talent", "/me", "GET", mine.id)).json()).toMatchObject({
-        aiApply: { consented: true, available: false },
+        aiApply: { eligible: true, consented: true, available: false },
       });
 
       const draft = await seedAttempt(mine.id, "ai-draft", "draft");
@@ -982,6 +1037,11 @@ describe.skipIf(!url)("api", () => {
       const running = await seedAttempt(mine.id, "ai-running", "running");
       const submitted = await seedAttempt(mine.id, "ai-submitted", "submitted");
       const others = await seedAttempt(other.id, "ai-other", "draft");
+
+      await db
+        .update(aiApplications)
+        .set({ liveUrl: "https://www.browserbase.com/devtools-fullscreen/inspector.html" })
+        .where(eq(aiApplications.id, running));
 
       await put(gated, "talent", other.id, true);
 
@@ -1001,7 +1061,7 @@ describe.skipIf(!url)("api", () => {
       const withdrawn = await put(gated, "talent", mine.id, false);
 
       expect(await withdrawn.json()).toMatchObject({
-        aiApply: { consented: false, available: false },
+        aiApply: { eligible: true, consented: false, available: false },
       });
       expect(await consentOf(mine.id)).toEqual({ at: null, version: null });
 
@@ -1010,6 +1070,7 @@ describe.skipIf(!url)("api", () => {
           state: "cancelled",
           reason: "consent_withdrawn",
           finishedAt: expect.any(Date),
+          liveUrl: null,
         });
       }
 
@@ -1017,8 +1078,14 @@ describe.skipIf(!url)("api", () => {
         state: "submitted",
         reason: null,
         finishedAt: null,
+        liveUrl: null,
       });
-      expect(await stateOf(others)).toEqual({ state: "draft", reason: null, finishedAt: null });
+      expect(await stateOf(others)).toEqual({
+        state: "draft",
+        reason: null,
+        finishedAt: null,
+        liveUrl: null,
+      });
       expect((await consentOf(other.id)).at).toBeInstanceOf(Date);
 
       await put(gated, "talent", mine.id, true);
@@ -1084,9 +1151,10 @@ describe.skipIf(!url)("api", () => {
 
       const urls: string[] = [];
 
+      await onPlan("platinum-premium");
+
       const instance = createApp(webOrigin, repos, {
         ...appOptions,
-        aiApplyAllowlist: [personalEmail],
         browserbase,
         generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
         fetchGreenhouseImpl: async (input) => {
@@ -1099,6 +1167,11 @@ describe.skipIf(!url)("api", () => {
                   label: common.text,
                   required: false,
                   fields: [{ name: "question_1", type: "input_text", values: [] }],
+                },
+                {
+                  label: "Telefone",
+                  required: true,
+                  fields: [{ name: "phone", type: "input_text", values: [] }],
                 },
               ],
             }),
@@ -1131,6 +1204,13 @@ describe.skipIf(!url)("api", () => {
           inferred: false,
           status: "filled",
         },
+        {
+          questionId: "phone",
+          value: null,
+          source: null,
+          inferred: false,
+          status: "blank",
+        },
       ]);
 
       const confirmed = await instance.handle(
@@ -1143,7 +1223,10 @@ describe.skipIf(!url)("api", () => {
             "content-type": "application/json",
           },
           body: JSON.stringify({
-            answers: [{ questionId: "question_1", value: "Resposta final" }],
+            answers: [
+              { questionId: "question_1", value: "Resposta final" },
+              { questionId: "phone", value: "11 99999-8888" },
+            ],
           }),
         }),
       );
@@ -1153,6 +1236,22 @@ describe.skipIf(!url)("api", () => {
         (await repos.answers.library(created.id)).questions.find((item) => item.id === common.id)
           ?.answer,
       ).toBe("Resposta final");
+      expect((await repos.preferences.get(created.id)).profileFields.phone).toEqual({
+        value: "11 99999-8888",
+        share: true,
+      });
+
+      const [saved] = await db
+        .select({ updatedAt: talentPreferences.updatedAt })
+        .from(talentPreferences)
+        .where(eq(talentPreferences.profileId, created.id));
+
+      const [row] = await db
+        .select({ confirmedAt: aiApplications.confirmedAt })
+        .from(aiApplications)
+        .where(eq(aiApplications.id, attempt.id));
+
+      expect(saved.updatedAt).toEqual(row.confirmedAt);
     });
 
     it("runs a confirmed AI application from the scheduled drain", async () => {
@@ -1205,9 +1304,10 @@ describe.skipIf(!url)("api", () => {
       const browser: string[] = [];
       const logged = vi.spyOn(console, "error");
 
+      await onPlan("platinum-premium");
+
       const instance = createApp(webOrigin, repos, {
         ...appOptions,
-        aiApplyAllowlist: [personalEmail],
         browserbase,
         generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
         fetchGreenhouseImpl: async () =>
@@ -1277,14 +1377,298 @@ describe.skipIf(!url)("api", () => {
       ).toMatchObject({ state: "assisted", reason: "error" });
       expect(browser).toEqual([
         "POST https://api.browserbase.com/v1/sessions",
+        "GET https://api.browserbase.com/v1/sessions/s1/debug",
         "GET https://connect.test/s1",
         "POST https://api.browserbase.com/v1/sessions/s1",
       ]);
+      expect(logged).toHaveBeenCalledWith("Browserbase live view failed", { name: "SyntaxError" });
       expect(logged).toHaveBeenCalledWith("AI application run failed", {
         name: "CdpError",
         message: "no websocket",
       });
       logged.mockRestore();
+    });
+
+    describe("running an AI application now", () => {
+      const live =
+        "https://www.browserbase.com/devtools-fullscreen/inspector.html?wss=connect.test/s1";
+
+      async function confirmedAttempt(
+        fetchBrowserImpl: (input: string | URL | Request, init?: RequestInit) => Promise<Response>,
+      ) {
+        const [firstCase] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
+
+        const created = z.object({ id: z.uuid() }).parse(
+          await repos.talent.enable({
+            orgId: defaultOrgId,
+            caseId: firstCase.id,
+            personalEmail,
+            sponsoredUntil,
+          }),
+        );
+
+        await repos.talent.acceptTerms(created.id);
+        await repos.talent.setAiApplyConsent(created.id, true, new Date());
+
+        await db.insert(resumes).values({
+          profileId: created.id,
+          kind: "base",
+          content: {
+            headline: { id: "h", text: "Engenheira" },
+            summary: { id: "s", text: "Backend" },
+            experiences: [],
+            education: [],
+            skills: [],
+            languages: [],
+            contact: { email: null, phone: null, city: null, links: [] },
+          },
+          updatedAt: new Date(Date.now() - 60_000),
+        });
+
+        const [job] = await db
+          .insert(jobs)
+          .values({
+            origin: "external",
+            source: "greenhouse",
+            sourceKey: "acme:42",
+            title: "Backend",
+            company: "Acme",
+            url: "https://job-boards.greenhouse.io/acme/jobs/42",
+          })
+          .returning({ id: jobs.id });
+
+        await onPlan("platinum-premium");
+
+        const instance = createApp(webOrigin, repos, {
+          ...appOptions,
+          browserbase,
+          generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
+          fetchGreenhouseImpl: async () =>
+            new Response(
+              JSON.stringify({
+                questions: [
+                  {
+                    label: "Por que a Acme?",
+                    required: true,
+                    fields: [{ name: "question_1", type: "input_text", values: [] }],
+                  },
+                ],
+              }),
+            ),
+          fetchBrowserImpl,
+        });
+
+        const headers = {
+          "x-test-session": "talent",
+          "x-test-talent-id": created.id,
+          origin: webOrigin,
+          "content-type": "application/json",
+        };
+
+        const prepared = await instance.handle(
+          new Request(`http://localhost/api/me/jobs/${job.id}/ai-apply`, {
+            method: "POST",
+            headers,
+          }),
+        );
+
+        const { attempt } = await prepared.json();
+
+        const confirmed = await instance.handle(
+          new Request(`http://localhost/api/me/ai-applications/${attempt.id}/confirm`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              answers: [{ questionId: "question_1", value: "Pagamentos" }],
+              rehearsal: true,
+            }),
+          }),
+        );
+
+        expect(confirmed.status).toBe(200);
+
+        const id = z.uuid().parse(attempt.id);
+
+        const call = (path: string, method = "GET", talentId = created.id) =>
+          instance.handle(
+            new Request(`http://localhost/api${path}`, {
+              method,
+              headers: { ...headers, "x-test-talent-id": talentId },
+            }),
+          );
+
+        return { instance, id, call, run: () => call(`/me/ai-applications/${id}/run`, "POST") };
+      }
+
+      const jobsOf = async (id: string) =>
+        (await db.select().from(backgroundJobs).where(eq(backgroundJobs.subject, id))).map(
+          (row) => row.status,
+        );
+
+      it("runs the attempt in the request and shows the live view only while running", async () => {
+        const browser: string[] = [];
+        const seen: { state: string; liveUrl: string | null }[] = [];
+        const logged = vi.spyOn(console, "error");
+        const [, otherCase] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
+
+        const other = z.object({ id: z.uuid() }).parse(
+          await repos.talent.enable({
+            orgId: defaultOrgId,
+            caseId: otherCase.id,
+            personalEmail: "outra.pessoa@example.com",
+            sponsoredUntil,
+          }),
+        );
+
+        await repos.talent.acceptTerms(other.id);
+
+        const theirs: number[] = [];
+
+        const setup = await confirmedAttempt(async (input, init) => {
+          const target = String(input);
+
+          browser.push(`${init?.method ?? "GET"} ${target}`);
+
+          if (target === "https://api.browserbase.com/v1/sessions") {
+            return Response.json({ id: "s1", connectUrl: "wss://connect.test/s1" });
+          }
+
+          if (target.endsWith("/sessions/s1/debug")) {
+            return Response.json({ debuggerFullscreenUrl: live, wsUrl: "wss://connect.test/s1" });
+          }
+
+          if (target === "https://connect.test/s1") {
+            const mine = await setup.call(`/me/ai-applications/${setup.id}`);
+            seen.push(await mine.json());
+            theirs.push(
+              (await setup.call(`/me/ai-applications/${setup.id}`, "GET", other.id)).status,
+            );
+          }
+
+          return new Response(null);
+        });
+
+        await db.delete(backgroundJobs);
+
+        const response = await setup.run();
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          id: setup.id,
+          state: "assisted",
+          reason: "error",
+          liveUrl: null,
+        });
+        expect(seen).toMatchObject([{ state: "running", liveUrl: `${live}&navbar=false` }]);
+        expect(theirs).toEqual([404]);
+        expect(browser).toEqual([
+          "POST https://api.browserbase.com/v1/sessions",
+          "GET https://api.browserbase.com/v1/sessions/s1/debug",
+          "GET https://connect.test/s1",
+          "POST https://api.browserbase.com/v1/sessions/s1",
+        ]);
+        expect(await jobsOf(setup.id)).toEqual(["done"]);
+        expect(
+          (await db.select().from(aiApplications).where(eq(aiApplications.id, setup.id)))[0],
+        ).toMatchObject({ state: "assisted", liveUrl: null });
+        expect(JSON.stringify(logged.mock.calls)).not.toContain("browserbase.com/devtools");
+        logged.mockRestore();
+      });
+
+      it("runs once when the cron got there first", async () => {
+        const browser: string[] = [];
+        const signals = new EventEmitter();
+        const atSession = once(signals, "session");
+
+        const logged = vi.spyOn(console, "error");
+
+        const setup = await confirmedAttempt(async (input, init) => {
+          const target = String(input);
+
+          browser.push(`${init?.method ?? "GET"} ${target}`);
+
+          if (target === "https://api.browserbase.com/v1/sessions") {
+            signals.emit("session");
+            await once(signals, "proceed");
+
+            return Response.json({ id: "s1", connectUrl: "wss://connect.test/s1" });
+          }
+
+          return new Response(null);
+        });
+
+        const cron = setup.instance.handle(
+          new Request("http://localhost/api/background/drain", {
+            method: "POST",
+            headers: { authorization: `Bearer ${cronSecret}` },
+          }),
+        );
+
+        await atSession;
+
+        const response = await setup.run();
+
+        expect(response.status).toBe(202);
+        expect(await response.json()).toMatchObject({ id: setup.id, state: "running" });
+
+        signals.emit("proceed");
+
+        expect(await (await cron).json()).toEqual({ processed: 1, failed: 0 });
+        expect(
+          browser.filter((call) => call === "POST https://api.browserbase.com/v1/sessions"),
+        ).toHaveLength(1);
+        expect(await jobsOf(setup.id)).toEqual(["done"]);
+        expect(logged).toHaveBeenCalledWith("AI application run failed", {
+          name: "CdpError",
+          message: "no websocket",
+        });
+        logged.mockRestore();
+      });
+
+      it("leaves a job the cron already claimed to the cron", async () => {
+        const browser: string[] = [];
+
+        const setup = await confirmedAttempt(async (input) => {
+          browser.push(String(input));
+
+          return new Response(null);
+        });
+
+        expect(
+          await repos.background.claim(1, new Date(), {
+            target: { kind: "ai_apply", subject: setup.id },
+          }),
+        ).toHaveLength(1);
+
+        const response = await setup.run();
+
+        expect(response.status).toBe(202);
+        expect(await response.json()).toMatchObject({ id: setup.id, state: "queued" });
+        expect(browser).toEqual([]);
+        expect(await jobsOf(setup.id)).toEqual(["running"]);
+      });
+
+      it("answers 202 when the job waits for a later retry", async () => {
+        const browser: string[] = [];
+
+        const setup = await confirmedAttempt(async (input) => {
+          browser.push(String(input));
+
+          return new Response(null);
+        });
+
+        await db
+          .update(backgroundJobs)
+          .set({ runAfter: new Date(Date.now() + 5 * 60_000) })
+          .where(eq(backgroundJobs.subject, setup.id));
+
+        const response = await setup.run();
+
+        expect(response.status).toBe(202);
+        expect(await response.json()).toMatchObject({ state: "queued" });
+        expect(browser).toEqual([]);
+        expect(await jobsOf(setup.id)).toEqual(["pending"]);
+      });
     });
 
     it("answers 500 without data and rolls back every library save when a confirm fails", async () => {
@@ -1340,9 +1724,10 @@ describe.skipIf(!url)("api", () => {
         fields: [{ name, type: "input_text", values: [] }],
       });
 
+      await onPlan("platinum-premium");
+
       const instance = createApp(webOrigin, repos, {
         ...appOptions,
-        aiApplyAllowlist: [personalEmail],
         browserbase,
         generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
         fetchGreenhouseImpl: async () =>
@@ -1575,7 +1960,12 @@ describe.skipIf(!url)("api", () => {
         expect(listed.status).toBe(200);
         expect(body).toMatchObject({ page: 1, pageSize: 20, total: 2 });
         expect(body.items.map((item: { title: string }) => item.title)).toEqual(["A", "B"]);
-        expect(body.items[0]).toMatchObject({ match: null, applied: false });
+        expect(body.items[0]).toMatchObject({
+          match: null,
+          applied: false,
+          aiApplyCapable: false,
+          description: "",
+        });
 
         const remote = await asSession(
           "talent",
@@ -1760,7 +2150,7 @@ describe.skipIf(!url)("api", () => {
         const listed = await (await send(headers, "/me/applications")).json();
 
         expect(listed).toHaveLength(1);
-        expect(listed[0]).toMatchObject({ status: "sent", closedReason: null });
+        expect(listed[0]).toMatchObject({ status: "sent", closedReason: null, channel: "manual" });
       });
 
       it("refuses a manual application while an AI submission awaits its check", async () => {
@@ -2241,6 +2631,45 @@ describe.skipIf(!url)("api", () => {
             status: "canceled",
           });
           await expectHidden("ana-dev");
+        });
+
+        it("keeps a collaborator's page public without sponsorship or subscription", async () => {
+          const headers = await publicProfile();
+          const profileId = headers["x-test-talent-id"];
+
+          await publish(headers, "ana-dev");
+
+          const [profile] = await db
+            .update(talentProfiles)
+            .set({ sponsoredUntil: "2000-01-01" })
+            .where(eq(talentProfiles.id, profileId))
+            .returning({ caseId: talentProfiles.caseId });
+
+          const subscription = await repos.billing.getSubscription(defaultOrgId);
+
+          if (!subscription?.id || !profile.caseId) throw new Error("missing fixtures");
+
+          await repos.billing.updateSubscription(defaultOrgId, subscription.id, {
+            status: "canceled",
+          });
+
+          expect((await visit("/public/pages/ana-dev")).status).toBe(404);
+
+          await db.insert(employeeAccess).values({
+            caseId: profile.caseId,
+            orgId: defaultOrgId,
+            email: `colaboradora-${randomUUID()}@example.com`,
+            plan: emptyEmployeePlan,
+          });
+
+          expect((await visit("/public/pages/ana-dev")).status).toBe(200);
+
+          await db
+            .update(employeeAccess)
+            .set({ email: null })
+            .where(eq(employeeAccess.caseId, profile.caseId));
+
+          expect((await visit("/public/pages/ana-dev")).status).toBe(404);
         });
 
         it("links applications to the page and counts recruiter visits", async () => {
@@ -6261,6 +6690,32 @@ describe.skipIf(!url)("api", () => {
       expect(await queued("compute_matches")).toEqual([]);
     });
 
+    it("fans out matching to collaborators without sponsorship or subscription", async () => {
+      const profileId = await matchingProfile();
+
+      const [profile] = await db
+        .update(talentProfiles)
+        .set({ sponsoredUntil: "2000-01-01" })
+        .where(eq(talentProfiles.id, profileId))
+        .returning({ caseId: talentProfiles.caseId });
+
+      const subscription = await repos.billing.getSubscription(defaultOrgId);
+
+      if (!subscription?.id || !profile.caseId) throw new Error("missing fixtures");
+
+      await repos.billing.updateSubscription(defaultOrgId, subscription.id, { status: "canceled" });
+      await db.insert(employeeAccess).values({
+        caseId: profile.caseId,
+        orgId: defaultOrgId,
+        email: `colaboradora-${randomUUID()}@example.com`,
+        plan: emptyEmployeePlan,
+      });
+
+      await sourcesApp([acme]).drainNow();
+
+      expect((await queued("compute_matches")).map((row) => row.subject)).toEqual([profileId]);
+    });
+
     it("fans out matching only to people whose sponsor is active", async () => {
       const inactiveSponsor = await matchingProfile();
 
@@ -7798,7 +8253,9 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       | EmployeeState
       | EmployeeSettings
       | { done: boolean }
-      | { code: string; received: boolean },
+      | { code: string; received: boolean }
+      | { shareOutcomeWithHr: boolean }
+      | { email: string; callbackURL: string },
     origin = webOrigin,
     nativeOrigin?: string,
     grantId = cookie ? grants.get(cookie) : undefined,
@@ -8938,6 +9395,407 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     expect((await send({ "expo-origin": "exp://localhost:8103/--/" })).status).toBe(403);
     expect((await send({ "expo-origin": "offboard:///" })).status).toBe(200);
     expect(delivered[0]).toMatch(/\b\d{6}\b/);
+  });
+
+  describe("collaborator career routes", () => {
+    const orgIds: string[] = [];
+
+    afterAll(async () => {
+      for (const orgId of orgIds) {
+        await db.delete(subscriptions).where(eq(subscriptions.orgId, orgId));
+        await db.delete(talentProfiles).where(eq(talentProfiles.orgId, orgId));
+        await db.delete(offboardingCases).where(eq(offboardingCases.orgId, orgId));
+        await db.delete(organizations).where(eq(organizations.id, orgId));
+      }
+    });
+
+    async function organization() {
+      const orgId = randomUUID();
+      await db.insert(organizations).values({ id: orgId, slug: orgId, name: "Org " + orgId });
+      orgIds.push(orgId);
+
+      return orgId;
+    }
+
+    async function collaboratorCase(
+      orgId: string,
+      email = `career-${randomUUID()}@offboard.example`,
+    ) {
+      const record = await repos.offboardings.createOffboarding(orgId, {
+        name: "Pessoa da carreira",
+        role: "Analista",
+        department: "Produto",
+        deadline: "2027-02-01",
+        email,
+      });
+
+      return { caseId: record.id, email };
+    }
+
+    function profilesOf(caseId: string) {
+      return db.select().from(talentProfiles).where(eq(talentProfiles.caseId, caseId));
+    }
+
+    it("lets a collaborator use the career routes with their session", async () => {
+      const orgId = await organization();
+      const { caseId, email } = await collaboratorCase(orgId);
+      const cookie = await authenticate(email);
+
+      const foreign = await request(
+        "/me/consent",
+        "PUT",
+        cookie,
+        { shareOutcomeWithHr: true },
+        "https://foreign.example",
+      );
+
+      expect(foreign.status).toBe(403);
+      expect(await profilesOf(caseId)).toEqual([]);
+
+      const before = new Date();
+      const me = await request("/me", "GET", cookie);
+      const after = new Date();
+      expect(me.status).toBe(200);
+      expect(me.headers.get("cache-control")).toBe("no-store");
+      expect(await me.json()).toMatchObject({
+        name: "Pessoa da carreira",
+        email,
+        termsAccepted: true,
+        entitlement: { kind: "sponsored", until: null },
+      });
+
+      const [row] = await profilesOf(caseId);
+      expect(row).toMatchObject({
+        orgId,
+        caseId,
+        personalEmail: email,
+        name: "Pessoa da carreira",
+        sponsoredUntil: saoPauloDate(before),
+      });
+
+      for (const at of [row.termsAcceptedAt, row.firstSignedInAt]) {
+        expect(at?.getTime()).toBeGreaterThanOrEqual(before.getTime());
+        expect(at?.getTime()).toBeLessThanOrEqual(after.getTime());
+      }
+
+      const jobs = await request("/me/jobs", "GET", cookie);
+      expect(jobs.status).toBe(200);
+      expect(await jobs.json()).toMatchObject({ page: 1 });
+
+      const listed = await request("/me/applications", "GET", cookie);
+      expect(listed.status).toBe(200);
+      expect(await listed.json()).toEqual([]);
+
+      const consent = await request("/me/consent", "PUT", cookie, { shareOutcomeWithHr: true });
+      expect(consent.status).toBe(200);
+      expect(await consent.json()).toMatchObject({ id: row.id, shareOutcomeWithHr: true });
+      expect(await profilesOf(caseId)).toHaveLength(1);
+
+      expect((await request("/offboardings", "GET", cookie)).status).toBe(403);
+    });
+
+    it("creates the profile once", async () => {
+      const orgId = await organization();
+      const { caseId, email } = await collaboratorCase(orgId);
+      const cookie = await authenticate(email);
+
+      const responses = await Promise.all(
+        Array.from({ length: 6 }, () => request("/me", "GET", cookie)),
+      );
+
+      expect(responses.map((response) => response.status)).toEqual(Array(6).fill(200));
+
+      const ids = new Set(
+        await Promise.all(
+          responses.map(
+            async (response) => z.object({ id: z.uuid() }).parse(await response.json()).id,
+          ),
+        ),
+      );
+
+      expect(ids.size).toBe(1);
+      expect(await profilesOf(caseId)).toHaveLength(1);
+    });
+
+    it("isolates collaborators by case", async () => {
+      const firstOrg = await organization();
+      const secondOrg = await organization();
+      const first = await collaboratorCase(firstOrg);
+      const second = await collaboratorCase(secondOrg);
+      const firstCookie = await authenticate(first.email);
+      const secondCookie = await authenticate(second.email);
+
+      const shared = await request("/me/consent", "PUT", firstCookie, { shareOutcomeWithHr: true });
+      expect(shared.status).toBe(200);
+
+      const other = await request("/me", "GET", secondCookie);
+      expect(other.status).toBe(200);
+      const otherMe = await other.json();
+      expect(otherMe).toMatchObject({ email: second.email, shareOutcomeWithHr: false });
+      expect(otherMe.id).not.toBe((await shared.json()).id);
+
+      const [firstRow] = await profilesOf(first.caseId);
+      const [secondRow] = await profilesOf(second.caseId);
+      expect(firstRow).toMatchObject({ orgId: firstOrg, shareOutcomeWithHr: true });
+      expect(secondRow).toMatchObject({ orgId: secondOrg, id: otherMe.id });
+    });
+
+    it("keeps a collaborator active and accepted on a lapsed profile HR enabled", async () => {
+      const orgId = await organization();
+      const { caseId, email } = await collaboratorCase(orgId);
+
+      const enabled = z.object({ id: z.uuid() }).parse(
+        await repos.talent.enable({
+          orgId,
+          caseId,
+          personalEmail: `hr-${randomUUID()}@offboard.example`,
+          sponsoredUntil: "2020-01-01",
+        }),
+      );
+
+      const cookie = await authenticate(email);
+      expect((await request("/me/jobs", "GET", cookie)).status).toBe(200);
+      expect((await request("/me/applications", "GET", cookie)).status).toBe(200);
+      expect(await (await request("/me", "GET", cookie)).json()).toMatchObject({
+        id: enabled.id,
+        email,
+        termsAccepted: true,
+        entitlement: { kind: "sponsored", until: null },
+      });
+
+      const rows = await profilesOf(caseId);
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ personalEmail: email, sponsoredUntil: "2020-01-01" });
+      expect(rows[0].firstSignedInAt).not.toBeNull();
+    });
+
+    it("forbids a collaborator whose email another case's profile holds", async () => {
+      const orgId = await organization();
+      const holder = await collaboratorCase(orgId);
+      const { caseId, email } = await collaboratorCase(orgId);
+
+      expect(
+        await repos.talent.enable({
+          orgId,
+          caseId: holder.caseId,
+          personalEmail: email.toUpperCase(),
+          sponsoredUntil: "2099-01-01",
+        }),
+      ).toMatchObject({ caseId: holder.caseId });
+
+      const cookie = await authenticate(email);
+      const response = await request("/me", "GET", cookie);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "Email already in use" });
+      expect(await profilesOf(caseId)).toEqual([]);
+    });
+
+    async function rotate(orgId: string, caseId: string) {
+      const email = `rotated-${randomUUID()}@offboard.example`;
+
+      expect(
+        await repos.employee.saveSettings(orgId, caseId, {
+          email,
+          plan: emptyEmployeePlan,
+          revision: 1,
+        }),
+      ).toBe("saved");
+
+      return email;
+    }
+
+    it("ties the profile to the current grant when HR rotates it", async () => {
+      const orgId = await organization();
+      const { caseId, email: previous } = await collaboratorCase(orgId);
+      const previousCookie = await authenticate(previous);
+      const before = await request("/me", "GET", previousCookie);
+
+      expect(before.status).toBe(200);
+
+      const { id } = z.object({ id: z.uuid() }).parse(await before.json());
+      const current = await rotate(orgId, caseId);
+
+      expect((await request("/me", "GET", previousCookie)).status).toBe(401);
+      expect(await profilesOf(caseId)).toMatchObject([{ id, personalEmail: previous }]);
+
+      const link = await request("/auth/sign-in/magic-link", "POST", undefined, {
+        email: previous,
+        callbackURL: "/app",
+      });
+
+      expect(link.status).toBe(200);
+      expect(links.has(previous)).toBe(false);
+
+      const cookie = await authenticate(current);
+      const me = await request("/me", "GET", cookie);
+
+      expect(me.status).toBe(200);
+      expect(await me.json()).toMatchObject({ id, email: current });
+      expect(await profilesOf(caseId)).toMatchObject([{ id, personalEmail: current }]);
+    });
+
+    it("rejects a session whose grant moved on without creating a profile", async () => {
+      const orgId = await organization();
+      const { caseId, email } = await collaboratorCase(orgId);
+      const cookie = await authenticate(email);
+
+      await db
+        .update(employeeAccess)
+        .set({ email: `moved-${randomUUID()}@offboard.example` })
+        .where(eq(employeeAccess.caseId, caseId));
+
+      const response = await request("/me", "GET", cookie);
+
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({ error: "Unauthorized" });
+      expect(await profilesOf(caseId)).toEqual([]);
+    });
+
+    it("refuses a talent session once the case gets a collaborator grant", async () => {
+      const orgId = await organization();
+      const email = `talent-${randomUUID()}@offboard.example`;
+
+      const [record] = await db
+        .insert(offboardingCases)
+        .values({
+          orgId,
+          name: "Pessoa da carreira",
+          role: "Analista",
+          department: "Produto",
+          deadline: "2027-02-01",
+        })
+        .returning({ id: offboardingCases.id });
+
+      expect(
+        await repos.talent.enable({
+          orgId,
+          caseId: record.id,
+          personalEmail: email,
+          sponsoredUntil: "2099-01-01",
+        }),
+      ).toMatchObject({ caseId: record.id });
+
+      const sent = await request("/auth/sign-in/magic-link", "POST", undefined, {
+        email,
+        callbackURL: "/app",
+      });
+
+      expect(sent.status).toBe(200);
+      const link = links.get(email);
+
+      if (!link) throw new Error("No talent link delivered");
+
+      const cookie = (await app.handle(new Request(link))).headers
+        .getSetCookie()
+        .find((value) => value.includes("session_token="))
+        ?.split(";")[0];
+
+      expect((await request("/me", "GET", cookie)).status).toBe(200);
+
+      await db.insert(employeeAccess).values({
+        caseId: record.id,
+        orgId,
+        email: `grant-${randomUUID()}@offboard.example`,
+        plan: emptyEmployeePlan,
+      });
+
+      const refused = await request("/me", "GET", cookie);
+
+      expect(refused.status).toBe(401);
+      expect(await refused.json()).toEqual({ error: "Unauthorized" });
+
+      await db
+        .update(employeeAccess)
+        .set({ email: null })
+        .where(eq(employeeAccess.caseId, record.id));
+
+      expect((await request("/me", "GET", cookie)).status).toBe(200);
+    });
+
+    it("offers AI Apply to a collaborator whose company is on the top plan", async () => {
+      const orgId = await organization();
+      const { email } = await collaboratorCase(orgId);
+      const cookie = await authenticate(email);
+      const grantId = grants.get(cookie) ?? "";
+
+      const [top] = await db
+        .select({ id: plans.id })
+        .from(plans)
+        .where(eq(plans.slug, "platinum-premium"));
+
+      const [gold] = await db.select({ id: plans.id }).from(plans).where(eq(plans.slug, "gold"));
+
+      const [subscription] = await db
+        .insert(subscriptions)
+        .values({
+          orgId,
+          planId: top.id,
+          currentPeriodStart: "2026-11-01",
+          currentPeriodEnd: "2026-12-01",
+        })
+        .returning({ id: subscriptions.id });
+
+      const composed = createApp(webOrigin, repos, {
+        auth: employeeAuth,
+        sendEmail,
+        browserbase: { apiKey: "bb-key", projectId: "bb-project" },
+        generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
+      });
+
+      const send = (path: string, method: string, body?: { accept: boolean }) =>
+        composed.handle(
+          new Request(webOrigin + "/api" + path, {
+            method,
+            headers: {
+              cookie,
+              origin: webOrigin,
+              [employeeGrantHeader]: grantId,
+              "content-type": "application/json",
+            },
+            body: body && JSON.stringify(body),
+          }),
+        );
+
+      expect((await send("/me/ai-apply/consent", "PUT", { accept: true })).status).toBe(200);
+
+      const prepare = () => send(`/me/jobs/${randomUUID()}/ai-apply`, "POST");
+
+      const allowed = await prepare();
+
+      expect(allowed.status).toBe(404);
+      expect(await allowed.json()).toEqual({ error: "Job not found" });
+
+      await db
+        .update(subscriptions)
+        .set({ planId: gold.id })
+        .where(eq(subscriptions.id, subscription.id));
+
+      const refused = await prepare();
+
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toEqual({ error: "AI Apply not available" });
+    });
+
+    it("keeps member sessions out of the career routes", async () => {
+      const orgId = await organization();
+      const { caseId, email } = await collaboratorCase(orgId);
+      const cookie = await authenticate(email);
+
+      const composed = createApp(webOrigin, repos, {
+        ...appOptions,
+        auth: { ...auth, resolveEmployee: employeeAuth.resolveEmployee },
+      });
+
+      const response = await composed.handle(
+        new Request(webOrigin + "/api/me", {
+          headers: { cookie, "x-test-session": "admin", "x-test-org-id": orgId },
+        }),
+      );
+
+      expect(response.status).toBe(403);
+      expect(await profilesOf(caseId)).toEqual([]);
+    });
   });
 
   describe("signup", () => {

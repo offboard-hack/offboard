@@ -15,6 +15,7 @@ import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createRepositories } from "../../repositories.js";
+import type { SaveProfile } from "./repository.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const missingId = "00000000-0000-4000-8000-000000000001";
@@ -129,8 +130,8 @@ describe.skipIf(!url)("ai apply repository", () => {
       })
       .returning({ id: aiApplications.id });
 
-    const confirmation = { confirmed: [], rehearsal: false, entries: [] };
-    const save = async () => undefined;
+    const confirmation = { confirmed: [], rehearsal: false, entries: [], profile: {} };
+    const save = { answer: async () => undefined, profile: async () => undefined };
 
     expect(await repos.aiApply.confirm(created.id, stale.id, confirmation, new Date(), save)).toBe(
       "expired",
@@ -486,9 +487,156 @@ describe.skipIf(!url)("ai apply repository", () => {
     });
   });
 
+  describe("the live view", () => {
+    const now = new Date("2026-11-25T12:00:00.000Z");
+    const old = new Date(now.getTime() - 16 * 60_000);
+    const live = "https://www.browserbase.com/devtools-fullscreen/inspector.html?navbar=false";
+
+    const liveOf = async (id: string) => (await stateOf(id)).liveUrl;
+
+    it("stores the live view only while running and keeps it while submitting", async () => {
+      const { id } = await seedAttempt("queued");
+
+      await repos.aiApply.showLive(id, live);
+      expect(await liveOf(id)).toBeNull();
+
+      await repos.aiApply.claimForRun(id, now);
+      await repos.aiApply.showLive(id, live);
+      expect(await liveOf(id)).toBe(live);
+
+      expect(await repos.aiApply.markSubmitting(id, now)).toBe(true);
+      await repos.aiApply.showLive(id, "https://www.browserbase.com/other");
+      expect(await liveOf(id)).toBe(live);
+    });
+
+    type Seeded = Awaited<ReturnType<typeof seedAttempt>>;
+
+    const writes: [string, Parameters<typeof seedAttempt>[0], (seeded: Seeded) => Promise<void>][] =
+      [
+        [
+          "finish",
+          "running",
+          async ({ id }) => {
+            await repos.aiApply.finish(
+              id,
+              ["running"],
+              { state: "assisted", reason: "error" },
+              now,
+            );
+          },
+        ],
+        [
+          "requeue",
+          "running",
+          async ({ id }) => {
+            await repos.aiApply.requeue(id, now);
+          },
+        ],
+        [
+          "reclaim of a stale run",
+          "running",
+          async ({ id }) => {
+            await repos.aiApply.claimForRun(id, now);
+          },
+        ],
+        [
+          "submission",
+          "submitting",
+          async ({ id }) => {
+            await repos.aiApply.submittedWithApplication(
+              id,
+              { evidence, screenshotKey: null },
+              now,
+            );
+          },
+        ],
+        [
+          "submission that raced a manual application",
+          "submitting",
+          async (seeded) => {
+            await db
+              .insert(applications)
+              .values({ profileId: seeded.profileId, jobId: seeded.jobId });
+            await repos.aiApply.submittedWithApplication(
+              seeded.id,
+              { evidence, screenshotKey: null },
+              now,
+            );
+          },
+        ],
+        [
+          "sweep of a stuck run",
+          "running",
+          async () => {
+            await repos.aiApply.sweepStale(now);
+          },
+        ],
+        [
+          "sweep of a stuck submission",
+          "submitting",
+          async () => {
+            await repos.aiApply.sweepStale(now);
+          },
+        ],
+        [
+          "cancel",
+          "queued",
+          async ({ id, profileId }) => {
+            await repos.aiApply.cancel(profileId, id, now);
+          },
+        ],
+        [
+          "check that it was sent",
+          "needs_check",
+          async ({ id, profileId }) => {
+            await repos.aiApply.check(profileId, id, true, now);
+          },
+        ],
+        [
+          "check that it was not sent",
+          "needs_check",
+          async ({ id, profileId }) => {
+            await repos.aiApply.check(profileId, id, false, now);
+          },
+        ],
+        [
+          "confirm of a rehearsal",
+          "rehearsed",
+          async ({ id, profileId }) => {
+            await db
+              .update(aiApplications)
+              .set({ finishedAt: new Date(now.getTime() - 60_000) })
+              .where(eq(aiApplications.id, id));
+            await repos.aiApply.confirm(
+              profileId,
+              id,
+              { confirmed: [], rehearsal: true, entries: [], profile: {} },
+              now,
+              { answer: async () => undefined, profile: async () => undefined },
+            );
+          },
+        ],
+      ];
+
+    it.each(writes)("clears the live view on %s", async (_name, state, write) => {
+      const seeded = await seedAttempt(state, old);
+
+      await db
+        .update(aiApplications)
+        .set({ liveUrl: live })
+        .where(eq(aiApplications.id, seeded.id));
+      await write(seeded);
+
+      const row = await stateOf(seeded.id);
+
+      expect(row.updatedAt).toEqual(now);
+      expect(row.liveUrl).toBeNull();
+    });
+  });
+
   describe("confirming a rehearsed attempt again", () => {
-    const confirmation = { confirmed: [], rehearsal: false, entries: [] };
-    const save = async () => undefined;
+    const confirmation = { confirmed: [], rehearsal: false, entries: [], profile: {} };
+    const save = { answer: async () => undefined, profile: async () => undefined };
     const day = 24 * 60 * 60 * 1000;
     const now = new Date("2026-11-25T12:00:00.000Z");
 
@@ -509,7 +657,12 @@ describe.skipIf(!url)("ai apply repository", () => {
       const result = await repos.aiApply.confirm(
         profileId,
         id,
-        { confirmed: [{ questionId: "q", value: "x" }], rehearsal: false, entries: [] },
+        {
+          confirmed: [{ questionId: "q", value: "x" }],
+          rehearsal: false,
+          entries: [],
+          profile: {},
+        },
         now,
         save,
       );
@@ -523,6 +676,49 @@ describe.skipIf(!url)("ai apply repository", () => {
         evidence: null,
         screenshotKey: null,
       });
+    });
+
+    it("saves the typed profile values in the confirm transaction, only when it confirms", async () => {
+      const { id, profileId } = await rehearsed(new Date(now.getTime() - day));
+      const saved: unknown[] = [];
+
+      const profile = { phone: "11 99999-8888" };
+
+      const record: SaveProfile = async (_tx, owner, values, at) => {
+        saved.push([owner, values, at]);
+      };
+
+      const recording = { answer: async () => undefined, profile: record };
+
+      await repos.aiApply.confirm(profileId, id, { ...confirmation, profile }, now, recording);
+
+      expect(saved).toEqual([[profileId, profile, now]]);
+
+      await repos.aiApply.confirm(profileId, id, { ...confirmation, profile }, now, recording);
+
+      expect(saved).toHaveLength(1);
+    });
+
+    it("rolls the confirm back when the profile cannot be saved", async () => {
+      const { id, profileId } = await rehearsed(new Date(now.getTime() - day));
+
+      const failing = {
+        answer: async () => undefined,
+        profile: async () => {
+          throw new Error("profile write failed");
+        },
+      };
+
+      await expect(
+        repos.aiApply.confirm(
+          profileId,
+          id,
+          { ...confirmation, profile: { city: "Santos" } },
+          now,
+          failing,
+        ),
+      ).rejects.toThrow("profile write failed");
+      expect((await stateOf(id)).state).toBe("rehearsed");
     });
 
     it("counts the seven days from the end of the rehearsal", async () => {

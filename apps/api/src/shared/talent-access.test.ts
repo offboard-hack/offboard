@@ -1,5 +1,6 @@
 import { Elysia } from "elysia";
 import { describe, expect, it, vi } from "vitest";
+import type { EmployeePrincipal } from "./employee-auth.js";
 import type { PortalAccess, PortalAuth } from "./portal-auth.js";
 import { talentAccess } from "./talent-access.js";
 import type { TalentProfile } from "./talent-profile.js";
@@ -22,17 +23,39 @@ const profile: TalentProfile = {
   aiApplyConsentVersion: null,
 };
 
+const collaborator: EmployeePrincipal = {
+  id: "u1",
+  caseId: "c9",
+  grantId: "g1",
+  name: "Bia",
+  email: "bia@example.com",
+};
+
+const collaboratorProfile: TalentProfile = {
+  ...profile,
+  id: "t9",
+  caseId: "c9",
+  name: "Bia",
+  email: "bia@example.com",
+  sponsoredUntil: "2020-01-01",
+  termsAcceptedAt: null,
+};
+
 function build(options: {
   access?: PortalAccess;
   found?: TalentProfile | undefined;
   companyActive?: boolean;
   handler?: () => void;
   realClock?: boolean;
+  employee?: () => Promise<EmployeePrincipal | null>;
+  ensured?: TalentProfile | "email_taken";
+  ensure?: (principal: { caseId: string; name: string; email: string }, at: Date) => void;
 }) {
   const auth: PortalAuth = {
     handler: async () => new Response(),
     resolvePrincipal: async () =>
       options.access ?? { kind: "talent", profile: { id: "t1", name: "Ana", email: "a@b.c" } },
+    resolveEmployee: options.employee,
   };
 
   const handler = options.handler ?? (() => {});
@@ -42,7 +65,14 @@ function build(options: {
       talentAccess({
         auth,
         webOrigin,
-        talent: { findById: async () => ("found" in options ? options.found : profile) },
+        talent: {
+          findById: async () => ("found" in options ? options.found : profile),
+          ensureForCollaborator: async (principal, at) => {
+            options.ensure?.(principal, at);
+
+            return options.ensured ?? collaboratorProfile;
+          },
+        },
         companyActive: async (orgId) => {
           sponsorLookups.push(orgId);
 
@@ -69,6 +99,7 @@ function build(options: {
       },
       { talent: "active" },
     )
+    .get("/entitlement", ({ entitlement }) => entitlement, { talent: "active" })
     .post("/active", () => ({ ok: true }), { talent: "active" });
 }
 
@@ -94,26 +125,37 @@ describe("talentAccess", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { kind: "forbidden" } as const,
-    {
-      kind: "authenticated",
-      principal: {
-        id: "u",
-        name: "U",
-        email: "u@x.y",
-        role: "admin",
-        orgId: "00000000-0000-4000-8000-0000000000a1",
-      },
-    } satisfies PortalAccess,
-  ])("rejects non-talent kind %# with 403", async (access) => {
+  it("rejects a member session with 403", async () => {
     const handler = vi.fn();
 
-    const response = await build({ access, handler }).handle(
+    const response = await build({
+      access: {
+        kind: "authenticated",
+        principal: {
+          id: "u",
+          name: "U",
+          email: "u@x.y",
+          role: "admin",
+          orgId: "00000000-0000-4000-8000-0000000000a1",
+        },
+      },
+      handler,
+    }).handle(new Request("http://localhost/signed-in"));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "Forbidden" });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("sends a session without a member, talent or collaborator principal back to sign-in", async () => {
+    const handler = vi.fn();
+
+    const response = await build({ access: { kind: "forbidden" }, handler }).handle(
       new Request("http://localhost/signed-in"),
     );
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Unauthorized" });
     expect(handler).not.toHaveBeenCalled();
   });
 
@@ -190,4 +232,116 @@ describe("talentAccess", () => {
 
     expect(response.status).toBe(200);
   });
+
+  it("serves a collaborator session as always active on its case profile", async () => {
+    const ensure = vi.fn();
+
+    const app = build({
+      access: { kind: "forbidden" },
+      employee: async () => collaborator,
+      companyActive: false,
+      ensure,
+    });
+
+    const active = await app.handle(new Request("http://localhost/active"));
+
+    expect(active.status).toBe(200);
+    expect(active.headers.get("cache-control")).toBe("no-store");
+    expect(await active.json()).toEqual({ id: "t9", kind: "sponsored" });
+    expect(ensure).toHaveBeenCalledWith(collaborator, now);
+
+    const entitlement = await app.handle(new Request("http://localhost/entitlement"));
+
+    expect(await entitlement.json()).toEqual({ kind: "sponsored", until: null });
+  });
+
+  it("rejects a collaborator whose email belongs to another profile", async () => {
+    const handler = vi.fn();
+
+    const response = await build({
+      access: { kind: "forbidden" },
+      employee: async () => collaborator,
+      ensured: "email_taken",
+      handler,
+    }).handle(new Request("http://localhost/signed-in"));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "Email already in use" });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("checks the origin of collaborator writes before creating a profile", async () => {
+    const ensure = vi.fn();
+
+    const app = build({
+      access: { kind: "forbidden" },
+      employee: async () => collaborator,
+      ensure,
+    });
+
+    const foreign = await app.handle(
+      new Request("http://localhost/active", {
+        method: "POST",
+        headers: { origin: "https://evil.test" },
+      }),
+    );
+
+    expect(foreign.status).toBe(403);
+    expect(ensure).not.toHaveBeenCalled();
+
+    const own = await app.handle(
+      new Request("http://localhost/active", { method: "POST", headers: { origin: webOrigin } }),
+    );
+
+    expect(own.status).toBe(200);
+    expect(ensure).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends a collaborator whose grant no longer resolves back to sign-in", async () => {
+    const ensure = vi.fn();
+
+    const response = await build({
+      access: { kind: "forbidden" },
+      employee: async () => null,
+      ensure,
+    }).handle(new Request("http://localhost/signed-in"));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Unauthorized" });
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { access: { kind: "anonymous" }, status: 401 },
+    {
+      access: {
+        kind: "authenticated",
+        principal: {
+          id: "u",
+          name: "U",
+          email: "u@x.y",
+          role: "admin",
+          orgId: "00000000-0000-4000-8000-0000000000a1",
+        },
+      },
+      status: 403,
+    },
+  ] satisfies { access: PortalAccess; status: number }[])(
+    "never bridges $access.kind sessions",
+    async ({ access, status }) => {
+      const lookups: string[] = [];
+
+      const response = await build({
+        access,
+        employee: async () => {
+          lookups.push(access.kind);
+
+          return collaborator;
+        },
+      }).handle(new Request("http://localhost/signed-in"));
+
+      expect(response.status).toBe(status);
+      expect(lookups).toEqual([]);
+    },
+  );
 });

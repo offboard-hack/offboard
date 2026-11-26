@@ -32,11 +32,10 @@ import {
   or,
 } from "drizzle-orm";
 import { z } from "zod";
+import { greenhouseKey } from "../../shared/ai-apply-access.js";
 import { uniqueViolation } from "../../shared/http.js";
-import { toPreferences } from "../../shared/talent-preferences.js";
+import { type ProfileFill, toPreferences } from "../../shared/talent-preferences.js";
 import { toAttemptView } from "./view.js";
-
-const sourceKey = /^([a-z0-9][a-z0-9_-]*):(\d+)$/;
 
 const nonFinal = ["queued", "running", "submitting", "needs_check"] as const;
 
@@ -72,10 +71,18 @@ export type SaveAnswer = (
   now: Date,
 ) => Promise<void>;
 
+export type SaveProfile = (
+  tx: Transaction,
+  profileId: string,
+  values: ProfileFill,
+  now: Date,
+) => Promise<void>;
+
 type Confirmation = {
   confirmed: ConfirmedAnswer[];
   rehearsal: boolean;
   entries: { label: string; text: string; sensitive: boolean }[];
+  profile: ProfileFill;
 };
 
 export function draftBlock(
@@ -137,7 +144,7 @@ export function createAiApplyRepository(db: Database) {
       .from(jobs)
       .where(and(eq(jobs.id, jobId), eq(jobs.source, "greenhouse"), isNull(jobs.closedAt)));
 
-    const match = row === undefined ? null : sourceKey.exec(row.sourceKey);
+    const match = row === undefined ? null : greenhouseKey.exec(row.sourceKey);
 
     return row === undefined || match === null
       ? undefined
@@ -328,7 +335,7 @@ export function createAiApplyRepository(db: Database) {
     id: string,
     confirmation: Confirmation,
     now: Date,
-    save: SaveAnswer,
+    save: { answer: SaveAnswer; profile: SaveProfile },
   ) {
     const since = new Date(now.getTime() - expiry);
 
@@ -345,6 +352,7 @@ export function createAiApplyRepository(db: Database) {
             finishedAt: null,
             evidence: null,
             screenshotKey: null,
+            liveUrl: null,
             updatedAt: now,
           })
           .where(
@@ -378,8 +386,12 @@ export function createAiApplyRepository(db: Database) {
 
         if (rows.length > 0) {
           for (const entry of confirmation.entries) {
-            await save(tx, profileId, entry.label, entry.text, { sensitive: entry.sensitive }, now);
+            const { label, text, sensitive } = entry;
+
+            await save.answer(tx, profileId, label, text, { sensitive }, now);
           }
+
+          await save.profile(tx, profileId, confirmation.profile, now);
         }
 
         return rows[0];
@@ -414,7 +426,13 @@ export function createAiApplyRepository(db: Database) {
 
     const [row] = await db
       .update(aiApplications)
-      .set({ state: "cancelled", reason: "cancelled_by_person", finishedAt: now, updatedAt: now })
+      .set({
+        state: "cancelled",
+        reason: "cancelled_by_person",
+        finishedAt: now,
+        liveUrl: null,
+        updatedAt: now,
+      })
       .where(
         and(
           eq(aiApplications.id, id),
@@ -439,6 +457,7 @@ export function createAiApplyRepository(db: Database) {
         attempt: aiApplications,
         job: { sourceKey: jobs.sourceKey, closedAt: jobs.closedAt },
         profile: {
+          orgId: talentProfiles.orgId,
           name: talentProfiles.name,
           email: talentProfiles.personalEmail,
           consentAt: talentProfiles.aiApplyConsentAt,
@@ -465,7 +484,7 @@ export function createAiApplyRepository(db: Database) {
 
     if (row === undefined) return undefined;
 
-    const key = sourceKey.exec(row.job.sourceKey);
+    const key = greenhouseKey.exec(row.job.sourceKey);
 
     return {
       ...row,
@@ -486,7 +505,7 @@ export function createAiApplyRepository(db: Database) {
   async function claimForRun(id: string, now: Date) {
     const rows = await db
       .update(aiApplications)
-      .set({ state: "running", updatedAt: now })
+      .set({ state: "running", liveUrl: null, updatedAt: now })
       .where(
         and(
           eq(aiApplications.id, id),
@@ -507,11 +526,18 @@ export function createAiApplyRepository(db: Database) {
   async function requeue(id: string, now: Date) {
     const rows = await db
       .update(aiApplications)
-      .set({ state: "queued", updatedAt: now })
+      .set({ state: "queued", liveUrl: null, updatedAt: now })
       .where(and(eq(aiApplications.id, id), eq(aiApplications.state, "running")))
       .returning({ id: aiApplications.id });
 
     return rows.length > 0;
+  }
+
+  async function showLive(id: string, liveUrl: string) {
+    await db
+      .update(aiApplications)
+      .set({ liveUrl })
+      .where(and(eq(aiApplications.id, id), eq(aiApplications.state, "running")));
   }
 
   async function markSubmitting(id: string, now: Date) {
@@ -556,12 +582,12 @@ export function createAiApplyRepository(db: Database) {
 
     await db
       .update(aiApplications)
-      .set({ state: "needs_check", reason: null, finishedAt: null, updatedAt: now })
+      .set({ state: "needs_check", reason: null, finishedAt: null, liveUrl: null, updatedAt: now })
       .where(and(eq(aiApplications.state, "submitting"), lt(aiApplications.updatedAt, cutoff)));
 
     await db
       .update(aiApplications)
-      .set({ state: "assisted", reason: "error", finishedAt: now, updatedAt: now })
+      .set({ state: "assisted", reason: "error", finishedAt: now, liveUrl: null, updatedAt: now })
       .where(and(eq(aiApplications.state, "running"), lt(aiApplications.updatedAt, cutoff)));
   }
 
@@ -571,6 +597,7 @@ export function createAiApplyRepository(db: Database) {
       .set({
         ...outcome,
         finishedAt: outcome.state === "needs_check" ? null : now,
+        liveUrl: null,
         updatedAt: now,
       })
       .where(and(eq(aiApplications.id, id), inArray(aiApplications.state, from)))
@@ -587,7 +614,14 @@ export function createAiApplyRepository(db: Database) {
     return db.transaction(async (tx) => {
       const [row] = await tx
         .update(aiApplications)
-        .set({ state: "submitted", reason: null, ...record, finishedAt: now, updatedAt: now })
+        .set({
+          state: "submitted",
+          reason: null,
+          ...record,
+          finishedAt: now,
+          liveUrl: null,
+          updatedAt: now,
+        })
         .where(and(eq(aiApplications.id, id), eq(aiApplications.state, "submitting")))
         .returning({
           profileId: aiApplications.profileId,
@@ -602,7 +636,7 @@ export function createAiApplyRepository(db: Database) {
       if (created === undefined) {
         await tx
           .update(aiApplications)
-          .set({ state: "needs_check", finishedAt: null, updatedAt: now })
+          .set({ state: "needs_check", finishedAt: null, liveUrl: null, updatedAt: now })
           .where(eq(aiApplications.id, id));
 
         return "needs_check" as const;
@@ -638,8 +672,14 @@ export function createAiApplyRepository(db: Database) {
         .update(aiApplications)
         .set(
           sent
-            ? { state: "submitted", reason: null, finishedAt: now, updatedAt: now }
-            : { state: "assisted", reason: "not_sent", finishedAt: now, updatedAt: now },
+            ? { state: "submitted", reason: null, finishedAt: now, liveUrl: null, updatedAt: now }
+            : {
+                state: "assisted",
+                reason: "not_sent",
+                finishedAt: now,
+                liveUrl: null,
+                updatedAt: now,
+              },
         )
         .where(eq(aiApplications.id, id))
         .returning();
@@ -659,6 +699,7 @@ export function createAiApplyRepository(db: Database) {
     sweepStale,
     claimForRun,
     requeue,
+    showLive,
     markSubmitting,
     finish,
     submittedWithApplication,

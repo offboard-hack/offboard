@@ -9,7 +9,9 @@ import {
   defaultOrgId,
   jobs,
   offboardingCases,
+  plans,
   resumes,
+  subscriptions,
   talentPreferences,
   talentProfiles,
 } from "@offboard/db/schema";
@@ -21,7 +23,7 @@ import { createRepositories } from "../../repositories.js";
 import { BrowserbaseError } from "./browser/browserbase.js";
 import type { Page } from "./browser/cdp.js";
 import type { FormPage, OutcomePage } from "./browser/greenhouse-form.js";
-import { runAiApplication, type RunnerDeps } from "./runner.js";
+import { failedLabel, runAiApplication, type RunnerDeps } from "./runner.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const email = "ana.pessoal@example.com";
@@ -331,11 +333,20 @@ const fakePage = (setup: PageSetup = {}) => {
 
 type Upload = { sessionId: string; name: string; bytes: Uint8Array; type: string };
 
+const liveView =
+  "https://www.browserbase.com/devtools-fullscreen/inspector.html?wss=s1&navbar=false";
+
 const fakeBrowserbase = (
-  setup: { failCreate?: number; failUpload?: boolean; failRelease?: boolean } = {},
+  setup: {
+    failCreate?: number;
+    failUpload?: boolean;
+    failRelease?: boolean;
+    failLive?: boolean;
+  } = {},
 ) => {
   const uploads: Upload[] = [];
   const released: string[] = [];
+  const watched: string[] = [];
   let created = 0;
 
   const browserbase = {
@@ -347,6 +358,13 @@ const fakeBrowserbase = (
       }
 
       return { id: "session-1", connectUrl: "wss://connect.test/session-1" };
+    },
+    async liveUrl(sessionId: string) {
+      watched.push(sessionId);
+
+      if (setup.failLive) throw new BrowserbaseError("live view", 404);
+
+      return liveView;
     },
     async upload(sessionId: string, file: { name: string; bytes: Uint8Array; type: string }) {
       uploads.push({ sessionId, ...file });
@@ -360,7 +378,7 @@ const fakeBrowserbase = (
     },
   };
 
-  return { browserbase, uploads, released, created: () => created };
+  return { browserbase, uploads, released, watched, created: () => created };
 };
 
 const fakeStorage = (setup: { failRemove?: boolean } = {}) => {
@@ -421,7 +439,21 @@ describe.skipIf(!url)("ai apply runner", () => {
     await db.$client.end();
   });
 
+  async function onPlan(
+    slug: string,
+    status: (typeof subscriptions.$inferInsert)["status"] = "active",
+  ) {
+    const [plan] = await db.select({ id: plans.id }).from(plans).where(eq(plans.slug, slug));
+
+    await db
+      .update(subscriptions)
+      .set({ planId: plan.id, status })
+      .where(eq(subscriptions.orgId, defaultOrgId));
+  }
+
   async function profile() {
+    await onPlan("platinum-premium");
+
     const [first] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
 
     const created = await repos.talent.enable({
@@ -526,7 +558,7 @@ describe.skipIf(!url)("ai apply runner", () => {
 
     const deps: RunnerDeps = {
       repo: repos.aiApply,
-      allowlist: [email.toUpperCase()],
+      companyPlan: repos.billing.companyPlan,
       browserbase: bb.browserbase,
       openPage: async (connectUrl) => {
         opened.push(connectUrl);
@@ -744,7 +776,115 @@ describe.skipIf(!url)("ai apply runner", () => {
     });
   });
 
+  describe("shows the live view only while running", () => {
+    for (const rehearsal of [true, false]) {
+      it(`stores the live view after the session and clears it at the end (rehearsal ${rehearsal})`, async () => {
+        const { id } = await attempt({ rehearsal });
+        const seen: (string | null)[] = [];
+
+        const run = rig({
+          page: {
+            duringFill: async () => {
+              seen.push((await stateOf(id)).liveUrl);
+            },
+          },
+        });
+
+        await runAiApplication(run.deps, id, now);
+
+        expect(seen).toEqual([liveView]);
+        expect(run.watched).toEqual(["session-1"]);
+        expect(await stateOf(id)).toMatchObject({
+          state: rehearsal ? "rehearsed" : "submitted",
+          liveUrl: null,
+        });
+      });
+    }
+
+    it("clears the live view when the run ends early", async () => {
+      const { id } = await attempt();
+      const run = rig({ page: { throwOn: "navigate" } });
+      vi.spyOn(console, "error");
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(await stateOf(id)).toMatchObject({
+        state: "assisted",
+        reason: "error",
+        liveUrl: null,
+      });
+    });
+
+    it("runs without a live view when Browserbase cannot give one", async () => {
+      const { id } = await attempt({ rehearsal: true });
+      const seen: (string | null)[] = [];
+      const logged = vi.spyOn(console, "error");
+
+      const run = rig({
+        browserbase: { failLive: true },
+        page: {
+          duringFill: async () => {
+            seen.push((await stateOf(id)).liveUrl);
+          },
+        },
+      });
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(seen).toEqual([null]);
+      expect(await stateOf(id)).toMatchObject({ state: "rehearsed", liveUrl: null });
+      expect(logged).toHaveBeenCalledExactlyOnceWith("Browserbase live view failed", {
+        name: "BrowserbaseError",
+      });
+      expect(run.released).toEqual(["session-1"]);
+    });
+
+    it("runs on and never logs the live view when it cannot be stored", async () => {
+      const { id } = await attempt();
+      const logged = vi.spyOn(console, "error");
+      const run = rig();
+
+      run.deps.repo = {
+        ...repos.aiApply,
+        showLive: async (_attemptId, url) => {
+          throw new Error(`update failed for ${url}`);
+        },
+      };
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(await stateOf(id)).toMatchObject({ state: "submitted", liveUrl: null });
+      expect(logged).toHaveBeenCalledExactlyOnceWith("Browserbase live view failed", {
+        name: "Error",
+      });
+      expect(JSON.stringify(logged.mock.calls)).not.toContain("browserbase.com");
+    });
+  });
+
   describe("falls back when the form changed", () => {
+    it("names the question whose field could not be filled, without its answer", async () => {
+      const { id } = await attempt({
+        confirmed: baseConfirmed.map((answer) =>
+          answer.questionId === "question_1"
+            ? { ...answer, value: "linha um\nlinha dois" }
+            : answer,
+        ),
+      });
+
+      const run = rig();
+
+      await runAiApplication(run.deps, id, now);
+
+      const row = await stateOf(id);
+
+      expect(row).toMatchObject({
+        state: "assisted",
+        reason: "form_changed",
+        evidence: { failedField: "Por que a Acme?" },
+      });
+      expect(JSON.stringify(row.evidence?.failedField)).not.toContain("linha");
+    });
+
     it("stops before filling when a new required question appeared", async () => {
       const { id } = await attempt();
 
@@ -762,6 +902,7 @@ describe.skipIf(!url)("ai apply runner", () => {
       expect(run.actions).not.toContain("guard");
       expect(run.submits()).toBe(0);
       expect(run.released).toEqual(["session-1"]);
+      expect((await stateOf(id)).evidence?.failedField).toBeUndefined();
     });
 
     it("stops when a confirmed option was removed", async () => {
@@ -809,8 +950,26 @@ describe.skipIf(!url)("ai apply runner", () => {
 
       await runAiApplication(run.deps, id, now);
 
-      expect(await stateOf(id)).toMatchObject({ state: "assisted", reason: "upload_failed" });
+      expect(await stateOf(id)).toMatchObject({
+        state: "assisted",
+        reason: "upload_failed",
+        evidence: { failedField: "Currículo" },
+      });
       expect(run.submits()).toBe(0);
+    });
+
+    it("names the file Browserbase could not take", async () => {
+      const { id } = await attempt();
+      const run = rig({ browserbase: { failUpload: true } });
+      vi.spyOn(console, "error");
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(await stateOf(id)).toMatchObject({
+        state: "assisted",
+        reason: "upload_failed",
+        evidence: { failedField: "Currículo" },
+      });
     });
 
     it("maps a closed job, a sign-in wall and a blocked page", async () => {
@@ -1203,6 +1362,19 @@ describe.skipIf(!url)("ai apply runner", () => {
       expect((await stateOf(unchanged.id)).state).toBe("submitted");
     });
 
+    it("runs when the confirm itself saved the profile, at the confirm instant", async () => {
+      const { id, profileId } = await attempt();
+      const { confirmedAt } = await stateOf(id);
+
+      await db
+        .insert(talentPreferences)
+        .values({ profileId, createdAt: earlier(), updatedAt: confirmedAt ?? earlier() });
+
+      await runAiApplication(rig().deps, id, now);
+
+      expect((await stateOf(id)).state).toBe("submitted");
+    });
+
     it("hands a foreign phone number back before a browser", async () => {
       const phone = question("phone", "Telefone", "phone", [text("phone")]);
       const questions = [...baseQuestions, phone];
@@ -1516,9 +1688,19 @@ describe.skipIf(!url)("ai apply runner", () => {
         { state: "cancelled", reason: "consent_withdrawn" },
       ],
       [
-        "removal from the allowlist",
-        async () => undefined,
-        { allowlist: ["outra@example.com"] },
+        "a company that dropped from the top plan",
+        async () => {
+          await onPlan("gold");
+        },
+        {},
+        { state: "cancelled", reason: "not_allowed" },
+      ],
+      [
+        "a canceled top-plan subscription",
+        async () => {
+          await onPlan("platinum-premium", "canceled");
+        },
+        {},
         { state: "cancelled", reason: "not_allowed" },
       ],
       [
@@ -1581,5 +1763,26 @@ describe.skipIf(!url)("ai apply runner", () => {
         expect(run.opened).toEqual([]);
       });
     }
+  });
+});
+
+describe("failedLabel", () => {
+  const phone = question("phone", "Telefone", "phone", [text("phone")]);
+  const location = question("location", "Localização", "city", [text("location")]);
+
+  const questions = [...baseQuestions, phone, location, letterWithText];
+
+  it("maps the failed field to its question label", () => {
+    expect(failedLabel(questions, "question_1")).toBe("Por que a Acme?");
+    expect(failedLabel(questions, "location")).toBe("Localização");
+    expect(failedLabel(questions, "country")).toBe("Telefone");
+    expect(failedLabel(questions, "cover_letter_text")).toBe("Cover Letter");
+    expect(failedLabel(questions, "resume")).toBe("Currículo");
+    expect(failedLabel(questions, "cover_letter")).toBe("Cover Letter");
+  });
+
+  it("names nothing for an unknown field", () => {
+    expect(failedLabel(questions, "question_99")).toBeUndefined();
+    expect(failedLabel(baseQuestions, "country")).toBeUndefined();
   });
 });

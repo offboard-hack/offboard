@@ -1,6 +1,7 @@
 import type { Database } from "@offboard/db/client";
 import { applications, jobMatches, jobs, resumes, talentPreferences } from "@offboard/db/schema";
 import { and, count, desc, eq, getTableColumns, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import { aiApplyCapable } from "../../shared/ai-apply-access.js";
 import { notRejectedBy } from "../../shared/not-rejected.js";
 import { toPreferences } from "../../shared/talent-preferences.js";
 
@@ -24,6 +25,8 @@ export type TalentJobView = JobView & {
   match: { score: number; reasons: string[] } | null;
   applied: boolean;
   fitsPreferences: boolean;
+  aiApplyCapable: boolean;
+  description: string;
 };
 
 type Row = typeof jobs.$inferSelect;
@@ -141,6 +144,8 @@ export function createJobsRepository(db: Database) {
       match: score === null || reasons === null ? null : { score, reasons },
       applied,
       fitsPreferences: fits,
+      aiApplyCapable: aiApplyCapable(job),
+      description: job.description,
     })) satisfies TalentJobView[];
 
     return { items, total: totals.total };

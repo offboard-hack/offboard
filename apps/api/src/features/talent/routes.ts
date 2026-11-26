@@ -4,7 +4,7 @@ import { errorResponse } from "../../shared/http.js";
 import type { Entitlement } from "../../shared/entitlement.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
 import type { TalentProfile } from "../../shared/talent-profile.js";
-import { aiApplyAccess } from "../../shared/ai-apply-access.js";
+import { aiApplyAccess, onTopPlan, type CompanyPlan } from "../../shared/ai-apply-access.js";
 import type { TalentRepository } from "./repository.js";
 
 const talentAccessResponse = t.Object({
@@ -19,7 +19,7 @@ const meResponse = t.Object({
   email: t.String(),
   termsAccepted: t.Boolean(),
   shareOutcomeWithHr: t.Boolean(),
-  aiApply: t.Object({ consented: t.Boolean(), available: t.Boolean() }),
+  aiApply: t.Object({ eligible: t.Boolean(), consented: t.Boolean(), available: t.Boolean() }),
   entitlement: t.Object({
     kind: t.Union([t.Literal("sponsored"), t.Literal("lapsed")]),
     until: t.Union([t.String(), t.Null()]),
@@ -38,13 +38,14 @@ function toTalentAccess(profile: TalentProfile) {
   };
 }
 
-type AiApply = { allowlist: string[]; configured: boolean };
+type AiApply = {
+  companyPlan: (orgId: string) => Promise<CompanyPlan | null>;
+  configured: boolean;
+};
 
-function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: AiApply) {
-  const access = aiApplyAccess(
-    { personalEmail: profile.email, aiApplyConsentAt: profile.aiApplyConsentAt },
-    aiApply.allowlist,
-  );
+async function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: AiApply) {
+  const plan = await aiApply.companyPlan(profile.orgId);
+  const access = aiApplyAccess(profile, plan);
 
   return {
     id: profile.id,
@@ -53,6 +54,7 @@ function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: AiApply
     termsAccepted: profile.termsAcceptedAt !== null,
     shareOutcomeWithHr: profile.shareOutcomeWithHr,
     aiApply: {
+      eligible: onTopPlan(plan),
       consented: profile.aiApplyConsentAt !== null,
       available: access === "allowed" && aiApply.configured,
     },
@@ -91,7 +93,8 @@ export function talentRoutes(
           return status(409, { error: conflicts[created] });
         }
 
-        await sendWelcome(created);
+        if (!(await repos.signsInAsCollaborator(params.id))) await sendWelcome(created);
+
         set.status = 201;
 
         return toTalentAccess(created);

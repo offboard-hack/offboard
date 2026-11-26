@@ -64,6 +64,8 @@ export function pagesRoutes(
 
     if (!page) return undefined;
 
+    if (page.collaborator) return page;
+
     const companyActive = await deps.companyActive(page.orgId);
 
     const entitlement = entitlementOf({ sponsoredUntil: page.sponsoredUntil, companyActive, now });

@@ -1,16 +1,21 @@
 import type { FormQuestion, ResumeContent } from "@offboard/db/schema";
 import { Elysia, t } from "elysia";
-import { aiApplyAccess } from "../../shared/ai-apply-access.js";
+import { aiApplyAccess, type CompanyPlan } from "../../shared/ai-apply-access.js";
 import type { GenerateStructured } from "../../shared/ai.js";
 import { logFailure, logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import type { UsageRepository } from "../../shared/llm-usage.js";
 import type { ObjectStorage } from "../../shared/object-storage.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
-import { confirmedAnswers, libraryEntries, needsCoverLetter } from "./confirm.js";
+import { confirmedAnswers, libraryEntries, needsCoverLetter, profileFills } from "./confirm.js";
 import { draftAnswers } from "./draft.js";
 import type { FormResult } from "./greenhouse.js";
-import { draftBlock, type AiApplyRepository, type SaveAnswer } from "./repository.js";
+import {
+  draftBlock,
+  type AiApplyRepository,
+  type SaveAnswer,
+  type SaveProfile,
+} from "./repository.js";
 import { attemptResponse } from "./view.js";
 
 const params = t.Object({ jobId: t.String() });
@@ -35,7 +40,7 @@ export function aiApplyRoutes(
   repos: AiApplyRepository,
   talentAccess: TalentAccessPlugin,
   deps: {
-    allowlist: string[];
+    companyPlan: (orgId: string) => Promise<CompanyPlan | null>;
     generate: GenerateStructured | undefined;
     runnerConfigured: boolean;
     takeLlmCall: UsageRepository["takeLlmCall"];
@@ -44,7 +49,9 @@ export function aiApplyRoutes(
       profileId: string,
     ) => Promise<{ question: string; answer: string; sensitive: boolean }[]>;
     saveAnswer: SaveAnswer;
+    saveProfile: SaveProfile;
     enqueueRun: (attemptId: string) => Promise<void>;
+    runNow: (attemptId: string) => Promise<boolean>;
     storage: ObjectStorage | undefined;
   },
 ) {
@@ -73,11 +80,8 @@ export function aiApplyRoutes(
     };
   }
 
-  const gate = (me: { email: string; aiApplyConsentAt: string | null }) => {
-    const access = aiApplyAccess(
-      { personalEmail: me.email, aiApplyConsentAt: me.aiApplyConsentAt },
-      deps.allowlist,
-    );
+  const gate = async (me: { orgId: string; aiApplyConsentAt: string | null }) => {
+    const access = aiApplyAccess(me, await deps.companyPlan(me.orgId));
 
     if (access !== "allowed") {
       return {
@@ -106,7 +110,7 @@ export function aiApplyRoutes(
     .post(
       "/me/jobs/:jobId/ai-apply",
       async ({ me, params, status }) => {
-        const open = gate(me);
+        const open = await gate(me);
 
         if (open.refused) return status(open.refused.code, { error: open.refused.error });
 
@@ -226,7 +230,7 @@ export function aiApplyRoutes(
     .post(
       "/me/ai-applications/:id/confirm",
       async ({ me, params, body, status }) => {
-        const open = gate(me);
+        const open = await gate(me);
 
         if (open.refused) return status(open.refused.code, { error: open.refused.error });
 
@@ -253,16 +257,19 @@ export function aiApplyRoutes(
           return status(409, { error: "Generate a cover letter first" });
         }
 
+        const { draft } = found.attempt;
+
         const result = await repos.confirm(
           me.id,
           params.id,
           {
             confirmed,
             rehearsal: body.rehearsal ?? false,
-            entries: libraryEntries(questions, confirmed, found.attempt.draft),
+            entries: libraryEntries(questions, confirmed, draft),
+            profile: profileFills(questions, confirmed, draft),
           },
           now,
-          deps.saveAnswer,
+          { answer: deps.saveAnswer, profile: deps.saveProfile },
         );
 
         if (result === "job_closed") return status(404, { error: "Job not found" });
@@ -293,6 +300,40 @@ export function aiApplyRoutes(
           404: errorResponse,
           409: errorResponse,
           422: errorResponse,
+          503: errorResponse,
+        },
+      },
+    )
+    .post(
+      "/me/ai-applications/:id/run",
+      async ({ me, params, status }) => {
+        const open = await gate(me);
+
+        if (open.refused) return status(open.refused.code, { error: open.refused.error });
+
+        if (!deps.runnerConfigured) return status(503, { error: "AI Apply not configured" });
+
+        const current = await repos.get(me.id, params.id);
+
+        if (!current) return status(404, notFound);
+
+        if (current.state !== "queued") return status(202, current);
+
+        const ran = await deps.runNow(current.id);
+        const after = await repos.get(me.id, current.id);
+
+        if (!after) return status(404, notFound);
+
+        return ran ? after : status(202, after);
+      },
+      {
+        talent: "active",
+        params: attemptParams,
+        response: {
+          200: attemptResponse,
+          202: attemptResponse,
+          403: errorResponse,
+          404: errorResponse,
           503: errorResponse,
         },
       },

@@ -185,6 +185,28 @@ describe.skipIf(!url)("background repository", () => {
     expect(stored.find((stored) => stored.status === "running")?.id).toBe(job.id);
   });
 
+  it("tells whether a target still has a pending or running job", async () => {
+    const target = { kind: "score_resume", subject: "resume-1" };
+
+    expect(await repository.scheduled(target)).toBe(false);
+
+    await repository.enqueue("score_resume", "resume-1", {}, start);
+
+    expect(await repository.scheduled(target)).toBe(true);
+    expect(await repository.scheduled({ kind: "compute_matches", subject: "resume-1" })).toBe(
+      false,
+    );
+    expect(await repository.scheduled({ kind: "score_resume", subject: "resume-2" })).toBe(false);
+
+    const [job] = await repository.claim(1, start);
+
+    expect(await repository.scheduled(target)).toBe(true);
+
+    await repository.complete(job);
+
+    expect(await repository.scheduled(target)).toBe(false);
+  });
+
   it("claims due jobs in run order and locks them for five minutes", async () => {
     await repository.enqueue("score_resume", "later", { n: 2 }, minutesAfter(start, -1));
     await repository.enqueue("score_resume", "first", { n: 1 }, minutesAfter(start, -10));

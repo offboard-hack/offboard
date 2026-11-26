@@ -183,6 +183,30 @@ describe.skipIf(!url)("jobs repository", () => {
       expect(other.items.filter((job) => job.match)).toHaveLength(1);
     });
 
+    it("tells which jobs AI Apply can take and returns their description", async () => {
+      await insert("acme:42", {
+        source: "greenhouse",
+        description: "Vaga <b>backend</b>\n\nRemoto",
+        postedAt: new Date("2026-05-01T00:00:00Z"),
+      });
+      await insert("acme", { source: "greenhouse", postedAt: new Date("2026-04-01T00:00:00Z") });
+      await insert("acme:43", { postedAt: new Date("2026-03-01T00:00:00Z") });
+
+      const result = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
+
+      expect(
+        result.items.map(({ title, aiApplyCapable, description }) => ({
+          title,
+          aiApplyCapable,
+          description,
+        })),
+      ).toEqual([
+        { title: "acme:42", aiApplyCapable: true, description: "Vaga <b>backend</b>\n\nRemoto" },
+        { title: "acme", aiApplyCapable: false, description: "" },
+        { title: "acme:43", aiApplyCapable: false, description: "" },
+      ]);
+    });
+
     it("treats a résumé version with microseconds as fresh", async () => {
       await insert("job");
 

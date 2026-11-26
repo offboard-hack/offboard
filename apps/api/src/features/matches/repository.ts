@@ -1,6 +1,13 @@
 import type { Database } from "@offboard/db/client";
-import { jobMatches, jobs, resumes, talentPreferences, talentProfiles } from "@offboard/db/schema";
-import { and, asc, desc, eq, gte, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
+import {
+  employeeAccess,
+  jobMatches,
+  jobs,
+  resumes,
+  talentPreferences,
+  talentProfiles,
+} from "@offboard/db/schema";
+import { and, asc, desc, eq, gte, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
 import { notRejectedBy } from "../../shared/not-rejected.js";
 import { toPreferences } from "../../shared/talent-preferences.js";
 import type { MatchJob, MatchResult } from "./score.js";
@@ -148,14 +155,19 @@ export function createMatchesRepository(db: Database) {
     const today = new Date(now.getTime() - saoPauloOffsetMs).toISOString().slice(0, 10);
 
     return db
-      .select({ profileId: resumes.profileId, orgId: talentProfiles.orgId })
+      .select({
+        profileId: resumes.profileId,
+        orgId: talentProfiles.orgId,
+        collaborator: sql<boolean>`${employeeAccess.email} is not null`,
+      })
       .from(resumes)
       .innerJoin(talentProfiles, eq(talentProfiles.id, resumes.profileId))
+      .leftJoin(employeeAccess, eq(employeeAccess.caseId, talentProfiles.caseId))
       .where(
         and(
           eq(resumes.kind, "base"),
           isNotNull(talentProfiles.termsAcceptedAt),
-          gte(talentProfiles.sponsoredUntil, today),
+          or(isNotNull(employeeAccess.email), gte(talentProfiles.sponsoredUntil, today)),
         ),
       )
       .orderBy(asc(resumes.profileId));

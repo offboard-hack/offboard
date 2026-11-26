@@ -1,7 +1,7 @@
 import type { Database } from "@offboard/db/client";
 import { talentPreferences } from "@offboard/db/schema";
 import { eq, sql } from "drizzle-orm";
-import { toPreferences } from "../../shared/talent-preferences.js";
+import { type ProfileFill, toPreferences } from "../../shared/talent-preferences.js";
 import type { PreferencesInput } from "./schema.js";
 
 function sameTitles(left: string[], right: string[]) {
@@ -11,7 +11,7 @@ function sameTitles(left: string[], right: string[]) {
   return first.size === second.size && [...first].every((title) => second.has(title));
 }
 
-export function createPreferencesRepository(db: Database) {
+export function createPreferencesRepository(db: Pick<Database, "select" | "insert">) {
   async function stored(profileId: string) {
     const [row] = await db
       .select()
@@ -54,7 +54,26 @@ export function createPreferencesRepository(db: Database) {
     };
   }
 
-  return { get, save };
+  async function fillUnset(profileId: string, values: ProfileFill, now: Date) {
+    const fields = Object.fromEntries(
+      Object.entries(values).map(([key, value]) => [key, { value, share: true }]),
+    );
+
+    if (Object.keys(fields).length === 0) return;
+
+    await db
+      .insert(talentPreferences)
+      .values({ profileId, profileFields: fields, createdAt: now, updatedAt: now })
+      .onConflictDoUpdate({
+        target: talentPreferences.profileId,
+        set: {
+          profileFields: sql`${talentPreferences.profileFields} || (select coalesce(jsonb_object_agg(fill.key, coalesce(${talentPreferences.profileFields} -> fill.key, fill.value) || jsonb_build_object('value', fill.value -> 'value')), '{}'::jsonb) from jsonb_each(excluded.profile_fields) as fill where ${talentPreferences.profileFields} -> fill.key ->> 'value' is null)`,
+          updatedAt: now,
+        },
+      });
+  }
+
+  return { get, save, fillUnset };
 }
 
 export type PreferencesRepository = ReturnType<typeof createPreferencesRepository>;

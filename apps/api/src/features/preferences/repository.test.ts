@@ -199,6 +199,80 @@ describe.skipIf(!url)("preferences repository", () => {
     );
   });
 
+  it("fills only unset profile values, keeping a stored share choice", async () => {
+    await repository.save(
+      profileId,
+      {
+        mode: "hybrid",
+        profileFields: {
+          phone: { value: "11 1111-1111", share: false },
+          city: { value: null, share: false },
+          linkedin: { value: null, share: true },
+        },
+      },
+      first,
+    );
+
+    await repository.fillUnset(
+      profileId,
+      { phone: "11 2222-2222", city: "São Paulo, SP", cpf: "52998224725" },
+      second,
+    );
+
+    const filled = await repository.get(profileId);
+
+    expect(filled.mode).toBe("hybrid");
+    expect(filled.profileFields.phone).toEqual({ value: "11 1111-1111", share: false });
+    expect(filled.profileFields.city).toEqual({ value: "São Paulo, SP", share: false });
+    expect(filled.profileFields.cpf).toEqual({ value: "52998224725", share: true });
+    expect(filled.profileFields.linkedin).toEqual({ value: null, share: true });
+
+    const [row] = await db.select().from(talentPreferences);
+
+    expect(row).toMatchObject({ createdAt: first, updatedAt: second });
+  });
+
+  it("never flips an explicit choice not to share, and shares a field never set", async () => {
+    await repository.save(
+      profileId,
+      {
+        profileFields: {
+          phone: { value: null, share: false },
+          linkedin: { value: null, share: true },
+        },
+      },
+      first,
+    );
+
+    await repository.fillUnset(
+      profileId,
+      { phone: "11 2222-2222", linkedin: "linkedin.com/in/eu", portfolio: "eu.dev" },
+      second,
+    );
+
+    const { profileFields } = await repository.get(profileId);
+
+    expect(profileFields.phone).toEqual({ value: "11 2222-2222", share: false });
+    expect(profileFields.linkedin).toEqual({ value: "linkedin.com/in/eu", share: true });
+    expect(profileFields.portfolio).toEqual({ value: "eu.dev", share: true });
+  });
+
+  it("creates the row when filling a profile without preferences, and ignores an empty fill", async () => {
+    await repository.fillUnset(profileId, {}, first);
+
+    expect(await db.select().from(talentPreferences)).toEqual([]);
+
+    await repository.fillUnset(profileId, { linkedin: "linkedin.com/in/eu" }, first);
+
+    const [row] = await db.select().from(talentPreferences);
+
+    expect(row).toMatchObject({ profileId, createdAt: first, updatedAt: first });
+    expect((await repository.get(profileId)).profileFields.linkedin).toEqual({
+      value: "linkedin.com/in/eu",
+      share: true,
+    });
+  });
+
   it("keeps each profile isolated", async () => {
     await repository.save(profileId, { mode: "automatic", targetTitles: ["Backend"] }, first);
 

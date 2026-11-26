@@ -208,6 +208,7 @@ describe.skipIf(!url)("applications repository", () => {
           form: { questions: [] },
           draft: [],
           preparedAt: now,
+          liveUrl: "https://www.browserbase.com/devtools-fullscreen/inspector.html",
         })
         .returning({ id: aiApplications.id });
 
@@ -218,7 +219,11 @@ describe.skipIf(!url)("applications repository", () => {
         .from(aiApplications)
         .where(eq(aiApplications.id, attempt.id));
 
-      expect(after).toMatchObject({ state: "cancelled", reason: "applied_manually" });
+      expect(after).toMatchObject({
+        state: "cancelled",
+        reason: "applied_manually",
+        liveUrl: null,
+      });
       expect(after.finishedAt).toBeInstanceOf(Date);
 
       await db.delete(applications).where(eq(applications.jobId, jobId));
@@ -398,7 +403,7 @@ describe.skipIf(!url)("applications repository", () => {
     await applied(otherProfileId, "alheia");
     await db
       .update(applications)
-      .set({ appliedAt: new Date("2026-11-01T12:00:00Z") })
+      .set({ appliedAt: new Date("2026-11-01T12:00:00Z"), channel: "ai_apply" })
       .where(eq(applications.id, older));
     await db
       .update(applications)
@@ -412,6 +417,7 @@ describe.skipIf(!url)("applications repository", () => {
       id: newer.applicationId,
       status: "sent",
       closedReason: null,
+      channel: "manual",
       appliedAt: "2026-11-10T12:00:00.000Z",
       statusChangedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
       job: {
@@ -424,6 +430,7 @@ describe.skipIf(!url)("applications repository", () => {
       },
     });
     expect(list[1].job).toMatchObject({ title: "Vaga antiga", workModel: null, city: null });
+    expect(list[1].channel).toBe("ai_apply");
   });
 
   it("summarizes the funnel of the profile's applications", async () => {

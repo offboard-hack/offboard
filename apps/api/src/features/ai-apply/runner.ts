@@ -5,7 +5,7 @@ import type {
   FormQuestion,
   ResumeContent,
 } from "@offboard/db/schema";
-import { aiApplyAccess } from "../../shared/ai-apply-access.js";
+import { aiApplyAccess, type CompanyPlan } from "../../shared/ai-apply-access.js";
 import { logFailure, logFailureCode } from "../../shared/error-summary.js";
 import type { ObjectStorage } from "../../shared/object-storage.js";
 import { renderLetterPdf } from "../../shared/resume-pdf.js";
@@ -24,7 +24,7 @@ import { stuckMs, type AiApplyRepository } from "./repository.js";
 
 export type RunnerDeps = {
   repo: AiApplyRepository;
-  allowlist: string[];
+  companyPlan: (orgId: string) => Promise<CompanyPlan | null>;
   browserbase: ReturnType<typeof createBrowserbase> | undefined;
   openPage: (connectUrl: string) => Promise<Page>;
   storage: ObjectStorage | undefined;
@@ -93,6 +93,14 @@ const afterClick = {
 const firstField = (questions: FormQuestion[], name: string) =>
   questions.find((question) => question.fields[0]?.name === name);
 
+export const failedLabel = (questions: FormQuestion[], field: string) => {
+  const name = field === "country" ? "phone" : field;
+
+  return questions.find(
+    (question) => question.id === name || question.fields.some((item) => item.name === name),
+  )?.label;
+};
+
 function foreignPhone(questions: FormQuestion[], confirmed: ConfirmedAnswer[]) {
   const phone = firstField(questions, "phone");
   const value = confirmed.find((answer) => answer.questionId === phone?.id)?.value;
@@ -100,14 +108,14 @@ function foreignPhone(questions: FormQuestion[], confirmed: ConfirmedAnswer[]) {
   return [value ?? ""].flat().some((item) => /^\+(?!55)/.test(item));
 }
 
-function refusal(run: Runnable, allowlist: string[]) {
+async function refusal(run: Runnable, deps: RunnerDeps) {
   const { profile } = run;
 
   if (profile.consentAt === null) return cancelled("consent_withdrawn");
 
   const access = aiApplyAccess(
-    { personalEmail: profile.email, aiApplyConsentAt: profile.consentAt.toISOString() },
-    allowlist,
+    { aiApplyConsentAt: profile.consentAt.toISOString() },
+    await deps.companyPlan(profile.orgId),
   );
 
   if (access !== "allowed") return cancelled("not_allowed");
@@ -175,20 +183,35 @@ async function capture(deps: RunnerDeps, page: Page, key: string) {
 async function rendered(ready: Run, letter: string | null) {
   const { deps, run } = ready;
   const { questions } = run.attempt.form;
-  const files: { name: string; bytes: Uint8Array }[] = [];
+  const files: { field: string; name: string; bytes: Uint8Array }[] = [];
 
   if (firstField(questions, "resume") !== undefined) {
     const fields = await deps.repo.profileFields(run.attempt.profileId);
     const content = shareFilteredResume(ready.resume, fields);
+    const bytes = await deps.renderResume(run.profile.name, content);
 
-    files.push({ name: resumeFile, bytes: await deps.renderResume(run.profile.name, content) });
+    files.push({ field: "resume", name: resumeFile, bytes });
   }
 
   if (letter !== null) {
-    files.push({ name: letterFile, bytes: await renderLetterPdf(run.profile.name, letter) });
+    const bytes = await renderLetterPdf(run.profile.name, letter);
+
+    files.push({ field: "cover_letter", name: letterFile, bytes });
   }
 
   return files;
+}
+
+function failedAt(
+  progress: Progress,
+  questions: FormQuestion[],
+  failure: { failed: "upload_failed" | "form_changed"; field: string },
+) {
+  const label = failedLabel(questions, failure.field);
+
+  if (label !== undefined) progress.evidence.failedField = label;
+
+  return assisted(failure.failed);
 }
 
 async function operate(ready: Run, progress: Progress, deadline: number) {
@@ -208,20 +231,25 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
 
   progress.sessionId = session.id;
 
+  await browserbase
+    .liveUrl(session.id)
+    .then((url) => deps.repo.showLive(attemptId, url))
+    .catch(logFailureCode("Browserbase live view failed"));
+
   const uploaded: string[] = [];
 
   withinBudget(deadline);
 
-  for (const file of files) {
+  for (const { field, name, bytes } of files) {
     try {
-      await browserbase.upload(session.id, { ...file, type: "application/pdf" });
+      await browserbase.upload(session.id, { name, bytes, type: "application/pdf" });
     } catch (cause) {
       logFailure("AI application upload failed")(cause);
 
-      return assisted("upload_failed");
+      return failedAt(progress, questions, { failed: "upload_failed", field });
     }
 
-    uploaded.push(file.name);
+    uploaded.push(name);
   }
 
   const page = await deps.openPage(session.connectUrl);
@@ -262,7 +290,7 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
     attach: !rehearsal,
   });
 
-  if (failure !== undefined) return assisted(failure.failed);
+  if (failure !== undefined) return failedAt(progress, questions, failure);
 
   const key = `ai-applications/${run.attempt.profileId}/${attemptId}.png`;
 
@@ -277,7 +305,7 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
   if (!(await deps.repo.markSubmitting(attemptId, now()))) {
     const fresh = await deps.repo.runnable(attemptId);
 
-    return (fresh === undefined ? undefined : refusal(fresh, deps.allowlist)) ?? assisted("error");
+    return (fresh === undefined ? undefined : await refusal(fresh, deps)) ?? assisted("error");
   }
 
   progress.submitting = true;
@@ -386,7 +414,7 @@ export async function runAiApplication(deps: RunnerDeps, attemptId: string, now:
 
   if (state !== "queued" && state !== "running") return skipped;
 
-  const refused = refusal(run, deps.allowlist);
+  const refused = await refusal(run, deps);
 
   if (refused !== undefined) {
     await deps.repo.finish(attemptId, ["queued", "running"], refused, now());

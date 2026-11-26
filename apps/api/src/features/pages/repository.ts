@@ -1,6 +1,7 @@
 import type { Database } from "@offboard/db/client";
 import {
   applications,
+  employeeAccess,
   publicPageDailyViews,
   publicPages,
   resumes,
@@ -145,10 +146,12 @@ export function createPagesRepository(db: Database) {
         orgId: talentProfiles.orgId,
         name: talentProfiles.name,
         sponsoredUntil: talentProfiles.sponsoredUntil,
+        collaborator: sql<boolean>`${employeeAccess.email} is not null`,
         content: resumes.content,
       })
       .from(publicPages)
       .innerJoin(talentProfiles, eq(talentProfiles.id, publicPages.profileId))
+      .leftJoin(employeeAccess, eq(employeeAccess.caseId, talentProfiles.caseId))
       .innerJoin(
         resumes,
         and(

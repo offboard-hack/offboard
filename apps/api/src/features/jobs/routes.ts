@@ -26,6 +26,8 @@ const talentJobResponse = t.Composite([
     match: t.Union([t.Object({ score: t.Integer(), reasons: t.Array(t.String()) }), t.Null()]),
     applied: t.Boolean(),
     fitsPreferences: t.Boolean(),
+    aiApplyCapable: t.Boolean(),
+    description: t.String(),
   }),
 ]);
 

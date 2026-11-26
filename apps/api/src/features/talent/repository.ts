@@ -1,8 +1,14 @@
 import type { Database } from "@offboard/db/client";
-import { aiApplications, offboardingCases, talentProfiles } from "@offboard/db/schema";
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import {
+  aiApplications,
+  employeeAccess,
+  offboardingCases,
+  talentProfiles,
+} from "@offboard/db/schema";
+import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { aiApplyConsentVersion } from "../../shared/ai-apply-access.js";
+import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 import type { TalentProfile } from "../../shared/talent-profile.js";
 
 const caseViolation = z.object({
@@ -102,6 +108,93 @@ export function createTalentRepository(db: Database) {
     }
   }
 
+  async function signsInAsCollaborator(caseId: string) {
+    const [row] = await db
+      .select({ caseId: employeeAccess.caseId })
+      .from(employeeAccess)
+      .where(and(eq(employeeAccess.caseId, caseId), isNotNull(employeeAccess.email)));
+
+    return row !== undefined;
+  }
+
+  async function profileOfCase(caseId: string) {
+    const [row] = await db.select().from(talentProfiles).where(eq(talentProfiles.caseId, caseId));
+
+    return row;
+  }
+
+  async function createForCollaborator(
+    principal: { caseId: string; name: string; email: string },
+    now: Date,
+  ) {
+    const at = sql<Date>`${now.toISOString()}::timestamp`;
+
+    await db
+      .insert(talentProfiles)
+      .select(
+        db
+          .select({
+            id: sql<string>`gen_random_uuid()`.as("id"),
+            orgId: sql<string>`${offboardingCases.orgId}`.as("org_id"),
+            caseId: sql<string>`${offboardingCases.id}`.as("case_id"),
+            personalEmail: sql<string>`${normalizeEmail(principal.email)}`.as("personal_email"),
+            name: sql<string>`${principal.name}`.as("name"),
+            sponsoredUntil: sql<string>`${saoPauloDate(now)}::date`.as("sponsored_until"),
+            termsAcceptedAt: at.as("terms_accepted_at"),
+            firstSignedInAt: at.as("first_signed_in_at"),
+            shareOutcomeWithHr: sql<boolean>`false`.as("share_outcome_with_hr"),
+            aiApplyConsentAt: sql<null>`null::timestamp`.as("ai_apply_consent_at"),
+            aiApplyConsentVersion: sql<null>`null::varchar`.as("ai_apply_consent_version"),
+            createdAt: at.as("created_at"),
+            updatedAt: at.as("updated_at"),
+          })
+          .from(offboardingCases)
+          .where(eq(offboardingCases.id, principal.caseId)),
+      )
+      .onConflictDoNothing();
+
+    return profileOfCase(principal.caseId);
+  }
+
+  async function ensureForCollaborator(
+    principal: { caseId: string; name: string; email: string },
+    now: Date,
+  ) {
+    const email = normalizeEmail(principal.email);
+
+    const existing =
+      (await profileOfCase(principal.caseId)) ?? (await createForCollaborator(principal, now));
+
+    if (!existing) return "email_taken" as const;
+
+    if (
+      existing.personalEmail === email &&
+      existing.termsAcceptedAt !== null &&
+      existing.firstSignedInAt !== null
+    ) {
+      return toProfile(existing);
+    }
+
+    try {
+      const [row] = await db
+        .update(talentProfiles)
+        .set({
+          personalEmail: email,
+          termsAcceptedAt: sql`coalesce(${talentProfiles.termsAcceptedAt}, ${sql.param(now, talentProfiles.termsAcceptedAt)})`,
+          firstSignedInAt: sql`coalesce(${talentProfiles.firstSignedInAt}, ${sql.param(now, talentProfiles.firstSignedInAt)})`,
+          updatedAt: now,
+        })
+        .where(eq(talentProfiles.id, existing.id))
+        .returning();
+
+      return toProfile(row);
+    } catch (error) {
+      if (emailViolation.safeParse(error).success) return "email_taken" as const;
+
+      throw error;
+    }
+  }
+
   async function updateAccess(
     orgId: string,
     caseId: string,
@@ -140,12 +233,18 @@ export function createTalentRepository(db: Database) {
 
   async function findForSignIn(email: string, id?: string) {
     const [row] = await db
-      .select({ id: talentProfiles.id, name: talentProfiles.name })
+      .select({
+        id: talentProfiles.id,
+        name: talentProfiles.name,
+        email: talentProfiles.personalEmail,
+      })
       .from(talentProfiles)
+      .leftJoin(employeeAccess, eq(employeeAccess.caseId, talentProfiles.caseId))
       .where(
         and(
           sql`lower(${talentProfiles.personalEmail}) = ${normalizeEmail(email)}`,
           id === undefined ? undefined : eq(talentProfiles.id, id),
+          isNull(employeeAccess.email),
         ),
       );
 
@@ -198,6 +297,7 @@ export function createTalentRepository(db: Database) {
             state: "cancelled",
             reason: "consent_withdrawn",
             finishedAt: now,
+            liveUrl: null,
             updatedAt: now,
           })
           .where(
@@ -214,9 +314,11 @@ export function createTalentRepository(db: Database) {
 
   return {
     enable,
+    ensureForCollaborator,
     findByCase,
     updateAccess,
     findForSignIn,
+    signsInAsCollaborator,
     markSignedIn,
     findById,
     acceptTerms,

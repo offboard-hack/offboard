@@ -259,7 +259,11 @@ describe("draftAnswers", () => {
     );
 
     expect(hidden.map((item) => [item.value, item.source, item.status])).toEqual(
-      kinds.map(() => [null, null, "not_shared"]),
+      kinds.map((kind) =>
+        kind === "linkedin" || kind === "website"
+          ? [null, null, "blank"]
+          : [null, null, "not_shared"],
+      ),
     );
     expect(JSON.stringify(hidden)).not.toMatch(/90000|529|1990|Paulista/);
 
@@ -306,7 +310,42 @@ describe("draftAnswers", () => {
       }),
     );
 
-    expect(hidden[0]).toMatchObject({ value: null, status: "not_shared" });
+    expect(hidden[0]).toMatchObject({ value: null, status: "blank" });
+  });
+
+  it("drafts unset, unshared profile kinds blank instead of not shared", async () => {
+    const kinds = [
+      "phone",
+      "linkedin",
+      "website",
+      "city",
+      "cpf",
+      "birth_date",
+      "cep",
+      "address",
+    ] as const;
+
+    const answers = await draftAnswers(
+      fake([]).generate,
+      input(
+        kinds.map((kind) => question({ id: kind, kind })),
+        {
+          fields: fieldsOf({
+            phone: { value: null, share: false },
+            linkedin: { value: null, share: false },
+            portfolio: { value: null, share: false },
+            city: { value: null, share: false },
+            cpf: { value: null, share: false },
+            birthDate: { value: null, share: false },
+            address: { value: null, share: false },
+          }),
+        },
+      ),
+    );
+
+    expect(answers.map((item) => [item.value, item.source, item.status])).toEqual(
+      kinds.map(() => [null, null, "blank"]),
+    );
   });
 
   it("drafts a custom question that has no usable field blank", async () => {
@@ -366,6 +405,27 @@ describe("draftAnswers", () => {
       expect(answers.map((item) => item.status)).toEqual(["not_shared", "not_shared", "blank"]);
       expect(prompts).toHaveLength(1);
       expect(prompts[0].prompt).not.toContain("Campinas");
+    });
+
+    it("reuses a saved city answer when the city is unset", async () => {
+      const { generate, prompts } = fake([]);
+
+      const answers = await draftAnswers(
+        generate,
+        input([cityQuestion, question({ id: "home", label: "Onde você mora?" })], {
+          fields: fieldsOf({ city: { value: null, share: false } }),
+          library: [
+            ...saved,
+            { question: "Onde você mora?", answer: "Campinas", sensitive: false },
+          ],
+        }),
+      );
+
+      expect(answers.map((item) => [item.status, item.value])).toEqual([
+        ["blank", null],
+        ["filled", "Campinas"],
+      ]);
+      expect(prompts).toEqual([]);
     });
 
     it("fills a shared city and leaves an unset one blank", async () => {
@@ -809,6 +869,35 @@ describe("draftAnswers", () => {
       );
 
       expect(shared[0]).toMatchObject({ value: "(11) 90000-0000", source: "library" });
+    });
+
+    it("uses the library and the model for those questions when the field is unset", async () => {
+      const { generate, prompts } = fake([]);
+
+      const answers = await draftAnswers(
+        generate,
+        input(
+          [
+            question({ id: "salary", label: "Qual a sua pretensão salarial?" }),
+            question({ id: "start", label: "Disponibilidade para início" }),
+            question({ id: "free", label: "Conte sobre você" }),
+          ],
+          {
+            fields: fieldsOf({
+              salaryExpectation: { value: null, share: false },
+              availability: { value: null, share: false },
+              noticePeriod: { value: null, share: false },
+            }),
+            library,
+          },
+        ),
+      );
+
+      expect(answers.map((item) => item.status)).toEqual(["filled", "blank", "blank"]);
+      expect(answers[0]).toMatchObject({ value: "R$ 12.345 por mês", source: "library" });
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0].prompt).toContain("Em 15 dias");
+      expect(prompts[0].prompt).toContain("45 dias");
     });
 
     it("answers those questions from the library when the field is shared", async () => {

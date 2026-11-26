@@ -1,3 +1,4 @@
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGateway, generateText, Output, type LanguageModel } from "ai";
 import type { z } from "zod";
 
@@ -40,3 +41,14 @@ export const createGenerateStructured = (model: LanguageModel) => {
 
 export const gatewayModel = (apiKey: string, modelId = "anthropic/claude-sonnet-5.5") =>
   createGateway({ apiKey })(modelId);
+
+export const anthropicModel = (apiKey: string, modelId = "claude-sonnet-5-5") =>
+  createAnthropic({ apiKey })(modelId);
+
+export const resolveModel = (keys: { gatewayKey?: string; anthropicKey?: string }) => {
+  if (keys.gatewayKey) return gatewayModel(keys.gatewayKey);
+
+  if (keys.anthropicKey) return anthropicModel(keys.anthropicKey);
+
+  return undefined;
+};

@@ -264,13 +264,57 @@ export const classifyOutcome = (page: OutcomePage) => {
   return errorsVisible(page) ? "invalid" : "timeout";
 };
 
+const brazilStates = [
+  ["AC", "Acre"],
+  ["AL", "Alagoas"],
+  ["AP", "Amapá"],
+  ["AM", "Amazonas"],
+  ["BA", "Bahia"],
+  ["CE", "Ceará"],
+  ["DF", "Distrito Federal", "Federal District"],
+  ["ES", "Espírito Santo"],
+  ["GO", "Goiás"],
+  ["MA", "Maranhão"],
+  ["MT", "Mato Grosso"],
+  ["MS", "Mato Grosso do Sul"],
+  ["MG", "Minas Gerais"],
+  ["PA", "Pará"],
+  ["PB", "Paraíba"],
+  ["PR", "Paraná"],
+  ["PE", "Pernambuco"],
+  ["PI", "Piauí"],
+  ["RJ", "Rio de Janeiro"],
+  ["RN", "Rio Grande do Norte"],
+  ["RS", "Rio Grande do Sul"],
+  ["RO", "Rondônia"],
+  ["RR", "Roraima"],
+  ["SC", "Santa Catarina"],
+  ["SP", "São Paulo"],
+  ["SE", "Sergipe"],
+  ["TO", "Tocantins"],
+].map((names) => names.map(loose));
+
+const placeParts = (place: string) => place.split(/,|\s-\s/).map((part) => part.trim());
+
+const cityName = (place: string) => placeParts(place)[0];
+
+const stateNamed = (place: string) => {
+  const [, part = ""] = placeParts(place);
+
+  return brazilStates.find((names) => names.includes(loose(part)));
+};
+
+const showsState = (shown: string, names: string[]) =>
+  shown.split(",").some((part) => names.includes(loose(part).replace(/^state of /, "")));
+
 export const locationMatches = (city: string, shown: string | null, states: LocationState[]) => {
   if (shown === null) return false;
 
-  const [place = ""] = shown.split(",");
+  const state = stateNamed(city);
 
   return (
-    loose(place) === loose(city) &&
+    loose(cityName(shown)) === loose(cityName(city)) &&
+    (state === undefined || showsState(shown, state)) &&
     states.some(
       (state) =>
         state.latitude.trim() !== "" &&
@@ -389,7 +433,7 @@ const fillLocation = async (page: Page, city: string) => {
   if (!(await exists(page, selector))) return fail("form_changed", "location");
 
   await page.click(selector);
-  await page.type(city);
+  await page.type(cityName(city));
 
   if (!(await page.waitFor(`${found(first)} !== null`, suggestionMs))) {
     await page.press("Escape");

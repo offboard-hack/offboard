@@ -1,26 +1,28 @@
+import { companySponsors } from "./entitlement.js";
+
 export const aiApplyConsentVersion = "2026-11-25";
 
-function normalize(email: string) {
-  return email.trim().toLowerCase();
-}
+export const topPlanSlug = "platinum-premium";
 
-export function parseAllowlist(raw: string | undefined) {
-  return (raw ?? "")
-    .split(",")
-    .map(normalize)
-    .filter((entry) => entry !== "");
+export type CompanyPlan = { slug: string; status: string };
+
+export function onTopPlan(plan: CompanyPlan | null) {
+  return plan !== null && plan.slug === topPlanSlug && companySponsors(plan.status);
 }
 
 export function aiApplyAccess(
-  profile: { personalEmail: string; aiApplyConsentAt: string | null },
-  allowlist: string[],
+  profile: { aiApplyConsentAt: string | null },
+  plan: CompanyPlan | null,
 ) {
-  const email = normalize(profile.personalEmail);
-  const listed = allowlist.some((entry) => entry.trim() !== "" && normalize(entry) === email);
-
-  return listed && profile.aiApplyConsentAt !== null
+  return profile.aiApplyConsentAt !== null && onTopPlan(plan)
     ? ("allowed" as const)
     : ("not_allowed" as const);
+}
+
+export const greenhouseKey = /^([a-z0-9][a-z0-9_-]*):(\d+)$/;
+
+export function aiApplyCapable(job: { source: string; sourceKey: string; closedAt: Date | null }) {
+  return job.closedAt === null && job.source === "greenhouse" && greenhouseKey.test(job.sourceKey);
 }
 
 export function browserbaseConfig(apiKey: string | undefined, projectId: string | undefined) {

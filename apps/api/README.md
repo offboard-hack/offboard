@@ -43,6 +43,11 @@ For the talent app rollout, apply `0013_add_talent_app` to production before
 merging, since every session lookup reads `auth_session.talent_profile_id`.
 First confirm `SELECT count(*) FROM auth_session WHERE num_nonnulls(member_id,
 employee_case_id) <> 1;` returns 0, or the widened audience check fails.
+For the AI Apply live view, apply `0014_add_ai_application_live_url` to
+production before deploying, since every attempt read selects
+`ai_applications.live_url`.
+AI Apply is offered only to people who consented and whose company has an
+active or trialing `platinum-premium` subscription.
 For a disposable development database, `npm run seed -w @offboard/db` loads
 sample cases and replaces the team roster. Add a team row for an email
 address you control before requesting a link.
@@ -68,7 +73,7 @@ public health endpoint at `http://127.0.0.1:3001/api/health` returns
 | `WEBHOOK_SECRET`            | Bearer secret for `/api/webhooks/inbound/:taskId`.                                                                                                                                                  |
 | `SLACK_SIGNING_SECRET`      | Slack app signing secret for `/api/integrations/slack/events`.                                                                                                                                      |
 | `AI_GATEWAY_API_KEY`        | Optional Vercel AI Gateway key. Enables résumé reading, scoring, tailoring and job matching; without it résumé upload and tailoring return 503.                                                     |
-| `AI_APPLY_ALLOWLIST`        | Optional comma-separated personal emails allowed to use AI Apply. Requires `AI_GATEWAY_API_KEY` and the person's own consent; empty means nobody.                                                   |
+| `ANTHROPIC_API_KEY`         | Optional Anthropic API key for the same AI features when `AI_GATEWAY_API_KEY` is not set.                                                                                                           |
 | `BROWSERBASE_API_KEY`       | Optional Browserbase API key, read only by the Worker. AI Apply needs it with `BROWSERBASE_PROJECT_ID`; without both, and always under Node (`server.ts`, Vercel), confirming a draft returns 503.  |
 | `BROWSERBASE_PROJECT_ID`    | Optional Browserbase project id, paired with `BROWSERBASE_API_KEY`. Worker only.                                                                                                                    |
 | `RESUME_STORAGE_DIR`        | Optional directory for uploaded résumé files in local and Node runs. Without storage, `POST /api/me/resume/upload` returns 503.                                                                     |
@@ -156,7 +161,7 @@ EMAIL_PROVIDER=cloudflare OFFBOARD_API_CONFIGURED=1 npm run deploy:cloudflare -w
 ```
 
 Set `OFFBOARD_AI_CONFIGURED=1` for the build to declare the `AI_GATEWAY_API_KEY`
-secret, and `OFFBOARD_AI_APPLY_CONFIGURED=1` to declare `AI_APPLY_ALLOWLIST`, `BROWSERBASE_API_KEY` and
+secret (or `OFFBOARD_AI_CONFIGURED=anthropic` for `ANTHROPIC_API_KEY`), and `OFFBOARD_AI_APPLY_CONFIGURED=1` to declare `BROWSERBASE_API_KEY` and
 `BROWSERBASE_PROJECT_ID`.
 
 Include `WEBHOOK_SECRET` and `SLACK_SIGNING_SECRET` in that file if you plan to
