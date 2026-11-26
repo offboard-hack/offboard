@@ -3578,6 +3578,7 @@ describe.skipIf(!url)("api", () => {
               suggestedText: "Reduziu o tempo de deploy com X",
               rationale: "Mostra o impacto",
               estimatedGain: 6,
+              extraGainWithFacts: 5,
             },
             {
               targetNodeId: created.content.headline.id,
@@ -3615,6 +3616,7 @@ describe.skipIf(!url)("api", () => {
             suggestedText: "Reduziu o tempo de deploy com X",
             rationale: "Mostra o impacto",
             estimatedGain: 6,
+            extraGainWithFacts: 5,
           },
           {
             id: expect.any(String),
@@ -3623,6 +3625,7 @@ describe.skipIf(!url)("api", () => {
             suggestedText: "Engenheira de Software Sênior",
             rationale: "Destaca a senioridade",
             estimatedGain: 4,
+            extraGainWithFacts: 0,
           },
         ]);
       });

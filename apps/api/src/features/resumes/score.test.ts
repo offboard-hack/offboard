@@ -47,6 +47,7 @@ type Suggestion = {
   suggestedText: string;
   rationale: string;
   estimatedGain: number;
+  extraGainWithFacts?: number;
 };
 
 type Output = { score: number; suggestions: Suggestion[] };
@@ -65,8 +66,19 @@ function fake(output: Output) {
   return { generate, requests };
 }
 
-function suggestion(targetNodeId: string, suggestedText: string, estimatedGain = 4) {
-  return { targetNodeId, suggestedText, rationale: "Mostra impacto.", estimatedGain };
+function suggestion(
+  targetNodeId: string,
+  suggestedText: string,
+  estimatedGain = 4,
+  extraGainWithFacts?: number,
+) {
+  return {
+    targetNodeId,
+    suggestedText,
+    rationale: "Mostra impacto.",
+    estimatedGain,
+    extraGainWithFacts,
+  };
 }
 
 describe("textNodes", () => {
@@ -108,6 +120,7 @@ describe("scoreResume", () => {
           suggestedText: "Liderou a migração de 12 serviços para Kubernetes",
           rationale: "Mostra impacto.",
           estimatedGain: 6,
+          extraGainWithFacts: 0,
         },
       ],
     });
@@ -149,8 +162,8 @@ describe("scoreResume", () => {
   it("clamps the score and the estimated gain", async () => {
     const cases = [
       { score: 140.6, gain: 33, expected: { score: 100, gain: 20 } },
-      { score: -3, gain: -2, expected: { score: 0, gain: 1 } },
-      { score: 0.4, gain: 0.2, expected: { score: 0, gain: 1 } },
+      { score: -3, gain: -2, expected: { score: 0, gain: 0 } },
+      { score: 0.4, gain: 0.2, expected: { score: 0, gain: 0 } },
       { score: 72.5, gain: 4.4, expected: { score: 73, gain: 4 } },
       { score: 88.49, gain: 19.6, expected: { score: 88, gain: 20 } },
     ];
@@ -166,6 +179,36 @@ describe("scoreResume", () => {
         suggestions: [{ estimatedGain: expected.gain }],
       });
     }
+  });
+
+  it("clamps the extra gain and defaults it to zero", async () => {
+    const cases = [
+      { extra: undefined, expected: 0 },
+      { extra: -4, expected: 0 },
+      { extra: 7.4, expected: 7 },
+      { extra: 55, expected: 20 },
+    ];
+
+    for (const { extra, expected } of cases) {
+      const result = await scoreResume(
+        fake({ score: 50, suggestions: [suggestion("b3", "Criou 8 APIs REST", 3, extra)] })
+          .generate,
+        resume,
+      );
+
+      expect(result.suggestions).toMatchObject([
+        { estimatedGain: 3, extraGainWithFacts: expected },
+      ]);
+    }
+  });
+
+  it("asks for gains that exclude facts the person has not added yet", async () => {
+    const { generate, requests } = fake({ score: 50, suggestions: [] });
+
+    await scoreResume(generate, resume);
+
+    expect(requests[0]?.system).toContain("applied exactly as written");
+    expect(requests[0]?.system).toContain("extraGainWithFacts");
   });
 
   it("stores clean, bounded text", async () => {

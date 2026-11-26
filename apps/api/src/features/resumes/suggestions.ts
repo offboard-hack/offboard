@@ -12,6 +12,7 @@ export type SuggestionView = {
   suggestedText: string;
   rationale: string;
   estimatedGain: number;
+  extraGainWithFacts: number;
 };
 
 type ScoreResult = { score: number; suggestions: ScoredSuggestion[] };
@@ -23,6 +24,7 @@ const viewColumns = {
   suggestedText: resumeSuggestions.suggestedText,
   rationale: resumeSuggestions.rationale,
   estimatedGain: resumeSuggestions.estimatedGain,
+  extraGainWithFacts: resumeSuggestions.extraGainWithFacts,
 };
 
 function rewrite(content: ResumeContent, nodeId: string, text: string) {

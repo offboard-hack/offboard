@@ -45,6 +45,7 @@ function scored(
   originalText: string,
   suggestedText: string,
   estimatedGain = 4,
+  extraGainWithFacts = 0,
 ) {
   return {
     targetNodeId,
@@ -52,10 +53,11 @@ function scored(
     suggestedText,
     rationale: "Mostra impacto.",
     estimatedGain,
+    extraGainWithFacts,
   } satisfies ScoredSuggestion;
 }
 
-const migration = scored("b1", "Liderou a migração", "Liderou a migração de 12 serviços", 6);
+const migration = scored("b1", "Liderou a migração", "Liderou a migração de 12 serviços", 6, 5);
 const headline = scored("headline", "Engenheira de Software", "Engenheira Backend Sênior", 3);
 
 describe.skipIf(!url)("resume suggestions repository", () => {
@@ -352,8 +354,9 @@ describe.skipIf(!url)("resume suggestions repository", () => {
           suggestedText: "Liderou a migração de 12 serviços",
           rationale: "Mostra impacto.",
           estimatedGain: 6,
+          extraGainWithFacts: 5,
         },
-        expect.objectContaining({ id: ids.headline, estimatedGain: 3 }),
+        expect.objectContaining({ id: ids.headline, extraGainWithFacts: 0, estimatedGain: 3 }),
         expect.objectContaining({ id: ids.b2, estimatedGain: 2 }),
       ]);
     });
