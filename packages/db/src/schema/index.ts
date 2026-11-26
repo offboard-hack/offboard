@@ -406,7 +406,6 @@ export const jobs = pgTable(
       "gin",
       sql`to_tsvector('portuguese', ${table.title} || ' ' || ${table.description})`,
     ),
-    index("jobs_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
   ],
 );
 
@@ -787,7 +786,7 @@ export const resumes = pgTable(
     matchScore: integer("match_score"),
     sourceFileKey: varchar("source_file_key", { length: 512 }),
     embedding: vector("embedding", { dimensions: 1024 }),
-    embeddedVersion: timestamp("embedded_version"),
+    embeddedHash: varchar("embedded_hash", { length: 64 }),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },

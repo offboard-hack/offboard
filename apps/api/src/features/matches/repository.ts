@@ -119,20 +119,17 @@ export function createMatchesRepository(db: Database) {
       .limit(limit);
   }
 
-  async function resumeEmbedding(profileId: string, resumeVersion: Date) {
+  async function resumeEmbedding(profileId: string, hash: string) {
     const [row] = await db
       .select({ embedding: resumes.embedding })
       .from(resumes)
-      .where(and(baseOf(profileId), eq(resumes.embeddedVersion, resumeVersion)));
+      .where(and(baseOf(profileId), eq(resumes.embeddedHash, hash)));
 
     return row?.embedding ?? null;
   }
 
-  async function saveResumeEmbedding(profileId: string, resumeVersion: Date, embedding: number[]) {
-    await db
-      .update(resumes)
-      .set({ embedding, embeddedVersion: resumeVersion })
-      .where(baseOf(profileId));
+  async function saveResumeEmbedding(profileId: string, hash: string, embedding: number[]) {
+    await db.update(resumes).set({ embedding, embeddedHash: hash }).where(baseOf(profileId));
   }
 
   async function jobsToEmbed(limit: number) {

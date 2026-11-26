@@ -523,21 +523,16 @@ describe.skipIf(!url)("matches repository", () => {
       expect(nearest.id).toBe(id);
     });
 
-    it("keeps the résumé embedding only for the version it was made from", async () => {
-      const version = new Date("2026-11-20T10:00:00.123Z");
+    it("keeps the résumé embedding only for the text hash it was made from", async () => {
+      await base(profileId);
 
-      await base(profileId, { updatedAt: version });
+      expect(await repository.resumeEmbedding(profileId, "hash")).toBeNull();
 
-      expect(await repository.resumeEmbedding(profileId, version)).toBeNull();
+      await repository.saveResumeEmbedding(profileId, "hash", vectorAt(3));
 
-      await repository.saveResumeEmbedding(profileId, version, vectorAt(3));
-
-      expect(await repository.resumeEmbedding(profileId, version)).toEqual(vectorAt(3));
-      expect(
-        await repository.resumeEmbedding(profileId, new Date(version.getTime() + 1)),
-      ).toBeNull();
-      expect(await repository.resumeEmbedding(otherProfileId, version)).toBeNull();
-      expect(await repository.baseResume(profileId)).toEqual({ content, version });
+      expect(await repository.resumeEmbedding(profileId, "hash")).toEqual(vectorAt(3));
+      expect(await repository.resumeEmbedding(profileId, "other")).toBeNull();
+      expect(await repository.resumeEmbedding(otherProfileId, "hash")).toBeNull();
     });
 
     it("lists open jobs without an embedding, newest first, and stores their embeddings", async () => {

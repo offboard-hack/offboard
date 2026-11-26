@@ -1,6 +1,6 @@
 import type { ResumeContent } from "@offboard/db/schema";
 import { describe, expect, it } from "vitest";
-import { jobEmbeddingText, resumeEmbeddingText, workersAiEmbed } from "./embed.js";
+import { jobEmbeddingText, resumeEmbeddingText, textHash, workersAiEmbed } from "./embed.js";
 
 const vector = (fill: number) => Array.from({ length: 1024 }, () => fill);
 
@@ -118,5 +118,13 @@ describe("workersAiEmbed", () => {
     const embed = workersAiEmbed({ run: async () => ({ data: [vector(1)] }) });
 
     await expect(embed(["a", "b"])).rejects.toThrow("Embedding count mismatch");
+  });
+});
+
+describe("textHash", () => {
+  it("hashes text to a hex SHA-256 digest", async () => {
+    expect(await textHash("abc")).toBe(
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    );
   });
 });

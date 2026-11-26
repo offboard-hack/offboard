@@ -4381,7 +4381,7 @@ describe.skipIf(!url)("api", () => {
         const id = await profile();
 
         await openJobs([
-          ...Array.from({ length: 54 }, (_, index) => `Vaga ${index}`),
+          ...Array.from({ length: 34 }, (_, index) => `Vaga ${index}`),
           "Zootecnista Veterinária",
         ]);
 
@@ -4480,12 +4480,12 @@ describe.skipIf(!url)("api", () => {
         await app.settle();
 
         const [stored] = await db
-          .select({ embedding: resumes.embedding, version: resumes.embeddedVersion })
+          .select({ embedding: resumes.embedding, hash: resumes.embeddedHash })
           .from(resumes)
           .where(eq(resumes.profileId, id));
 
         expect(stored.embedding).toHaveLength(1024);
-        expect(stored.version).toBeInstanceOf(Date);
+        expect(stored.hash).toMatch(/^[0-9a-f]{64}$/);
         expect(embedder.calls).toHaveLength(1);
 
         await repos.background.enqueue("compute_matches", id);
@@ -4506,6 +4506,24 @@ describe.skipIf(!url)("api", () => {
 
         expect(embedder.calls).toHaveLength(2);
         expect(embedder.calls[1][0]).toContain("Designer");
+      });
+
+      it("embeds the résumé again when the target titles change", async () => {
+        const embedder = fakeEmbed();
+        const app = resumesApp({ embed: embedder.embed });
+        const id = await profile();
+
+        await upload(app.instance, id);
+        await app.settle();
+
+        expect(embedder.calls).toHaveLength(1);
+
+        await db.insert(talentPreferences).values({ profileId: id, targetTitles: ["Zootecnista"] });
+        await repos.background.enqueue("compute_matches", id);
+        await app.settle();
+
+        expect(embedder.calls).toHaveLength(2);
+        expect(embedder.calls[1][0]).toContain("Zootecnista");
       });
 
       it("tops up with text-search candidates when too few jobs are embedded", async () => {
@@ -7214,9 +7232,7 @@ describe.skipIf(!url)("api", () => {
       expect(await queued("compute_matches")).toEqual([]);
     });
 
-    it("logs a failed embedding and stops without enqueueing again", async () => {
-      const logged = vi.spyOn(console, "error");
-
+    it("retries a failed embedding through the queue without enqueueing again", async () => {
       await matchingProfile();
       await insertOpenJobs(3);
 
@@ -7227,13 +7243,17 @@ describe.skipIf(!url)("api", () => {
       const app = sourcesApp([], {}, embedder.embed);
 
       await repos.background.enqueue("embed_jobs", "jobs");
-      await app.drainNow();
 
-      expect(logged.mock.calls).toEqual([["embed jobs failed", { name: "Error" }]]);
+      expect(await app.drainNow()).toEqual({ processed: 0, failed: 1 });
       expect(await embeddedCount()).toBe(0);
-      expect(await queued("embed_jobs")).toEqual([{ subject: "jobs", status: "done" }]);
+
+      const rows = await db
+        .select({ status: backgroundJobs.status, lastError: backgroundJobs.lastError })
+        .from(backgroundJobs)
+        .where(eq(backgroundJobs.kind, "embed_jobs"));
+
+      expect(rows).toEqual([{ status: "pending", lastError: "Error: embeddings down" }]);
       expect(await queued("compute_matches")).toEqual([]);
-      logged.mockRestore();
     });
 
     it("ignores a queued embedding job when embeddings are not configured", async () => {

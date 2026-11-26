@@ -349,6 +349,42 @@ describe.skipIf(!url)("sources repository", () => {
     expect(await stored(feed.id)).toMatchObject({ lastSyncedAt: at(1), lastError: null });
   });
 
+  it("clears a job's embedding only when its title or description changes", async () => {
+    const feed = await created("greenhouse", "acme");
+    const embedding = Array.from({ length: 1024 }, (_, index) => (index === 0 ? 1 : 0));
+
+    await feeds.sync(
+      feed.id,
+      { jobs: [feedJob("acme:1"), feedJob("acme:2"), feedJob("acme:3")], skipped: 0 },
+      start,
+    );
+    await db.update(jobs).set({ embedding, embeddedAt: start });
+
+    await feeds.sync(
+      feed.id,
+      {
+        jobs: [
+          feedJob("acme:1"),
+          feedJob("acme:2", { description: "Outra descrição" }),
+          feedJob("acme:3", { title: "Outro título" }),
+        ],
+        skipped: 0,
+      },
+      at(1),
+    );
+
+    const rows = await db
+      .select({ key: jobs.sourceKey, embedding: jobs.embedding, embeddedAt: jobs.embeddedAt })
+      .from(jobs)
+      .orderBy(asc(jobs.sourceKey));
+
+    expect(rows).toEqual([
+      { key: "acme:1", embedding, embeddedAt: start },
+      { key: "acme:2", embedding: null, embeddedAt: null },
+      { key: "acme:3", embedding: null, embeddedAt: null },
+    ]);
+  });
+
   it("imports large sources in chunks", async () => {
     const feed = await created("lever", "big");
     const many = Array.from({ length: 1_201 }, (_, index) => feedJob(`big:${index}`));

@@ -52,10 +52,11 @@ import type { DispatchAction } from "./shared/action-dispatch.js";
 import type { ResumeContent } from "@offboard/db/schema";
 import { portalAccess } from "./shared/access.js";
 import type { GenerateStructured } from "./shared/ai.js";
-import { jobEmbeddingText, resumeEmbeddingText, type Embed } from "./shared/embed.js";
+import { jobEmbeddingText, resumeEmbeddingText, textHash, type Embed } from "./shared/embed.js";
 import { renderResumePdf } from "./shared/resume-pdf.js";
 
-const matchCandidates = 50;
+const textCandidateLimit = 30;
+const embeddedCandidateLimit = 50;
 const matchBatch = 10;
 const embedJobsLimit = 100;
 const embedBatch = 20;
@@ -102,6 +103,8 @@ const elysiaCodes = new Set<string | number>([
 ]);
 
 export function createApp(webOrigin: string, repos: Repositories, options: AppOptions) {
+  const candidateLimit = options.embed ? embeddedCandidateLimit : textCandidateLimit;
+
   const access = portalAccess(options.auth, webOrigin);
 
   const dispatchAction: DispatchAction = async (context, stepId) => {
@@ -194,20 +197,14 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       const rows = await repos.matches.jobsToEmbed(embedJobsLimit + 1);
       const batch = rows.slice(0, embedJobsLimit);
 
-      try {
-        for (let start = 0; start < batch.length; start += embedBatch) {
-          const part = batch.slice(start, start + embedBatch);
-          const vectors = await options.embed(part.map(jobEmbeddingText));
+      for (let start = 0; start < batch.length; start += embedBatch) {
+        const part = batch.slice(start, start + embedBatch);
+        const vectors = await options.embed(part.map(jobEmbeddingText));
 
-          await repos.matches.saveJobEmbeddings(
-            part.map((row, index) => ({ id: row.id, embedding: vectors[index] })),
-            new Date(),
-          );
-        }
-      } catch (cause) {
-        logFailureCode("embed jobs failed")(cause);
-
-        return;
+        await repos.matches.saveJobEmbeddings(
+          part.map((row, index) => ({ id: row.id, embedding: vectors[index] })),
+          new Date(),
+        );
       }
 
       if (rows.length > embedJobsLimit) {
@@ -249,19 +246,19 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         repos.matches.candidates(
           job.subject,
           toTsQuery(searchTerms(resume.content, titles)),
-          matchCandidates,
+          candidateLimit,
         );
 
       const nearest = await nearestFor(job.subject, resume, titles);
 
       const topUp =
-        nearest.length >= matchCandidates
+        nearest.length >= candidateLimit
           ? []
           : (await textCandidates()).filter((candidate) => !fresh.has(candidate.id));
 
       const pending = [...new Map([...nearest, ...topUp].map((item) => [item.id, item])).values()]
         .filter((candidate) => !fresh.has(candidate.id))
-        .slice(0, matchCandidates);
+        .slice(0, candidateLimit);
 
       for (let start = 0; start < pending.length; start += matchBatch) {
         const taken = await repos.llmUsage.takeLlmCall(job.subject, new Date());
@@ -283,24 +280,26 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
   async function resumeVector(
     profileId: string,
-    resume: { content: ResumeContent; version: Date },
+    resume: { content: ResumeContent },
     titles: string[],
     embed: Embed,
   ) {
-    const stored = await repos.matches.resumeEmbedding(profileId, resume.version);
+    const text = resumeEmbeddingText(resume.content, titles);
+    const hash = await textHash(text);
+    const stored = await repos.matches.resumeEmbedding(profileId, hash);
 
     if (stored) return stored;
 
-    const [embedding] = await embed([resumeEmbeddingText(resume.content, titles)]);
+    const [embedding] = await embed([text]);
 
-    await repos.matches.saveResumeEmbedding(profileId, resume.version, embedding);
+    await repos.matches.saveResumeEmbedding(profileId, hash, embedding);
 
     return embedding;
   }
 
   async function nearestFor(
     profileId: string,
-    resume: { content: ResumeContent; version: Date },
+    resume: { content: ResumeContent },
     titles: string[],
   ) {
     if (!options.embed) return [];
@@ -308,7 +307,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     try {
       const embedding = await resumeVector(profileId, resume, titles, options.embed);
 
-      return await repos.matches.nearestCandidates(profileId, embedding, matchCandidates);
+      return await repos.matches.nearestCandidates(profileId, embedding, candidateLimit);
     } catch (cause) {
       logFailureCode("resume embedding failed")(cause);
 
