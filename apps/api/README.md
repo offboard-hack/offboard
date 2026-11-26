@@ -71,6 +71,7 @@ public health endpoint at `http://127.0.0.1:3001/api/health` returns
 | `WEBHOOK_SECRET`            | Bearer secret for `/api/webhooks/inbound/:taskId`.                                                                                                                                                  |
 | `SLACK_SIGNING_SECRET`      | Slack app signing secret for `/api/integrations/slack/events`.                                                                                                                                      |
 | `AI_GATEWAY_API_KEY`        | Optional Vercel AI Gateway key. Enables résumé reading, scoring, tailoring and job matching; without it résumé upload and tailoring return 503.                                                     |
+| `ANTHROPIC_API_KEY`         | Optional Anthropic API key for the same AI features when `AI_GATEWAY_API_KEY` is not set.                                                                                                           |
 | `AI_APPLY_ALLOWLIST`        | Optional comma-separated personal emails allowed to use AI Apply. Requires `AI_GATEWAY_API_KEY` and the person's own consent; empty means nobody.                                                   |
 | `BROWSERBASE_API_KEY`       | Optional Browserbase API key, read only by the Worker. AI Apply needs it with `BROWSERBASE_PROJECT_ID`; without both, and always under Node (`server.ts`, Vercel), confirming a draft returns 503.  |
 | `BROWSERBASE_PROJECT_ID`    | Optional Browserbase project id, paired with `BROWSERBASE_API_KEY`. Worker only.                                                                                                                    |
@@ -159,7 +160,7 @@ EMAIL_PROVIDER=cloudflare OFFBOARD_API_CONFIGURED=1 npm run deploy:cloudflare -w
 ```
 
 Set `OFFBOARD_AI_CONFIGURED=1` for the build to declare the `AI_GATEWAY_API_KEY`
-secret, and `OFFBOARD_AI_APPLY_CONFIGURED=1` to declare `AI_APPLY_ALLOWLIST`, `BROWSERBASE_API_KEY` and
+secret (or `OFFBOARD_AI_CONFIGURED=anthropic` for `ANTHROPIC_API_KEY`), and `OFFBOARD_AI_APPLY_CONFIGURED=1` to declare `AI_APPLY_ALLOWLIST`, `BROWSERBASE_API_KEY` and
 `BROWSERBASE_PROJECT_ID`.
 
 Include `WEBHOOK_SECRET` and `SLACK_SIGNING_SECRET` in that file if you plan to

@@ -2,7 +2,7 @@ import { APICallError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { createGenerateStructured, gatewayModel } from "./ai.ts";
+import { anthropicModel, createGenerateStructured, gatewayModel, resolveModel } from "./ai.ts";
 
 const jsonModel = (text: string) =>
   new MockLanguageModelV4({
@@ -126,5 +126,34 @@ describe("gatewayModel", () => {
     expect(gatewayModel("key", "anthropic/claude-haiku-5").modelId).toBe(
       "anthropic/claude-haiku-5",
     );
+  });
+});
+
+describe("anthropicModel", () => {
+  it("defaults to Claude Sonnet 5.5", () => {
+    const model = anthropicModel("key");
+
+    expect(model.modelId).toBe("claude-sonnet-5-5");
+    expect(model.provider).toContain("anthropic");
+  });
+
+  it("accepts another model id", () => {
+    expect(anthropicModel("key", "claude-haiku-5").modelId).toBe("claude-haiku-5");
+  });
+});
+
+describe("resolveModel", () => {
+  it("prefers the gateway key", () => {
+    expect(resolveModel({ gatewayKey: "g", anthropicKey: "a" })?.modelId).toBe(
+      "anthropic/claude-sonnet-5.5",
+    );
+  });
+
+  it("falls back to Anthropic", () => {
+    expect(resolveModel({ anthropicKey: "a" })?.modelId).toBe("claude-sonnet-5-5");
+  });
+
+  it("is off without keys", () => {
+    expect(resolveModel({})).toBeUndefined();
   });
 });

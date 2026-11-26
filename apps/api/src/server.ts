@@ -6,7 +6,7 @@ import { createApp } from "./app.js";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
 import { parseAllowlist } from "./shared/ai-apply-access.js";
-import { createGenerateStructured, gatewayModel } from "./shared/ai.js";
+import { createGenerateStructured, resolveModel } from "./shared/ai.js";
 import { diskStorage } from "./shared/disk-storage.js";
 
 const config = z
@@ -20,6 +20,11 @@ const config = z
       .default("http://localhost:5173"),
   })
   .parse(process.env);
+
+const aiModel = resolveModel({
+  gatewayKey: process.env.AI_GATEWAY_API_KEY,
+  anthropicKey: process.env.ANTHROPIC_API_KEY,
+});
 
 const db = createClient(config.POSTGRES_URL);
 const repos = createRepositories(db);
@@ -42,9 +47,7 @@ createApp(origin, repos, {
   slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
   abacatepay: createAbacatePayGateway(process.env.ABACATEPAY_API_KEY),
   abacatepayWebhookSecret: process.env.ABACATEPAY_WEBHOOK_SECRET,
-  generateStructured: process.env.AI_GATEWAY_API_KEY
-    ? createGenerateStructured(gatewayModel(process.env.AI_GATEWAY_API_KEY))
-    : undefined,
+  generateStructured: aiModel ? createGenerateStructured(aiModel) : undefined,
   storage: process.env.RESUME_STORAGE_DIR ? diskStorage(process.env.RESUME_STORAGE_DIR) : undefined,
   publicPageOrigin: process.env.PUBLIC_PAGE_ORIGIN,
   aiApplyAllowlist: parseAllowlist(process.env.AI_APPLY_ALLOWLIST),
