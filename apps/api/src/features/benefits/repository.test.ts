@@ -69,6 +69,14 @@ describe.skipIf(!url)("benefit repository", () => {
     planId,
   });
 
+  it("checks that a profile belongs to the org", async () => {
+    const profileId = await profile();
+
+    expect(await repos.benefits.profileInOrg(defaultOrgId, profileId)).toBe(true);
+    expect(await repos.benefits.profileInOrg(crypto.randomUUID(), profileId)).toBe(false);
+    expect(await repos.benefits.profileInOrg(defaultOrgId, crypto.randomUUID())).toBe(false);
+  });
+
   it("returns null policy when the org has none", async () => {
     expect(await repos.benefits.getPolicy(defaultOrgId)).toBeNull();
   });

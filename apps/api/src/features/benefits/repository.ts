@@ -117,7 +117,18 @@ export function createBenefitRepository(db: Database) {
     return new Map(rows.map((row) => [row.id, row.price]));
   }
 
+  async function profileInOrg(orgId: string, profileId: string) {
+    const [row] = await db
+      .select({ id: talentProfiles.id })
+      .from(talentProfiles)
+      .where(and(eq(talentProfiles.id, profileId), eq(talentProfiles.orgId, orgId)))
+      .limit(1);
+
+    return row !== undefined;
+  }
+
   return {
+    profileInOrg,
     getPolicy,
     savePolicy,
     listAssignments,
