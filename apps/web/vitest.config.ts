@@ -14,6 +14,7 @@ export default defineConfig({
         "src/features/employee/career/ai-apply-form.ts",
         "src/features/employee/career/plan-card.ts",
         "src/features/employee/career/preferences-form.ts",
+        "src/features/employee/career/job-preferences-form.ts",
       ],
       thresholds: { lines: 100, functions: 100, branches: 100, statements: 100 },
     },
