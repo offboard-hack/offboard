@@ -22,7 +22,7 @@ import { z } from "zod";
 import type { PortalAuth, TalentPrincipal } from "../../shared/portal-auth.js";
 import { isEmployeeApp } from "../../shared/employee-auth.js";
 import { createEmailSender, type CloudflareEmailBinding } from "./email.js";
-import { signInEmail, signInLinkMinutes } from "./sign-in-email.js";
+import { signInCodeEmail, signInEmail, signInLinkMinutes } from "./sign-in-email.js";
 
 const authPath = "/api/auth";
 const verifyPath = "/magic-link/verify";
@@ -500,14 +500,9 @@ export function createRuntimeAuth(
       );
     },
     sendCode({ email, code }) {
-      const text = `Seu código para entrar no Offboard é ${code}. Ele expira em ${codeLifetimeSeconds / 60} minutos.`;
-
-      return sender.send({
-        to: email,
-        subject: "Seu código de acesso ao Offboard",
-        text,
-        html: `<p>${text}</p>`,
-      });
+      return sender.send(
+        signInCodeEmail({ email, code, minutes: codeLifetimeSeconds / 60, origin }),
+      );
     },
   });
 
