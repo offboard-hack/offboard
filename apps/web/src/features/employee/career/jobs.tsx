@@ -11,6 +11,7 @@ import {
   careerJobsQuery,
   careerProfileQuery,
   careerResumeQuery,
+  jobsRefetchInterval,
   useMarkApplied,
   type WorkModel,
 } from "@/entities/career";
@@ -243,7 +244,7 @@ export function CareerJobs({ account }: { account: EmployeeAccount }) {
   const resume = useQuery(careerResumeQuery(account));
 
   const jobs = useQuery({
-    ...careerJobsQuery(account, model === "all" ? undefined : model, page),
+    ...careerJobsQuery(account, model === "all" ? undefined : model, page, Boolean(resume.data)),
     placeholderData: keepPreviousData,
   });
 
@@ -253,6 +254,7 @@ export function CareerJobs({ account }: { account: EmployeeAccount }) {
 
   const pages = jobs.data ? Math.max(1, Math.ceil(jobs.data.total / jobs.data.pageSize)) : 1;
   const current = selected && jobs.data?.items.find((job) => job.id === selected.id);
+  const calculating = jobsRefetchInterval(jobs.data, Boolean(resume.data)) !== false;
 
   return (
     <div className="space-y-5">
@@ -278,6 +280,11 @@ export function CareerJobs({ account }: { account: EmployeeAccount }) {
             }}
           />
         </div>
+        {calculating && jobs.data?.items.length ? (
+          <p className="text-sm text-muted-foreground">
+            Calculando a compatibilidade com seu currículo… pode levar alguns minutos.
+          </p>
+        ) : null}
         {jobs.isPending ? <Skeleton className="h-48 w-full" /> : null}
         {jobs.data?.items.length === 0 ? (
           <EmployeeEmpty>

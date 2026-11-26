@@ -1,5 +1,5 @@
 import type { ApiClient, Treaty } from "@offboard/api-client";
-import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   checkEmployeeAccess,
   type EmployeeAccount,
@@ -9,6 +9,9 @@ import {
 } from "@/entities/employee";
 import { getApiClient } from "@/shared/lib/api-client";
 import { careerFailure } from "./failure";
+import { jobsRefetchInterval, resumeRefetchInterval, scoreArrived } from "./refresh";
+
+export { jobsRefetchInterval } from "./refresh";
 
 type Me = ApiClient["api"]["me"];
 
@@ -80,12 +83,14 @@ export function careerProfileQuery(account: EmployeeAccount) {
   });
 }
 
-export function careerResumeQuery(account: EmployeeAccount) {
+function resumeSource(account: EmployeeAccount) {
+  const queryKey = [...careerKey(account), "resume"] as const;
+
   return queryOptions({
-    queryKey: [...careerKey(account), "resume"],
+    queryKey,
     staleTime: freshness,
     retry: retryEmployeeRead,
-    queryFn: async ({ signal }) => {
+    queryFn: async ({ signal, client: queryClient }) => {
       const result = await client().resume.get({
         headers: employeeAccessHeaders(account),
         fetch: { signal },
@@ -93,8 +98,22 @@ export function careerResumeQuery(account: EmployeeAccount) {
 
       if (result.status === 404) return null;
 
-      return settle(result, "Não foi possível abrir seu currículo.");
+      const resume = settle(result, "Não foi possível abrir seu currículo.");
+      const previous = queryClient.getQueryData<CareerResume | null>(queryKey);
+
+      if (scoreArrived(previous?.score, resume.score)) {
+        void refreshAfterScore(queryClient, account);
+      }
+
+      return resume;
     },
+  });
+}
+
+export function careerResumeQuery(account: EmployeeAccount) {
+  return queryOptions({
+    ...resumeSource(account),
+    refetchInterval: (query) => resumeRefetchInterval(query.state.data),
   });
 }
 
@@ -114,11 +133,7 @@ export function resumeSuggestionsQuery(account: EmployeeAccount) {
   });
 }
 
-export function careerJobsQuery(
-  account: EmployeeAccount,
-  workModel: WorkModel | undefined,
-  page: number,
-) {
+function jobsSource(account: EmployeeAccount, workModel: WorkModel | undefined, page: number) {
   return queryOptions({
     queryKey: [...careerKey(account), "jobs", workModel ?? "all", page],
     staleTime: freshness,
@@ -132,6 +147,18 @@ export function careerJobsQuery(
         }),
         "Não foi possível abrir as vagas.",
       ),
+  });
+}
+
+export function careerJobsQuery(
+  account: EmployeeAccount,
+  workModel: WorkModel | undefined,
+  page: number,
+  hasResume = false,
+) {
+  return queryOptions({
+    ...jobsSource(account, workModel, page),
+    refetchInterval: (query) => jobsRefetchInterval(query.state.data, hasResume),
   });
 }
 
@@ -196,6 +223,13 @@ export function aiAttemptQuery(account: EmployeeAccount, id: string) {
         "Não foi possível abrir a candidatura com IA.",
       ),
   });
+}
+
+export function refreshAfterScore(queryClient: QueryClient, account: EmployeeAccount) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: resumeSuggestionsQuery(account).queryKey }),
+    queryClient.invalidateQueries({ queryKey: [...careerKey(account), "jobs"] }),
+  ]);
 }
 
 export function useResumeUpload(account: EmployeeAccount) {
