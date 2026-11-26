@@ -224,7 +224,11 @@ export function createTalentRepository(db: Database) {
 
   async function findForSignIn(email: string, id?: string) {
     const [row] = await db
-      .select({ id: talentProfiles.id, name: talentProfiles.name })
+      .select({
+        id: talentProfiles.id,
+        name: talentProfiles.name,
+        email: talentProfiles.personalEmail,
+      })
       .from(talentProfiles)
       .leftJoin(employeeAccess, eq(employeeAccess.caseId, talentProfiles.caseId))
       .where(

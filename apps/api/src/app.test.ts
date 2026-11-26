@@ -9255,6 +9255,67 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       expect(await profilesOf(caseId)).toEqual([]);
     });
 
+    it("refuses a talent session once the case gets a collaborator grant", async () => {
+      const orgId = await organization();
+      const email = `talent-${randomUUID()}@offboard.example`;
+
+      const [record] = await db
+        .insert(offboardingCases)
+        .values({
+          orgId,
+          name: "Pessoa da carreira",
+          role: "Analista",
+          department: "Produto",
+          deadline: "2027-02-01",
+        })
+        .returning({ id: offboardingCases.id });
+
+      expect(
+        await repos.talent.enable({
+          orgId,
+          caseId: record.id,
+          personalEmail: email,
+          sponsoredUntil: "2099-01-01",
+        }),
+      ).toMatchObject({ caseId: record.id });
+
+      const sent = await request("/auth/sign-in/magic-link", "POST", undefined, {
+        email,
+        callbackURL: "/app",
+      });
+
+      expect(sent.status).toBe(200);
+      const link = links.get(email);
+
+      if (!link) throw new Error("No talent link delivered");
+
+      const cookie = (await app.handle(new Request(link))).headers
+        .getSetCookie()
+        .find((value) => value.includes("session_token="))
+        ?.split(";")[0];
+
+      expect((await request("/me", "GET", cookie)).status).toBe(200);
+
+      await db.insert(employeeAccess).values({
+        caseId: record.id,
+        orgId,
+        email: `grant-${randomUUID()}@offboard.example`,
+        plan: emptyEmployeePlan,
+      });
+
+      const refused = await request("/me", "GET", cookie);
+
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toEqual({ error: "Forbidden" });
+
+      await db
+        .update(employeeAccess)
+        .set({ email: null })
+        .where(eq(employeeAccess.caseId, record.id));
+
+      expect((await request("/me", "GET", cookie)).status).toBe(200);
+    });
+
     it("keeps member sessions out of the career routes", async () => {
       const orgId = await organization();
       const { caseId, email } = await collaboratorCase(orgId);

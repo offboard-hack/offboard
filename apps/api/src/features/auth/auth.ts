@@ -92,9 +92,8 @@ const appCallback = z.object({ callbackURL: z.string().regex(/^\/app(?:[/?]|$)/)
 const talentSession = z.object({ talentProfileId: z.string() });
 
 type TalentDirectory = {
-  findForSignIn(email: string, id?: string): Promise<{ id: string; name: string } | undefined>;
+  findForSignIn(email: string, id?: string): Promise<TalentPrincipal | undefined>;
   markSignedIn(id: string): Promise<void>;
-  findById(id: string): Promise<TalentPrincipal | undefined>;
 };
 
 async function requestAudience(request: Request, pathname: string) {
@@ -422,9 +421,9 @@ export function createAuth({
       const email = session.user.email.toLowerCase();
 
       if (audience === "talent") {
-        const profile = await talent.findById(id);
+        const profile = await talent.findForSignIn(email, id);
 
-        return profile?.email.toLowerCase() === email
+        return profile
           ? {
               kind: "talent",
               profile: { id: profile.id, name: profile.name, email: profile.email },

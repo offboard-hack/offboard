@@ -191,10 +191,12 @@ describe.skipIf(!url)("talent repository", () => {
     expect(await talent.findForSignIn(" PESSOA@exemplo.com ")).toEqual({
       id: profile.id,
       name: first.name,
+      email: "pessoa@exemplo.com",
     });
     expect(await talent.findForSignIn("pessoa@exemplo.com", profile.id)).toEqual({
       id: profile.id,
       name: first.name,
+      email: "pessoa@exemplo.com",
     });
     expect(await talent.findForSignIn("pessoa@exemplo.com", missingId)).toBeUndefined();
     expect(await talent.findForSignIn("ninguem@exemplo.com")).toBeUndefined();
@@ -213,6 +215,7 @@ describe.skipIf(!url)("talent repository", () => {
     expect(await talent.findForSignIn("pessoa@exemplo.com")).toEqual({
       id: profile.id,
       name: first.name,
+      email: "pessoa@exemplo.com",
     });
   });
 
