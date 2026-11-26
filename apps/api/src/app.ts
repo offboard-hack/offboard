@@ -252,18 +252,16 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
           matchCandidates,
         );
 
-      const nearest = await nearestFor(job.subject, resume, titles, fresh);
+      const nearest = await nearestFor(job.subject, resume, titles);
 
-      const pending =
+      const topUp =
         nearest.length >= matchCandidates
-          ? nearest
-          : [
-              ...nearest,
-              ...(await textCandidates()).filter(
-                (candidate) =>
-                  !fresh.has(candidate.id) && !nearest.some((near) => near.id === candidate.id),
-              ),
-            ].slice(0, matchCandidates);
+          ? []
+          : (await textCandidates()).filter((candidate) => !fresh.has(candidate.id));
+
+      const pending = [...new Map([...nearest, ...topUp].map((item) => [item.id, item])).values()]
+        .filter((candidate) => !fresh.has(candidate.id))
+        .slice(0, matchCandidates);
 
       for (let start = 0; start < pending.length; start += matchBatch) {
         const taken = await repos.llmUsage.takeLlmCall(job.subject, new Date());
@@ -304,16 +302,13 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     profileId: string,
     resume: { content: ResumeContent; version: Date },
     titles: string[],
-    fresh: Set<string>,
   ) {
     if (!options.embed) return [];
 
     try {
       const embedding = await resumeVector(profileId, resume, titles, options.embed);
 
-      return await repos.matches.nearestCandidates(profileId, embedding, matchCandidates, [
-        ...fresh,
-      ]);
+      return await repos.matches.nearestCandidates(profileId, embedding, matchCandidates);
     } catch (cause) {
       logFailureCode("resume embedding failed")(cause);
 

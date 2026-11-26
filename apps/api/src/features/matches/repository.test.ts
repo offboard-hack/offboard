@@ -484,7 +484,7 @@ describe.skipIf(!url)("matches repository", () => {
     const vectorAt = (offset: number) =>
       Array.from({ length: 1024 }, (_, index) => (index === 0 ? 1 : index === 1 ? offset : 0));
 
-    it("orders open embedded jobs by cosine distance, honoring exclusions and rejections", async () => {
+    it("orders open embedded jobs by cosine distance, honoring rejections", async () => {
       const far = await job("far", { embedding: vectorAt(5) });
       const near = await job("near", { embedding: vectorAt(1) });
       const middle = await job("middle", { embedding: vectorAt(2) });
@@ -494,18 +494,15 @@ describe.skipIf(!url)("matches repository", () => {
       await job("unembedded");
       await db.insert(jobRejections).values({ profileId, jobId: rejected, reason: "other" });
 
-      const ids = async (limit: number, exclude: string[], embedding = vectorAt(0)) =>
-        (await repository.nearestCandidates(profileId, embedding, limit, exclude)).map(
-          (item) => item.id,
-        );
+      const ids = async (limit: number, embedding = vectorAt(0)) =>
+        (await repository.nearestCandidates(profileId, embedding, limit)).map((item) => item.id);
 
-      expect(await ids(10, [])).toEqual([near, middle, far]);
-      expect(await ids(2, [])).toEqual([near, middle]);
-      expect(await ids(10, [near])).toEqual([middle, far]);
-      expect(await ids(10, [], vectorAt(5))).toEqual([far, middle, near]);
-      expect(await ids(10, [])).not.toContain(closed);
+      expect(await ids(10)).toEqual([near, middle, far]);
+      expect(await ids(2)).toEqual([near, middle]);
+      expect(await ids(10, vectorAt(5))).toEqual([far, middle, near]);
+      expect(await ids(10)).not.toContain(closed);
       expect(
-        (await repository.nearestCandidates(otherProfileId, vectorAt(0), 10, [])).map(
+        (await repository.nearestCandidates(otherProfileId, vectorAt(0), 10)).map(
           (item) => item.id,
         ),
       ).toContain(rejected);
@@ -519,7 +516,7 @@ describe.skipIf(!url)("matches repository", () => {
         description: "Descrição",
       });
 
-      const [nearest] = await repository.nearestCandidates(profileId, vectorAt(0), 1, []);
+      const [nearest] = await repository.nearestCandidates(profileId, vectorAt(0), 1);
       const [text] = await repository.candidates(profileId, null, 1);
 
       expect(nearest).toEqual(text);

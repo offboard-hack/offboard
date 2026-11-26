@@ -4415,7 +4415,7 @@ describe.skipIf(!url)("api", () => {
 
       const vagas = (count: number) => Array.from({ length: count }, (_, index) => `Vaga ${index}`);
 
-      it("scores the nearest embedded jobs and the next nearest on the following run", async () => {
+      it("scores the nearest embedded jobs and nothing more on a repeat run", async () => {
         const embedder = fakeEmbed();
         const app = resumesApp({ embed: embedder.embed });
         const id = await profile();
@@ -4435,11 +4435,39 @@ describe.skipIf(!url)("api", () => {
         await repos.background.enqueue("compute_matches", id);
         await app.settle();
 
-        expect(app.matching.batches.flat().slice(50)).toEqual(
-          expect.arrayContaining(vagas(60).slice(50)),
-        );
-        expect(app.matching.batches.flat()).toHaveLength(60);
+        expect(app.matching.batches.flat()).toHaveLength(50);
         expect(embedder.calls).toHaveLength(1);
+      });
+
+      it("scores a new job inside the nearest fifty and ignores one outside", async () => {
+        const embedder = fakeEmbed();
+        const app = resumesApp({ embed: embedder.embed });
+        const id = await profile();
+
+        await openJobs(vagas(60));
+        await embedOpenJobs();
+        await upload(app.instance, id);
+        await app.settle();
+
+        await db.insert(jobs).values(
+          [
+            { title: "Perto", offset: 0 },
+            { title: "Longe", offset: 1000 },
+          ].map(({ title, offset }) => ({
+            origin: "external" as const,
+            source: "seed",
+            sourceKey: title,
+            title,
+            company: "Acme",
+            description: title,
+            url: `https://jobs.example.com/${title}`,
+            embedding: vectorAt(offset),
+          })),
+        );
+        await repos.background.enqueue("compute_matches", id);
+        await app.settle();
+
+        expect(app.matching.batches.flat().slice(50)).toEqual(["Perto"]);
       });
 
       it("embeds the résumé again once its version changes", async () => {

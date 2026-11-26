@@ -110,22 +110,11 @@ export function createMatchesRepository(db: Database) {
     return [...matched, ...rest];
   }
 
-  async function nearestCandidates(
-    profileId: string,
-    embedding: number[],
-    limit: number,
-    excludeIds: string[],
-  ) {
+  async function nearestCandidates(profileId: string, embedding: number[], limit: number) {
     return db
       .select(jobColumns)
       .from(jobs)
-      .where(
-        and(
-          openFor(profileId),
-          isNotNull(jobs.embedding),
-          excludeIds.length > 0 ? notInArray(jobs.id, excludeIds) : undefined,
-        ),
-      )
+      .where(and(openFor(profileId), isNotNull(jobs.embedding)))
       .orderBy(asc(cosineDistance(jobs.embedding, embedding)), asc(jobs.id))
       .limit(limit);
   }
