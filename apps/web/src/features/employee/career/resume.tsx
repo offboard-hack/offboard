@@ -190,6 +190,17 @@ function Suggestions({ account }: { account: EmployeeAccount }) {
   );
 }
 
+export function ResumeFirst({ account }: { account: EmployeeAccount }) {
+  return (
+    <EmployeePanel
+      title="Comece pelo currículo"
+      description="Envie seu currículo para ver as vagas em ordem de compatibilidade e se candidatar com IA. A IA lê o arquivo, dá uma nota e sugere melhorias."
+    >
+      <ResumeUpload account={account} />
+    </EmployeePanel>
+  );
+}
+
 export function ResumeCareer({ account }: { account: EmployeeAccount }) {
   const resume = useQuery(careerResumeQuery(account));
   const [replacing, setReplacing] = useState(false);

@@ -286,6 +286,14 @@ export function useAiApplyConsent(account: EmployeeAccount) {
   });
 }
 
+export class NotAiApplicable extends Error {
+  constructor() {
+    super(
+      "Esta vaga não aceita candidatura com IA. Use “Abrir vaga” para se candidatar pelo site.",
+    );
+  }
+}
+
 const activeStates = new Set<AiAttempt["state"]>([
   "draft",
   "queued",
@@ -302,6 +310,8 @@ export function useAiDraft(account: EmployeeAccount) {
       const result = await client()
         .jobs({ jobId })
         ["ai-apply"].post(undefined, { headers: employeeAccessHeaders(account) });
+
+      if (result.status === 404) throw new NotAiApplicable();
 
       if (result.status === 409) {
         const attempts = await queryClient.fetchQuery({

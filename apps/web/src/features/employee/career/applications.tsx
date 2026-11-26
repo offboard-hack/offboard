@@ -2,6 +2,7 @@ import AiMagicIcon from "@hugeicons/core-free-icons/AiMagicIcon";
 import Briefcase01Icon from "@hugeicons/core-free-icons/Briefcase01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   type AiAttempt,
   aiAttemptsQuery,
@@ -21,6 +22,7 @@ import {
 } from "@/shared/ui/shadcn/item";
 import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "../ui";
+import { AiApplyDialog } from "./ai-apply";
 import { applicationStatus, attemptReason, attemptState, careerDate } from "./labels";
 
 const attemptTones = {
@@ -70,6 +72,7 @@ export function AttemptBadge({ state }: { state: AiAttempt["state"] }) {
 }
 
 export function CareerApplications({ account }: { account: EmployeeAccount }) {
+  const [opened, setOpened] = useState<AiAttempt | null>(null);
   const attempts = useQuery(aiAttemptsQuery(account));
   const applications = useQuery(careerApplicationsQuery(account));
 
@@ -113,6 +116,11 @@ export function CareerApplications({ account }: { account: EmployeeAccount }) {
                   </ItemContent>
                   <ItemActions className="max-sm:w-full max-sm:flex-wrap">
                     <AttemptBadge state={attempt.state} />
+                    {attempt.state === "draft" || attempt.state === "rehearsed" ? (
+                      <Button size="sm" variant="outline" onClick={() => setOpened(attempt)}>
+                        Revisar respostas
+                      </Button>
+                    ) : null}
                   </ItemActions>
                 </Item>
               </li>
@@ -148,6 +156,14 @@ export function CareerApplications({ account }: { account: EmployeeAccount }) {
           ))}
         </ul>
       </EmployeePanel>
+      {opened ? (
+        <AiApplyDialog
+          account={account}
+          job={opened.job}
+          attemptId={opened.id}
+          close={() => setOpened(null)}
+        />
+      ) : null}
     </div>
   );
 }

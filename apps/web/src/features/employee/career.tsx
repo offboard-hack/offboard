@@ -4,11 +4,12 @@ import { resumeHtml } from "@offboard/employee/resume-document";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { careerApplicationsQuery } from "@/entities/career";
+import { careerApplicationsQuery, careerResumeQuery } from "@/entities/career";
 import type { EmployeeAccount } from "@/entities/employee";
 import { Button, buttonVariants } from "@/shared/ui/shadcn/button";
 import { CareerApplications } from "./career/applications";
 import { CareerJobs } from "./career/jobs";
+import { ResumeFirst } from "./career/resume";
 import { EmployeeError, EmployeePanel } from "./ui";
 
 type CareerState = Extract<EmployeeState, { key: "career" }>;
@@ -21,6 +22,7 @@ export function Career({
   view: "vagas" | "candidaturas";
 }) {
   const applications = useQuery(careerApplicationsQuery(account));
+  const resume = useQuery(careerResumeQuery(account));
 
   return (
     <div className="space-y-5">
@@ -40,6 +42,7 @@ export function Career({
           Candidaturas{applications.data ? ` · ${applications.data.length}` : ""}
         </Link>
       </nav>
+      {resume.data === null ? <ResumeFirst account={account} /> : null}
       {view === "vagas" ? (
         <CareerJobs account={account} />
       ) : (

@@ -1,10 +1,10 @@
+import AiMagicIcon from "@hugeicons/core-free-icons/AiMagicIcon";
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import Briefcase01Icon from "@hugeicons/core-free-icons/Briefcase01Icon";
 import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
 import LinkSquare02Icon from "@hugeicons/core-free-icons/LinkSquare02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   type CareerJob,
@@ -44,6 +44,7 @@ import {
 } from "@/shared/ui/shadcn/pagination";
 import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "../ui";
+import { AiApplyDialog } from "./ai-apply";
 import { careerDate, jobPlace, matchScore, salaryRange } from "./labels";
 import { CareerRetry } from "./resume";
 
@@ -58,33 +59,18 @@ function isWorkModel(value: string): value is WorkModel {
   return value === "remote" || value === "hybrid" || value === "onsite";
 }
 
-export function ResumeFirst() {
-  return (
-    <EmployeePanel
-      title="Comece pelo currículo"
-      description="Envie seu currículo para ver as vagas em ordem de compatibilidade e se candidatar com IA."
-    >
-      <Link
-        to="/colaborador"
-        search={{ tela: "curriculo" }}
-        className={buttonVariants({ className: "w-fit" })}
-      >
-        Enviar currículo
-      </Link>
-    </EmployeePanel>
-  );
-}
-
 function JobDialog({
   account,
   job,
   resumeId,
   close,
+  applyWithAi,
 }: {
   account: EmployeeAccount;
   job: CareerJob;
   resumeId: string | null;
   close: () => void;
+  applyWithAi: () => void;
 }) {
   const markApplied = useMarkApplied(account);
   const salary = salaryRange(job);
@@ -166,9 +152,46 @@ function JobDialog({
               {markApplied.isPending ? "Registrando…" : "Já me candidatei"}
             </Button>
           )}
+          {job.applied || job.origin !== "external" ? null : (
+            <Button disabled={markApplied.isPending} onClick={applyWithAi}>
+              <HugeiconsIcon icon={AiMagicIcon} aria-hidden="true" /> Candidatar com IA
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function JobRow({ job, open }: { job: CareerJob; open: () => void }) {
+  const score = matchScore(job.match);
+
+  return (
+    <li>
+      <Item size="sm">
+        <ItemMedia variant="icon">
+          <HugeiconsIcon icon={Briefcase01Icon} aria-hidden="true" />
+        </ItemMedia>
+        <ItemContent className="min-w-0">
+          <ItemTitle className="block wrap-anywhere">{job.title}</ItemTitle>
+          <ItemDescription>
+            {job.company} · {jobPlace(job)}
+          </ItemDescription>
+          <div className="flex flex-wrap gap-1.5">
+            {score ? <Badge variant="status-success">{score}</Badge> : null}
+            {job.applied ? <Badge variant="secondary">Candidatura registrada</Badge> : null}
+            {job.fitsPreferences ? null : (
+              <Badge variant="outline">Fora das suas preferências</Badge>
+            )}
+          </div>
+        </ItemContent>
+        <ItemActions>
+          <Button type="button" variant="outline" onClick={open}>
+            Ver vaga <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden="true" />
+          </Button>
+        </ItemActions>
+      </Item>
+    </li>
   );
 }
 
@@ -176,6 +199,7 @@ export function CareerJobs({ account }: { account: EmployeeAccount }) {
   const [model, setModel] = useState<WorkModel | "all">("all");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<CareerJob | null>(null);
+  const [aiJob, setAiJob] = useState<CareerJob | null>(null);
   const resume = useQuery(careerResumeQuery(account));
 
   const jobs = useQuery({
@@ -192,12 +216,11 @@ export function CareerJobs({ account }: { account: EmployeeAccount }) {
 
   return (
     <div className="space-y-5">
-      {resume.data === null ? <ResumeFirst /> : null}
       <EmployeePanel
         title="Vagas para você"
         description={
           jobs.data
-            ? `${jobs.data.total} ${jobs.data.total === 1 ? "vaga" : "vagas"}, das mais compatíveis às menos.`
+            ? `${jobs.data.total} ${jobs.data.total === 1 ? "vaga" : "vagas"}${resume.data ? ", das mais compatíveis às menos." : "."}`
             : undefined
         }
       >
@@ -222,39 +245,9 @@ export function CareerJobs({ account }: { account: EmployeeAccount }) {
           </EmployeeEmpty>
         ) : null}
         <ul className="divide-y" aria-busy={jobs.isPlaceholderData}>
-          {jobs.data?.items.map((job) => {
-            const score = matchScore(job.match);
-
-            return (
-              <li key={job.id}>
-                <Item size="sm">
-                  <ItemMedia variant="icon">
-                    <HugeiconsIcon icon={Briefcase01Icon} aria-hidden="true" />
-                  </ItemMedia>
-                  <ItemContent className="min-w-0">
-                    <ItemTitle className="block wrap-anywhere">{job.title}</ItemTitle>
-                    <ItemDescription>
-                      {job.company} · {jobPlace(job)}
-                    </ItemDescription>
-                    <div className="flex flex-wrap gap-1.5">
-                      {score ? <Badge variant="status-success">{score}</Badge> : null}
-                      {job.applied ? (
-                        <Badge variant="secondary">Candidatura registrada</Badge>
-                      ) : null}
-                      {job.fitsPreferences ? null : (
-                        <Badge variant="outline">Fora das suas preferências</Badge>
-                      )}
-                    </div>
-                  </ItemContent>
-                  <ItemActions>
-                    <Button type="button" variant="outline" onClick={() => setSelected(job)}>
-                      Ver vaga <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden="true" />
-                    </Button>
-                  </ItemActions>
-                </Item>
-              </li>
-            );
-          })}
+          {jobs.data?.items.map((job) => (
+            <JobRow key={job.id} job={job} open={() => setSelected(job)} />
+          ))}
         </ul>
         {pages > 1 ? (
           <Pagination>
@@ -285,8 +278,13 @@ export function CareerJobs({ account }: { account: EmployeeAccount }) {
           job={current ?? selected}
           resumeId={resume.data?.id ?? null}
           close={() => setSelected(null)}
+          applyWithAi={() => {
+            setSelected(null);
+            setAiJob(current ?? selected);
+          }}
         />
       ) : null}
+      {aiJob ? <AiApplyDialog account={account} job={aiJob} close={() => setAiJob(null)} /> : null}
     </div>
   );
 }
