@@ -98,14 +98,19 @@ describe.skipIf(!url)("career plan route", () => {
     return row;
   }
 
-  async function subscribed(profileId: string, status: "active" | "canceled", end: string | null) {
+  async function subscribed(
+    profileId: string,
+    status: "active" | "canceled" | "past_due" | "pending",
+    end: string | null,
+    updatedAt = new Date(),
+  ) {
     await db.insert(talentSubscriptions).values({
       profileId,
       status,
       providerSubscriptionId: "subs_pro",
       currentPeriodEnd: end,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: updatedAt,
+      updatedAt,
     });
   }
 
@@ -226,6 +231,13 @@ describe.skipIf(!url)("career plan route", () => {
     });
   });
 
+  it("does not offer the upgrade while billing is not configured", async () => {
+    const profileId = await profile("2020-01-01");
+    const response = await get(profileId, planApp({ ...gateway, configured: false }));
+
+    expect(await response.json()).toMatchObject({ upgrade: { offered: false } });
+  });
+
   it("answers 404 when the profile disappears while reading the plan", async () => {
     const vanishing = new Elysia().use(
       careerPlanRoutes(
@@ -330,6 +342,37 @@ describe.skipIf(!url)("career plan route", () => {
     expect((await checkout(profileId)).status).toBe(409);
     expect((await subscription(profileId)).status).toBe("active");
     expect(checkouts).toEqual([]);
+  });
+
+  it("refuses a second checkout while Carreira Pro is past due", async () => {
+    const profileId = await profile("2099-12-31");
+
+    await subscribed(profileId, "past_due", "2099-01-01");
+
+    const duplicate = await checkout(profileId);
+
+    expect(duplicate.status).toBe(409);
+    expect(await duplicate.json()).toEqual({ error: "Already subscribed" });
+    expect((await subscription(profileId)).status).toBe("past_due");
+    expect(checkouts).toEqual([]);
+  });
+
+  it("refuses a second checkout while the first one is recent", async () => {
+    const profileId = await profile("2099-12-31");
+
+    await subscribed(profileId, "pending", null, new Date(Date.now() - 30 * 60_000));
+
+    expect((await checkout(profileId)).status).toBe(409);
+    expect(checkouts).toEqual([]);
+  });
+
+  it("restarts a checkout that stayed pending for over an hour", async () => {
+    const profileId = await profile("2099-12-31");
+
+    await subscribed(profileId, "pending", null, new Date(Date.now() - 61 * 60_000));
+
+    expect((await checkout(profileId)).status).toBe(200);
+    expect(checkouts).toHaveLength(1);
   });
 
   it("answers 503 without AbacatePay and stores nothing", async () => {

@@ -71,7 +71,26 @@ async function talentSubscriptionOf(repos: BillingRepository, externalId: string
   return parsed.success ? repos.findTalentSubscription(parsed.data) : null;
 }
 
-type TalentTarget = { profileId: string; currentPeriodEnd: string | null };
+type TalentTarget = {
+  profileId: string;
+  providerSubscriptionId: string | null;
+  currentPeriodEnd: string | null;
+};
+
+const replaceableEvents = new Set([
+  "subscription.renewed",
+  "subscription.payment_failed",
+  "subscription.cancelled",
+]);
+
+function isStale(name: string | undefined, event: SubscriptionEvent, talent: TalentTarget) {
+  return (
+    name !== undefined &&
+    replaceableEvents.has(name) &&
+    talent.providerSubscriptionId !== null &&
+    talent.providerSubscriptionId !== event.data.subscription.id
+  );
+}
 
 function talentPatch(name: string | undefined, event: SubscriptionEvent, talent: TalentTarget) {
   const today = saoPauloDate(new Date());
@@ -113,6 +132,12 @@ async function applyTalentEvent(
   talent: TalentTarget | null,
 ) {
   if (!talent) {
+    console.error("talent webhook ignored", { event: name });
+
+    return;
+  }
+
+  if (isStale(name, event, talent)) {
     console.error("talent webhook ignored", { event: name });
 
     return;

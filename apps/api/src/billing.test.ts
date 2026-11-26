@@ -738,6 +738,47 @@ describe.skipIf(!url)("billing", () => {
     expect(await allInvoices()).toEqual(before);
   });
 
+  it("ignores events of a replaced Carreira Pro subscription", async () => {
+    const logged = vi.spyOn(console, "error");
+    const profileId = await pendingTalent();
+    const today = saoPauloDate(new Date());
+    const first = { ...talentCheckout(profileId), subscription: { id: "subs_a", amount: 7900 } };
+    const second = { ...talentCheckout(profileId), subscription: { id: "subs_b", amount: 7900 } };
+
+    try {
+      await talentWebhook("subscription.completed", first);
+      await talentWebhook("subscription.payment_failed", first);
+
+      expect((await talentRow(profileId)).status).toBe("past_due");
+
+      await talentWebhook("subscription.completed", second);
+
+      expect(await talentRow(profileId)).toEqual({
+        status: "active",
+        providerSubscriptionId: "subs_b",
+        currentPeriodEnd: monthAfter(today),
+      });
+
+      const stale = [
+        await talentWebhook("subscription.cancelled", first),
+        await talentWebhook("subscription.renewed", first),
+        await talentWebhook("subscription.payment_failed", first),
+      ];
+
+      expect(stale.map((res) => res.status)).toEqual([200, 200, 200]);
+      expect(logged).toHaveBeenCalledWith("talent webhook ignored", {
+        event: "subscription.cancelled",
+      });
+      expect(await talentRow(profileId)).toEqual({
+        status: "active",
+        providerSubscriptionId: "subs_b",
+        currentPeriodEnd: monthAfter(today),
+      });
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
   it("creates invoices and updates their status through the repository", async () => {
     const created = await repos.billing.createInvoice(
       defaultOrgId,

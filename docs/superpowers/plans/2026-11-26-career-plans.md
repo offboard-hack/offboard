@@ -10,7 +10,7 @@
 
 - 100% coverage in `apps/api` and `packages/db`; zero code comments; English commits ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Lint forbids explicit return types, `as` casts, `(x: unknown)` params (except `cause`), test-double libraries and cross-feature imports (read tables via `@offboard/db/schema`, compose in `app.ts`). Timestamps are set app-side. `.github/workflows` stays untouched.
 - All values are as written in the spec (Rules, Data, Portal). `careerPro` is a constant in `apps/api/src/shared/career-pro.ts`.
-- Migration 0015 is hand-written: SQL, then the snapshot copied from 0014 with a new `id` and `prevId` set to 0014's id, then the journal entry. Cross-check with `npx drizzle-kit export`.
+- Migration 0017 is hand-written: SQL, then the snapshot copied from 0014 with a new `id` and `prevId` set to 0014's id, then the journal entry. Cross-check with `npx drizzle-kit export`.
 - `TEST_DATABASE_URL=postgres://offboard:offboard@127.0.0.1:5432/offboard_talent_test` only.
 
 ## Review Focus
@@ -25,11 +25,11 @@
 
 ### Task 1: Data, entitlement, daily limit and `GET /me/plan`
 
-**Files:** migration 0015 plus the schema; `apps/api/src/shared/career-pro.ts`; the AI Apply gate (`shared/ai-apply-access.ts` and its callers: routes, runner re-check, `GET /me` `aiApply`); the confirm route's daily limit; `features/talent` or a new `features/career-plan` for `GET /me/plan` and the repository; the export; tests.
+**Files:** migration 0017 plus the schema; `apps/api/src/shared/career-pro.ts`; the AI Apply gate (`shared/ai-apply-access.ts` and its callers: routes, runner re-check, `GET /me` `aiApply`); the confirm route's daily limit; `features/talent` or a new `features/career-plan` for `GET /me/plan` and the repository; the export; tests.
 
 **Interfaces:**
 
-- `GET /me/plan` (talent "active") returns:
+- `GET /me/plan` (talent "signed-in") returns:
 
   ```
   {
@@ -66,4 +66,4 @@
 
 ### Delivery
 
-- [ ] Apply 0015 to production (with Samuel's OK), push, open one PR, and merge once CI passes. In the PR body, list the AbacatePay ops steps: the `carreira-pro` product, the keys and the webhook URL.
+- [ ] Apply 0017 to production (with Samuel's OK), push, open one PR, and merge once CI passes. In the PR body, list the AbacatePay ops steps: the `carreira-pro` product, the keys and the webhook URL.

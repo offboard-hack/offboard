@@ -3,7 +3,10 @@ import { z } from "zod";
 const failureBody = z.object({ value: z.object({ error: z.string() }) });
 
 const reasons = new Map([
-  ["AI Apply not available", "Disponível no plano Platinum Premium da sua empresa."],
+  [
+    "AI Apply not available",
+    "Disponível no plano Platinum Premium da sua empresa ou no Carreira Pro.",
+  ],
   ["Email already in use", "Este e-mail já está ligado a outra conta de carreira."],
   [
     "Daily AI application limit reached",

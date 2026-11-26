@@ -7,9 +7,11 @@ import {
   talentProfiles,
   talentSubscriptions,
 } from "@offboard/db/schema";
-import { and, desc, eq, isNotNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, lt, or, sql } from "drizzle-orm";
 import { careerPlanOf } from "../../shared/career-pro.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
+
+const checkoutRetryMs = 60 * 60_000;
 
 export function createCareerPlanRepository(db: Database) {
   async function companyOf(orgId: string) {
@@ -84,8 +86,15 @@ export function createCareerPlanRepository(db: Database) {
         target: talentSubscriptions.profileId,
         set: { status: "pending", updatedAt: now },
         setWhere: or(
-          ne(talentSubscriptions.status, "active"),
-          lt(talentSubscriptions.currentPeriodEnd, saoPauloDate(now)),
+          eq(talentSubscriptions.status, "canceled"),
+          and(
+            eq(talentSubscriptions.status, "pending"),
+            lt(talentSubscriptions.updatedAt, new Date(now.getTime() - checkoutRetryMs)),
+          ),
+          and(
+            eq(talentSubscriptions.status, "active"),
+            lt(talentSubscriptions.currentPeriodEnd, saoPauloDate(now)),
+          ),
         ),
       })
       .returning({ profileId: talentSubscriptions.profileId });

@@ -25,11 +25,12 @@ describe("plan card view", () => {
   });
 
   it("shows the company plan with a distant sponsorship and no upgrade", () => {
-    expect(planCardView(base, today)).toEqual({
+    expect(planCardView(base, today, false)).toEqual({
       companyPlan: "Platinum Premium",
       aiLine: "Inclui candidatura com IA",
       sponsorLine: "Patrocinado pela empresa até 10/03/2027",
       proLine: null,
+      paymentNote: false,
       upgrade: "hidden",
       upgradeLabel: "Fazer upgrade · R$ 79/mês",
     });
@@ -39,8 +40,8 @@ describe("plan card view", () => {
     const soon = { ...base, company: { ...base.company, sponsoredUntil: "2026-12-26" } };
     const later = { ...base, company: { ...base.company, sponsoredUntil: "2026-12-27" } };
 
-    expect(planCardView(soon, today).upgrade).toBe("available");
-    expect(planCardView(later, today).upgrade).toBe("hidden");
+    expect(planCardView(soon, today, false).upgrade).toBe("available");
+    expect(planCardView(later, today, false).upgrade).toBe("hidden");
   });
 
   it("offers the upgrade when AI Apply is not allowed", () => {
@@ -50,7 +51,7 @@ describe("plan card view", () => {
       aiApply: { allowedBy: null },
     };
 
-    expect(planCardView(plan, today)).toMatchObject({
+    expect(planCardView(plan, today, false)).toMatchObject({
       companyPlan: "Sua empresa não tem plano",
       aiLine: "Não inclui",
       sponsorLine: null,
@@ -65,7 +66,7 @@ describe("plan card view", () => {
       upgrade: { ...base.upgrade, offered: false },
     };
 
-    expect(planCardView(plan, today).upgrade).toBe("unavailable");
+    expect(planCardView(plan, today, false).upgrade).toBe("unavailable");
   });
 
   it("shows Carreira Pro and hides the upgrade when it is active", () => {
@@ -75,7 +76,7 @@ describe("plan card view", () => {
       individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-12-26" },
     };
 
-    expect(planCardView(plan, today)).toMatchObject({
+    expect(planCardView(plan, today, false)).toMatchObject({
       proLine: "Carreira Pro ativo · renova em 26/12/2026",
       upgrade: "hidden",
     });
@@ -83,6 +84,7 @@ describe("plan card view", () => {
       planCardView(
         { ...plan, individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null } },
         today,
+        false,
       ).proLine,
     ).toBe("Carreira Pro ativo");
   });
@@ -94,12 +96,46 @@ describe("plan card view", () => {
       individual: { plan: "carreira-pro", status: "past_due", currentPeriodEnd: "2026-11-01" },
     };
 
-    expect(planCardView(plan, today)).toMatchObject({ proLine: null, upgrade: "available" });
+    expect(planCardView(plan, today, false)).toMatchObject({ proLine: null, upgrade: "available" });
+  });
+
+  it("hides the upgrade while a checkout is pending or the payment was just made", () => {
+    const pending: CareerPlan = {
+      ...base,
+      aiApply: { allowedBy: null },
+      individual: { plan: "carreira-pro", status: "pending", currentPeriodEnd: null },
+    };
+
+    const none: CareerPlan = { ...base, aiApply: { allowedBy: null } };
+
+    expect(planCardView(pending, today, false).upgrade).toBe("hidden");
+    expect(planCardView(none, today, true)).toMatchObject({ upgrade: "hidden", paymentNote: true });
+  });
+
+  it("does not call an expired Carreira Pro active and drops the payment note once active", () => {
+    const expired: CareerPlan = {
+      ...base,
+      aiApply: { allowedBy: null },
+      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-11-01" },
+    };
+
+    const active: CareerPlan = {
+      ...expired,
+      aiApply: { allowedBy: "individual" },
+      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-12-26" },
+    };
+
+    expect(planCardView(expired, today, false)).toMatchObject({
+      proLine: null,
+      upgrade: "available",
+    });
+    expect(planCardView(active, today, true).paymentNote).toBe(false);
   });
 
   it("polls until Carreira Pro is active", () => {
     const active: CareerPlan = {
       ...base,
+      aiApply: { allowedBy: "individual" },
       individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
     };
 

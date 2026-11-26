@@ -16,6 +16,7 @@ type TalentSubscriptionStatus = (typeof talentSubscriptions.$inferSelect)["statu
 
 const talentSubscriptionColumns = {
   profileId: talentSubscriptions.profileId,
+  providerSubscriptionId: talentSubscriptions.providerSubscriptionId,
   currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
 };
 

@@ -25,6 +25,7 @@ const dayFormat = new Intl.DateTimeFormat("en-CA", {
 export function PlanSection({ account, paid }: { account: EmployeeAccount; paid: boolean }) {
   const checkout = useUpgradeCheckout(account);
   const [openedAt] = useState(() => Date.now());
+  const [today] = useState(() => dayFormat.format(new Date()));
 
   const plan = useQuery({
     ...careerPlanQuery(account),
@@ -41,7 +42,7 @@ export function PlanSection({ account, paid }: { account: EmployeeAccount; paid:
   return (
     <PlanCard
       plan={plan.data}
-      today={dayFormat.format(new Date())}
+      today={today}
       paid={paid}
       upgrading={checkout.isPending || checkout.isSuccess}
       error={checkout.error?.message}
@@ -65,7 +66,7 @@ export function PlanCard({
   error?: string;
   onUpgrade: () => void;
 }) {
-  const view = planCardView(plan, today);
+  const view = planCardView(plan, today, paid);
 
   return (
     <EmployeePanel title="Seu plano">
@@ -79,7 +80,7 @@ export function PlanCard({
       {view.sponsorLine ? (
         <p className="text-sm text-muted-foreground">{view.sponsorLine}</p>
       ) : null}
-      {paid ? (
+      {view.paymentNote ? (
         <p role="status" className="text-sm">
           {paymentReceivedNote}
         </p>

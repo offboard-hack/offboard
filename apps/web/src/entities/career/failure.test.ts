@@ -4,7 +4,7 @@ import { careerFailure } from "./failure";
 describe("careerFailure", () => {
   it("translates a known API reason", () => {
     expect(careerFailure(403, { status: 403, value: { error: "AI Apply not available" } })).toBe(
-      "Disponível no plano Platinum Premium da sua empresa.",
+      "Disponível no plano Platinum Premium da sua empresa ou no Carreira Pro.",
     );
   });
 

@@ -27,7 +27,7 @@ Samuel, 2026-11-26: the collaborator must see, in Carreira, which plan the compa
   - The existing `/billing/webhook` activates, renews or cancels the person's subscription when the event's `externalId` is a talent subscription id. Company subscriptions are unchanged.
   - Without AbacatePay configured, the route returns 503 and the button shows "Indisponível no momento".
 
-## Data (migration 0015)
+## Data (migration 0017)
 
 - `employee_access.career_sponsored_until date null`. Null means the default: the case `deadline` + 3 months.
 - `talent_subscriptions`:

@@ -58,8 +58,16 @@ export function careerPlanRoutes(
     .use(talentAccess)
     .get(
       "/me/plan",
-      async ({ me, status }) =>
-        (await repos.plan(me.id, new Date())) ?? status(404, { error: "Profile not found" }),
+      async ({ me, status }) => {
+        const plan = await repos.plan(me.id, new Date());
+
+        if (!plan) return status(404, { error: "Profile not found" });
+
+        return {
+          ...plan,
+          upgrade: { ...plan.upgrade, offered: plan.upgrade.offered && gateway.configured },
+        };
+      },
       {
         talent: "signed-in",
         response: { 200: careerPlanResponse, 404: errorResponse },
