@@ -33,7 +33,7 @@ import { backgroundRoutes } from "./features/background/routes.js";
 import { drain, type JobHandler } from "./features/background/drain.js";
 import { accountRoutes } from "./features/account/routes.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
-import { logFailure, logUnhandled } from "./shared/error-summary.js";
+import { logFailure, logFailureCode, logUnhandled } from "./shared/error-summary.js";
 import { rejectionsRoutes } from "./features/preferences/rejections-routes.js";
 import { answersRoutes } from "./features/preferences/answers-routes.js";
 import { readGreenhouseForm } from "./features/ai-apply/greenhouse.js";
@@ -52,10 +52,14 @@ import type { DispatchAction } from "./shared/action-dispatch.js";
 import type { ResumeContent } from "@offboard/db/schema";
 import { portalAccess } from "./shared/access.js";
 import type { GenerateStructured } from "./shared/ai.js";
+import { jobEmbeddingText, resumeEmbeddingText, type Embed } from "./shared/embed.js";
 import { renderResumePdf } from "./shared/resume-pdf.js";
 
-const matchCandidates = 30;
+const matchCandidates = 50;
 const matchBatch = 10;
+const embedJobsLimit = 100;
+const embedBatch = 20;
+const embedSubject = "jobs";
 const aiApplyBudgetMs = 210_000;
 
 type AppOptions = {
@@ -69,6 +73,7 @@ type AppOptions = {
   abacatepay?: AbacatePayGateway;
   abacatepayWebhookSecret?: string;
   generateStructured?: GenerateStructured;
+  embed?: Embed;
   catalog?: readonly CatalogSource[];
   fetchFeedImpl?: typeof fetch;
   fetchGreenhouseImpl?: typeof fetch;
@@ -173,7 +178,41 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
       const synced = await repos.sources.sync(source.id, result, new Date());
 
-      if (synced !== "failed" && synced.created > 0) {
+      if (synced === "failed") return;
+
+      if (options.embed) {
+        await repos.background
+          .enqueue("embed_jobs", embedSubject)
+          .catch(logFailure("embed jobs enqueue failed"));
+      } else if (synced.created > 0) {
+        await matchNewJob().catch(logFailure("source match fan-out failed"));
+      }
+    },
+    embed_jobs: async () => {
+      if (!options.embed) return;
+
+      const rows = await repos.matches.jobsToEmbed(embedJobsLimit + 1);
+      const batch = rows.slice(0, embedJobsLimit);
+
+      try {
+        for (let start = 0; start < batch.length; start += embedBatch) {
+          const part = batch.slice(start, start + embedBatch);
+          const vectors = await options.embed(part.map(jobEmbeddingText));
+
+          await repos.matches.saveJobEmbeddings(
+            part.map((row, index) => ({ id: row.id, embedding: vectors[index] })),
+            new Date(),
+          );
+        }
+      } catch (cause) {
+        logFailureCode("embed jobs failed")(cause);
+
+        return;
+      }
+
+      if (rows.length > embedJobsLimit) {
+        await repos.background.enqueue("embed_jobs", embedSubject);
+      } else if (batch.length > 0) {
         await matchNewJob().catch(logFailure("source match fan-out failed"));
       }
     },
@@ -206,13 +245,25 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
       const titles = await repos.matches.targetTitles(job.subject);
 
-      const pending = (
-        await repos.matches.candidates(
+      const textCandidates = () =>
+        repos.matches.candidates(
           job.subject,
           toTsQuery(searchTerms(resume.content, titles)),
           matchCandidates,
-        )
-      ).filter((candidate) => !fresh.has(candidate.id));
+        );
+
+      const nearest = await nearestFor(job.subject, resume, titles, fresh);
+
+      const pending =
+        nearest.length >= matchCandidates
+          ? nearest
+          : [
+              ...nearest,
+              ...(await textCandidates()).filter(
+                (candidate) =>
+                  !fresh.has(candidate.id) && !nearest.some((near) => near.id === candidate.id),
+              ),
+            ].slice(0, matchCandidates);
 
       for (let start = 0; start < pending.length; start += matchBatch) {
         const taken = await repos.llmUsage.takeLlmCall(job.subject, new Date());
@@ -231,6 +282,44 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       }
     },
   } satisfies Record<string, JobHandler>;
+
+  async function resumeVector(
+    profileId: string,
+    resume: { content: ResumeContent; version: Date },
+    titles: string[],
+    embed: Embed,
+  ) {
+    const stored = await repos.matches.resumeEmbedding(profileId, resume.version);
+
+    if (stored) return stored;
+
+    const [embedding] = await embed([resumeEmbeddingText(resume.content, titles)]);
+
+    await repos.matches.saveResumeEmbedding(profileId, resume.version, embedding);
+
+    return embedding;
+  }
+
+  async function nearestFor(
+    profileId: string,
+    resume: { content: ResumeContent; version: Date },
+    titles: string[],
+    fresh: Set<string>,
+  ) {
+    if (!options.embed) return [];
+
+    try {
+      const embedding = await resumeVector(profileId, resume, titles, options.embed);
+
+      return await repos.matches.nearestCandidates(profileId, embedding, matchCandidates, [
+        ...fresh,
+      ]);
+    } catch (cause) {
+      logFailureCode("resume embedding failed")(cause);
+
+      return [];
+    }
+  }
 
   async function enqueued(kind: string, subject: string) {
     try {

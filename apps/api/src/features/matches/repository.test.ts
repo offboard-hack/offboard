@@ -479,4 +479,92 @@ describe.skipIf(!url)("matches repository", () => {
       ).toEqual((await repository.candidates(profileId, null, 30)).map((item) => item.id));
     });
   });
+
+  describe("embeddings", () => {
+    const vectorAt = (offset: number) =>
+      Array.from({ length: 1024 }, (_, index) => (index === 0 ? 1 : index === 1 ? offset : 0));
+
+    it("orders open embedded jobs by cosine distance, honoring exclusions and rejections", async () => {
+      const far = await job("far", { embedding: vectorAt(5) });
+      const near = await job("near", { embedding: vectorAt(1) });
+      const middle = await job("middle", { embedding: vectorAt(2) });
+      const closed = await job("closed", { embedding: vectorAt(0), closedAt: new Date() });
+      const rejected = await job("rejected", { embedding: vectorAt(0) });
+
+      await job("unembedded");
+      await db.insert(jobRejections).values({ profileId, jobId: rejected, reason: "other" });
+
+      const ids = async (limit: number, exclude: string[], embedding = vectorAt(0)) =>
+        (await repository.nearestCandidates(profileId, embedding, limit, exclude)).map(
+          (item) => item.id,
+        );
+
+      expect(await ids(10, [])).toEqual([near, middle, far]);
+      expect(await ids(2, [])).toEqual([near, middle]);
+      expect(await ids(10, [near])).toEqual([middle, far]);
+      expect(await ids(10, [], vectorAt(5))).toEqual([far, middle, near]);
+      expect(await ids(10, [])).not.toContain(closed);
+      expect(
+        (await repository.nearestCandidates(otherProfileId, vectorAt(0), 10, [])).map(
+          (item) => item.id,
+        ),
+      ).toContain(rejected);
+    });
+
+    it("returns the same columns as text-search candidates", async () => {
+      const id = await job("vaga", {
+        embedding: vectorAt(0),
+        city: "Recife",
+        state: "PE",
+        description: "Descrição",
+      });
+
+      const [nearest] = await repository.nearestCandidates(profileId, vectorAt(0), 1, []);
+      const [text] = await repository.candidates(profileId, null, 1);
+
+      expect(nearest).toEqual(text);
+      expect(nearest.id).toBe(id);
+    });
+
+    it("keeps the résumé embedding only for the version it was made from", async () => {
+      const version = new Date("2026-11-20T10:00:00.123Z");
+
+      await base(profileId, { updatedAt: version });
+
+      expect(await repository.resumeEmbedding(profileId, version)).toBeNull();
+
+      await repository.saveResumeEmbedding(profileId, version, vectorAt(3));
+
+      expect(await repository.resumeEmbedding(profileId, version)).toEqual(vectorAt(3));
+      expect(
+        await repository.resumeEmbedding(profileId, new Date(version.getTime() + 1)),
+      ).toBeNull();
+      expect(await repository.resumeEmbedding(otherProfileId, version)).toBeNull();
+      expect(await repository.baseResume(profileId)).toEqual({ content, version });
+    });
+
+    it("lists open jobs without an embedding, newest first, and stores their embeddings", async () => {
+      const older = await job("older", { postedAt: new Date("2026-11-01T00:00:00Z") });
+      const newer = await job("newer", { postedAt: new Date("2026-11-02T00:00:00Z") });
+
+      await job("closed", { closedAt: new Date() });
+      await job("done", { embedding: vectorAt(0) });
+
+      expect((await repository.jobsToEmbed(10)).map((item) => item.id)).toEqual([newer, older]);
+      expect(await repository.jobsToEmbed(1)).toMatchObject([{ id: newer, title: "newer" }]);
+
+      const now = new Date("2026-11-26T12:00:00.000Z");
+
+      await repository.saveJobEmbeddings([{ id: newer, embedding: vectorAt(4) }], now);
+
+      expect((await repository.jobsToEmbed(10)).map((item) => item.id)).toEqual([older]);
+
+      const [stored] = await db
+        .select({ embedding: jobs.embedding, embeddedAt: jobs.embeddedAt })
+        .from(jobs)
+        .where(eq(jobs.id, newer));
+
+      expect(stored).toEqual({ embedding: vectorAt(4), embeddedAt: now });
+    });
+  });
 });

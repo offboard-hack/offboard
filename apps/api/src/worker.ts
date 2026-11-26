@@ -7,6 +7,7 @@ import { createRuntimeAuth } from "./features/auth/auth.js";
 import { emailProvider, type CloudflareEmailBinding } from "./features/auth/email.js";
 import { browserbaseConfig } from "./shared/ai-apply-access.js";
 import { createGenerateStructured, resolveModel } from "./shared/ai.js";
+import { workersAiEmbed, type WorkersAi } from "./shared/embed.js";
 import { r2Storage, type R2BucketLike } from "./shared/object-storage.js";
 import { createRepositories } from "./repositories.js";
 
@@ -35,6 +36,7 @@ export type WorkerBindings = Partial<z.input<typeof runtimeConfig>> & {
   EMAIL?: CloudflareEmailBinding;
   HYPERDRIVE?: { connectionString: string };
   RESUMES?: R2BucketLike;
+  AI?: WorkersAi;
 };
 
 export function createWorkerApi(
@@ -91,6 +93,7 @@ export function createWorkerApi(
     abacatepay: createAbacatePayGateway(config.data.ABACATEPAY_API_KEY),
     abacatepayWebhookSecret: config.data.ABACATEPAY_WEBHOOK_SECRET,
     generateStructured: aiModel ? createGenerateStructured(aiModel) : undefined,
+    embed: bindings.AI && workersAiEmbed(bindings.AI),
     storage: bindings.RESUMES && r2Storage(bindings.RESUMES),
     publicPageOrigin: config.data.PUBLIC_PAGE_ORIGIN,
     browserbase: browserbaseConfig(

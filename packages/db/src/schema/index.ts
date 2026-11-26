@@ -14,6 +14,7 @@ import {
   uniqueIndex,
   uuid,
   varchar,
+  vector,
 } from "drizzle-orm/pg-core";
 import { authUser } from "./auth.ts";
 
@@ -390,6 +391,8 @@ export const jobs = pgTable(
     postedAt: timestamp("posted_at"),
     closedAt: timestamp("closed_at"),
     lastSeenAt: timestamp("last_seen_at"),
+    embedding: vector("embedding", { dimensions: 1024 }),
+    embeddedAt: timestamp("embedded_at"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
@@ -403,6 +406,7 @@ export const jobs = pgTable(
       "gin",
       sql`to_tsvector('portuguese', ${table.title} || ' ' || ${table.description})`,
     ),
+    index("jobs_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
   ],
 );
 
@@ -782,6 +786,8 @@ export const resumes = pgTable(
     scoreBreakdown: jsonb("score_breakdown").$type<ResumeScoreBreakdown>(),
     matchScore: integer("match_score"),
     sourceFileKey: varchar("source_file_key", { length: 512 }),
+    embedding: vector("embedding", { dimensions: 1024 }),
+    embeddedVersion: timestamp("embedded_version"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },

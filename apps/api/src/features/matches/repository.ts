@@ -8,7 +8,19 @@ import {
   talentProfiles,
   talentSubscriptions,
 } from "@offboard/db/schema";
-import { and, asc, desc, eq, gte, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  cosineDistance,
+  desc,
+  eq,
+  gte,
+  isNotNull,
+  isNull,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import { notRejectedBy } from "../../shared/not-rejected.js";
 import { toPreferences } from "../../shared/talent-preferences.js";
 import type { MatchJob, MatchResult } from "./score.js";
@@ -96,6 +108,70 @@ export function createMatchesRepository(db: Database) {
       .limit(limit - matched.length);
 
     return [...matched, ...rest];
+  }
+
+  async function nearestCandidates(
+    profileId: string,
+    embedding: number[],
+    limit: number,
+    excludeIds: string[],
+  ) {
+    return db
+      .select(jobColumns)
+      .from(jobs)
+      .where(
+        and(
+          openFor(profileId),
+          isNotNull(jobs.embedding),
+          excludeIds.length > 0 ? notInArray(jobs.id, excludeIds) : undefined,
+        ),
+      )
+      .orderBy(asc(cosineDistance(jobs.embedding, embedding)), asc(jobs.id))
+      .limit(limit);
+  }
+
+  async function resumeEmbedding(profileId: string, resumeVersion: Date) {
+    const [row] = await db
+      .select({ embedding: resumes.embedding })
+      .from(resumes)
+      .where(and(baseOf(profileId), eq(resumes.embeddedVersion, resumeVersion)));
+
+    return row?.embedding ?? null;
+  }
+
+  async function saveResumeEmbedding(profileId: string, resumeVersion: Date, embedding: number[]) {
+    await db
+      .update(resumes)
+      .set({ embedding, embeddedVersion: resumeVersion })
+      .where(baseOf(profileId));
+  }
+
+  async function jobsToEmbed(limit: number) {
+    return db
+      .select({
+        id: jobs.id,
+        title: jobs.title,
+        company: jobs.company,
+        workModel: jobs.workModel,
+        city: jobs.city,
+        state: jobs.state,
+        description: jobs.description,
+      })
+      .from(jobs)
+      .where(and(isNull(jobs.closedAt), isNull(jobs.embedding)))
+      .orderBy(...newest)
+      .limit(limit);
+  }
+
+  async function saveJobEmbeddings(entries: { id: string; embedding: number[] }[], now: Date) {
+    await db.transaction(async (tx) => {
+      for (const entry of entries) {
+        await tx
+          .update(jobs)
+          .set({ embedding: entry.embedding, embeddedAt: now })
+          .where(eq(jobs.id, entry.id));
+      }
+    });
   }
 
   async function freshJobIds(profileId: string, resumeVersion: Date) {
@@ -188,7 +264,19 @@ export function createMatchesRepository(db: Database) {
       .orderBy(asc(resumes.profileId));
   }
 
-  return { baseResume, targetTitles, candidates, freshJobIds, saveMatches, profilesForMatching };
+  return {
+    baseResume,
+    targetTitles,
+    candidates,
+    nearestCandidates,
+    resumeEmbedding,
+    saveResumeEmbedding,
+    jobsToEmbed,
+    saveJobEmbeddings,
+    freshJobIds,
+    saveMatches,
+    profilesForMatching,
+  };
 }
 
 export type MatchesRepository = ReturnType<typeof createMatchesRepository>;

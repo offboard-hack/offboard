@@ -59,6 +59,7 @@ import type { TrackingConfig } from "./features/offboardings/correios.ts";
 import { codeAudienceHeader, createAuth, createRuntimeAuth } from "./features/auth/auth.js";
 import { catalogSources, type CatalogSource } from "./features/sources/catalog.js";
 import type { GenerateStructured } from "./shared/ai.js";
+import type { Embed } from "./shared/embed.js";
 import { diskStorage } from "./shared/disk-storage.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
 import { zipSync } from "fflate";
@@ -140,6 +141,25 @@ const appOptions = {
   catalog: [],
   runInBackground: () => undefined,
 };
+
+function vectorAt(offset: number) {
+  return Array.from({ length: 1024 }, (_, index) => (index === 0 ? 1 : index === 1 ? offset : 0));
+}
+
+function fakeEmbed() {
+  const calls: string[][] = [];
+  const state = { fail: false };
+
+  const embed: Embed = async (texts) => {
+    calls.push(texts);
+
+    if (state.fail) throw new Error("embeddings down");
+
+    return texts.map((text) => vectorAt(Number(/Vaga (\d+)/.exec(text)?.[1] ?? 0)));
+  };
+
+  return { calls, state, embed };
+}
 
 function leakyError(prompt: string) {
   return Object.assign(new Error("gateway down"), { requestBodyValues: { prompt } });
@@ -3147,7 +3167,12 @@ describe.skipIf(!url)("api", () => {
       const jobsInPrompt = z.array(z.object({ id: z.string(), title: z.string() }));
 
       function resumesApp(
-        options: { generate?: GenerateStructured | null; storage?: boolean; draft?: object } = {},
+        options: {
+          generate?: GenerateStructured | null;
+          storage?: boolean;
+          draft?: object;
+          embed?: Embed;
+        } = {},
       ) {
         const store: Store = { puts: [], removed: [], prefixes: [], failRemove: false };
 
@@ -3244,6 +3269,7 @@ describe.skipIf(!url)("api", () => {
           ...appOptions,
           generateStructured:
             options.generate === null ? undefined : (options.generate ?? generate),
+          embed: options.embed,
           storage: options.storage === false ? undefined : storage,
           runInBackground: (task) => {
             background.push(task);
@@ -4355,7 +4381,7 @@ describe.skipIf(!url)("api", () => {
         const id = await profile();
 
         await openJobs([
-          ...Array.from({ length: 34 }, (_, index) => `Vaga ${index}`),
+          ...Array.from({ length: 54 }, (_, index) => `Vaga ${index}`),
           "Zootecnista Veterinária",
         ]);
 
@@ -4370,6 +4396,122 @@ describe.skipIf(!url)("api", () => {
         await app.settle();
 
         expect(app.matching.batches.flat()).toContain("Zootecnista Veterinária");
+      });
+
+      async function embedOpenJobs(only?: (index: number) => boolean) {
+        const rows = await db.select({ id: jobs.id, title: jobs.title }).from(jobs);
+
+        for (const row of rows) {
+          const index = Number(/Vaga (\d+)/.exec(row.title)?.[1]);
+
+          if (only?.(index) === false) continue;
+
+          await db
+            .update(jobs)
+            .set({ embedding: vectorAt(index), embeddedAt: new Date() })
+            .where(eq(jobs.id, row.id));
+        }
+      }
+
+      const vagas = (count: number) => Array.from({ length: count }, (_, index) => `Vaga ${index}`);
+
+      it("scores the nearest embedded jobs and the next nearest on the following run", async () => {
+        const embedder = fakeEmbed();
+        const app = resumesApp({ embed: embedder.embed });
+        const id = await profile();
+
+        await openJobs(vagas(60));
+        await embedOpenJobs();
+        await upload(app.instance, id);
+        await app.settle();
+
+        const first = app.matching.batches.flat();
+
+        expect(first).toHaveLength(50);
+        expect(new Set(first)).toEqual(new Set(vagas(50)));
+        expect(embedder.calls).toHaveLength(1);
+        expect(embedder.calls[0]).toHaveLength(1);
+
+        await repos.background.enqueue("compute_matches", id);
+        await app.settle();
+
+        expect(app.matching.batches.flat().slice(50)).toEqual(
+          expect.arrayContaining(vagas(60).slice(50)),
+        );
+        expect(app.matching.batches.flat()).toHaveLength(60);
+        expect(embedder.calls).toHaveLength(1);
+      });
+
+      it("embeds the résumé again once its version changes", async () => {
+        const embedder = fakeEmbed();
+        const app = resumesApp({ embed: embedder.embed });
+        const id = await profile();
+
+        const created = await (await upload(app.instance, id)).json();
+
+        await app.settle();
+
+        const [stored] = await db
+          .select({ embedding: resumes.embedding, version: resumes.embeddedVersion })
+          .from(resumes)
+          .where(eq(resumes.profileId, id));
+
+        expect(stored.embedding).toHaveLength(1024);
+        expect(stored.version).toBeInstanceOf(Date);
+        expect(embedder.calls).toHaveLength(1);
+
+        await repos.background.enqueue("compute_matches", id);
+        await app.settle();
+
+        expect(embedder.calls).toHaveLength(1);
+
+        await request(app.instance, id, "/me/resume", {
+          method: "PATCH",
+          json: {
+            content: {
+              ...created.content,
+              headline: { ...created.content.headline, text: "Designer" },
+            },
+          },
+        });
+        await app.settle();
+
+        expect(embedder.calls).toHaveLength(2);
+        expect(embedder.calls[1][0]).toContain("Designer");
+      });
+
+      it("tops up with text-search candidates when too few jobs are embedded", async () => {
+        const embedder = fakeEmbed();
+        const app = resumesApp({ embed: embedder.embed });
+        const id = await profile();
+
+        await openJobs(vagas(60));
+        await embedOpenJobs((index) => index >= 55);
+        await upload(app.instance, id);
+        await app.settle();
+
+        const scored = app.matching.batches.flat();
+
+        expect(scored).toHaveLength(50);
+        expect(scored).toEqual(expect.arrayContaining(vagas(60).slice(55)));
+        expect(new Set(scored).size).toBe(50);
+      });
+
+      it("falls back to text-search candidates when embedding the résumé fails", async () => {
+        const logged = vi.spyOn(console, "error");
+        const embedder = fakeEmbed();
+        const app = resumesApp({ embed: embedder.embed });
+        const id = await profile();
+
+        embedder.state.fail = true;
+        await openJobs(vagas(60));
+        await embedOpenJobs();
+        await upload(app.instance, id);
+        await app.settle();
+
+        expect(app.matching.batches.flat()).toHaveLength(50);
+        expect(logged.mock.calls).toContainEqual(["resume embedding failed", { name: "Error" }]);
+        logged.mockRestore();
       });
 
       it("hides matches of an edited résumé until they are recomputed", async () => {
@@ -6629,6 +6771,7 @@ describe.skipIf(!url)("api", () => {
     function sourcesApp(
       catalog: readonly CatalogSource[] | undefined,
       overrides: Partial<typeof repos> = {},
+      embed?: Embed,
     ) {
       const fetched: string[] = [];
 
@@ -6638,6 +6781,7 @@ describe.skipIf(!url)("api", () => {
         {
           ...appOptions,
           catalog,
+          embed,
           fetchFeedImpl: async (input) => {
             const target = String(input);
 
@@ -6930,6 +7074,180 @@ describe.skipIf(!url)("api", () => {
 
       expect(await queued("ingest_jobs")).toEqual([{ subject: source.id, status: "done" }]);
       expect(await queued("compute_matches")).toEqual([]);
+    });
+
+    async function insertOpenJobs(count: number) {
+      await db.insert(jobs).values(
+        Array.from(
+          { length: count },
+          (_, index) =>
+            ({
+              origin: "external",
+              source: "seed",
+              sourceKey: `bulk-${index}`,
+              title: `Vaga ${index}`,
+              company: "Acme",
+              description: "<p>Vaga de engenharia</p>",
+              url: `https://jobs.example.com/bulk-${index}`,
+              postedAt: new Date(Date.UTC(2026, 0, 1) - index * 1000),
+            }) satisfies typeof jobs.$inferInsert,
+        ),
+      );
+    }
+
+    const embeddedCount = async () =>
+      (
+        await db
+          .select({ id: jobs.id })
+          .from(jobs)
+          .where(sql`${jobs.embedding} is not null`)
+      ).length;
+
+    it("embeds synced jobs and then fans out matching", async () => {
+      const profileId = await matchingProfile();
+      const embedder = fakeEmbed();
+      const app = sourcesApp([acme], {}, embedder.embed);
+
+      await app.drainNow();
+
+      expect(await queued("embed_jobs")).toEqual([{ subject: "jobs", status: "done" }]);
+      expect(embedder.calls).toHaveLength(1);
+      expect(embedder.calls[0]).toHaveLength(2);
+      expect(embedder.calls[0][0]).toContain("Engenheira");
+      expect(embedder.calls[0][0]).toContain("Acme Pagamentos");
+      expect(await embeddedCount()).toBe(2);
+      expect((await queued("compute_matches")).map((row) => row.subject)).toEqual([profileId]);
+    });
+
+    it("embeds a hundred jobs in batches of twenty and enqueues itself again", async () => {
+      await matchingProfile();
+      await insertOpenJobs(121);
+
+      const enqueued: [string, string][] = [];
+      const embedder = fakeEmbed();
+
+      const app = sourcesApp(
+        [],
+        {
+          background: {
+            ...repos.background,
+            enqueue: async (kind, subject) => {
+              enqueued.push([kind, subject]);
+            },
+          },
+        },
+        embedder.embed,
+      );
+
+      await repos.background.enqueue("embed_jobs", "jobs");
+      await app.drainNow();
+
+      expect(embedder.calls.map((texts) => texts.length)).toEqual([20, 20, 20, 20, 20]);
+      expect(await embeddedCount()).toBe(100);
+      expect(enqueued).toEqual([["embed_jobs", "jobs"]]);
+      expect(await queued("compute_matches")).toEqual([]);
+    });
+
+    it("fans out matching once every open job is embedded", async () => {
+      const profileId = await matchingProfile();
+
+      await insertOpenJobs(121);
+
+      const embedder = fakeEmbed();
+      const app = sourcesApp([], {}, embedder.embed);
+
+      await repos.background.enqueue("embed_jobs", "jobs");
+      await app.drainNow();
+
+      expect(embedder.calls.map((texts) => texts.length)).toEqual([20, 20, 20, 20, 20, 20, 1]);
+      expect(await embeddedCount()).toBe(121);
+      expect((await queued("compute_matches")).map((row) => row.subject)).toEqual([profileId]);
+    });
+
+    it("skips closed jobs and does nothing when every job is embedded", async () => {
+      await matchingProfile();
+      await insertOpenJobs(3);
+      await db.update(jobs).set({ closedAt: new Date() }).where(eq(jobs.title, "Vaga 0"));
+
+      const embedder = fakeEmbed();
+      const app = sourcesApp([], {}, embedder.embed);
+
+      await repos.background.enqueue("embed_jobs", "jobs");
+      await app.drainNow();
+
+      expect(embedder.calls[0]).toHaveLength(2);
+      expect(await queued("compute_matches")).toHaveLength(1);
+
+      await db.delete(backgroundJobs);
+      await repos.background.enqueue("embed_jobs", "jobs");
+      await app.drainNow();
+
+      expect(embedder.calls).toHaveLength(1);
+      expect(await queued("compute_matches")).toEqual([]);
+    });
+
+    it("logs a failed embedding and stops without enqueueing again", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      await matchingProfile();
+      await insertOpenJobs(3);
+
+      const embedder = fakeEmbed();
+
+      embedder.state.fail = true;
+
+      const app = sourcesApp([], {}, embedder.embed);
+
+      await repos.background.enqueue("embed_jobs", "jobs");
+      await app.drainNow();
+
+      expect(logged.mock.calls).toEqual([["embed jobs failed", { name: "Error" }]]);
+      expect(await embeddedCount()).toBe(0);
+      expect(await queued("embed_jobs")).toEqual([{ subject: "jobs", status: "done" }]);
+      expect(await queued("compute_matches")).toEqual([]);
+      logged.mockRestore();
+    });
+
+    it("ignores a queued embedding job when embeddings are not configured", async () => {
+      await insertOpenJobs(2);
+      await repos.background.enqueue("embed_jobs", "jobs");
+
+      expect(await sourcesApp([]).drainNow()).toEqual({ processed: 1, failed: 0 });
+      expect(await embeddedCount()).toBe(0);
+    });
+
+    it("keeps imported jobs when enqueueing the embedding job fails", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      const app = sourcesApp(
+        [acme],
+        {
+          background: {
+            ...repos.background,
+            enqueue: () => Promise.reject(new Error("queue down")),
+          },
+        },
+        fakeEmbed().embed,
+      );
+
+      expect(await app.drainNow()).toEqual({ processed: 1, failed: 0 });
+      expect(await importedJobs()).toHaveLength(2);
+      expect(logged.mock.calls).toEqual([
+        ["embed jobs enqueue failed", { name: "Error", message: "queue down" }],
+      ]);
+      logged.mockRestore();
+    });
+
+    it("does not enqueue embedding when the sync fails", async () => {
+      const app = sourcesApp(
+        [{ kind: "greenhouse", target: "broken", label: null }],
+        {},
+        fakeEmbed().embed,
+      );
+
+      await app.drainNow();
+
+      expect(await queued("embed_jobs")).toEqual([]);
     });
 
     it("fans out nothing when the company subscription is not active", async () => {
