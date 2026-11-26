@@ -288,6 +288,7 @@ export function createTalentRepository(db: Database) {
             state: "cancelled",
             reason: "consent_withdrawn",
             finishedAt: now,
+            liveUrl: null,
             updatedAt: now,
           })
           .where(

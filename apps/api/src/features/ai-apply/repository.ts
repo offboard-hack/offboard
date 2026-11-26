@@ -345,6 +345,7 @@ export function createAiApplyRepository(db: Database) {
             finishedAt: null,
             evidence: null,
             screenshotKey: null,
+            liveUrl: null,
             updatedAt: now,
           })
           .where(
@@ -414,7 +415,13 @@ export function createAiApplyRepository(db: Database) {
 
     const [row] = await db
       .update(aiApplications)
-      .set({ state: "cancelled", reason: "cancelled_by_person", finishedAt: now, updatedAt: now })
+      .set({
+        state: "cancelled",
+        reason: "cancelled_by_person",
+        finishedAt: now,
+        liveUrl: null,
+        updatedAt: now,
+      })
       .where(
         and(
           eq(aiApplications.id, id),
@@ -486,7 +493,7 @@ export function createAiApplyRepository(db: Database) {
   async function claimForRun(id: string, now: Date) {
     const rows = await db
       .update(aiApplications)
-      .set({ state: "running", updatedAt: now })
+      .set({ state: "running", liveUrl: null, updatedAt: now })
       .where(
         and(
           eq(aiApplications.id, id),
@@ -507,11 +514,18 @@ export function createAiApplyRepository(db: Database) {
   async function requeue(id: string, now: Date) {
     const rows = await db
       .update(aiApplications)
-      .set({ state: "queued", updatedAt: now })
+      .set({ state: "queued", liveUrl: null, updatedAt: now })
       .where(and(eq(aiApplications.id, id), eq(aiApplications.state, "running")))
       .returning({ id: aiApplications.id });
 
     return rows.length > 0;
+  }
+
+  async function showLive(id: string, liveUrl: string) {
+    await db
+      .update(aiApplications)
+      .set({ liveUrl })
+      .where(and(eq(aiApplications.id, id), eq(aiApplications.state, "running")));
   }
 
   async function markSubmitting(id: string, now: Date) {
@@ -556,12 +570,12 @@ export function createAiApplyRepository(db: Database) {
 
     await db
       .update(aiApplications)
-      .set({ state: "needs_check", reason: null, finishedAt: null, updatedAt: now })
+      .set({ state: "needs_check", reason: null, finishedAt: null, liveUrl: null, updatedAt: now })
       .where(and(eq(aiApplications.state, "submitting"), lt(aiApplications.updatedAt, cutoff)));
 
     await db
       .update(aiApplications)
-      .set({ state: "assisted", reason: "error", finishedAt: now, updatedAt: now })
+      .set({ state: "assisted", reason: "error", finishedAt: now, liveUrl: null, updatedAt: now })
       .where(and(eq(aiApplications.state, "running"), lt(aiApplications.updatedAt, cutoff)));
   }
 
@@ -571,6 +585,7 @@ export function createAiApplyRepository(db: Database) {
       .set({
         ...outcome,
         finishedAt: outcome.state === "needs_check" ? null : now,
+        liveUrl: null,
         updatedAt: now,
       })
       .where(and(eq(aiApplications.id, id), inArray(aiApplications.state, from)))
@@ -587,7 +602,14 @@ export function createAiApplyRepository(db: Database) {
     return db.transaction(async (tx) => {
       const [row] = await tx
         .update(aiApplications)
-        .set({ state: "submitted", reason: null, ...record, finishedAt: now, updatedAt: now })
+        .set({
+          state: "submitted",
+          reason: null,
+          ...record,
+          finishedAt: now,
+          liveUrl: null,
+          updatedAt: now,
+        })
         .where(and(eq(aiApplications.id, id), eq(aiApplications.state, "submitting")))
         .returning({
           profileId: aiApplications.profileId,
@@ -602,7 +624,7 @@ export function createAiApplyRepository(db: Database) {
       if (created === undefined) {
         await tx
           .update(aiApplications)
-          .set({ state: "needs_check", finishedAt: null, updatedAt: now })
+          .set({ state: "needs_check", finishedAt: null, liveUrl: null, updatedAt: now })
           .where(eq(aiApplications.id, id));
 
         return "needs_check" as const;
@@ -638,8 +660,14 @@ export function createAiApplyRepository(db: Database) {
         .update(aiApplications)
         .set(
           sent
-            ? { state: "submitted", reason: null, finishedAt: now, updatedAt: now }
-            : { state: "assisted", reason: "not_sent", finishedAt: now, updatedAt: now },
+            ? { state: "submitted", reason: null, finishedAt: now, liveUrl: null, updatedAt: now }
+            : {
+                state: "assisted",
+                reason: "not_sent",
+                finishedAt: now,
+                liveUrl: null,
+                updatedAt: now,
+              },
         )
         .where(eq(aiApplications.id, id))
         .returning();
@@ -659,6 +687,7 @@ export function createAiApplyRepository(db: Database) {
     sweepStale,
     claimForRun,
     requeue,
+    showLive,
     markSubmitting,
     finish,
     submittedWithApplication,

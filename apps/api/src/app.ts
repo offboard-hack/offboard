@@ -53,6 +53,7 @@ import { renderResumePdf } from "./shared/resume-pdf.js";
 
 const matchCandidates = 30;
 const matchBatch = 10;
+const aiApplyBudgetMs = 210_000;
 
 type AppOptions = {
   adapter?: NonNullable<ConstructorParameters<typeof Elysia>[0]>["adapter"];
@@ -395,6 +396,21 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
               : [{ question: item.text, answer: item.answer, sensitive: item.sensitive }],
           ),
         enqueueRun: (attemptId) => repos.background.enqueue("ai_apply", attemptId),
+        runNow: async (attemptId) => {
+          const target = { kind: "ai_apply", subject: attemptId };
+
+          if (!(await repos.background.scheduled(target))) {
+            await repos.background.enqueue(target.kind, target.subject);
+          }
+
+          const drained = await drain(repos.background, handlers, {
+            limit: 1,
+            budgetMs: aiApplyBudgetMs,
+            target,
+          });
+
+          return drained.processed + drained.failed > 0;
+        },
         storage: options.storage,
         saveAnswer: async (tx, profileId, label, text, { sensitive }, now) => {
           const answers = createAnswersRepository(tx);
@@ -407,7 +423,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     .use(
       backgroundRoutes(repos.background, handlers, options.cronSecret, {
         beforeDrain,
-        isolated: { kind: "ai_apply", budgetMs: 210_000 },
+        isolated: { kind: "ai_apply", budgetMs: aiApplyBudgetMs },
       }),
     )
     .use(accountRoutes(repos.account, talent, options.storage))

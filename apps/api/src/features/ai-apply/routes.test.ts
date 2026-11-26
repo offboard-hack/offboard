@@ -33,6 +33,8 @@ import { talentAccess } from "../../shared/talent-access.js";
 import type { SaveAnswer } from "./repository.js";
 import { aiApplyRoutes } from "./routes.js";
 import { readGreenhouseForm } from "./greenhouse.js";
+import type { Page } from "./browser/cdp.js";
+import { runAiApplication, type RunnerDeps } from "./runner.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const webOrigin = "http://localhost:5173";
@@ -107,6 +109,7 @@ type Setup = {
   form?: () => Response | Promise<Response>;
   saveAnswer?: SaveAnswer;
   enqueueRun?: (attemptId: string) => Promise<void>;
+  runNow?: (attemptId: string) => Promise<boolean>;
   storage?: ObjectStorage;
 };
 
@@ -250,6 +253,7 @@ describe.skipIf(!url)("ai apply route", () => {
           saveAnswer: setup.saveAnswer ?? saveToLibrary,
           enqueueRun:
             setup.enqueueRun ?? ((attemptId) => repos.background.enqueue("ai_apply", attemptId)),
+          runNow: setup.runNow ?? (async () => false),
           storage: setup.storage,
         },
       ),
@@ -1044,6 +1048,7 @@ describe.skipIf(!url)("ai apply route", () => {
     const confirmPath = (id: string) => `/me/ai-applications/${id}/confirm`;
     const cancelPath = (id: string) => `/me/ai-applications/${id}/cancel`;
     const checkPath = (id: string) => `/me/ai-applications/${id}/check`;
+    const runPath = (id: string) => `/me/ai-applications/${id}/run`;
     const shotPath = (id: string) => `/me/ai-applications/${id}/screenshot`;
 
     const complete = [
@@ -1103,6 +1108,11 @@ describe.skipIf(!url)("ai apply route", () => {
 
         expect(cancelled.status).toBe(404);
         expect(await cancelled.json()).toEqual({ error: "Attempt not found" });
+
+        const ran = await call(profileId, runPath(id));
+
+        expect(ran.status).toBe(404);
+        expect(await ran.json()).toEqual({ error: "Attempt not found" });
       }
 
       expect(
@@ -1110,12 +1120,13 @@ describe.skipIf(!url)("ai apply route", () => {
       ).toMatchObject({ state: "draft" });
     });
 
-    it("applies the gate to preparing and confirming only", async () => {
+    it("applies the gate to preparing, confirming and running only", async () => {
       const { profileId, jobId } = await ready();
       const id = await seed(profileId, jobId, [why]);
 
       const routes: [string, string, Body?][] = [
         ["POST", confirmPath(id), { answers: [{ questionId: "why", value: "x" }] }],
+        ["POST", runPath(id)],
       ];
 
       const unlisted = build({ allowlist: [], generate: fakeModel().generate });
@@ -1182,6 +1193,11 @@ describe.skipIf(!url)("ai apply route", () => {
 
       expect(refused.status).toBe(503);
       expect(await refused.json()).toEqual({ error: "AI Apply not configured" });
+
+      const idle = await bare.call(profileId, runPath(id));
+
+      expect(idle.status).toBe(503);
+      expect(await idle.json()).toEqual({ error: "AI Apply not configured" });
       expect((await attempts(profileId))[0]).toMatchObject({ state: "draft", confirmed: null });
       expect((await call(profileId, `/me/ai-applications/${id}`, undefined, "GET")).status).toBe(
         200,
@@ -1821,6 +1837,221 @@ describe.skipIf(!url)("ai apply route", () => {
       expect(row.createdAt?.getTime()).toBe(row.preparedAt.getTime());
       expect(row.updatedAt?.getTime()).toBe(row.preparedAt.getTime());
     });
+    describe("running now", () => {
+      const live = "https://www.browserbase.com/devtools-fullscreen/inspector.html?navbar=false";
+      const stoneForm = "https://job-boards.greenhouse.io/stone/jobs/8201530003";
+
+      async function queued(app: Awaited<ReturnType<typeof ready>>) {
+        await db
+          .update(resumes)
+          .set({ updatedAt: new Date(Date.now() - 60_000) })
+          .where(eq(resumes.id, app.resumeId));
+
+        return seed(app.profileId, app.jobId, [], {
+          state: "queued",
+          confirmed: [],
+          rehearsal: true,
+          resumeId: app.resumeId,
+          confirmedAt: new Date(),
+        });
+      }
+
+      function runner(watch: () => Promise<void>) {
+        const sessions: string[] = [];
+
+        const page: Page = {
+          navigate: watch,
+          evaluate: async (expression, schema) =>
+            schema.parse(
+              expression.includes("loaderData")
+                ? {
+                    href: stoneForm,
+                    form: true,
+                    password: false,
+                    title: "Job Application for Account Executive at Stone",
+                    notices: [],
+                    questions: [],
+                    required: [],
+                  }
+                : true,
+            ),
+          waitFor: async () => true,
+          click: async () => undefined,
+          type: async () => undefined,
+          press: async () => undefined,
+          setFiles: async () => undefined,
+          screenshot: async () => new Uint8Array(),
+          url: async () => stoneForm,
+          close: () => undefined,
+        };
+
+        const deps: RunnerDeps = {
+          repo: repos.aiApply,
+          allowlist: [email],
+          browserbase: {
+            createSession: async () => {
+              sessions.push("s1");
+
+              return { id: "s1", connectUrl: "wss://connect.test/s1" };
+            },
+            liveUrl: async () => live,
+            upload: async () => undefined,
+            release: async () => undefined,
+          },
+          openPage: async () => page,
+          storage: undefined,
+          renderResume: async () => new Uint8Array(),
+          budgetMs: 200_000,
+          outcomeMs: 30_000,
+        };
+
+        return {
+          sessions,
+          runNow: async (attemptId: string) => {
+            await runAiApplication(deps, attemptId, () => new Date());
+
+            return true;
+          },
+        };
+      }
+
+      it("runs a queued rehearsal in the request and answers with its result", async () => {
+        const app = await ready();
+        const id = await queued(app);
+        const other = await profile("outra@example.com", 1);
+        const seen: { mine: string | null; theirs: number; listed: { id: string }[] }[] = [];
+
+        const run = runner(async () => {
+          const mine = await app.call(app.profileId, `/me/ai-applications/${id}`, undefined, "GET");
+          const theirs = await app.call(other, `/me/ai-applications/${id}`, undefined, "GET");
+          const listed = await app.call(other, "/me/ai-applications", undefined, "GET");
+
+          seen.push({
+            mine: (await mine.json()).liveUrl,
+            theirs: theirs.status,
+            listed: (await listed.json()).items,
+          });
+        });
+
+        const { call } = build({ generate: fakeModel().generate, runNow: run.runNow });
+        const response = await call(app.profileId, runPath(id));
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ id, state: "rehearsed", liveUrl: null });
+        expect(seen).toEqual([{ mine: live, theirs: 404, listed: [] }]);
+        expect(run.sessions).toEqual(["s1"]);
+        expect((await attempts(app.profileId))[0]).toMatchObject({
+          state: "rehearsed",
+          liveUrl: null,
+        });
+      });
+
+      it("shows the live view only while running", async () => {
+        const app = await ready();
+        const id = await queued(app);
+        const other = await profile("outra@example.com", 1);
+        const path = `/me/ai-applications/${id}`;
+
+        await db
+          .update(aiApplications)
+          .set({ state: "running", liveUrl: live })
+          .where(eq(aiApplications.id, id));
+
+        expect(await (await app.call(app.profileId, path, undefined, "GET")).json()).toMatchObject({
+          state: "running",
+          liveUrl: live,
+        });
+
+        const listed = await (
+          await app.call(app.profileId, "/me/ai-applications", undefined, "GET")
+        ).json();
+
+        expect(listed.items).toMatchObject([{ id, liveUrl: live }]);
+        expect((await app.call(other, path, undefined, "GET")).status).toBe(404);
+        expect(
+          JSON.stringify(
+            await (await app.call(other, "/me/ai-applications", undefined, "GET")).json(),
+          ),
+        ).not.toContain(live);
+
+        await db
+          .update(aiApplications)
+          .set({ state: "rehearsed" })
+          .where(eq(aiApplications.id, id));
+
+        expect(await (await app.call(app.profileId, path, undefined, "GET")).json()).toMatchObject({
+          state: "rehearsed",
+          liveUrl: null,
+        });
+      });
+
+      it("answers 202 with the current attempt when the job is not run here", async () => {
+        const app = await ready();
+        const id = await queued(app);
+        const ran: string[] = [];
+
+        const { call } = build({
+          generate: fakeModel().generate,
+          runNow: async (attemptId) => {
+            ran.push(attemptId);
+
+            return false;
+          },
+        });
+
+        const response = await call(app.profileId, runPath(id));
+
+        expect(response.status).toBe(202);
+        expect(await response.json()).toMatchObject({ id, state: "queued", liveUrl: null });
+        expect(ran).toEqual([id]);
+      });
+
+      it("answers 202 without running an attempt that is not queued", async () => {
+        const app = await ready();
+        const ran: string[] = [];
+
+        const { call } = build({
+          generate: fakeModel().generate,
+          runNow: async (attemptId) => {
+            ran.push(attemptId);
+
+            return true;
+          },
+        });
+
+        for (const state of ["draft", "running", "rehearsed", "submitted"] as const) {
+          const id = await seed(app.profileId, app.jobId, [], { state });
+          const response = await call(app.profileId, runPath(id));
+
+          expect(response.status).toBe(202);
+          expect(await response.json()).toMatchObject({ id, state });
+
+          await db.delete(aiApplications).where(eq(aiApplications.id, id));
+        }
+
+        expect(ran).toEqual([]);
+      });
+
+      it("answers 404 when the attempt is gone after the run", async () => {
+        const app = await ready();
+        const id = await queued(app);
+
+        const { call } = build({
+          generate: fakeModel().generate,
+          runNow: async (attemptId) => {
+            await db.delete(aiApplications).where(eq(aiApplications.id, attemptId));
+
+            return true;
+          },
+        });
+
+        const response = await call(app.profileId, runPath(id));
+
+        expect(response.status).toBe(404);
+        expect(await response.json()).toEqual({ error: "Attempt not found" });
+      });
+    });
+
     describe("evidence, screenshots and checks", () => {
       const evidence = {
         fields: [{ question: "E-mail", value: "ana@example.com" }],

@@ -13,6 +13,7 @@ export class BrowserbaseError extends Error {
 
 const api = "https://api.browserbase.com/v1";
 const requestMs = 30_000;
+const liveViewMs = 10_000;
 
 type SessionBody = {
   projectId: string;
@@ -23,6 +24,8 @@ type SessionBody = {
 };
 
 const session = z.object({ id: z.string(), connectUrl: z.string() });
+
+const debug = z.object({ debuggerFullscreenUrl: z.url({ protocol: /^https$/ }) });
 
 export const createBrowserbase = (
   fetchImpl: typeof fetch,
@@ -78,6 +81,27 @@ export const createBrowserbase = (
       await discardBody(response);
 
       if (!response.ok) throw new BrowserbaseError("upload", response.status);
+    },
+
+    async liveUrl(sessionId: string) {
+      const response = await fetchImpl(`${api}/sessions/${sessionId}/debug`, {
+        headers: keyHeader,
+        signal: AbortSignal.timeout(liveViewMs),
+      });
+
+      if (!response.ok) {
+        await discardBody(response);
+
+        throw new BrowserbaseError("live view", response.status);
+      }
+
+      const parsed = debug.safeParse(await response.json());
+
+      if (!parsed.success) throw new BrowserbaseError("live view", response.status);
+
+      const url = parsed.data.debuggerFullscreenUrl;
+
+      return `${url}${url.includes("?") ? "&" : "?"}navbar=false`;
     },
 
     async release(sessionId: string) {

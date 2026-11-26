@@ -13,6 +13,7 @@ const row: Parameters<typeof toAttemptView>[0] = {
   confirmedAt: null,
   evidence: null,
   screenshotKey: null,
+  liveUrl: null,
 };
 
 const job = { id: "j1", title: "Backend", company: "Acme", url: "https://example.com/j1" };
@@ -32,7 +33,20 @@ describe("toAttemptView", () => {
       confirmedAt: null,
       evidence: null,
       hasScreenshot: false,
+      liveUrl: null,
     });
+  });
+
+  it("shows the live view only while the browser is working", () => {
+    const liveUrl = "https://www.browserbase.com/devtools-fullscreen/inspector.html?navbar=false";
+
+    for (const state of ["running", "submitting"] as const) {
+      expect(toAttemptView({ ...row, state, liveUrl }, job).liveUrl).toBe(liveUrl);
+    }
+
+    for (const state of ["queued", "rehearsed", "assisted", "needs_check", "submitted"] as const) {
+      expect(toAttemptView({ ...row, state, liveUrl }, job).liveUrl).toBeNull();
+    }
   });
 
   it("exposes the evidence and whether a screenshot exists without leaking its key", () => {

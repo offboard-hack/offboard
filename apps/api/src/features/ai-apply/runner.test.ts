@@ -331,11 +331,20 @@ const fakePage = (setup: PageSetup = {}) => {
 
 type Upload = { sessionId: string; name: string; bytes: Uint8Array; type: string };
 
+const liveView =
+  "https://www.browserbase.com/devtools-fullscreen/inspector.html?wss=s1&navbar=false";
+
 const fakeBrowserbase = (
-  setup: { failCreate?: number; failUpload?: boolean; failRelease?: boolean } = {},
+  setup: {
+    failCreate?: number;
+    failUpload?: boolean;
+    failRelease?: boolean;
+    failLive?: boolean;
+  } = {},
 ) => {
   const uploads: Upload[] = [];
   const released: string[] = [];
+  const watched: string[] = [];
   let created = 0;
 
   const browserbase = {
@@ -347,6 +356,13 @@ const fakeBrowserbase = (
       }
 
       return { id: "session-1", connectUrl: "wss://connect.test/session-1" };
+    },
+    async liveUrl(sessionId: string) {
+      watched.push(sessionId);
+
+      if (setup.failLive) throw new BrowserbaseError("live view", 404);
+
+      return liveView;
     },
     async upload(sessionId: string, file: { name: string; bytes: Uint8Array; type: string }) {
       uploads.push({ sessionId, ...file });
@@ -360,7 +376,7 @@ const fakeBrowserbase = (
     },
   };
 
-  return { browserbase, uploads, released, created: () => created };
+  return { browserbase, uploads, released, watched, created: () => created };
 };
 
 const fakeStorage = (setup: { failRemove?: boolean } = {}) => {
@@ -741,6 +757,91 @@ describe.skipIf(!url)("ai apply runner", () => {
 
       expect(await stateOf(id)).toMatchObject({ state: "rehearsed", screenshotKey: null });
       expect(run.screenshots).toEqual([]);
+    });
+  });
+
+  describe("shows the live view only while running", () => {
+    for (const rehearsal of [true, false]) {
+      it(`stores the live view after the session and clears it at the end (rehearsal ${rehearsal})`, async () => {
+        const { id } = await attempt({ rehearsal });
+        const seen: (string | null)[] = [];
+
+        const run = rig({
+          page: {
+            duringFill: async () => {
+              seen.push((await stateOf(id)).liveUrl);
+            },
+          },
+        });
+
+        await runAiApplication(run.deps, id, now);
+
+        expect(seen).toEqual([liveView]);
+        expect(run.watched).toEqual(["session-1"]);
+        expect(await stateOf(id)).toMatchObject({
+          state: rehearsal ? "rehearsed" : "submitted",
+          liveUrl: null,
+        });
+      });
+    }
+
+    it("clears the live view when the run ends early", async () => {
+      const { id } = await attempt();
+      const run = rig({ page: { throwOn: "navigate" } });
+      vi.spyOn(console, "error");
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(await stateOf(id)).toMatchObject({
+        state: "assisted",
+        reason: "error",
+        liveUrl: null,
+      });
+    });
+
+    it("runs without a live view when Browserbase cannot give one", async () => {
+      const { id } = await attempt({ rehearsal: true });
+      const seen: (string | null)[] = [];
+      const logged = vi.spyOn(console, "error");
+
+      const run = rig({
+        browserbase: { failLive: true },
+        page: {
+          duringFill: async () => {
+            seen.push((await stateOf(id)).liveUrl);
+          },
+        },
+      });
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(seen).toEqual([null]);
+      expect(await stateOf(id)).toMatchObject({ state: "rehearsed", liveUrl: null });
+      expect(logged).toHaveBeenCalledExactlyOnceWith("Browserbase live view failed", {
+        name: "BrowserbaseError",
+      });
+      expect(run.released).toEqual(["session-1"]);
+    });
+
+    it("runs on and never logs the live view when it cannot be stored", async () => {
+      const { id } = await attempt();
+      const logged = vi.spyOn(console, "error");
+      const run = rig();
+
+      run.deps.repo = {
+        ...repos.aiApply,
+        showLive: async (_attemptId, url) => {
+          throw new Error(`update failed for ${url}`);
+        },
+      };
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(await stateOf(id)).toMatchObject({ state: "submitted", liveUrl: null });
+      expect(logged).toHaveBeenCalledExactlyOnceWith("Browserbase live view failed", {
+        name: "Error",
+      });
+      expect(JSON.stringify(logged.mock.calls)).not.toContain("browserbase.com");
     });
   });
 

@@ -185,7 +185,13 @@ export function createApplicationsRepository(db: Database) {
 
       await tx
         .update(aiApplications)
-        .set({ state: "cancelled", reason: "applied_manually", finishedAt: now, updatedAt: now })
+        .set({
+          state: "cancelled",
+          reason: "applied_manually",
+          finishedAt: now,
+          liveUrl: null,
+          updatedAt: now,
+        })
         .where(
           and(
             eq(aiApplications.profileId, profileId),

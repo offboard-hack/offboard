@@ -129,6 +129,22 @@ export function createBackgroundRepository(db: Database) {
     }
   }
 
+  async function scheduled(target: ClaimTarget) {
+    const [row] = await db
+      .select({ id: backgroundJobs.id })
+      .from(backgroundJobs)
+      .where(
+        and(
+          eq(backgroundJobs.kind, target.kind),
+          eq(backgroundJobs.subject, target.subject),
+          inArray(backgroundJobs.status, ["pending", "running"]),
+        ),
+      )
+      .limit(1);
+
+    return row !== undefined;
+  }
+
   async function claim(limit: number, now = new Date(), filter: ClaimFilter = {}) {
     const { target, kinds, excludeKinds } = filter;
 
@@ -245,7 +261,7 @@ export function createBackgroundRepository(db: Database) {
       .where(held(job));
   }
 
-  return { enqueue, enqueueMany, claim, complete, retry, postpone };
+  return { enqueue, enqueueMany, scheduled, claim, complete, retry, postpone };
 }
 
 export type BackgroundRepository = ReturnType<typeof createBackgroundRepository>;

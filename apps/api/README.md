@@ -43,6 +43,9 @@ For the talent app rollout, apply `0013_add_talent_app` to production before
 merging, since every session lookup reads `auth_session.talent_profile_id`.
 First confirm `SELECT count(*) FROM auth_session WHERE num_nonnulls(member_id,
 employee_case_id) <> 1;` returns 0, or the widened audience check fails.
+For the AI Apply live view, apply `0014_add_ai_application_live_url` to
+production before deploying, since every attempt read selects
+`ai_applications.live_url`.
 For a disposable development database, `npm run seed -w @offboard/db` loads
 sample cases and replaces the team roster. Add a team row for an email
 address you control before requesting a link.

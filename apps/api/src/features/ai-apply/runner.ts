@@ -208,6 +208,11 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
 
   progress.sessionId = session.id;
 
+  await browserbase
+    .liveUrl(session.id)
+    .then((url) => deps.repo.showLive(attemptId, url))
+    .catch(logFailureCode("Browserbase live view failed"));
+
   const uploaded: string[] = [];
 
   withinBudget(deadline);

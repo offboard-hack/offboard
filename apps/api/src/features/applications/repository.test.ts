@@ -208,6 +208,7 @@ describe.skipIf(!url)("applications repository", () => {
           form: { questions: [] },
           draft: [],
           preparedAt: now,
+          liveUrl: "https://www.browserbase.com/devtools-fullscreen/inspector.html",
         })
         .returning({ id: aiApplications.id });
 
@@ -218,7 +219,11 @@ describe.skipIf(!url)("applications repository", () => {
         .from(aiApplications)
         .where(eq(aiApplications.id, attempt.id));
 
-      expect(after).toMatchObject({ state: "cancelled", reason: "applied_manually" });
+      expect(after).toMatchObject({
+        state: "cancelled",
+        reason: "applied_manually",
+        liveUrl: null,
+      });
       expect(after.finishedAt).toBeInstanceOf(Date);
 
       await db.delete(applications).where(eq(applications.jobId, jobId));

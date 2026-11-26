@@ -19,6 +19,7 @@ type AttemptRow = {
   confirmedAt: Date | null;
   evidence: AttemptEvidence | null;
   screenshotKey: string | null;
+  liveUrl: string | null;
 };
 
 type AttemptJob = { id: string; title: string; company: string; url: string };
@@ -89,6 +90,7 @@ export const attemptResponse = t.Object({
   confirmedAt: t.Union([t.String(), t.Null()]),
   evidence: t.Union([evidenceResponse, t.Null()]),
   hasScreenshot: t.Boolean(),
+  liveUrl: t.Union([t.String(), t.Null()]),
 });
 
 export const toAttemptView = (row: AttemptRow, job: AttemptJob) => ({
@@ -104,4 +106,5 @@ export const toAttemptView = (row: AttemptRow, job: AttemptJob) => ({
   confirmedAt: row.confirmedAt?.toISOString() ?? null,
   evidence: row.evidence,
   hasScreenshot: row.screenshotKey !== null,
+  liveUrl: row.state === "running" || row.state === "submitting" ? row.liveUrl : null,
 });

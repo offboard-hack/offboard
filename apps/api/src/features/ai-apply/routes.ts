@@ -45,6 +45,7 @@ export function aiApplyRoutes(
     ) => Promise<{ question: string; answer: string; sensitive: boolean }[]>;
     saveAnswer: SaveAnswer;
     enqueueRun: (attemptId: string) => Promise<void>;
+    runNow: (attemptId: string) => Promise<boolean>;
     storage: ObjectStorage | undefined;
   },
 ) {
@@ -293,6 +294,40 @@ export function aiApplyRoutes(
           404: errorResponse,
           409: errorResponse,
           422: errorResponse,
+          503: errorResponse,
+        },
+      },
+    )
+    .post(
+      "/me/ai-applications/:id/run",
+      async ({ me, params, status }) => {
+        const open = gate(me);
+
+        if (open.refused) return status(open.refused.code, { error: open.refused.error });
+
+        if (!deps.runnerConfigured) return status(503, { error: "AI Apply not configured" });
+
+        const current = await repos.get(me.id, params.id);
+
+        if (!current) return status(404, notFound);
+
+        if (current.state !== "queued") return status(202, current);
+
+        const ran = await deps.runNow(current.id);
+        const after = await repos.get(me.id, current.id);
+
+        if (!after) return status(404, notFound);
+
+        return ran ? after : status(202, after);
+      },
+      {
+        talent: "active",
+        params: attemptParams,
+        response: {
+          200: attemptResponse,
+          202: attemptResponse,
+          403: errorResponse,
+          404: errorResponse,
           503: errorResponse,
         },
       },

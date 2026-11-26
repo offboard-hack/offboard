@@ -1,4 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
+import { EventEmitter, once } from "node:events";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -928,6 +929,7 @@ describe.skipIf(!url)("api", () => {
             state: aiApplications.state,
             reason: aiApplications.reason,
             finishedAt: aiApplications.finishedAt,
+            liveUrl: aiApplications.liveUrl,
           })
           .from(aiApplications)
           .where(eq(aiApplications.id, id));
@@ -985,6 +987,11 @@ describe.skipIf(!url)("api", () => {
       const submitted = await seedAttempt(mine.id, "ai-submitted", "submitted");
       const others = await seedAttempt(other.id, "ai-other", "draft");
 
+      await db
+        .update(aiApplications)
+        .set({ liveUrl: "https://www.browserbase.com/devtools-fullscreen/inspector.html" })
+        .where(eq(aiApplications.id, running));
+
       await put(gated, "talent", other.id, true);
 
       const older = new Date("2020-01-01T00:00:00Z");
@@ -1012,6 +1019,7 @@ describe.skipIf(!url)("api", () => {
           state: "cancelled",
           reason: "consent_withdrawn",
           finishedAt: expect.any(Date),
+          liveUrl: null,
         });
       }
 
@@ -1019,8 +1027,14 @@ describe.skipIf(!url)("api", () => {
         state: "submitted",
         reason: null,
         finishedAt: null,
+        liveUrl: null,
       });
-      expect(await stateOf(others)).toEqual({ state: "draft", reason: null, finishedAt: null });
+      expect(await stateOf(others)).toEqual({
+        state: "draft",
+        reason: null,
+        finishedAt: null,
+        liveUrl: null,
+      });
       expect((await consentOf(other.id)).at).toBeInstanceOf(Date);
 
       await put(gated, "talent", mine.id, true);
@@ -1279,14 +1293,297 @@ describe.skipIf(!url)("api", () => {
       ).toMatchObject({ state: "assisted", reason: "error" });
       expect(browser).toEqual([
         "POST https://api.browserbase.com/v1/sessions",
+        "GET https://api.browserbase.com/v1/sessions/s1/debug",
         "GET https://connect.test/s1",
         "POST https://api.browserbase.com/v1/sessions/s1",
       ]);
+      expect(logged).toHaveBeenCalledWith("Browserbase live view failed", { name: "SyntaxError" });
       expect(logged).toHaveBeenCalledWith("AI application run failed", {
         name: "CdpError",
         message: "no websocket",
       });
       logged.mockRestore();
+    });
+
+    describe("running an AI application now", () => {
+      const live =
+        "https://www.browserbase.com/devtools-fullscreen/inspector.html?wss=connect.test/s1";
+
+      async function confirmedAttempt(
+        fetchBrowserImpl: (input: string | URL | Request, init?: RequestInit) => Promise<Response>,
+      ) {
+        const [firstCase] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
+
+        const created = z.object({ id: z.uuid() }).parse(
+          await repos.talent.enable({
+            orgId: defaultOrgId,
+            caseId: firstCase.id,
+            personalEmail,
+            sponsoredUntil,
+          }),
+        );
+
+        await repos.talent.acceptTerms(created.id);
+        await repos.talent.setAiApplyConsent(created.id, true, new Date());
+
+        await db.insert(resumes).values({
+          profileId: created.id,
+          kind: "base",
+          content: {
+            headline: { id: "h", text: "Engenheira" },
+            summary: { id: "s", text: "Backend" },
+            experiences: [],
+            education: [],
+            skills: [],
+            languages: [],
+            contact: { email: null, phone: null, city: null, links: [] },
+          },
+          updatedAt: new Date(Date.now() - 60_000),
+        });
+
+        const [job] = await db
+          .insert(jobs)
+          .values({
+            origin: "external",
+            source: "greenhouse",
+            sourceKey: "acme:42",
+            title: "Backend",
+            company: "Acme",
+            url: "https://job-boards.greenhouse.io/acme/jobs/42",
+          })
+          .returning({ id: jobs.id });
+
+        const instance = createApp(webOrigin, repos, {
+          ...appOptions,
+          aiApplyAllowlist: [personalEmail],
+          browserbase,
+          generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
+          fetchGreenhouseImpl: async () =>
+            new Response(
+              JSON.stringify({
+                questions: [
+                  {
+                    label: "Por que a Acme?",
+                    required: true,
+                    fields: [{ name: "question_1", type: "input_text", values: [] }],
+                  },
+                ],
+              }),
+            ),
+          fetchBrowserImpl,
+        });
+
+        const headers = {
+          "x-test-session": "talent",
+          "x-test-talent-id": created.id,
+          origin: webOrigin,
+          "content-type": "application/json",
+        };
+
+        const prepared = await instance.handle(
+          new Request(`http://localhost/api/me/jobs/${job.id}/ai-apply`, {
+            method: "POST",
+            headers,
+          }),
+        );
+
+        const { attempt } = await prepared.json();
+
+        const confirmed = await instance.handle(
+          new Request(`http://localhost/api/me/ai-applications/${attempt.id}/confirm`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              answers: [{ questionId: "question_1", value: "Pagamentos" }],
+              rehearsal: true,
+            }),
+          }),
+        );
+
+        expect(confirmed.status).toBe(200);
+
+        const id = z.uuid().parse(attempt.id);
+
+        const call = (path: string, method = "GET", talentId = created.id) =>
+          instance.handle(
+            new Request(`http://localhost/api${path}`, {
+              method,
+              headers: { ...headers, "x-test-talent-id": talentId },
+            }),
+          );
+
+        return { instance, id, call, run: () => call(`/me/ai-applications/${id}/run`, "POST") };
+      }
+
+      const jobsOf = async (id: string) =>
+        (await db.select().from(backgroundJobs).where(eq(backgroundJobs.subject, id))).map(
+          (row) => row.status,
+        );
+
+      it("runs the attempt in the request and shows the live view only while running", async () => {
+        const browser: string[] = [];
+        const seen: { state: string; liveUrl: string | null }[] = [];
+        const logged = vi.spyOn(console, "error");
+        const [, otherCase] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
+
+        const other = z.object({ id: z.uuid() }).parse(
+          await repos.talent.enable({
+            orgId: defaultOrgId,
+            caseId: otherCase.id,
+            personalEmail: "outra.pessoa@example.com",
+            sponsoredUntil,
+          }),
+        );
+
+        await repos.talent.acceptTerms(other.id);
+
+        const theirs: number[] = [];
+
+        const setup = await confirmedAttempt(async (input, init) => {
+          const target = String(input);
+
+          browser.push(`${init?.method ?? "GET"} ${target}`);
+
+          if (target === "https://api.browserbase.com/v1/sessions") {
+            return Response.json({ id: "s1", connectUrl: "wss://connect.test/s1" });
+          }
+
+          if (target.endsWith("/sessions/s1/debug")) {
+            return Response.json({ debuggerFullscreenUrl: live, wsUrl: "wss://connect.test/s1" });
+          }
+
+          if (target === "https://connect.test/s1") {
+            const mine = await setup.call(`/me/ai-applications/${setup.id}`);
+            seen.push(await mine.json());
+            theirs.push(
+              (await setup.call(`/me/ai-applications/${setup.id}`, "GET", other.id)).status,
+            );
+          }
+
+          return new Response(null);
+        });
+
+        await db.delete(backgroundJobs);
+
+        const response = await setup.run();
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          id: setup.id,
+          state: "assisted",
+          reason: "error",
+          liveUrl: null,
+        });
+        expect(seen).toMatchObject([{ state: "running", liveUrl: `${live}&navbar=false` }]);
+        expect(theirs).toEqual([404]);
+        expect(browser).toEqual([
+          "POST https://api.browserbase.com/v1/sessions",
+          "GET https://api.browserbase.com/v1/sessions/s1/debug",
+          "GET https://connect.test/s1",
+          "POST https://api.browserbase.com/v1/sessions/s1",
+        ]);
+        expect(await jobsOf(setup.id)).toEqual(["done"]);
+        expect(
+          (await db.select().from(aiApplications).where(eq(aiApplications.id, setup.id)))[0],
+        ).toMatchObject({ state: "assisted", liveUrl: null });
+        expect(JSON.stringify(logged.mock.calls)).not.toContain("browserbase.com/devtools");
+        logged.mockRestore();
+      });
+
+      it("runs once when the cron got there first", async () => {
+        const browser: string[] = [];
+        const signals = new EventEmitter();
+        const atSession = once(signals, "session");
+
+        const logged = vi.spyOn(console, "error");
+
+        const setup = await confirmedAttempt(async (input, init) => {
+          const target = String(input);
+
+          browser.push(`${init?.method ?? "GET"} ${target}`);
+
+          if (target === "https://api.browserbase.com/v1/sessions") {
+            signals.emit("session");
+            await once(signals, "proceed");
+
+            return Response.json({ id: "s1", connectUrl: "wss://connect.test/s1" });
+          }
+
+          return new Response(null);
+        });
+
+        const cron = setup.instance.handle(
+          new Request("http://localhost/api/background/drain", {
+            method: "POST",
+            headers: { authorization: `Bearer ${cronSecret}` },
+          }),
+        );
+
+        await atSession;
+
+        const response = await setup.run();
+
+        expect(response.status).toBe(202);
+        expect(await response.json()).toMatchObject({ id: setup.id, state: "running" });
+
+        signals.emit("proceed");
+
+        expect(await (await cron).json()).toEqual({ processed: 1, failed: 0 });
+        expect(
+          browser.filter((call) => call === "POST https://api.browserbase.com/v1/sessions"),
+        ).toHaveLength(1);
+        expect(await jobsOf(setup.id)).toEqual(["done"]);
+        expect(logged).toHaveBeenCalledWith("AI application run failed", {
+          name: "CdpError",
+          message: "no websocket",
+        });
+        logged.mockRestore();
+      });
+
+      it("leaves a job the cron already claimed to the cron", async () => {
+        const browser: string[] = [];
+
+        const setup = await confirmedAttempt(async (input) => {
+          browser.push(String(input));
+
+          return new Response(null);
+        });
+
+        expect(
+          await repos.background.claim(1, new Date(), {
+            target: { kind: "ai_apply", subject: setup.id },
+          }),
+        ).toHaveLength(1);
+
+        const response = await setup.run();
+
+        expect(response.status).toBe(202);
+        expect(await response.json()).toMatchObject({ id: setup.id, state: "queued" });
+        expect(browser).toEqual([]);
+        expect(await jobsOf(setup.id)).toEqual(["running"]);
+      });
+
+      it("answers 202 when the job waits for a later retry", async () => {
+        const browser: string[] = [];
+
+        const setup = await confirmedAttempt(async (input) => {
+          browser.push(String(input));
+
+          return new Response(null);
+        });
+
+        await db
+          .update(backgroundJobs)
+          .set({ runAfter: new Date(Date.now() + 5 * 60_000) })
+          .where(eq(backgroundJobs.subject, setup.id));
+
+        const response = await setup.run();
+
+        expect(response.status).toBe(202);
+        expect(await response.json()).toMatchObject({ state: "queued" });
+        expect(browser).toEqual([]);
+        expect(await jobsOf(setup.id)).toEqual(["pending"]);
+      });
     });
 
     it("answers 500 without data and rolls back every library save when a confirm fails", async () => {
