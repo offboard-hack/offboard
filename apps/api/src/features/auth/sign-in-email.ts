@@ -119,7 +119,7 @@ export function signInCodeEmail({
 }) {
   const subject = "Seu código de acesso ao Offboard";
   const title = "Seu código para entrar";
-  const request = "Use este código para entrar na sua jornada no Offboard.";
+  const request = "Use este código para entrar no Offboard.";
   const expires = `O código expira em ${minutes} minutos e só pode ser usado uma vez.`;
   const retry = "Se expirar, volte à tela de login e peça outro.";
 
