@@ -135,6 +135,7 @@ export type AttemptEvidence = {
   files: string[];
   finalUrl: string | null;
   failedField?: string;
+  formErrors?: string[];
 };
 
 export type ConfigValue =

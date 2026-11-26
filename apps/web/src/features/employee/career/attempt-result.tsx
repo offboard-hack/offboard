@@ -152,6 +152,15 @@ export function AttemptProgress({
       {running && attempt.liveUrl ? <LiveView url={attempt.liveUrl} /> : null}
       {reason ? <p className="text-sm text-muted-foreground">{reason}</p> : null}
       {failed ? <p className="text-sm wrap-anywhere">{failed}</p> : null}
+      {attempt.evidence?.formErrors.length ? (
+        <ul aria-label="Mensagens do site da vaga" className="grid list-disc gap-1 pl-5 text-sm">
+          {attempt.evidence.formErrors.map((message) => (
+            <li key={message} className="wrap-anywhere">
+              {message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {attempt.state === "rehearsed" ? (
         <p className="text-sm">Ensaio concluído. Nada foi enviado para {attempt.job.company}.</p>
       ) : null}

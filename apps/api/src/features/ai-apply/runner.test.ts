@@ -150,6 +150,9 @@ type PageSetup = {
   throwOn?: ThrowPoint;
   rejectUpload?: boolean;
   duringFill?: () => Promise<void>;
+  unready?: boolean;
+  unguarded?: boolean;
+  errorsUnreadable?: boolean;
 };
 
 const literal = (expression: string) => {
@@ -167,6 +170,7 @@ const fakePage = (setup: PageSetup = {}) => {
   const checked = new Set<string>();
   let focused = "";
   let clicked = false;
+  let reads = 0;
   let filling = false;
   let closes = 0;
 
@@ -209,11 +213,17 @@ const fakePage = (setup: PageSetup = {}) => {
     if (expression.includes("armed = false")) {
       actions.push("lift");
 
-      return true;
+      return !setup.unguarded;
     }
 
     if (expression.includes('querySelectorAll("iframe")')) {
-      return clicked ? outcomes[outcome] : (setup.before ?? quiet);
+      if (!clicked) return setup.before ?? quiet;
+
+      reads += 1;
+
+      if (setup.errorsUnreadable && reads > 1) throw new Error("page gone");
+
+      return outcomes[outcome];
     }
 
     if (expression.includes('[role=\\"option\\"]')) {
@@ -256,6 +266,8 @@ const fakePage = (setup: PageSetup = {}) => {
       }
 
       if (expression.includes("file-upload__filename")) return !setup.rejectUpload;
+
+      if (expression.includes("readyState")) return !setup.unready;
 
       return true;
     },
@@ -910,7 +922,7 @@ describe.skipIf(!url)("ai apply runner", () => {
 
       expect(row).toMatchObject({
         state: "assisted",
-        reason: "form_changed",
+        reason: "fill_failed",
         evidence: { failedField: "Por que a Acme?" },
       });
       expect(JSON.stringify(row.evidence?.failedField)).not.toContain("linha");
@@ -959,7 +971,11 @@ describe.skipIf(!url)("ai apply runner", () => {
 
       await runAiApplication(run.deps, id, now);
 
-      expect(await stateOf(id)).toMatchObject({ state: "assisted", reason: "form_changed" });
+      expect(await stateOf(id)).toMatchObject({
+        state: "assisted",
+        reason: "form_rejected",
+        evidence: { formErrors: ["Este campo é obrigatório."] },
+      });
       expect(run.submits()).toBe(0);
       expect(await db.select().from(applications)).toEqual([]);
     });
@@ -970,9 +986,55 @@ describe.skipIf(!url)("ai apply runner", () => {
 
       await runAiApplication(run.deps, id, now);
 
-      expect(await stateOf(id)).toMatchObject({ state: "assisted", reason: "form_changed" });
+      expect(await stateOf(id)).toMatchObject({
+        state: "assisted",
+        reason: "form_rejected",
+        evidence: { formErrors: ["Este campo é obrigatório."] },
+      });
       expect(run.submits()).toBe(1);
       expect(run.stored).toHaveLength(1);
+    });
+
+    it("keeps the form's errors out when the page cannot be read after the click", async () => {
+      const { id } = await attempt();
+      const run = rig({ page: { outcome: "invalid", errorsUnreadable: true } });
+
+      await runAiApplication(run.deps, id, now);
+
+      const row = await stateOf(id);
+
+      expect(row).toMatchObject({ state: "assisted", reason: "form_rejected" });
+      expect(row.evidence?.formErrors).toEqual([]);
+    });
+
+    it("tells a page that never loaded apart from a changed form", async () => {
+      const { id } = await attempt();
+      const run = rig({ page: { unready: true } });
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(await stateOf(id)).toMatchObject({ state: "assisted", reason: "page_not_ready" });
+      expect(run.submits()).toBe(0);
+    });
+
+    it("reports a challenge shown before the click as blocked", async () => {
+      const { id } = await attempt();
+      const run = rig({ page: { before: outcomes.blocked } });
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(await stateOf(id)).toMatchObject({ state: "assisted", reason: "blocked" });
+      expect(run.submits()).toBe(0);
+    });
+
+    it("does not click when the submit guard is missing", async () => {
+      const { id } = await attempt();
+      const run = rig({ page: { unguarded: true } });
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(await stateOf(id)).toMatchObject({ state: "assisted", reason: "error" });
+      expect(run.submits()).toBe(0);
     });
 
     it("reports a file the form did not take", async () => {
@@ -1420,7 +1482,7 @@ describe.skipIf(!url)("ai apply runner", () => {
       expect(await runAiApplication(run.deps, id, now)).toEqual({ skipped: true });
       expect(await stateOf(id)).toMatchObject({
         state: "assisted",
-        reason: "form_changed",
+        reason: "foreign_phone",
         finishedAt: clock,
       });
       expect(run.created()).toBe(0);

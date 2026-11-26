@@ -13,6 +13,7 @@ import {
   locationMatches,
   readLiveForm,
   submitGreenhouse,
+  visibleErrors,
   type FormPage,
   type LiveForm,
   type OutcomePage,
@@ -413,7 +414,7 @@ const live = (fields: LiveForm["fields"]) =>
 
 const steps = (actions: string[]) => actions.filter((action) => action !== "guard");
 
-const changed = (field: string) => ({ failed: "form_changed", field });
+const changed = (field: string) => ({ failed: "fill_failed", field });
 
 describe("reads the live form", () => {
   it("reads the Stone form as it renders", async () => {
@@ -1282,17 +1283,41 @@ describe("classifies the outcome", () => {
   it("refuses to click on a page whose guard was never installed", async () => {
     const { page, actions } = fakePage({ unguarded: true });
 
-    expect(await submitGreenhouse(page)).toBe("not_clicked");
+    expect(await submitGreenhouse(page)).toBe("unguarded");
     expect(actions).toEqual(["lift"]);
   });
 
   it("refuses to click while errors or a challenge are visible", async () => {
-    for (const shown of [errored, challenged]) {
+    for (const [shown, outcome] of [
+      [errored, "errors"],
+      [challenged, "challenge"],
+    ] as const) {
       const { page, actions } = fakePage({ pages: [shown] });
 
-      expect(await submitGreenhouse(page)).toBe("not_clicked");
+      expect(await submitGreenhouse(page)).toBe(outcome);
       expect(actions).toEqual([]);
     }
+  });
+
+  it("reads the visible error messages, once each and at most five", async () => {
+    const error = (text: string, visible = true) => ({ text, visible });
+
+    const { page } = fakePage({
+      pages: [
+        {
+          ...quiet,
+          errors: [
+            error("Campo obrigatório"),
+            error("Campo obrigatório"),
+            error("", true),
+            error("escondido", false),
+            ...["a", "b", "c", "d", "e"].map((text) => error(text)),
+          ],
+        },
+      ],
+    });
+
+    expect(await visibleErrors(page)).toEqual(["Campo obrigatório", "a", "b", "c", "d"]);
   });
 
   it("ignores the always-visible reCAPTCHA badge and a hidden challenge", () => {

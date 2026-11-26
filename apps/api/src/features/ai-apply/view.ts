@@ -76,6 +76,7 @@ const evidenceResponse = t.Object({
   files: t.Array(t.String()),
   finalUrl: t.Union([t.String(), t.Null()]),
   failedField: t.Union([t.String(), t.Null()]),
+  formErrors: t.Array(t.String()),
 });
 
 export const attemptResponse = t.Object({
@@ -108,7 +109,11 @@ export const toAttemptView = (row: AttemptRow, job: AttemptJob) => ({
   evidence:
     row.evidence === null
       ? null
-      : { ...row.evidence, failedField: row.evidence.failedField ?? null },
+      : {
+          ...row.evidence,
+          failedField: row.evidence.failedField ?? null,
+          formErrors: row.evidence.formErrors ?? [],
+        },
   hasScreenshot: row.screenshotKey !== null,
   liveUrl: row.state === "running" || row.state === "submitting" ? row.liveUrl : null,
 });
