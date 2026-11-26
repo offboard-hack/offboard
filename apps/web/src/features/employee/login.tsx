@@ -5,16 +5,16 @@ import { revalidateLogic, useForm, useStore } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import { useHydrated } from "@tanstack/react-router";
 import { REGEXP_ONLY_DIGITS } from "input-otp";
-import { useCallback, useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import { Button } from "@/shared/ui/shadcn/button";
 import { Input } from "@/shared/ui/shadcn/input";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/shared/ui/shadcn/input-otp";
 import { Label } from "@/shared/ui/shadcn/label";
 import { Spinner } from "@/shared/ui/shadcn/spinner";
+import { resendCooldownSeconds, useResendCountdown } from "@/shared/lib/resend-countdown";
 import { notifySessionChange } from "@/shared/lib/session-change";
 import { employeeAuth, requestEmployeeCode } from "./auth";
 
-const resendCooldownSeconds = 30;
 const otpSlots = [0, 1, 2, 3, 4, 5];
 
 type LoginStep =
@@ -137,24 +137,7 @@ function CodeForm({
   const [error, setError] = useState("");
   const [resendAt, setResendAt] = useState(initialResendAt);
 
-  const subscribeToCooldown = useCallback(
-    (tick: () => void) => {
-      const timer = window.setInterval(() => {
-        tick();
-
-        if (Date.now() >= resendAt) window.clearInterval(timer);
-      }, 250);
-
-      return () => window.clearInterval(timer);
-    },
-    [resendAt],
-  );
-
-  const secondsLeft = useSyncExternalStore(
-    subscribeToCooldown,
-    () => Math.max(0, Math.ceil((resendAt - Date.now()) / 1000)),
-    () => resendCooldownSeconds,
-  );
+  const secondsLeft = useResendCountdown(resendAt);
 
   const form = useForm({
     defaultValues: { code: "" },
