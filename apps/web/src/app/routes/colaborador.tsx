@@ -14,6 +14,7 @@ const screens = z.enum([
   "saida",
   "carreira",
   "curriculo",
+  "preferencias",
   "perfil",
   "privacidade",
   "passagem",
@@ -27,6 +28,7 @@ export const Route = createFileRoute("/colaborador")({
   validateSearch: z.object({
     tela: screens.default("hoje").catch("hoje"),
     carreira: z.enum(["vagas", "candidaturas"]).default("vagas").catch("vagas"),
+    secao: z.enum(["perfil", "respostas"]).default("perfil").catch("perfil"),
     plano: z.literal("ok").optional().catch(undefined),
   }),
   beforeLoad: async ({ context }) => {

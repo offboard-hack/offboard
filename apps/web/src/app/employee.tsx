@@ -7,6 +7,7 @@ import FirstAidKitIcon from "@hugeicons/core-free-icons/FirstAidKitIcon";
 import Home01Icon from "@hugeicons/core-free-icons/Home01Icon";
 import Mail01Icon from "@hugeicons/core-free-icons/Mail01Icon";
 import Package01Icon from "@hugeicons/core-free-icons/Package01Icon";
+import Settings02Icon from "@hugeicons/core-free-icons/Settings02Icon";
 import UserCircleIcon from "@hugeicons/core-free-icons/UserCircleIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { employeeDate } from "@offboard/employee";
@@ -20,6 +21,7 @@ import {
   employeeStateQuery,
 } from "@/entities/employee";
 import { Career } from "@/features/employee/career";
+import { Preferences } from "@/features/employee/career/preferences";
 import { ResumeCareer } from "@/features/employee/career/resume";
 import {
   DepartureOverview,
@@ -65,6 +67,7 @@ const titles = {
   saida: "Minha saída",
   carreira: "Carreira",
   curriculo: "Currículo",
+  preferencias: "Preferências",
   perfil: "Seu perfil",
   privacidade: "Privacidade",
   passagem: "Passar seu trabalho",
@@ -87,6 +90,7 @@ const navigation = [
     items: [
       { id: "carreira", icon: Briefcase01Icon, label: "Carreira" },
       { id: "curriculo", icon: File02Icon, label: "Currículo" },
+      { id: "preferencias", icon: Settings02Icon, label: "Preferências" },
     ],
   },
 ] as const;
@@ -311,6 +315,8 @@ function EmployeeContent({
     case "carreira":
     case "curriculo":
       return <CareerContent account={account} screen={screen} />;
+    case "preferencias":
+      return <PreferencesContent account={account} />;
     default:
       return <DepartureContent account={account} screen={screen} />;
   }
@@ -391,6 +397,16 @@ function DepartureContent({
   return (
     <EmployeeScreenPage screen={screen} metrics={screen === "hoje" ? metrics : undefined}>
       {content}
+    </EmployeeScreenPage>
+  );
+}
+
+function PreferencesContent({ account }: { account: EmployeeAccount }) {
+  const { secao } = route.useSearch();
+
+  return (
+    <EmployeeScreenPage screen="preferencias">
+      <Preferences account={account} section={secao} />
     </EmployeeScreenPage>
   );
 }

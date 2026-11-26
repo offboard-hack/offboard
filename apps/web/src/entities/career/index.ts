@@ -37,6 +37,12 @@ export type ApplicationsSummary = Treaty.Data<Me["applications"]["summary"]["get
 
 export type AiAttempt = Treaty.Data<Me["ai-applications"]["get"]>["items"][number];
 
+export type CareerPreferences = Treaty.Data<Me["preferences"]["get"]>;
+
+export type ProfileFieldsInput = Partial<CareerPreferences["profileFields"]>;
+
+export type AnswerLibrary = Treaty.Data<Me["answers"]["get"]>;
+
 export type ConfirmAnswers = Parameters<
   ReturnType<Me["ai-applications"]>["confirm"]["post"]
 >[0]["answers"];
@@ -535,4 +541,68 @@ export function resumePdfUrl(resumeId: string) {
 
 export function aiScreenshotUrl(attemptId: string) {
   return `/api/me/ai-applications/${encodeURIComponent(attemptId)}/screenshot`;
+}
+
+export function careerPreferencesQuery(account: EmployeeAccount) {
+  return queryOptions({
+    queryKey: [...careerKey(account), "preferences"],
+    staleTime: freshness,
+    retry: retryEmployeeRead,
+    queryFn: async ({ signal }) =>
+      settle(
+        await client().preferences.get({
+          headers: employeeAccessHeaders(account),
+          fetch: { signal },
+        }),
+        "Não foi possível abrir suas preferências.",
+      ),
+  });
+}
+
+export function useSaveProfileFields(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (profileFields: ProfileFieldsInput) =>
+      settle(
+        await client().preferences.put(
+          { profileFields },
+          { headers: employeeAccessHeaders(account) },
+        ),
+        "Não foi possível salvar. Confira os campos e tente de novo.",
+      ),
+    onSuccess(preferences) {
+      queryClient.setQueryData(careerPreferencesQuery(account).queryKey, preferences);
+    },
+  });
+}
+
+export function answerLibraryQuery(account: EmployeeAccount) {
+  return queryOptions({
+    queryKey: [...careerKey(account), "answers"],
+    staleTime: freshness,
+    retry: retryEmployeeRead,
+    queryFn: async ({ signal }) =>
+      settle(
+        await client().answers.get({ headers: employeeAccessHeaders(account), fetch: { signal } }),
+        "Não foi possível abrir suas respostas salvas.",
+      ),
+  });
+}
+
+export function useSaveAnswer(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ questionId, answer }: { questionId: string; answer: string }) =>
+      settle(
+        await client()
+          .answers({ questionId })
+          .put({ answer }, { headers: employeeAccessHeaders(account) }),
+        "Não foi possível salvar a resposta.",
+      ),
+    onSuccess(library) {
+      queryClient.setQueryData(answerLibraryQuery(account).queryKey, library);
+    },
+  });
 }

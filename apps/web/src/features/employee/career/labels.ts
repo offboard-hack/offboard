@@ -88,7 +88,7 @@ const attemptReasons = new Map([
   ["cancelled_by_person", "Você cancelou."],
   ["consent_withdrawn", "Você retirou o consentimento para a IA."],
   ["expired", "As respostas expiraram antes da confirmação."],
-  ["files_changed", "O currículo ou a carta mudou depois da confirmação."],
+  ["files_changed", "O currículo, a carta ou seu perfil mudou depois da confirmação."],
   ["form_changed", "O formulário da vaga mudou. Prepare as respostas de novo."],
   ["job_closed", "A vaga foi encerrada."],
   ["not_allowed", "A candidatura com IA não está disponível para sua empresa."],
