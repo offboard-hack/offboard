@@ -20,6 +20,14 @@ import { authUser } from "./auth.ts";
 
 export { authAccount, authRateLimit, authSession, authUser, authVerification } from "./auth.ts";
 
+export type BenefitPolicyRule = {
+  id: string;
+  field: "department" | "role";
+  operator: "equals" | "notEquals" | "contains";
+  value: string;
+  planId: string;
+};
+
 export type ResumeContent = {
   headline: { id: string; text: string };
   summary: { id: string; text: string };
@@ -128,7 +136,10 @@ export type DraftAnswer = {
   status: "filled" | "blank" | "not_shared" | "sensitive";
 };
 
-export type ConfirmedAnswer = { questionId: string; value: string | string[] | null };
+export type ConfirmedAnswer = {
+  questionId: string;
+  value: string | string[] | null;
+};
 
 export type AttemptEvidence = {
   fields: { question: string; value: string | string[] | null }[];
@@ -437,7 +448,9 @@ export const applications = pgTable(
     jobId: uuid("job_id")
       .notNull()
       .references(() => jobs.id, { onDelete: "restrict" }),
-    resumeId: uuid("resume_id").references(() => resumes.id, { onDelete: "set null" }),
+    resumeId: uuid("resume_id").references(() => resumes.id, {
+      onDelete: "set null",
+    }),
     publicToken: varchar("public_token", { length: 64 }),
     channel: applicationChannelEnum("channel").notNull().default("manual"),
     status: applicationStatusEnum("status").notNull().default("sent"),
@@ -515,6 +528,7 @@ export const talentProfilesRelations = relations(talentProfiles, ({ one }) => ({
     fields: [talentProfiles.orgId],
     references: [organizations.id],
   }),
+  benefitAssignment: one(benefitAssignments),
 }));
 
 export const exitSurveysRelations = relations(exitSurveys, ({ one }) => ({
@@ -678,6 +692,10 @@ export const plans = pgTable("plans", {
   monthlyPriceCents: integer("monthly_price_cents").notNull(),
   maxEmployees: integer("max_employees").notNull(),
   features: jsonb("features").$type<string[]>().notNull().default([]),
+  perPersonPriceCents: integer("per_person_price_cents").notNull().default(0),
+  aiApplyDailyLimit: integer("ai_apply_daily_limit").notNull().default(0),
+  aiApplyPriority: boolean("ai_apply_priority").notNull().default(false),
+  detailedScore: boolean("detailed_score").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -749,7 +767,80 @@ export const invoicesRelations = relations(invoices, ({ one }) => ({
   }),
 }));
 
-export const organizationsRelations = relations(organizations, ({ many }) => ({
+export const benefitAssignmentSourceEnum = pgEnum("benefit_assignment_source", [
+  "default",
+  "rule",
+  "manual",
+]);
+
+export const benefitPolicies = pgTable("benefit_policies", {
+  orgId: uuid("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  defaultPlanId: uuid("default_plan_id").references(() => plans.id),
+  benefitDurationMonths: integer("benefit_duration_months").notNull().default(6),
+  rules: jsonb("rules").$type<BenefitPolicyRule[]>().notNull().default([]),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const benefitAssignments = pgTable(
+  "benefit_assignments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: orgIdColumn(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    assignedPlanId: uuid("assigned_plan_id")
+      .notNull()
+      .references(() => plans.id),
+    effectivePlanId: uuid("effective_plan_id")
+      .notNull()
+      .references(() => plans.id),
+    source: benefitAssignmentSourceEnum("source").notNull(),
+    validUntil: date("valid_until").notNull(),
+    copaySubscriptionId: varchar("copay_subscription_id", { length: 255 }),
+    graceUntil: date("grace_until"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("benefit_assignments_profile_id_idx").on(table.profileId),
+    index("benefit_assignments_org_id_idx").on(table.orgId),
+  ],
+);
+
+export const benefitPoliciesRelations = relations(benefitPolicies, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [benefitPolicies.orgId],
+    references: [organizations.id],
+  }),
+  defaultPlan: one(plans, {
+    fields: [benefitPolicies.defaultPlanId],
+    references: [plans.id],
+  }),
+}));
+
+export const benefitAssignmentsRelations = relations(benefitAssignments, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [benefitAssignments.orgId],
+    references: [organizations.id],
+  }),
+  profile: one(talentProfiles, {
+    fields: [benefitAssignments.profileId],
+    references: [talentProfiles.id],
+  }),
+  assignedPlan: one(plans, {
+    fields: [benefitAssignments.assignedPlanId],
+    references: [plans.id],
+  }),
+  effectivePlan: one(plans, {
+    fields: [benefitAssignments.effectivePlanId],
+    references: [plans.id],
+  }),
+}));
+
+export const organizationsRelations = relations(organizations, ({ one, many }) => ({
   cases: many(offboardingCases),
   tasks: many(tasks),
   subtasks: many(subtasks),
@@ -763,6 +854,7 @@ export const organizationsRelations = relations(organizations, ({ many }) => ({
   employeeAccess: many(employeeAccess),
   employeeStates: many(employeeStates),
   talentProfiles: many(talentProfiles),
+  benefitPolicy: one(benefitPolicies),
 }));
 
 export const resumeKindEnum = pgEnum("resume_kind", ["base", "tailored"]);
@@ -909,7 +1001,9 @@ export const publicPages = pgTable(
       .references(() => talentProfiles.id, { onDelete: "cascade" }),
     slug: varchar("slug", { length: 40 }).notNull(),
     enabled: boolean("enabled").notNull().default(false),
-    resumeId: uuid("resume_id").references(() => resumes.id, { onDelete: "set null" }),
+    resumeId: uuid("resume_id").references(() => resumes.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
@@ -1050,7 +1144,9 @@ export const aiApplications = pgTable(
     draft: jsonb("draft").$type<DraftAnswer[]>().notNull(),
     confirmed: jsonb("confirmed").$type<ConfirmedAnswer[]>(),
     rehearsal: boolean("rehearsal").notNull().default(false),
-    resumeId: uuid("resume_id").references(() => resumes.id, { onDelete: "set null" }),
+    resumeId: uuid("resume_id").references(() => resumes.id, {
+      onDelete: "set null",
+    }),
     evidence: jsonb("evidence").$type<AttemptEvidence>(),
     screenshotKey: varchar("screenshot_key", { length: 512 }),
     liveUrl: varchar("live_url", { length: 2048 }),

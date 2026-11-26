@@ -2,7 +2,14 @@ import type { invoices, plans, subscriptions } from "./schema/index.ts";
 
 export type SeedPlan = Pick<
   typeof plans.$inferInsert,
-  "name" | "slug" | "monthlyPriceCents" | "maxEmployees"
+  | "name"
+  | "slug"
+  | "monthlyPriceCents"
+  | "maxEmployees"
+  | "perPersonPriceCents"
+  | "aiApplyDailyLimit"
+  | "aiApplyPriority"
+  | "detailedScore"
 > & { features: string[] };
 
 export type SeedInvoice = Pick<
@@ -21,6 +28,10 @@ export const seedPlans: SeedPlan[] = [
     slug: "silver",
     monthlyPriceCents: 14900,
     maxEmployees: 20,
+    perPersonPriceCents: 0,
+    aiApplyDailyLimit: 0,
+    aiApplyPriority: false,
+    detailedScore: false,
     features: ["Até 20 desligamentos ativos", "Checklists padrão", "Suporte por e-mail"],
   },
   {
@@ -28,6 +39,10 @@ export const seedPlans: SeedPlan[] = [
     slug: "gold",
     monthlyPriceCents: 24900,
     maxEmployees: 30,
+    perPersonPriceCents: 2900,
+    aiApplyDailyLimit: 3,
+    aiApplyPriority: false,
+    detailedScore: true,
     features: [
       "Até 30 desligamentos ativos",
       "Checklists personalizados",
@@ -40,6 +55,10 @@ export const seedPlans: SeedPlan[] = [
     slug: "platinum",
     monthlyPriceCents: 39900,
     maxEmployees: 15,
+    perPersonPriceCents: 5900,
+    aiApplyDailyLimit: 10,
+    aiApplyPriority: false,
+    detailedScore: true,
     features: [
       "Até 15 desligamentos ativos",
       "Checklists personalizados",
@@ -52,6 +71,10 @@ export const seedPlans: SeedPlan[] = [
     slug: "platinum-premium",
     monthlyPriceCents: 69900,
     maxEmployees: 5,
+    perPersonPriceCents: 9900,
+    aiApplyDailyLimit: 25,
+    aiApplyPriority: true,
+    detailedScore: true,
     features: [
       "Até 5 desligamentos ativos",
       "Fluxos para liderança",
@@ -74,6 +97,11 @@ export const seedSubscription: SeedSubscription = {
       dueDate: "2026-10-01",
       paidAt: new Date("2026-10-01T12:00:00Z"),
     },
-    { amountCents: 24900, status: "pending", dueDate: "2026-12-01", paidAt: null },
+    {
+      amountCents: 24900,
+      status: "pending",
+      dueDate: "2026-12-01",
+      paidAt: null,
+    },
   ],
 };
