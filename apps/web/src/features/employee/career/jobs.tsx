@@ -164,7 +164,8 @@ function JobDialog({
           )}
           {offersAi && profile.data && !eligible ? (
             <p className="text-sm text-muted-foreground">
-              Candidatura com IA: disponível no plano Platinum Premium da sua empresa.
+              Candidatura com IA: disponível no plano Platinum Premium da sua empresa ou no Carreira
+              Pro.
             </p>
           ) : null}
           {!job.applied && resumeId === null ? (
