@@ -23,21 +23,20 @@ function SignInRoute() {
       revoked={acesso === "revogado"}
       invalidLink={!!error}
       employeeLink={
-        <>
+        <div className="grid justify-items-start gap-2">
           <Link
             to="/cadastro"
             className="font-bold text-primary underline-offset-4 hover:underline"
           >
             Criar uma organização
           </Link>
-          {" · "}
           <Link
             to="/colaborador/entrar"
             className="font-bold text-primary underline-offset-4 hover:underline"
           >
             Acessar minha jornada de colaborador
           </Link>
-        </>
+        </div>
       }
     />
   );
