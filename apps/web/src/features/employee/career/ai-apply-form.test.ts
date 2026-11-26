@@ -174,6 +174,19 @@ describe("AI application form", () => {
       inferred: false,
       attention: "Você escolheu não compartilhar esta resposta. Responda só se quiser.",
     });
+    expect(
+      answerNote({
+        questionId: "x",
+        value: "2",
+        source: "library",
+        inferred: false,
+        status: "suggested",
+      }),
+    ).toEqual({
+      source: "Das suas respostas salvas",
+      inferred: false,
+      attention: "Sugerida a partir de uma resposta sua em outra vaga. Confira antes de enviar.",
+    });
     expect(answerNote(undefined)).toEqual({
       source: null,
       inferred: false,

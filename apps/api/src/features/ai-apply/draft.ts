@@ -20,6 +20,7 @@ import { clipText, sanitizeText } from "../../shared/storable-text.js";
 import type { toPreferences } from "../../shared/talent-preferences.js";
 import { escapeUntrustedTags } from "../../shared/untrusted-json.js";
 import { cityLabelPattern, isHiddenQuestion, isSensitive } from "./questions.js";
+import { canonicalValue, type Topic, topicOf } from "./topics.js";
 
 type Fields = ReturnType<typeof toPreferences>["profileFields"];
 
@@ -281,6 +282,36 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
     }
   }
 
+  const topicAnswers = new Map<Topic, Set<string> | null>();
+
+  const within = (small: Set<string>, large: Set<string>) =>
+    [...small].every((item) => large.has(item));
+
+  for (const entry of input.library) {
+    const topic = topicOf(entry.question);
+
+    if (topic === undefined || !library.has(normalizeQuestion(entry.question))) continue;
+
+    const parts = entry.answer.split(";");
+
+    const read = parts.flatMap((item) => {
+      const value = canonicalValue(topic, item.trim());
+
+      return value === undefined ? [] : [value];
+    });
+
+    if (read.length !== parts.length) continue;
+
+    const saved = new Set(read);
+    const known = topicAnswers.get(topic);
+
+    if (known === undefined || (known !== null && within(known, saved))) {
+      topicAnswers.set(topic, saved);
+    } else if (known !== null && !within(saved, known)) {
+      topicAnswers.set(topic, null);
+    }
+  }
+
   const profile = profileKeys.flatMap((key) => {
     const { value, share } = fields[key];
 
@@ -313,6 +344,37 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
       : undefined;
   };
 
+  const fromTopic = (question: FormQuestion) => {
+    const topic = topicOf(question.label);
+    const [field] = question.fields;
+
+    if (topic === undefined || field === undefined) return undefined;
+
+    const wanted = topicAnswers.get(topic);
+
+    if (wanted === undefined || wanted === null) return undefined;
+
+    const matches = [...wanted].map((value) =>
+      field.options.filter((option) => canonicalValue(topic, option.label) === value),
+    );
+
+    if (matches.some((options) => options.length > 1)) return undefined;
+
+    const picked = new Set(matches.flat().map((option) => option.value));
+
+    const chosen = field.options.flatMap((option) =>
+      picked.has(option.value) ? [option.value] : [],
+    );
+
+    if (chosen.length === 0) return undefined;
+
+    if (field.type === "multi_select") return draft(question, "suggested", chosen, "library");
+
+    return field.type === "single_select" && chosen.length === 1
+      ? draft(question, "suggested", chosen[0], "library")
+      : undefined;
+  };
+
   const accountValues = new Map<QuestionKind, string>([
     ["first_name", names.first],
     ["last_name", names.last],
@@ -338,7 +400,7 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
     if (kind === "document") return draft(question, "blank");
 
     if (question.sensitive && !insensitive.has(kind)) {
-      return fromLibrary(question) ?? draft(question, "sensitive");
+      return fromLibrary(question) ?? fromTopic(question) ?? draft(question, "sensitive");
     }
 
     const read = profileKinds.get(kind);
@@ -366,7 +428,7 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
 
     if (blocked(normalizeQuestion(question.label))) return draft(question, "not_shared");
 
-    return fromLibrary(question);
+    return fromLibrary(question) ?? fromTopic(question);
   }
 
   const settled = input.questions.map((question) => ({ question, answer: settle(question) }));

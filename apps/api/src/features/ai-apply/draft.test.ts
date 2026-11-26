@@ -617,6 +617,189 @@ describe("draftAnswers", () => {
       expect(answers[0]).toMatchObject({ value: null, status: "sensitive" });
     });
 
+    describe("suggests a saved answer from another company's form", () => {
+      const options = (...labels: string[]) =>
+        labels.map((label, index) => ({ label, value: String(index + 1) }));
+
+      const gender = question({
+        id: "gender",
+        label: "What is your gender identity?",
+        sensitive: true,
+        section: "demographic",
+        fields: [
+          {
+            name: "gender",
+            type: "multi_select",
+            options: options("Female", "Male", "Non-binary", "Cisgender", "Transgender"),
+          },
+        ],
+      });
+
+      const race = select(
+        "race",
+        "What’s your race or skin color?",
+        options("Asian", "White", "Brown", "Black"),
+        true,
+      );
+
+      const relatives = select(
+        "relatives",
+        "Do you have any relatives currently working at Bees Brasil?",
+        options("Yes", "No"),
+      );
+
+      const saved = [
+        { question: "Gênero", answer: "Masculino; Cisgênero", sensitive: true },
+        { question: "Raça/cor", answer: "Branca", sensitive: true },
+        {
+          question: "Contato com pessoas que já trabalham na empresa",
+          answer: "Nenhuma das anteriores.",
+          sensitive: false,
+        },
+      ];
+
+      it("matches the options by meaning and marks them for review", async () => {
+        const { generate, prompts } = fake([]);
+
+        const answers = await draftAnswers(
+          generate,
+          input([gender, race, relatives], { library: saved }),
+        );
+
+        expect(answers).toEqual([
+          {
+            questionId: "gender",
+            value: ["2", "4"],
+            source: "library",
+            inferred: false,
+            status: "suggested",
+          },
+          {
+            questionId: "race",
+            value: "2",
+            source: "library",
+            inferred: false,
+            status: "suggested",
+          },
+          {
+            questionId: "relatives",
+            value: "2",
+            source: "library",
+            inferred: false,
+            status: "suggested",
+          },
+        ]);
+        expect(prompts).toEqual([]);
+      });
+
+      it("prefers the exact saved answer over a suggestion", async () => {
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([race], {
+            library: [
+              ...saved,
+              { question: "What’s your race or skin color?", answer: "Brown", sensitive: true },
+            ],
+          }),
+        );
+
+        expect(answers[0]).toMatchObject({ value: "3", status: "filled" });
+      });
+
+      it("stays blank when the saved answers disagree or cannot be read", async () => {
+        const conflicting = await draftAnswers(
+          fake([]).generate,
+          input([race], {
+            library: [...saved, { question: "Etnia", answer: "Parda", sensitive: true }],
+          }),
+        );
+
+        const unreadable = await draftAnswers(
+          fake([]).generate,
+          input([race], {
+            library: [{ question: "Raça/cor", answer: "Outra", sensitive: true }],
+          }),
+        );
+
+        const repeated = await draftAnswers(
+          fake([]).generate,
+          input([race], {
+            library: [...saved, { question: "Cor/raça", answer: "Branco", sensitive: true }],
+          }),
+        );
+
+        expect(conflicting[0]).toMatchObject({ value: null, status: "sensitive" });
+        expect(unreadable[0]).toMatchObject({ value: null, status: "sensitive" });
+        expect(repeated[0]).toMatchObject({ value: "2", status: "suggested" });
+      });
+
+      it("stays blank when the options do not map to exactly one choice", async () => {
+        const ambiguous = select("race", "Raça", options("Preta", "Negra", "Branca"), true);
+
+        const missing = select("race", "Raça", options("Amarela", "Indígena"), true);
+        const single = select("gender", "Gênero", options("Masculino", "Cisgênero"), true);
+
+        const conflicting = [
+          { question: "Identidade de gênero", answer: "Masculino", sensitive: true },
+          { question: "Sexo", answer: "Feminino", sensitive: true },
+        ];
+
+        const free = question({ id: "gender", label: "Identidade de gênero", sensitive: true });
+        const blackSaved = [{ question: "Raça/cor", answer: "Preta", sensitive: true }];
+
+        const results = await Promise.all([
+          draftAnswers(fake([]).generate, input([ambiguous], { library: blackSaved })),
+          draftAnswers(fake([]).generate, input([missing], { library: saved })),
+          draftAnswers(fake([]).generate, input([single], { library: saved })),
+          draftAnswers(fake([]).generate, input([free], { library: saved })),
+          draftAnswers(fake([]).generate, input([single], { library: conflicting })),
+        ]);
+
+        for (const [answer] of results) {
+          expect(answer).toMatchObject({ value: null, status: "sensitive" });
+        }
+      });
+
+      it("reads answers given at different levels of detail as one answer", async () => {
+        const plain = select("plain", "Gênero", options("Feminino", "Masculino", "Outro"), true);
+        const multi = { ...gender, id: "multi" };
+
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([plain, multi], {
+            library: [
+              { question: "Sexo", answer: "Masculino", sensitive: true },
+              ...saved,
+              { question: "Identidade de gênero", answer: "Homem", sensitive: true },
+            ],
+          }),
+        );
+
+        expect(find(answers, "plain")).toMatchObject({ value: "2", status: "suggested" });
+        expect(find(answers, "multi")).toMatchObject({ value: ["2", "4"], status: "suggested" });
+      });
+
+      it("ignores a saved answer the profile withholds", async () => {
+        const { generate } = fake([]);
+
+        const answers = await draftAnswers(
+          generate,
+          input([relatives], {
+            library: [
+              {
+                question: "Você tem parentes na empresa? CPF 529.982.247-25",
+                answer: "Não, CPF 52998224725",
+                sensitive: false,
+              },
+            ],
+            fields: fieldsOf({ cpf: { value: "52998224725", share: false } }),
+          }),
+        );
+
+        expect(answers[0]).toMatchObject({ value: null, status: "blank" });
+      });
+    });
+
     it("drafts a sensitive question without a usable field as sensitive", async () => {
       const answers = await draftAnswers(
         fake([]).generate,

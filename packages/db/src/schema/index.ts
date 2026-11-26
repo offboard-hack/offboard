@@ -125,7 +125,7 @@ export type DraftAnswer = {
   value: string | string[] | null;
   source: "account" | "profile" | "library" | "resume" | "cover_letter" | null;
   inferred: boolean;
-  status: "filled" | "blank" | "not_shared" | "sensitive";
+  status: "filled" | "suggested" | "blank" | "not_shared" | "sensitive";
 };
 
 export type ConfirmedAnswer = { questionId: string; value: string | string[] | null };
