@@ -2643,6 +2643,7 @@ describe.skipIf(!url)("api", () => {
 
             store.prefixes.push(prefix);
           },
+          get: async () => null,
         };
 
         const generate: GenerateStructured = async ({ schema, system, prompt }) => {
@@ -2936,6 +2937,7 @@ describe.skipIf(!url)("api", () => {
                 store.push(...keys);
               },
               removePrefix: async () => undefined,
+              get: async () => null,
             },
           },
         );
@@ -3481,6 +3483,7 @@ describe.skipIf(!url)("api", () => {
               put: async () => undefined,
               remove: async () => undefined,
               removePrefix: async () => undefined,
+              get: async () => null,
             },
             runInBackground: () => {
               throw new Error("should not kick a drain");
@@ -3557,6 +3560,7 @@ describe.skipIf(!url)("api", () => {
               put: async () => undefined,
               remove: async () => undefined,
               removePrefix: async () => undefined,
+              get: async () => null,
             },
           },
         );
@@ -3824,6 +3828,7 @@ describe.skipIf(!url)("api", () => {
               put: async () => undefined,
               remove: async () => undefined,
               removePrefix: async () => undefined,
+              get: async () => null,
             },
             runInBackground: () => {
               kicks += 1;
@@ -5776,7 +5781,7 @@ describe.skipIf(!url)("api", () => {
         const deleted = await request(instance, id, "/me", { method: "DELETE" });
 
         expect(deleted.status).toBe(204);
-        expect(store.prefixes).toEqual([`resumes/${id}/`]);
+        expect(store.prefixes).toEqual([`resumes/${id}/`, `ai-applications/${id}/`]);
         expect((await request(instance, id, "/me")).status).toBe(403);
       });
 
@@ -5852,9 +5857,12 @@ describe.skipIf(!url)("api", () => {
           expect((await upload(instance, other)).status).toBe(200);
 
           await storage.put(`resumes/${id}/orphan.pdf`, pdf, "application/pdf");
+          await storage.put(`ai-applications/${id}/orphan.png`, pdf, "image/png");
+          await storage.put(`ai-applications/${other}/kept.png`, pdf, "image/png");
 
           expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
           expect(await readdir(path.join(root, "resumes"))).toEqual([other]);
+          expect(await readdir(path.join(root, "ai-applications"))).toEqual([other]);
           expect(await readdir(path.join(root, "resumes", other))).toHaveLength(1);
         } finally {
           await rm(root, { recursive: true, force: true });
@@ -5880,6 +5888,38 @@ describe.skipIf(!url)("api", () => {
         expect(res.status).toBe(503);
         expect(await res.json()).toEqual({ error: "File storage not configured" });
         expect((await request(instance, id, "/me")).status).toBe(200);
+      });
+
+      it("refuses to delete when only an AI application screenshot is stored and storage is missing", async () => {
+        const { instance } = resumesApp({ storage: false });
+        const id = await profile();
+
+        const [job] = await db
+          .insert(jobs)
+          .values({
+            origin: "external",
+            source: "greenhouse",
+            sourceKey: "acme:1",
+            title: "Backend",
+            company: "Acme",
+            url: "https://example.com/1",
+          })
+          .returning({ id: jobs.id });
+
+        await db.insert(aiApplications).values({
+          profileId: id,
+          jobId: job.id,
+          state: "assisted",
+          form: { questions: [] },
+          draft: [],
+          preparedAt: new Date(),
+          screenshotKey: `ai-applications/${id}/shot.png`,
+        });
+
+        const res = await request(instance, id, "/me", { method: "DELETE" });
+
+        expect(res.status).toBe(503);
+        expect(await res.json()).toEqual({ error: "File storage not configured" });
       });
     });
   });

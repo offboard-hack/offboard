@@ -4,6 +4,8 @@ import { r2Storage, type R2BucketLike } from "./object-storage.ts";
 const fakeBucket = (stored: string[] = []) => {
   const puts: { key: string; value: Uint8Array; contentType: string }[] = [];
   const deletes: string[][] = [];
+  const gets: string[] = [];
+  const bodies = new Map<string, Uint8Array>();
   const lists: { prefix: string; cursor?: string; limit?: number }[] = [];
   const objects = new Set(stored);
 
@@ -17,6 +19,13 @@ const fakeBucket = (stored: string[] = []) => {
       deletes.push(batch);
 
       for (const key of batch) objects.delete(key);
+    },
+    get: async (key) => {
+      gets.push(key);
+
+      const body = bodies.get(key);
+
+      return body === undefined ? null : { arrayBuffer: async () => body.slice().buffer };
     },
     list: async (options) => {
       lists.push(options);
@@ -35,7 +44,7 @@ const fakeBucket = (stored: string[] = []) => {
     },
   };
 
-  return { bucket, puts, deletes, lists, objects };
+  return { bucket, puts, deletes, lists, objects, gets, bodies };
 };
 
 describe("r2Storage", () => {
@@ -46,6 +55,18 @@ describe("r2Storage", () => {
     await r2Storage(bucket).put("resumes/a/b.pdf", data, "application/pdf");
 
     expect(puts).toEqual([{ key: "resumes/a/b.pdf", value: data, contentType: "application/pdf" }]);
+  });
+
+  it("reads the bytes of an object and returns null when it is missing", async () => {
+    const { bucket, gets, bodies } = fakeBucket();
+
+    bodies.set("ai-applications/a/b.png", new Uint8Array([9, 8, 7]));
+
+    const storage = r2Storage(bucket);
+
+    expect(await storage.get("ai-applications/a/b.png")).toEqual(new Uint8Array([9, 8, 7]));
+    expect(await storage.get("ai-applications/a/missing.png")).toBeNull();
+    expect(gets).toEqual(["ai-applications/a/b.png", "ai-applications/a/missing.png"]);
   });
 
   it("deletes keys in batches of 1000", async () => {

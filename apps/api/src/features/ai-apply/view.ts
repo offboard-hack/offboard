@@ -1,4 +1,9 @@
-import type { ConfirmedAnswer, DraftAnswer, FormQuestion } from "@offboard/db/schema";
+import type {
+  AttemptEvidence,
+  ConfirmedAnswer,
+  DraftAnswer,
+  FormQuestion,
+} from "@offboard/db/schema";
 import { aiApplicationStateEnum } from "@offboard/db/schema";
 import { t } from "elysia";
 
@@ -12,6 +17,8 @@ type AttemptRow = {
   rehearsal: boolean;
   preparedAt: Date;
   confirmedAt: Date | null;
+  evidence: AttemptEvidence | null;
+  screenshotKey: string | null;
 };
 
 type AttemptJob = { id: string; title: string; company: string; url: string };
@@ -63,6 +70,12 @@ const draftAnswer = t.Object({
 
 const confirmedAnswer = t.Object({ questionId: t.String(), value: answerValue });
 
+const evidenceResponse = t.Object({
+  fields: t.Array(t.Object({ question: t.String(), value: answerValue })),
+  files: t.Array(t.String()),
+  finalUrl: t.Union([t.String(), t.Null()]),
+});
+
 export const attemptResponse = t.Object({
   id: t.String(),
   job: t.Object({ id: t.String(), title: t.String(), company: t.String(), url: t.String() }),
@@ -74,6 +87,8 @@ export const attemptResponse = t.Object({
   rehearsal: t.Boolean(),
   preparedAt: t.String(),
   confirmedAt: t.Union([t.String(), t.Null()]),
+  evidence: t.Union([evidenceResponse, t.Null()]),
+  hasScreenshot: t.Boolean(),
 });
 
 export const toAttemptView = (row: AttemptRow, job: AttemptJob) => ({
@@ -87,4 +102,6 @@ export const toAttemptView = (row: AttemptRow, job: AttemptJob) => ({
   rehearsal: row.rehearsal,
   preparedAt: row.preparedAt.toISOString(),
   confirmedAt: row.confirmedAt?.toISOString() ?? null,
+  evidence: row.evidence,
+  hasScreenshot: row.screenshotKey !== null,
 });

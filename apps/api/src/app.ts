@@ -390,6 +390,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
               : [{ question: item.text, answer: item.answer, sensitive: item.sensitive }],
           ),
         enqueueRun: (attemptId) => repos.background.enqueue("ai_apply", attemptId),
+        storage: options.storage,
         saveAnswer: async (tx, profileId, label, text, { sensitive }, now) => {
           const answers = createAnswersRepository(tx);
           const questionId = await answers.ensureQuestion(label, now, { sensitive });

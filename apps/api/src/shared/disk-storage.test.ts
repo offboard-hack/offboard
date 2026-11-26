@@ -29,12 +29,23 @@ describe("diskStorage", () => {
     expect([...(await readFile(path.join(root, "resumes/p/f.pdf")))]).toEqual([1, 2, 3]);
   });
 
+  it("reads stored bytes and returns null for a missing key", async () => {
+    const storage = diskStorage(root);
+
+    await storage.put("ai-applications/p/a.png", new Uint8Array([4, 5, 6]), "image/png");
+
+    expect(await storage.get("ai-applications/p/a.png")).toEqual(new Uint8Array([4, 5, 6]));
+    expect(await storage.get("ai-applications/p/missing.png")).toBeNull();
+    await expect(storage.get("ai-applications/p")).rejects.toThrow();
+  });
+
   it.each(["../x", "a/../../x", "/abs", "a\\b", "", "."])("rejects the key %j", async (key) => {
     const storage = diskStorage(root);
 
     await expect(storage.put(key, new Uint8Array(), "text/plain")).rejects.toThrow("Invalid key");
     await expect(storage.remove([key])).rejects.toThrow("Invalid key");
     await expect(storage.removePrefix(key)).rejects.toThrow("Invalid key");
+    await expect(storage.get(key)).rejects.toThrow("Invalid key");
   });
 
   it("removes existing files and ignores missing ones", async () => {

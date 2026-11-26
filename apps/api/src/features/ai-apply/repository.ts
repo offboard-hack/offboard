@@ -59,7 +59,7 @@ type NewAttempt = {
 
 const expiry = 7 * 24 * 60 * 60 * 1000;
 const liveRunMs = 5 * 60_000;
-const stuckMs = 15 * 60_000;
+export const stuckMs = 15 * 60_000;
 
 export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
@@ -79,14 +79,45 @@ type Confirmation = {
 };
 
 export function draftBlock(
-  row: { state: string; reason: string | null; preparedAt: Date },
+  row: { state: string; reason: string | null; preparedAt: Date; finishedAt: Date | null },
   now: Date,
 ) {
-  if (row.state !== "draft") {
+  if (row.state !== "draft" && row.state !== "rehearsed") {
     return row.reason === "applied_manually" ? ("applied" as const) : ("in_progress" as const);
   }
 
-  return row.preparedAt.getTime() <= now.getTime() - expiry ? ("expired" as const) : undefined;
+  const since = row.state === "rehearsed" ? row.finishedAt : row.preparedAt;
+
+  return since === null || since.getTime() <= now.getTime() - expiry
+    ? ("expired" as const)
+    : undefined;
+}
+
+async function recordApplication(
+  tx: Transaction,
+  attempt: { profileId: string; jobId: string; resumeId: string | null },
+  now: Date,
+) {
+  const [created] = await tx
+    .insert(applications)
+    .values({
+      ...attempt,
+      channel: "ai_apply",
+      appliedAt: now,
+      statusChangedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoNothing({ target: [applications.profileId, applications.jobId] })
+    .returning({ id: applications.id });
+
+  if (created !== undefined) {
+    await tx
+      .insert(applicationEvents)
+      .values({ applicationId: created.id, status: "sent", createdAt: now });
+  }
+
+  return created;
 }
 
 const jobColumns = { id: jobs.id, title: jobs.title, company: jobs.company, url: jobs.url };
@@ -299,51 +330,65 @@ export function createAiApplyRepository(db: Database) {
     now: Date,
     save: SaveAnswer,
   ) {
-    const [queued] = await db.transaction(async (tx) => {
-      const rows = await tx
-        .update(aiApplications)
-        .set({
-          state: "queued",
-          confirmed: confirmation.confirmed,
-          rehearsal: confirmation.rehearsal,
-          confirmedAt: now,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(aiApplications.id, id),
-            eq(aiApplications.profileId, profileId),
-            eq(aiApplications.state, "draft"),
-            gt(aiApplications.preparedAt, new Date(now.getTime() - expiry)),
-            notExists(
-              tx
-                .select({ id: applications.id })
-                .from(applications)
-                .where(
-                  and(
-                    eq(applications.profileId, profileId),
-                    eq(applications.jobId, aiApplications.jobId),
+    const since = new Date(now.getTime() - expiry);
+
+    const queued = await db
+      .transaction(async (tx) => {
+        const rows = await tx
+          .update(aiApplications)
+          .set({
+            state: "queued",
+            reason: null,
+            confirmed: confirmation.confirmed,
+            rehearsal: confirmation.rehearsal,
+            confirmedAt: now,
+            finishedAt: null,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(aiApplications.id, id),
+              eq(aiApplications.profileId, profileId),
+              or(
+                and(eq(aiApplications.state, "draft"), gt(aiApplications.preparedAt, since)),
+                and(eq(aiApplications.state, "rehearsed"), gt(aiApplications.finishedAt, since)),
+              ),
+              notExists(
+                tx
+                  .select({ id: applications.id })
+                  .from(applications)
+                  .where(
+                    and(
+                      eq(applications.profileId, profileId),
+                      eq(applications.jobId, aiApplications.jobId),
+                    ),
                   ),
-                ),
+              ),
+              exists(
+                tx
+                  .select({ id: jobs.id })
+                  .from(jobs)
+                  .where(and(eq(jobs.id, aiApplications.jobId), isNull(jobs.closedAt))),
+              ),
             ),
-            exists(
-              tx
-                .select({ id: jobs.id })
-                .from(jobs)
-                .where(and(eq(jobs.id, aiApplications.jobId), isNull(jobs.closedAt))),
-            ),
-          ),
-        )
-        .returning();
+          )
+          .returning();
 
-      if (rows.length > 0) {
-        for (const entry of confirmation.entries) {
-          await save(tx, profileId, entry.label, entry.text, { sensitive: entry.sensitive }, now);
+        if (rows.length > 0) {
+          for (const entry of confirmation.entries) {
+            await save(tx, profileId, entry.label, entry.text, { sensitive: entry.sensitive }, now);
+          }
         }
-      }
 
-      return rows;
-    });
+        return rows[0];
+      })
+      .catch((error) => {
+        if (uniqueViolation.safeParse(error).success) return "in_progress" as const;
+
+        throw error;
+      });
+
+    if (queued === "in_progress") return queued;
 
     if (queued !== undefined) return withJob(queued);
 
@@ -532,18 +577,7 @@ export function createAiApplyRepository(db: Database) {
 
       if (row === undefined) return "lost" as const;
 
-      const [created] = await tx
-        .insert(applications)
-        .values({
-          ...row,
-          channel: "ai_apply",
-          appliedAt: now,
-          statusChangedAt: now,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .onConflictDoNothing({ target: [applications.profileId, applications.jobId] })
-        .returning({ id: applications.id });
+      const created = await recordApplication(tx, row, now);
 
       if (created === undefined) {
         await tx
@@ -554,12 +588,48 @@ export function createAiApplyRepository(db: Database) {
         return "needs_check" as const;
       }
 
-      await tx
-        .insert(applicationEvents)
-        .values({ applicationId: created.id, status: "sent", createdAt: now });
-
       return "submitted" as const;
     });
+  }
+
+  async function check(profileId: string, id: string, sent: boolean, now: Date) {
+    if (!z.uuid().safeParse(id).success) return "not_found" as const;
+
+    const resolved = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .select({
+          state: aiApplications.state,
+          jobId: aiApplications.jobId,
+          resumeId: aiApplications.resumeId,
+        })
+        .from(aiApplications)
+        .where(and(eq(aiApplications.id, id), eq(aiApplications.profileId, profileId)))
+        .for("update");
+
+      if (row === undefined) return "not_found" as const;
+
+      if (row.state !== "needs_check") return "nothing_to_check" as const;
+
+      if (sent) {
+        await recordApplication(tx, { profileId, jobId: row.jobId, resumeId: row.resumeId }, now);
+      }
+
+      const [updated] = await tx
+        .update(aiApplications)
+        .set(
+          sent
+            ? { state: "submitted", reason: null, finishedAt: now, updatedAt: now }
+            : { state: "assisted", reason: "not_sent", finishedAt: now, updatedAt: now },
+        )
+        .where(eq(aiApplications.id, id))
+        .returning();
+
+      return updated;
+    });
+
+    if (resolved === "not_found" || resolved === "nothing_to_check") return resolved;
+
+    return withJob(resolved);
   }
 
   return {
@@ -571,6 +641,7 @@ export function createAiApplyRepository(db: Database) {
     markSubmitting,
     finish,
     submittedWithApplication,
+    check,
     get,
     list,
     confirm,

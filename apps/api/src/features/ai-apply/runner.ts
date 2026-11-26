@@ -20,7 +20,7 @@ import {
   submitGreenhouse,
 } from "./browser/greenhouse-form.js";
 import { splitName } from "./draft.js";
-import type { AiApplyRepository } from "./repository.js";
+import { stuckMs, type AiApplyRepository } from "./repository.js";
 
 export type RunnerDeps = {
   repo: AiApplyRepository;
@@ -343,7 +343,11 @@ export async function runAiApplication(deps: RunnerDeps, attemptId: string, now:
   const { state, confirmed } = run.attempt;
 
   if (state === "submitting") {
-    await deps.repo.finish(attemptId, ["submitting"], needsCheck, now());
+    const { updatedAt } = run.attempt;
+
+    if (updatedAt === null || updatedAt.getTime() < now().getTime() - stuckMs) {
+      await deps.repo.finish(attemptId, ["submitting"], needsCheck, now());
+    }
 
     return skipped;
   }

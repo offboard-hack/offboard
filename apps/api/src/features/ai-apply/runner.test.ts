@@ -369,6 +369,9 @@ const fakeStorage = () => {
       async put(key: string, data: Uint8Array, contentType: string) {
         stored.push({ key, data, contentType });
       },
+      async get() {
+        return null;
+      },
       async remove() {},
       async removePrefix() {},
     },
@@ -380,6 +383,7 @@ describe.skipIf(!url)("ai apply runner", () => {
   const repos = createRepositories(db);
   const clock = new Date("2026-11-25T15:00:00.000Z");
   const now = () => clock;
+  const later = () => new Date(clock.getTime() + 15 * 60_000 + 1);
 
   beforeAll(async () => {
     await migrate(db, {
@@ -895,8 +899,8 @@ describe.skipIf(!url)("ai apply runner", () => {
 
       expect((await stateOf(id)).state).toBe("submitting");
 
-      await runAiApplication(run.deps, id, now);
-      await runAiApplication(run.deps, id, now);
+      expect(await runAiApplication(run.deps, id, later)).toEqual({ skipped: true });
+      expect(await runAiApplication(run.deps, id, later)).toEqual({ skipped: true });
 
       expect(await stateOf(id)).toMatchObject({ state: "needs_check", finishedAt: null });
       expect(run.created()).toBe(1);
@@ -904,6 +908,33 @@ describe.skipIf(!url)("ai apply runner", () => {
       expect(run.lifts()).toBe(1);
       expect(run.released).toEqual(["session-1"]);
       expect(await db.select().from(applications)).toEqual([]);
+    });
+
+    it("leaves a fresh submitting attempt to the run that owns it", async () => {
+      const { id } = await attempt({ state: "submitting", updatedAt: clock });
+      const run = rig();
+      const edge = () => new Date(clock.getTime() + 15 * 60_000);
+
+      expect(await runAiApplication(run.deps, id, now)).toEqual({ skipped: true });
+      expect(await runAiApplication(run.deps, id, edge)).toEqual({ skipped: true });
+      expect(await stateOf(id)).toMatchObject({ state: "submitting", updatedAt: clock });
+      expect(run.created()).toBe(0);
+
+      await runAiApplication(run.deps, id, later);
+
+      expect(await stateOf(id)).toMatchObject({ state: "needs_check", finishedAt: null });
+      expect(run.created()).toBe(0);
+    });
+
+    it("checks a submitting attempt that has no update time", async () => {
+      const { id } = await attempt({ state: "submitting" });
+      const run = rig();
+
+      await db.update(aiApplications).set({ updatedAt: null }).where(eq(aiApplications.id, id));
+      await runAiApplication(run.deps, id, now);
+
+      expect((await stateOf(id)).state).toBe("needs_check");
+      expect(run.created()).toBe(0);
     });
 
     it("never runs an attempt in any other state", async () => {

@@ -7,6 +7,7 @@ import {
   defaultOrgId,
   jobs,
   offboardingCases,
+  resumes,
   talentProfiles,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
@@ -16,6 +17,17 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createRepositories } from "../../repositories.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+const missingId = "00000000-0000-4000-8000-000000000001";
+
+const resumeContent = {
+  headline: { id: "h", text: "Engenheira" },
+  summary: { id: "s", text: "Backend" },
+  experiences: [],
+  education: [],
+  skills: [],
+  languages: [],
+  contact: { email: null, phone: null, city: null, links: [] },
+};
 
 describe.skipIf(!url)("ai apply repository", () => {
   const db = createClient(url ?? "");
@@ -136,7 +148,10 @@ describe.skipIf(!url)("ai apply repository", () => {
     );
   });
 
-  async function seedAttempt(state: "queued" | "running" | "submitting", updatedAt = new Date()) {
+  async function seedAttempt(
+    state: "queued" | "running" | "submitting" | "needs_check" | "rehearsed",
+    updatedAt = new Date(),
+  ) {
     const [first] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
 
     const created = await repos.talent.enable({
@@ -216,6 +231,15 @@ describe.skipIf(!url)("ai apply repository", () => {
     expect(await repos.aiApply.markSubmitting(queued.id, now)).toBe(true);
     expect(await stateOf(queued.id)).toMatchObject({ state: "submitting", updatedAt: now });
     expect(await repos.aiApply.claimForRun(queued.id, now)).toBe(false);
+  });
+
+  it("lets only one markSubmitting win on the same attempt", async () => {
+    const now = new Date("2026-11-25T12:00:00.000Z");
+    const { id } = await seedAttempt("running");
+
+    expect(await repos.aiApply.markSubmitting(id, now)).toBe(true);
+    expect(await repos.aiApply.markSubmitting(id, now)).toBe(false);
+    expect((await stateOf(id)).state).toBe("submitting");
   });
 
   it("reclaims a running attempt only once its last update is five minutes old", async () => {
@@ -354,5 +378,205 @@ describe.skipIf(!url)("ai apply repository", () => {
     expect(await repos.aiApply.queuedIds()).toEqual([id]);
     expect(await repos.aiApply.runnable("not-a-uuid")).toBeUndefined();
     expect(await repos.aiApply.runnable("00000000-0000-4000-8000-000000000009")).toBeUndefined();
+  });
+
+  describe("resolving an unconfirmed submission", () => {
+    const now = new Date("2026-11-25T12:00:00.000Z");
+
+    it("records the application and the submission when the person says it was sent", async () => {
+      const { id, profileId, jobId } = await seedAttempt("needs_check");
+
+      await db
+        .update(aiApplications)
+        .set({ evidence, screenshotKey: "k.png" })
+        .where(eq(aiApplications.id, id));
+
+      const view = await repos.aiApply.check(profileId, id, true, now);
+
+      expect(view).toMatchObject({ id, state: "submitted", reason: null, hasScreenshot: true });
+      expect(await stateOf(id)).toMatchObject({
+        state: "submitted",
+        reason: null,
+        finishedAt: now,
+        updatedAt: now,
+        evidence,
+        screenshotKey: "k.png",
+      });
+
+      const [application] = await db.select().from(applications);
+
+      expect(application).toMatchObject({
+        profileId,
+        jobId,
+        channel: "ai_apply",
+        status: "sent",
+        appliedAt: now,
+        statusChangedAt: now,
+      });
+      expect(await db.select().from(applicationEvents)).toEqual([
+        expect.objectContaining({ applicationId: application.id, status: "sent", createdAt: now }),
+      ]);
+    });
+
+    it("uses the résumé of the attempt for the application", async () => {
+      const { id, profileId } = await seedAttempt("needs_check");
+
+      const [resume] = await db
+        .insert(resumes)
+        .values({ profileId, kind: "base", content: resumeContent })
+        .returning({ id: resumes.id });
+
+      await db.update(aiApplications).set({ resumeId: resume.id }).where(eq(aiApplications.id, id));
+      await repos.aiApply.check(profileId, id, true, now);
+
+      expect((await db.select().from(applications))[0]).toMatchObject({ resumeId: resume.id });
+    });
+
+    it("only marks the attempt submitted when the person already has an application", async () => {
+      const { id, profileId, jobId } = await seedAttempt("needs_check");
+
+      await db.insert(applications).values({ profileId, jobId });
+
+      expect(await repos.aiApply.check(profileId, id, true, now)).toMatchObject({
+        state: "submitted",
+      });
+      expect(await db.select().from(applications)).toHaveLength(1);
+      expect(await db.select().from(applicationEvents)).toEqual([]);
+    });
+
+    it("closes the attempt as assisted when the person says it was not sent", async () => {
+      const { id, profileId } = await seedAttempt("needs_check");
+
+      expect(await repos.aiApply.check(profileId, id, false, now)).toMatchObject({
+        state: "assisted",
+        reason: "not_sent",
+      });
+      expect(await stateOf(id)).toMatchObject({
+        state: "assisted",
+        reason: "not_sent",
+        finishedAt: now,
+        updatedAt: now,
+      });
+      expect(await db.select().from(applications)).toEqual([]);
+    });
+
+    it("refuses attempts that are not waiting for a check, foreign or malformed ids", async () => {
+      const { id, profileId } = await seedAttempt("submitting");
+
+      expect(await repos.aiApply.check(profileId, id, true, now)).toBe("nothing_to_check");
+      expect(await repos.aiApply.check(profileId, id, false, now)).toBe("nothing_to_check");
+      expect(await repos.aiApply.check(profileId, missingId, true, now)).toBe("not_found");
+      expect(await repos.aiApply.check(missingId, id, true, now)).toBe("not_found");
+      expect(await repos.aiApply.check(profileId, "not-a-uuid", true, now)).toBe("not_found");
+      expect((await stateOf(id)).state).toBe("submitting");
+      expect(await db.select().from(applications)).toEqual([]);
+    });
+
+    it("resolves a check only once", async () => {
+      const { id, profileId } = await seedAttempt("needs_check");
+
+      const results = await Promise.all([
+        repos.aiApply.check(profileId, id, true, now),
+        repos.aiApply.check(profileId, id, true, now),
+      ]);
+
+      expect(results.filter((result) => result === "nothing_to_check")).toHaveLength(1);
+      expect(await db.select().from(applications)).toHaveLength(1);
+      expect(await db.select().from(applicationEvents)).toHaveLength(1);
+    });
+  });
+
+  describe("confirming a rehearsed attempt again", () => {
+    const confirmation = { confirmed: [], rehearsal: false, entries: [] };
+    const save = async () => undefined;
+    const day = 24 * 60 * 60 * 1000;
+    const now = new Date("2026-11-25T12:00:00.000Z");
+
+    async function rehearsed(finishedAt: Date) {
+      const seeded = await seedAttempt("rehearsed");
+
+      await db
+        .update(aiApplications)
+        .set({ evidence, screenshotKey: "k.png", finishedAt, reason: null })
+        .where(eq(aiApplications.id, seeded.id));
+
+      return seeded;
+    }
+
+    it("queues it with the new answers and keeps the rehearsal evidence", async () => {
+      const { id, profileId } = await rehearsed(new Date(now.getTime() - 6 * day));
+
+      const result = await repos.aiApply.confirm(
+        profileId,
+        id,
+        { confirmed: [{ questionId: "q", value: "x" }], rehearsal: false, entries: [] },
+        now,
+        save,
+      );
+
+      expect(result).toMatchObject({ id, state: "queued", rehearsal: false, hasScreenshot: true });
+      expect(await stateOf(id)).toMatchObject({
+        state: "queued",
+        confirmed: [{ questionId: "q", value: "x" }],
+        confirmedAt: now,
+        finishedAt: null,
+        evidence,
+        screenshotKey: "k.png",
+      });
+    });
+
+    it("counts the seven days from the end of the rehearsal", async () => {
+      const { id, profileId } = await rehearsed(new Date(now.getTime() - 7 * day));
+
+      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save)).toBe("expired");
+      expect((await stateOf(id)).state).toBe("rehearsed");
+
+      await db
+        .update(aiApplications)
+        .set({ preparedAt: new Date(now.getTime() - 30 * day), finishedAt: null })
+        .where(eq(aiApplications.id, id));
+
+      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save)).toBe("expired");
+    });
+
+    it("refuses a rehearsed attempt of someone who already applied", async () => {
+      const { id, profileId, jobId } = await rehearsed(new Date(now.getTime() - day));
+
+      await db.insert(applications).values({ profileId, jobId });
+
+      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save)).toBe("applied");
+    });
+
+    it("reports an attempt that another one already holds for the job", async () => {
+      const { id, profileId, jobId } = await rehearsed(new Date(now.getTime() - day));
+
+      await db.insert(aiApplications).values({
+        profileId,
+        jobId,
+        state: "draft",
+        form: { questions: [] },
+        draft: [],
+        preparedAt: now,
+      });
+
+      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save)).toBe(
+        "in_progress",
+      );
+      expect((await stateOf(id)).state).toBe("rehearsed");
+    });
+
+    it.each(["needs_check", "submitted", "assisted", "cancelled"] as const)(
+      "never confirms a %s attempt",
+      async (state) => {
+        const { id, profileId } = await seedAttempt("needs_check");
+
+        await db.update(aiApplications).set({ state }).where(eq(aiApplications.id, id));
+
+        expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save)).toBe(
+          "in_progress",
+        );
+        expect((await stateOf(id)).state).toBe(state);
+      },
+    );
   });
 });

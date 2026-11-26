@@ -808,6 +808,12 @@ describe.skipIf(!url)("account repository", () => {
           confirmedAt: new Date("2026-03-02T10:00:00Z"),
           finishedAt: new Date("2026-03-03T10:00:00Z"),
           createdAt: new Date("2026-03-02T10:00:00Z"),
+          evidence: {
+            fields: [{ question: "Pergunta A", value: "final" }],
+            files: ["curriculo.pdf"],
+            finalUrl: "https://example.com/ok",
+          },
+          screenshotKey: `ai-applications/${profileId}/shot.png`,
         },
         {
           profileId: otherProfileId,
@@ -834,6 +840,11 @@ describe.skipIf(!url)("account repository", () => {
         preparedAt: "2026-03-01T10:00:00.000Z",
         confirmedAt: "2026-03-02T10:00:00.000Z",
         finishedAt: "2026-03-03T10:00:00.000Z",
+        evidence: {
+          fields: [{ question: "Pergunta A", value: "final" }],
+          files: ["curriculo.pdf"],
+          finalUrl: "https://example.com/ok",
+        },
       },
       {
         job: { id: draftJob, title: "Vaga ai-draft", company: "Acme" },
@@ -846,9 +857,11 @@ describe.skipIf(!url)("account repository", () => {
         preparedAt: "2026-03-01T10:00:00.000Z",
         confirmedAt: null,
         finishedAt: null,
+        evidence: null,
       },
     ]);
     expect(JSON.stringify(exported)).not.toContain(foreignJob);
+    expect(JSON.stringify(exported)).not.toContain("shot.png");
 
     expect(await repository.deleteProfile(profileId)).toBe(true);
     expect(await db.select({ id: aiApplications.id }).from(aiApplications)).toEqual([
@@ -870,7 +883,33 @@ describe.skipIf(!url)("account repository", () => {
       content,
     });
 
-    expect(await repository.fileKeys(profileId)).toEqual(["resumes/mine.pdf"]);
+    const [attemptJob] = await db.select({ id: jobs.id }).from(jobs).limit(1);
+
+    await db.insert(aiApplications).values([
+      {
+        profileId,
+        jobId: attemptJob.id,
+        state: "assisted",
+        form: { questions: [] },
+        draft: [],
+        preparedAt: new Date(),
+        screenshotKey: `ai-applications/${profileId}/shot.png`,
+      },
+      {
+        profileId: otherProfileId,
+        jobId: attemptJob.id,
+        state: "assisted",
+        form: { questions: [] },
+        draft: [],
+        preparedAt: new Date(),
+        screenshotKey: `ai-applications/${otherProfileId}/shot.png`,
+      },
+    ]);
+
+    expect(await repository.fileKeys(profileId)).toEqual([
+      "resumes/mine.pdf",
+      `ai-applications/${profileId}/shot.png`,
+    ]);
     expect(await repository.fileKeys(missingId)).toEqual([]);
   });
 
