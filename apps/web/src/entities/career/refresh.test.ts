@@ -21,20 +21,16 @@ describe("resumeRefetchInterval", () => {
 });
 
 describe("jobsRefetchInterval", () => {
-  it("polls while no job on the page has a match", () => {
-    expect(jobsRefetchInterval({ items: [{ match: null }, { match: null }] }, true)).toBe(
-      jobsRefreshMs,
-    );
+  it("polls while matches are being computed", () => {
+    expect(jobsRefetchInterval({ matching: true }, true)).toBe(jobsRefreshMs);
   });
 
-  it("stops when any job has a match", () => {
-    expect(jobsRefetchInterval({ items: [{ match: null }, { match: { score: 1 } }] }, true)).toBe(
-      false,
-    );
+  it("stops once matches are computed", () => {
+    expect(jobsRefetchInterval({ matching: false }, true)).toBe(false);
   });
 
   it("stops without a résumé or data", () => {
-    expect(jobsRefetchInterval({ items: [{ match: null }] }, false)).toBe(false);
+    expect(jobsRefetchInterval({ matching: true }, false)).toBe(false);
     expect(jobsRefetchInterval(undefined, true)).toBe(false);
   });
 });

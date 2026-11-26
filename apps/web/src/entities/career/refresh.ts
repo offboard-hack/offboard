@@ -6,13 +6,8 @@ export function resumeRefetchInterval(data: { score: number | null } | null | un
   return data && data.score === null ? resumeRefreshMs : false;
 }
 
-export function jobsRefetchInterval(
-  data: { items: { match: unknown }[] } | undefined,
-  hasResume: boolean,
-) {
-  if (!hasResume || !data) return false;
-
-  return data.items.every((job) => job.match === null) ? jobsRefreshMs : false;
+export function jobsRefetchInterval(data: { matching: boolean } | undefined, hasResume: boolean) {
+  return hasResume && data?.matching ? jobsRefreshMs : false;
 }
 
 export function scoreArrived(previous: number | null | undefined, current: number | null) {

@@ -36,6 +36,7 @@ const listResponse = t.Object({
   page: t.Integer(),
   pageSize: t.Literal(pageSize),
   total: t.Integer(),
+  matching: t.Boolean(),
 });
 
 export function jobsRoutes(repos: JobsRepository, talentAccess: TalentAccessPlugin) {
@@ -44,18 +45,20 @@ export function jobsRoutes(repos: JobsRepository, talentAccess: TalentAccessPlug
     async ({ query, me }) => {
       const page = query.page ?? 1;
 
-      const { items, total } = await repos.listForTalent(me.id, {
+      const { items, total, matching } = await repos.listForTalent(me.id, {
         workModel: query.workModel,
+        view: query.view ?? "compatible",
         page,
         pageSize,
       });
 
-      return { items, page, pageSize, total } as const;
+      return { items, page, pageSize, total, matching } as const;
     },
     {
       talent: "active",
       query: t.Object({
         workModel: t.Optional(workModel),
+        view: t.Optional(t.Union([t.Literal("compatible"), t.Literal("all")])),
         page: t.Optional(t.Numeric({ minimum: 1, maximum: 10_000, multipleOf: 1 })),
       }),
       response: { 200: listResponse },
