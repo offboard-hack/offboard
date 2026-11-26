@@ -5,20 +5,24 @@ import type { EmployeeAccount } from "@/entities/employee";
 import { buttonVariants } from "@/shared/ui/shadcn/button";
 import { CareerApplications } from "./career/applications";
 import { CareerJobs } from "./career/jobs";
+import { PlanSection } from "./career/plan";
 import { ResumeFirst } from "./career/resume";
 
 export function Career({
   account,
   view,
+  paid,
 }: {
   account: EmployeeAccount;
   view: "vagas" | "candidaturas";
+  paid: boolean;
 }) {
   const applications = useQuery(careerApplicationsQuery(account));
   const resume = useQuery(careerResumeQuery(account));
 
   return (
     <div className="space-y-5">
+      <PlanSection account={account} paid={paid} />
       <nav aria-label="Carreira" className="flex flex-wrap gap-2">
         <Link
           to="/colaborador"

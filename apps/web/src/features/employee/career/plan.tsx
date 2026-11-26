@@ -1,7 +1,54 @@
+import { brazilTimezone } from "@offboard/employee";
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { careerPlanQuery } from "@/entities/career";
+import type { EmployeeAccount } from "@/entities/employee";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
 import { EmployeeError, EmployeePanel } from "../ui";
-import { type CareerPlan, paymentReceivedNote, planCardView } from "./plan-card";
+import {
+  type CareerPlan,
+  paymentReceivedNote,
+  planCardView,
+  planPollInterval,
+  planPollTimeout,
+  shouldPollPlan,
+} from "./plan-card";
+
+const dayFormat = new Intl.DateTimeFormat("en-CA", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  timeZone: brazilTimezone,
+});
+
+function startCheckout() {}
+
+export function PlanSection({ account, paid }: { account: EmployeeAccount; paid: boolean }) {
+  const [openedAt] = useState(() => Date.now());
+
+  const plan = useQuery({
+    ...careerPlanQuery(account),
+    refetchInterval: (query) =>
+      paid && Date.now() - openedAt < planPollTimeout && shouldPollPlan(query.state.data)
+        ? planPollInterval
+        : false,
+  });
+
+  if (!plan.data) {
+    return <EmployeeError message={plan.error?.message} />;
+  }
+
+  return (
+    <PlanCard
+      plan={plan.data}
+      today={dayFormat.format(new Date())}
+      paid={paid}
+      upgrading={false}
+      onUpgrade={startCheckout}
+    />
+  );
+}
 
 export function PlanCard({
   plan,

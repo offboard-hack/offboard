@@ -27,6 +27,7 @@ export const Route = createFileRoute("/colaborador")({
   validateSearch: z.object({
     tela: screens.default("hoje").catch("hoje"),
     carreira: z.enum(["vagas", "candidaturas"]).default("vagas").catch("vagas"),
+    plano: z.literal("ok").optional().catch(undefined),
   }),
   beforeLoad: async ({ context }) => {
     const result = await getApiClient().api.employee.session.get();

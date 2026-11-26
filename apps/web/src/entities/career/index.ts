@@ -15,6 +15,8 @@ export { jobsRefetchInterval } from "./refresh";
 
 type Me = ApiClient["api"]["me"];
 
+export type CareerPlan = Treaty.Data<Me["plan"]["get"]>;
+
 export type CareerProfile = Treaty.Data<Me["get"]>;
 
 export type CareerResume = Treaty.Data<Me["resume"]["get"]>;
@@ -109,6 +111,19 @@ function resumeSource(account: EmployeeAccount) {
 
       return resume;
     },
+  });
+}
+
+export function careerPlanQuery(account: EmployeeAccount) {
+  return queryOptions({
+    queryKey: [...careerKey(account), "plan"],
+    staleTime: freshness,
+    retry: retryEmployeeRead,
+    queryFn: async ({ signal }) =>
+      settle(
+        await client().plan.get({ headers: employeeAccessHeaders(account), fetch: { signal } }),
+        "Não foi possível abrir seu plano.",
+      ),
   });
 }
 
