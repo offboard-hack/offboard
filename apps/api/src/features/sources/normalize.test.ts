@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { brazilState, parseLocation, workModelFrom } from "./normalize.js";
+import { brazilState, mentionsBrazil, parseLocation, workModelFrom } from "./normalize.js";
 
 describe("brazilState", () => {
   it.each([
@@ -114,10 +114,81 @@ describe("parseLocation", () => {
     },
   );
 
-  it("only trusts a lowercase or unguarded UF when nothing else says Brazil", () => {
-    expect(parseLocation("Campinas, SP")).toEqual({ city: null, state: null, inBrazil: false });
-    expect(parseLocation("Campinas - sp")).toEqual({ city: null, state: null, inBrazil: false });
+  it("trusts a UF code only next to a Brazilian city or a mention of Brazil", () => {
+    expect(parseLocation("Campinas, SP")).toEqual({
+      city: "Campinas",
+      state: "SP",
+      inBrazil: true,
+    });
+    expect(parseLocation("Belém - PA")).toEqual({ city: "Belém", state: "PA", inBrazil: true });
+    expect(parseLocation("Joinville, SC")).toEqual({
+      city: "Joinville",
+      state: "SC",
+      inBrazil: true,
+    });
+    expect(parseLocation("PA, Brasil")).toEqual({ city: null, state: "PA", inBrazil: true });
+    expect(parseLocation("Remote - SC, BR")).toEqual({ city: null, state: "SC", inBrazil: true });
+    expect(parseLocation("Campinas - sp")).toEqual({ city: null, state: "SP", inBrazil: true });
   });
+
+  it.each([
+    ["Remote - PA"],
+    ["Remote - SC"],
+    ["Remote - MA"],
+    ["Remote - AL"],
+    ["Remote - MT"],
+    ["Remote - CA"],
+    ["PA"],
+    ["Remote, PA"],
+    ["Remote - United States"],
+    ["Anywhere"],
+    ["Global"],
+    ["Remote - Global"],
+    ["LATAM"],
+    ["Latin America"],
+    ["Remote - LATAM"],
+    ["Remote, Latin America"],
+    ["Mexico City, Mexico"],
+  ])("rejects %s", (text) => {
+    expect(parseLocation(text)).toEqual({ city: null, state: null, inBrazil: false });
+  });
+
+  it.each([
+    ["Remote - LATAM, Brazil"],
+    ["Latin America (Brasil)"],
+    ["Remote - BR"],
+    ["BR"],
+    ["Curitiba, br"],
+  ])("accepts %s because Brazil is named", (text) => {
+    expect(parseLocation(text).inBrazil).toBe(true);
+  });
+
+  it.each([
+    ["Salvador", "BA"],
+    ["Goiânia", "GO"],
+    ["Santo André", "SP"],
+    ["Joao Pessoa", "PB"],
+    ["Palmas", "TO"],
+    ["Boa Vista", "RR"],
+    ["Natal", "RN"],
+  ])("places the Brazilian city %s in %s", (text, state) => {
+    expect(parseLocation(text)).toEqual({ city: null, state, inBrazil: true });
+  });
+
+  it("does not take a Brazilian city name inside a foreign place", () => {
+    expect(parseLocation("San Salvador, El Salvador")).toEqual({
+      city: null,
+      state: null,
+      inBrazil: false,
+    });
+  });
+
+  it.each([["Home office"], ["HOME OFFICE"], ["(home office)"]])(
+    "counts %s as a Portuguese work-model location",
+    (text) => {
+      expect(parseLocation(text)).toEqual({ city: null, state: null, inBrazil: true });
+    },
+  );
 });
 
 describe("workModelFrom", () => {
@@ -135,5 +206,15 @@ describe("workModelFrom", () => {
     ["Presencial", null],
   ])("reads %s as %s", (text, model) => {
     expect(workModelFrom(text)).toBe(model);
+  });
+});
+
+describe("mentionsBrazil", () => {
+  it.each([["Brazil"], ["BRASIL"], ["São Paulo, BR"], ["Remote - BR"]])("detects %s", (text) => {
+    expect(mentionsBrazil(text)).toBe(true);
+  });
+
+  it.each([["Bruges"], ["br"], ["Remote"], ["Brno"]])("ignores %s", (text) => {
+    expect(mentionsBrazil(text)).toBe(false);
   });
 });
