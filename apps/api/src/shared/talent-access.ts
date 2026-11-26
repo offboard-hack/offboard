@@ -34,11 +34,12 @@ export function talentAccess(deps: {
           return status(403, { error: "Forbidden" });
         }
 
-        if (access.kind !== "talent") {
-          const collaborator =
-            access.kind === "forbidden" ? await deps.auth.resolveEmployee?.(request.headers) : null;
+        if (access.kind === "authenticated") return status(403, { error: "Forbidden" });
 
-          if (!collaborator) return status(403, { error: "Forbidden" });
+        if (access.kind === "forbidden") {
+          const collaborator = await deps.auth.resolveEmployee?.(request.headers);
+
+          if (!collaborator) return status(401, { error: "Unauthorized" });
 
           const me = await deps.talent.ensureForCollaborator(collaborator, now());
 

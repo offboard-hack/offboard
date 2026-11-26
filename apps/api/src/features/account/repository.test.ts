@@ -162,7 +162,7 @@ describe.skipIf(!url)("account repository", () => {
 
     await db
       .update(applications)
-      .set({ appliedAt: new Date("2020-01-01T00:00:00Z") })
+      .set({ appliedAt: new Date("2020-01-01T00:00:00Z"), channel: "ai_apply" })
       .where(eq(applications.id, older));
     await db
       .update(applications)
@@ -205,11 +205,17 @@ describe.skipIf(!url)("account repository", () => {
       "Vaga mine",
       "Vaga older",
     ]);
+    expect(exported?.applications.map((application) => application.channel)).toEqual([
+      "manual",
+      "manual",
+      "ai_apply",
+    ]);
     expect(exported?.applications[1]).toEqual({
       job: { title: "Vaga mine", company: "Acme", url: "https://jobs.example.com/mine" },
       resume: { kind: "base", job: null },
       status: "closed",
       closedReason: "rejected",
+      channel: "manual",
       appliedAt: expect.any(String),
       events: [
         { status: "sent", closedReason: null, createdAt: expect.any(String) },

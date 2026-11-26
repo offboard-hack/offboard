@@ -21,6 +21,7 @@ const applicationResponse = t.Object({
   id: t.String(),
   status: statusSchema,
   closedReason: t.Union([closedReason, t.Null()]),
+  channel: t.Union([t.Literal("manual"), t.Literal("ai_apply")]),
   appliedAt: t.String(),
   statusChangedAt: t.String(),
   job: t.Object({

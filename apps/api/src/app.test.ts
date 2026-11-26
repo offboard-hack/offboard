@@ -718,7 +718,7 @@ describe.skipIf(!url)("api", () => {
         email: personalEmail,
         termsAccepted: false,
         shareOutcomeWithHr: false,
-        aiApply: { consented: false, available: false },
+        aiApply: { eligible: false, consented: false, available: false },
         entitlement: { kind: "sponsored", until: sponsoredUntil },
       });
 
@@ -968,7 +968,7 @@ describe.skipIf(!url)("api", () => {
       expect((await put(gated, "talent", mine.id, "yes")).status).toBe(422);
 
       expect(await (await call(gated, "talent", "/me", "GET", mine.id)).json()).toMatchObject({
-        aiApply: { consented: false, available: false },
+        aiApply: { eligible: true, consented: false, available: false },
       });
 
       const accepted = await put(gated, "talent", mine.id, true);
@@ -976,21 +976,29 @@ describe.skipIf(!url)("api", () => {
       expect(accepted.status).toBe(200);
       expect(await accepted.json()).toMatchObject({
         id: mine.id,
-        aiApply: { consented: true, available: true },
+        aiApply: { eligible: true, consented: true, available: true },
       });
 
       expect(
         await (await call(withoutBrowser, "talent", "/me", "GET", mine.id)).json(),
       ).toMatchObject({
-        aiApply: { consented: true, available: false },
+        aiApply: { eligible: true, consented: true, available: false },
       });
+
+      await onPlan("gold");
+
+      expect(await (await call(gated, "talent", "/me", "GET", mine.id)).json()).toMatchObject({
+        aiApply: { eligible: false, consented: true, available: false },
+      });
+
+      await onPlan("platinum-premium");
 
       const stored = await consentOf(mine.id);
 
       expect(stored.at).toBeInstanceOf(Date);
       expect(stored.version).toBe("2026-11-25");
       expect(await (await call(app, "talent", "/me", "GET", mine.id)).json()).toMatchObject({
-        aiApply: { consented: true, available: false },
+        aiApply: { eligible: true, consented: true, available: false },
       });
 
       const draft = await seedAttempt(mine.id, "ai-draft", "draft");
@@ -1022,7 +1030,7 @@ describe.skipIf(!url)("api", () => {
       const withdrawn = await put(gated, "talent", mine.id, false);
 
       expect(await withdrawn.json()).toMatchObject({
-        aiApply: { consented: false, available: false },
+        aiApply: { eligible: true, consented: false, available: false },
       });
       expect(await consentOf(mine.id)).toEqual({ at: null, version: null });
 
@@ -1890,7 +1898,12 @@ describe.skipIf(!url)("api", () => {
         expect(listed.status).toBe(200);
         expect(body).toMatchObject({ page: 1, pageSize: 20, total: 2 });
         expect(body.items.map((item: { title: string }) => item.title)).toEqual(["A", "B"]);
-        expect(body.items[0]).toMatchObject({ match: null, applied: false });
+        expect(body.items[0]).toMatchObject({
+          match: null,
+          applied: false,
+          aiApplyCapable: false,
+          description: "",
+        });
 
         const remote = await asSession(
           "talent",
@@ -2075,7 +2088,7 @@ describe.skipIf(!url)("api", () => {
         const listed = await (await send(headers, "/me/applications")).json();
 
         expect(listed).toHaveLength(1);
-        expect(listed[0]).toMatchObject({ status: "sent", closedReason: null });
+        expect(listed[0]).toMatchObject({ status: "sent", closedReason: null, channel: "manual" });
       });
 
       it("refuses a manual application while an AI submission awaits its check", async () => {
@@ -9564,8 +9577,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
       const response = await request("/me", "GET", cookie);
 
-      expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({ error: "Forbidden" });
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({ error: "Unauthorized" });
       expect(await profilesOf(caseId)).toEqual([]);
     });
 
@@ -9619,8 +9632,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
       const refused = await request("/me", "GET", cookie);
 
-      expect(refused.status).toBe(403);
-      expect(await refused.json()).toEqual({ error: "Forbidden" });
+      expect(refused.status).toBe(401);
+      expect(await refused.json()).toEqual({ error: "Unauthorized" });
 
       await db
         .update(employeeAccess)

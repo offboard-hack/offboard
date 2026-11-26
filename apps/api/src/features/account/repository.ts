@@ -90,6 +90,7 @@ export function createAccountRepository(db: Database) {
         id: applications.id,
         status: applications.status,
         closedReason: applications.closedReason,
+        channel: applications.channel,
         appliedAt: applications.appliedAt,
         job: { title: jobs.title, company: jobs.company, url: jobs.url },
         resume: { kind: resumes.kind },

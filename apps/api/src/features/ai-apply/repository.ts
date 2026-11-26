@@ -32,11 +32,10 @@ import {
   or,
 } from "drizzle-orm";
 import { z } from "zod";
+import { greenhouseKey } from "../../shared/ai-apply-access.js";
 import { uniqueViolation } from "../../shared/http.js";
 import { toPreferences } from "../../shared/talent-preferences.js";
 import { toAttemptView } from "./view.js";
-
-const sourceKey = /^([a-z0-9][a-z0-9_-]*):(\d+)$/;
 
 const nonFinal = ["queued", "running", "submitting", "needs_check"] as const;
 
@@ -137,7 +136,7 @@ export function createAiApplyRepository(db: Database) {
       .from(jobs)
       .where(and(eq(jobs.id, jobId), eq(jobs.source, "greenhouse"), isNull(jobs.closedAt)));
 
-    const match = row === undefined ? null : sourceKey.exec(row.sourceKey);
+    const match = row === undefined ? null : greenhouseKey.exec(row.sourceKey);
 
     return row === undefined || match === null
       ? undefined
@@ -473,7 +472,7 @@ export function createAiApplyRepository(db: Database) {
 
     if (row === undefined) return undefined;
 
-    const key = sourceKey.exec(row.job.sourceKey);
+    const key = greenhouseKey.exec(row.job.sourceKey);
 
     return {
       ...row,

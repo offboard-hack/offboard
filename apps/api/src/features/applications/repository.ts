@@ -21,6 +21,7 @@ export type ApplicationView = {
   id: string;
   status: ApplicationStatus;
   closedReason: ClosedReason | null;
+  channel: "manual" | "ai_apply";
   appliedAt: string;
   statusChangedAt: string;
   job: {
@@ -55,6 +56,7 @@ function selectApplications(reader: Reader, where: SQL | undefined) {
       id: applications.id,
       status: applications.status,
       closedReason: applications.closedReason,
+      channel: applications.channel,
       appliedAt: applications.appliedAt,
       statusChangedAt: applications.statusChangedAt,
       job: {

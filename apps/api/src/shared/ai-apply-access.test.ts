@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { aiApplyAccess, browserbaseConfig, onTopPlan, topPlanSlug } from "./ai-apply-access.js";
+import {
+  aiApplyAccess,
+  aiApplyCapable,
+  browserbaseConfig,
+  greenhouseKey,
+  onTopPlan,
+  topPlanSlug,
+} from "./ai-apply-access.js";
 
 describe("onTopPlan", () => {
   it("needs an active or trialing subscription to the top plan", () => {
@@ -29,6 +36,23 @@ describe("aiApplyAccess", () => {
 
   it("rejects a missing consent", () => {
     expect(aiApplyAccess({ aiApplyConsentAt: null }, top)).toBe("not_allowed");
+  });
+});
+
+describe("aiApplyCapable", () => {
+  const job = { source: "greenhouse", sourceKey: "stone:8201530003", closedAt: null };
+
+  it("takes open Greenhouse jobs with a board and posting key", () => {
+    expect(aiApplyCapable(job)).toBe(true);
+    expect(greenhouseKey.exec(job.sourceKey)?.slice(1)).toEqual(["stone", "8201530003"]);
+  });
+
+  it("refuses closed jobs, other sources and unreadable keys", () => {
+    expect(aiApplyCapable({ ...job, closedAt: new Date() })).toBe(false);
+    expect(aiApplyCapable({ ...job, source: "lever" })).toBe(false);
+    expect(aiApplyCapable({ ...job, sourceKey: "stone" })).toBe(false);
+    expect(aiApplyCapable({ ...job, sourceKey: "Stone:12" })).toBe(false);
+    expect(aiApplyCapable({ ...job, sourceKey: "stone:12a" })).toBe(false);
   });
 });
 

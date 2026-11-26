@@ -47,6 +47,7 @@ const exportResponse = t.Object({
     t.Object({
       status: t.String(),
       closedReason: nullable,
+      channel: t.Union([t.Literal("manual"), t.Literal("ai_apply")]),
       appliedAt: t.String(),
       job: t.Object({ title: t.String(), company: t.String(), url: t.String() }),
       resume: t.Union([

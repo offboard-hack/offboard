@@ -125,26 +125,37 @@ describe("talentAccess", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { kind: "forbidden" } as const,
-    {
-      kind: "authenticated",
-      principal: {
-        id: "u",
-        name: "U",
-        email: "u@x.y",
-        role: "admin",
-        orgId: "00000000-0000-4000-8000-0000000000a1",
-      },
-    } satisfies PortalAccess,
-  ])("rejects non-talent kind %# with 403", async (access) => {
+  it("rejects a member session with 403", async () => {
     const handler = vi.fn();
 
-    const response = await build({ access, handler }).handle(
+    const response = await build({
+      access: {
+        kind: "authenticated",
+        principal: {
+          id: "u",
+          name: "U",
+          email: "u@x.y",
+          role: "admin",
+          orgId: "00000000-0000-4000-8000-0000000000a1",
+        },
+      },
+      handler,
+    }).handle(new Request("http://localhost/signed-in"));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "Forbidden" });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("sends a session without a member, talent or collaborator principal back to sign-in", async () => {
+    const handler = vi.fn();
+
+    const response = await build({ access: { kind: "forbidden" }, handler }).handle(
       new Request("http://localhost/signed-in"),
     );
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Unauthorized" });
     expect(handler).not.toHaveBeenCalled();
   });
 
@@ -286,7 +297,7 @@ describe("talentAccess", () => {
     expect(ensure).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects a forbidden session without a collaborator grant", async () => {
+  it("sends a collaborator whose grant no longer resolves back to sign-in", async () => {
     const ensure = vi.fn();
 
     const response = await build({
@@ -295,7 +306,8 @@ describe("talentAccess", () => {
       ensure,
     }).handle(new Request("http://localhost/signed-in"));
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Unauthorized" });
     expect(ensure).not.toHaveBeenCalled();
   });
 

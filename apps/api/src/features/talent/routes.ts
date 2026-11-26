@@ -4,7 +4,7 @@ import { errorResponse } from "../../shared/http.js";
 import type { Entitlement } from "../../shared/entitlement.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
 import type { TalentProfile } from "../../shared/talent-profile.js";
-import { aiApplyAccess, type CompanyPlan } from "../../shared/ai-apply-access.js";
+import { aiApplyAccess, onTopPlan, type CompanyPlan } from "../../shared/ai-apply-access.js";
 import type { TalentRepository } from "./repository.js";
 
 const talentAccessResponse = t.Object({
@@ -19,7 +19,7 @@ const meResponse = t.Object({
   email: t.String(),
   termsAccepted: t.Boolean(),
   shareOutcomeWithHr: t.Boolean(),
-  aiApply: t.Object({ consented: t.Boolean(), available: t.Boolean() }),
+  aiApply: t.Object({ eligible: t.Boolean(), consented: t.Boolean(), available: t.Boolean() }),
   entitlement: t.Object({
     kind: t.Union([t.Literal("sponsored"), t.Literal("lapsed")]),
     until: t.Union([t.String(), t.Null()]),
@@ -44,7 +44,8 @@ type AiApply = {
 };
 
 async function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: AiApply) {
-  const access = aiApplyAccess(profile, await aiApply.companyPlan(profile.orgId));
+  const plan = await aiApply.companyPlan(profile.orgId);
+  const access = aiApplyAccess(profile, plan);
 
   return {
     id: profile.id,
@@ -53,6 +54,7 @@ async function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: A
     termsAccepted: profile.termsAcceptedAt !== null,
     shareOutcomeWithHr: profile.shareOutcomeWithHr,
     aiApply: {
+      eligible: onTopPlan(plan),
       consented: profile.aiApplyConsentAt !== null,
       available: access === "allowed" && aiApply.configured,
     },
