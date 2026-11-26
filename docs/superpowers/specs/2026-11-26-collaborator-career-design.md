@@ -18,7 +18,7 @@ To show and use AI Apply where the person already is. Samuel, 2026-11-26: "preci
   - The person watches the browser fill the real form **live**, then sees the screenshot at the end.
   - The demo uses the ensaio. The Browserbase Free plan has no captcha solving.
 - **Candidaturas:** the real ones from `GET /me/applications`, including the ones made by the AI.
-- **Real sends** stay limited to the allowlist (Samuel, Davi, Carolina) and to AI Apply consent. The hackathon auditor uses a shared demo collaborator account that is on the allowlist.
+- **Who gets AI Apply** (Samuel, 2026-11-26): people whose company has an active or trialing **Platinum Premium** (`platinum-premium`) subscription, plus AI Apply consent. This replaces the earlier email allowlist. The hackathon auditor uses a shared demo collaborator account in an org on that plan.
 
 ## Constraints
 
