@@ -1,22 +1,45 @@
-import type { ResumeContent } from "./schema/index.ts";
+import type { ResumeContent, ResumeScoreBreakdown } from "./schema/index.ts";
 
 export type SeedResume = {
   caseName: string;
-  score: number;
+  scoreBreakdown: ResumeScoreBreakdown;
   scoredDaysAgo: number;
   content: ResumeContent;
   suggestions: {
     targetNodeId: string;
     suggestedText: string;
     rationale: string;
+    criterion: string;
     estimatedGain: number;
   }[];
 };
 
+function breakdown(points: Record<string, [number, number, string]>) {
+  return Object.fromEntries(
+    Object.entries(points).map(([criterion, [earned, max, reason]]) => [
+      criterion,
+      { points: earned, max, reason },
+    ]),
+  ) satisfies ResumeScoreBreakdown;
+}
+
 export const seedResumes: SeedResume[] = [
   {
     caseName: "Marina Lopes",
-    score: 82,
+    scoreBreakdown: breakdown({
+      results: [14, 20, "A maioria das experiências traz números de resultado."],
+      keywords: [11, 15, "Mídia paga, CRM e SEO aparecem; faltam ferramentas no resumo."],
+      clarity: [13, 15, "Bullets curtos e diretos."],
+      structure: [
+        15,
+        15,
+        "Título, resumo, experiências com datas, formação, competências e contato.",
+      ],
+      actionVerbs: [9, 10, "Quase todos os bullets começam com verbo de ação."],
+      summary: [8, 10, "Diz área e senioridade; falta um resultado concreto."],
+      consistency: [8, 10, "Um relatório sem resultado destoa dos demais bullets."],
+      length: [4, 5, "Densidade boa, uma experiência com poucos bullets."],
+    }),
     scoredDaysAgo: 2,
     suggestions: [
       {
@@ -25,6 +48,7 @@ export const seedResumes: SeedResume[] = [
           "Liderou campanhas de mídia paga com investimento mensal de R$ 250 mil, reduzindo o custo de aquisição em 28% e gerando [valor] em vendas.",
         rationale:
           "Diga quanto as campanhas venderam: troque o trecho entre colchetes pelo valor real, que dá escala ao resultado.",
+        criterion: "results",
         estimatedGain: 4,
       },
       {
@@ -33,6 +57,7 @@ export const seedResumes: SeedResume[] = [
           "Montou relatórios mensais de desempenho de campanhas para a diretoria, que embasaram [decisão tomada a partir dos relatórios].",
         rationale:
           "Mostre o resultado do relatório: troque o trecho entre colchetes pela decisão que ele influenciou.",
+        criterion: "results",
         estimatedGain: 4,
       },
       {
@@ -41,6 +66,7 @@ export const seedResumes: SeedResume[] = [
           "Analista de marketing com 6 anos de experiência em mídia paga, CRM, SEO e conteúdo, usando HubSpot, focada em crescimento mensurável e campanhas orientadas por dados.",
         rationale:
           "Traga para o resumo as competências que você já lista, como SEO e HubSpot: são palavras-chave comuns nas vagas da área.",
+        criterion: "keywords",
         estimatedGain: 3,
       },
     ],
@@ -125,7 +151,16 @@ const cohortResume = (index: number, caseName: string, email: string) => {
 
   return {
     caseName,
-    score: 70 + index,
+    scoreBreakdown: breakdown({
+      results: [10 + index, 20, "Metade dos bullets traz resultado."],
+      keywords: [10, 15, "Termos de operações presentes."],
+      clarity: [12, 15, "Bullets claros."],
+      structure: [15, 15, "Todas as seções presentes."],
+      actionVerbs: [7, 10, "A maioria começa com verbo de ação."],
+      summary: [6, 10, "Resumo genérico."],
+      consistency: [7, 10, "Tempos verbais misturados."],
+      length: [3, 5, "Poucos bullets por experiência."],
+    }),
     scoredDaysAgo: 3,
     suggestions: [],
     content: {

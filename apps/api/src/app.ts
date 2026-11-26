@@ -24,6 +24,7 @@ import { talentAccess } from "./shared/talent-access.js";
 import { companySponsors } from "./shared/entitlement.js";
 import { welcomeEmail, type WelcomeMessage } from "./features/talent/welcome.js";
 import { resumesRoutes } from "./features/resumes/routes.js";
+import { scoreIsCurrent } from "./features/resumes/repository.js";
 import { scoreResume } from "./features/resumes/score.js";
 import { scoreMatches, type MatchJob } from "./features/matches/score.js";
 import { searchTerms, toTsQuery } from "./features/matches/terms.js";
@@ -175,7 +176,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     score_resume: async (job) => {
       const resume = await repos.resumes.forScoring(job.subject);
 
-      if (!resume || resume.score !== null) return;
+      if (!resume || scoreIsCurrent(resume)) return;
 
       if (!options.generateStructured) throw new Error("AI not configured");
 
@@ -183,7 +184,10 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
       if (taken !== true) return { postponeUntil: taken.retryAt };
 
-      const result = await scoreResume(options.generateStructured, resume.content);
+      const result = await scoreResume(options.generateStructured, resume.content, {
+        previous: resume.scoreBreakdown,
+        history: await repos.resumeSuggestions.history(job.subject),
+      });
 
       await repos.resumeSuggestions.saveScore(job.subject, resume.updatedAt, result, new Date());
     },
@@ -234,19 +238,27 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     }
   }
 
-  async function rescore(resumeId: string, profileId: string) {
+  async function runScore(resumeId: string) {
+    await drain(repos.background, handlers, {
+      limit: 1,
+      target: { kind: "score_resume", subject: resumeId },
+    });
+  }
+
+  async function requestScore(resumeId: string) {
     const scoring = await enqueued("score_resume", resumeId);
+
+    if (scoring) runInBackground(() => runScore(resumeId));
+
+    return scoring;
+  }
+
+  async function rescore(resumeId: string, profileId: string) {
+    const scoring = await requestScore(resumeId);
 
     await enqueued("compute_matches", profileId);
 
-    if (!scoring) return;
-
-    runInBackground(async () => {
-      await drain(repos.background, handlers, {
-        limit: 1,
-        target: { kind: "score_resume", subject: resumeId },
-      });
-    });
+    return scoring;
   }
 
   const fitScore = (model: GenerateStructured) => async (content: ResumeContent, job: MatchJob) =>
@@ -361,6 +373,8 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         storage: options.storage,
         suggestions: repos.resumeSuggestions,
         rescore,
+        requestScore,
+        runScore,
         versions: repos.resumeVersions,
         takeLlmCall: repos.llmUsage.takeLlmCall,
         fitScore: options.generateStructured && fitScore(options.generateStructured),

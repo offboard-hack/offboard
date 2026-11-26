@@ -4,12 +4,15 @@ import {
   attemptReason,
   attemptState,
   careerDate,
+  criterionLabel,
   evidenceValue,
   failedFieldNote,
   isLongText,
   jobPlace,
   matchScore,
+  resumeScoreState,
   salaryRange,
+  scoreCriteria,
 } from "./labels";
 
 const salary = (min: number | null, max: number | null) =>
@@ -89,5 +92,34 @@ describe("career labels", () => {
     expect(failedFieldNote({ reason: "form_changed", evidence: evidence(null) })).toBeNull();
     expect(failedFieldNote({ reason: "form_changed", evidence: null })).toBeNull();
     expect(failedFieldNote({ reason: "error", evidence: evidence("Telefone") })).toBeNull();
+  });
+
+  it("labels the score criteria in Portuguese", () => {
+    expect(criterionLabel("results")).toBe("Resultados");
+    expect(criterionLabel("actionVerbs")).toBe("Verbos de ação");
+    expect(criterionLabel("length")).toBe("Tamanho");
+    expect(criterionLabel("style")).toBeNull();
+    expect(criterionLabel(null)).toBeNull();
+  });
+
+  it("lists the known criteria of a breakdown in rubric order", () => {
+    expect(
+      scoreCriteria({
+        length: { points: 5, max: 5, reason: "Tamanho certo." },
+        style: { points: 1, max: 1, reason: "Antigo." },
+        results: { points: 12, max: 20, reason: "Três números." },
+      }),
+    ).toEqual([
+      { criterion: "results", label: "Resultados", points: 12, max: 20, reason: "Três números." },
+      { criterion: "length", label: "Tamanho", points: 5, max: 5, reason: "Tamanho certo." },
+    ]);
+    expect(scoreCriteria(null)).toEqual([]);
+  });
+
+  it("tells a pending, a recalculating and a ready score apart", () => {
+    expect(resumeScoreState({ score: null, rescoring: true })).toBe("pending");
+    expect(resumeScoreState({ score: null, rescoring: false })).toBe("pending");
+    expect(resumeScoreState({ score: 62, rescoring: true })).toBe("recalculating");
+    expect(resumeScoreState({ score: 0, rescoring: false })).toBe("ready");
   });
 });

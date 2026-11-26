@@ -9,7 +9,7 @@ import type { TalentAccessPlugin } from "../../shared/talent-access.js";
 import { resumeContentInputSchema, withNodeIds, type ResumeContent } from "./content.js";
 import { readResumeFile } from "./document.js";
 import { extractResume } from "./extract.js";
-import type { ResumesRepository } from "./repository.js";
+import { scoreIsCurrent, type ResumesRepository } from "./repository.js";
 import {
   resumeContentBody,
   resumeResponse,
@@ -44,7 +44,9 @@ export function resumesRoutes(
     generate: GenerateStructured | undefined;
     storage: ObjectStorage | undefined;
     suggestions: SuggestionsRepository;
-    rescore: (resumeId: string, profileId: string) => Promise<void>;
+    rescore: (resumeId: string, profileId: string) => Promise<boolean>;
+    requestScore: (resumeId: string) => Promise<boolean>;
+    runScore: (resumeId: string) => Promise<void>;
     versions: VersionsRepository;
     takeLlmCall: UsageRepository["takeLlmCall"];
     fitScore: ((content: ResumeContent, job: TailoringJob) => Promise<number | null>) | undefined;
@@ -105,9 +107,9 @@ export function resumesRoutes(
 
         if (saved.previousFileKey) await discard(storage, [saved.previousFileKey]);
 
-        await deps.rescore(saved.resume.id, me.id);
+        const rescoring = await deps.rescore(saved.resume.id, me.id);
 
-        return saved.resume;
+        return { ...saved.resume, rescoring };
       },
       {
         talent: "active",
@@ -122,8 +124,35 @@ export function resumesRoutes(
     )
     .get(
       "/me/resume",
-      async ({ me, status }) =>
-        (await repos.getBase(me.id)) ?? status(404, { error: "Résumé not found" }),
+      async ({ me, status }) => {
+        const resume = await repos.getBase(me.id);
+
+        if (!resume) return status(404, { error: "Résumé not found" });
+
+        if (resume.rescoring || !deps.generate || scoreIsCurrent(resume)) return resume;
+
+        if (await repos.lastScoreFailed(resume.id)) return resume;
+
+        return { ...resume, rescoring: await deps.requestScore(resume.id) };
+      },
+      {
+        talent: "active",
+        response: { 200: resumeResponse, 404: errorResponse },
+      },
+    )
+    .post(
+      "/me/resume/score/run",
+      async ({ me, status }) => {
+        const resume = await repos.getBase(me.id);
+
+        if (!resume) return status(404, { error: "Résumé not found" });
+
+        if (!resume.rescoring) return resume;
+
+        await deps.runScore(resume.id);
+
+        return { ...resume, ...(await repos.getBase(me.id)) };
+      },
       {
         talent: "active",
         response: { 200: resumeResponse, 404: errorResponse },
@@ -159,9 +188,9 @@ export function resumesRoutes(
 
         if (!saved) return status(404, { error: "Résumé not found" });
 
-        await deps.rescore(saved.id, me.id);
+        const rescoring = await deps.rescore(saved.id, me.id);
 
-        return saved;
+        return { ...saved, rescoring };
       },
       {
         talent: "active",
@@ -316,9 +345,9 @@ export function resumesRoutes(
           return status(409, { error: "Résumé changed since this suggestion" });
         }
 
-        await deps.rescore(applied.id, me.id);
+        const rescoring = await deps.rescore(applied.id, me.id);
 
-        return applied;
+        return { ...applied, rescoring };
       },
       {
         talent: "active",

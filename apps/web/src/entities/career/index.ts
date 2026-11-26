@@ -103,7 +103,7 @@ function resumeSource(account: EmployeeAccount) {
       const resume = settle(result, "Não foi possível abrir seu currículo.");
       const previous = queryClient.getQueryData<CareerResume | null>(queryKey);
 
-      if (scoreArrived(previous?.score, resume.score)) {
+      if (scoreArrived(previous?.rescoring, resume.rescoring)) {
         void refreshAfterScore(queryClient, account);
       }
 
@@ -240,6 +240,13 @@ export function refreshAfterScore(queryClient: QueryClient, account: EmployeeAcc
   ]);
 }
 
+function runPendingScore(queryClient: QueryClient, account: EmployeeAccount) {
+  void client()
+    .resume.score.run.post(undefined, { headers: employeeAccessHeaders(account) })
+    .catch(() => undefined)
+    .then(() => queryClient.invalidateQueries({ queryKey: careerResumeQuery(account).queryKey }));
+}
+
 export function useResumeUpload(account: EmployeeAccount) {
   const queryClient = useQueryClient();
 
@@ -251,6 +258,7 @@ export function useResumeUpload(account: EmployeeAccount) {
       ),
     onSuccess(resume) {
       queryClient.setQueryData(careerResumeQuery(account).queryKey, resume);
+      runPendingScore(queryClient, account);
 
       return Promise.all([
         queryClient.invalidateQueries({ queryKey: resumeSuggestionsQuery(account).queryKey }),
@@ -283,7 +291,10 @@ export function useSuggestionAction(account: EmployeeAccount) {
       );
     },
     onSuccess(resume) {
-      if (resume) queryClient.setQueryData(careerResumeQuery(account).queryKey, resume);
+      if (resume) {
+        queryClient.setQueryData(careerResumeQuery(account).queryKey, resume);
+        runPendingScore(queryClient, account);
+      }
 
       return queryClient.invalidateQueries({ queryKey: resumeSuggestionsQuery(account).queryKey });
     },

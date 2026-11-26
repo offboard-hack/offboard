@@ -24,6 +24,10 @@ const exportResponse = t.Object({
       status: t.String(),
       content: t.Unknown(),
       score: t.Union([t.Number(), t.Null()]),
+      scoreBreakdown: t.Union([
+        t.Record(t.String(), t.Object({ points: t.Number(), max: t.Number(), reason: t.String() })),
+        t.Null(),
+      ]),
       scoredAt: nullable,
       updatedAt: t.String(),
       job: t.Union([
@@ -36,6 +40,7 @@ const exportResponse = t.Object({
           originalText: t.String(),
           suggestedText: t.String(),
           rationale: t.String(),
+          criterion: nullable,
           estimatedGain: t.Number(),
           status: t.String(),
           createdAt: nullable,
