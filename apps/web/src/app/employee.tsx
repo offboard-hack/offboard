@@ -19,7 +19,8 @@ import {
   employeeJourneyQuery,
   employeeStateQuery,
 } from "@/entities/employee";
-import { Career, ResumePage, ResumePreview } from "@/features/employee/career";
+import { Career, ResumePreview } from "@/features/employee/career";
+import { ResumeCareer } from "@/features/employee/career/resume";
 import {
   DepartureOverview,
   EmployeeChecklist,
@@ -421,7 +422,7 @@ function CareerContent({ account, screen }: { account: EmployeeAccount; screen: 
       {screen === "previa" ? (
         <ResumePreview state={state} />
       ) : screen === "curriculo" ? (
-        <ResumePage account={account} state={state} />
+        <ResumeCareer account={account} />
       ) : (
         <Career account={account} state={state} jobs={journey.plan.jobs} view={carreira} />
       )}

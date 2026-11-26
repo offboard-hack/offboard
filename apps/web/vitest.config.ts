@@ -5,7 +5,11 @@ export default defineConfig({
   test: {
     coverage: {
       provider: "v8",
-      include: ["src/features/checklist/action-config.ts"],
+      include: [
+        "src/features/checklist/action-config.ts",
+        "src/entities/career/failure.ts",
+        "src/features/employee/career/labels.ts",
+      ],
       thresholds: { lines: 100, functions: 100, branches: 100, statements: 100 },
     },
   },

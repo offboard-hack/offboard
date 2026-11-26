@@ -1,8 +1,6 @@
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import Briefcase01Icon from "@hugeicons/core-free-icons/Briefcase01Icon";
 import Calendar01Icon from "@hugeicons/core-free-icons/Calendar01Icon";
-import Download01Icon from "@hugeicons/core-free-icons/Download01Icon";
-import File01Icon from "@hugeicons/core-free-icons/File01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { brazilTimezone, employeeDate, type EmployeeState } from "@offboard/employee";
 import {
@@ -10,18 +8,13 @@ import {
   applicationStatusLabel,
   applyForJob,
   jobFit,
-  resumeFormSchema,
   skillsList,
-  versionLabelSchema,
   type Job,
   type Resume,
-  type ResumeVersion,
 } from "@offboard/employee/career";
 import { resumeHtml } from "@offboard/employee/resume-document";
-import { revalidateLogic, useForm } from "@tanstack/react-form";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { z } from "zod";
 import { type EmployeeAccount, useEmployeeWrite } from "@/entities/employee";
 import { DatePicker } from "@/shared/ui/date-picker";
 import { PortalFilter } from "@/shared/ui/select";
@@ -36,7 +29,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/shared/ui/shadcn/dialog";
-import { Input } from "@/shared/ui/shadcn/input";
 import {
   Item,
   ItemActions,
@@ -46,8 +38,6 @@ import {
   ItemTitle,
 } from "@/shared/ui/shadcn/item";
 import { Label } from "@/shared/ui/shadcn/label";
-import { Switch } from "@/shared/ui/shadcn/switch";
-import { Textarea } from "@/shared/ui/shadcn/textarea";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "./ui";
 
 type CareerState = Extract<EmployeeState, { key: "career" }>;
@@ -297,8 +287,6 @@ export function Career({
   );
 }
 
-type Editor = { kind: "base" } | { kind: "version"; version: ResumeVersion } | { kind: "new" };
-
 function printResume(resume: Resume) {
   const preview = window.open("", "_blank");
 
@@ -312,298 +300,6 @@ function printResume(resume: Resume) {
   preview.print();
 
   return true;
-}
-
-export function ResumePage({ account, state }: CareerProps) {
-  const [editor, setEditor] = useState<Editor | null>(null);
-  const [printError, setPrintError] = useState("");
-  const write = useEmployeeWrite(account);
-  const { base, versions, published, baseUpdatedAt } = state.value;
-
-  function download(resume: Resume) {
-    setPrintError(
-      printResume(resume) ? "" : "Permita abrir a nova aba para imprimir ou salvar o PDF.",
-    );
-  }
-
-  return (
-    <div className="space-y-5">
-      <EmployeePanel
-        title="Currículo base"
-        description={
-          base.headline
-            ? `Atualizado em ${employeeDate(baseUpdatedAt, shortDate)}`
-            : "Preencha seu perfil profissional para criar o currículo base."
-        }
-      >
-        {base.headline ? <p className="font-bold">{base.headline}</p> : null}
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={() => setEditor({ kind: "base" })}>Editar base</Button>
-          {base.headline ? (
-            <Button variant="outline" onClick={() => download(base)}>
-              <HugeiconsIcon icon={Download01Icon} aria-hidden /> Baixar PDF
-            </Button>
-          ) : null}
-        </div>
-      </EmployeePanel>
-      <EmployeePanel title="Uma versão para cada vaga">
-        <Button variant="outline" onClick={() => setEditor({ kind: "new" })}>
-          Nova versão
-        </Button>
-        {versions.length === 0 ? <EmployeeEmpty>Você ainda não tem versões.</EmployeeEmpty> : null}
-        <ul className="divide-y">
-          {versions.map((version) => (
-            <li key={version.id}>
-              <Item
-                size="sm"
-                className="max-sm:grid max-sm:grid-cols-[auto_minmax(0,1fr)] max-sm:items-start"
-              >
-                <ItemMedia variant="icon">
-                  <HugeiconsIcon icon={File01Icon} aria-hidden="true" />
-                </ItemMedia>
-                <ItemContent className="min-w-0">
-                  <ItemTitle className="block wrap-anywhere">{version.label}</ItemTitle>
-                  {version.company ? <ItemDescription>{version.company}</ItemDescription> : null}
-                </ItemContent>
-                <ItemActions className="max-sm:col-start-2 max-sm:flex-wrap">
-                  <Button
-                    variant="ghost"
-                    aria-label={`Editar versão ${version.label}`}
-                    onClick={() => setEditor({ kind: "version", version })}
-                  >
-                    Editar
-                  </Button>
-                  <Button
-                    variant="outline"
-                    aria-label={`Baixar PDF de ${version.label}`}
-                    onClick={() => download(version.resume)}
-                  >
-                    PDF
-                  </Button>
-                </ItemActions>
-              </Item>
-            </li>
-          ))}
-        </ul>
-      </EmployeePanel>
-      <EmployeePanel
-        title="Prévia privada do currículo"
-        description="Só você pode abrir a prévia na sua conta. Para compartilhar o currículo, baixe o PDF."
-      >
-        <div className="flex items-center justify-between gap-4">
-          <Label htmlFor="employee-resume-visibility">Ativar prévia privada</Label>
-          <Switch
-            id="employee-resume-visibility"
-            checked={published}
-            disabled={write.isPending}
-            onCheckedChange={(next) =>
-              write.mutate({ ...state, value: { ...state.value, published: next } })
-            }
-          />
-        </div>
-        <EmployeeError message={write.error?.message} />
-        {published ? (
-          <Button variant="outline" render={<Link to="/colaborador" search={{ tela: "previa" }} />}>
-            Ver prévia
-          </Button>
-        ) : (
-          <p className="text-sm text-muted-foreground">Prévia oculta.</p>
-        )}
-      </EmployeePanel>
-      <EmployeeError message={printError} />
-      {editor ? (
-        <ResumeEditor
-          account={account}
-          state={state}
-          editor={editor}
-          close={() => setEditor(null)}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-const resumeFields = [
-  { key: "name", label: "Nome no currículo", multiline: false },
-  { key: "headline", label: "Título profissional", multiline: false },
-  { key: "summary", label: "Resumo profissional", multiline: true },
-  { key: "launchResult", label: "Experiência com projetos e lançamentos", multiline: true },
-  { key: "campaignResult", label: "Outras experiências e resultados", multiline: true },
-  { key: "skills", label: "Competências separadas por vírgula", multiline: false },
-] as const;
-
-function ResumeEditor({
-  account,
-  state,
-  editor,
-  close,
-}: CareerProps & { editor: Editor; close: () => void }) {
-  const write = useEmployeeWrite(account);
-  const version = editor.kind === "version" ? editor.version : null;
-
-  const schema = resumeFormSchema.extend({
-    label: editor.kind === "base" ? z.string() : versionLabelSchema,
-    company: z.string().trim().max(200),
-  });
-
-  const form = useForm({
-    defaultValues: {
-      ...(version?.resume ?? state.value.base),
-      label: version?.label ?? "",
-      company: version?.company ?? "",
-    },
-    validationLogic: revalidateLogic({ mode: "submit", modeAfterSubmission: "change" }),
-    validators: { onDynamic: schema },
-    onSubmit: ({ value }) => {
-      const resume = resumeFormSchema.parse(value);
-      const date = today();
-
-      if (editor.kind === "base") {
-        write.mutate(
-          { ...state, value: { ...state.value, base: resume, baseUpdatedAt: date } },
-          { onSuccess: close },
-        );
-
-        return;
-      }
-
-      const saved = {
-        id: version?.id ?? window.crypto.randomUUID(),
-        label: value.label.trim(),
-        company: value.company.trim(),
-        match: version?.match ?? null,
-        resume,
-        updatedAt: date,
-      };
-
-      const versions = version
-        ? state.value.versions.map((item) => (item.id === version.id ? saved : item))
-        : [saved, ...state.value.versions];
-
-      write.mutate({ ...state, value: { ...state.value, versions } }, { onSuccess: close });
-    },
-  });
-
-  const title =
-    editor.kind === "base"
-      ? "Editar currículo base"
-      : editor.kind === "new"
-        ? "Nova versão"
-        : "Editar versão";
-
-  return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open && !write.isPending && !write.error) close();
-      }}
-    >
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>As alterações ficam na sua conta.</DialogDescription>
-        </DialogHeader>
-        <form
-          className="flex min-h-0 flex-col"
-          noValidate
-          onSubmit={(event) => {
-            event.preventDefault();
-            void form.handleSubmit();
-          }}
-        >
-          <DialogBody className="grid gap-4">
-            {editor.kind !== "base" ? (
-              <>
-                <form.Field name="label">
-                  {(field) => (
-                    <div className="grid gap-1.5">
-                      <Label htmlFor="resume-version-label">Nome da versão</Label>
-                      <Input
-                        id="resume-version-label"
-                        value={field.state.value}
-                        onChange={(event) => field.handleChange(event.target.value)}
-                        onBlur={field.handleBlur}
-                        aria-invalid={field.state.meta.errors.length > 0}
-                        aria-describedby={
-                          field.state.meta.errors.length > 0
-                            ? "resume-version-label-error"
-                            : undefined
-                        }
-                      />
-                      <EmployeeError
-                        id="resume-version-label-error"
-                        message={field.state.meta.errors[0]?.message}
-                      />
-                    </div>
-                  )}
-                </form.Field>
-                <form.Field name="company">
-                  {(field) => (
-                    <div className="grid gap-1.5">
-                      <Label htmlFor="resume-version-company">Empresa (opcional)</Label>
-                      <Input
-                        id="resume-version-company"
-                        value={field.state.value}
-                        onChange={(event) => field.handleChange(event.target.value)}
-                        maxLength={200}
-                      />
-                    </div>
-                  )}
-                </form.Field>
-              </>
-            ) : null}
-            {resumeFields.map(({ key, label, multiline }) => (
-              <form.Field key={key} name={key}>
-                {(field) => (
-                  <div className="grid gap-1.5">
-                    <Label htmlFor={`resume-${key}`}>{label}</Label>
-                    {multiline ? (
-                      <Textarea
-                        id={`resume-${key}`}
-                        value={field.state.value}
-                        onChange={(event) => field.handleChange(event.target.value)}
-                        onBlur={field.handleBlur}
-                        maxLength={1200}
-                        aria-invalid={field.state.meta.errors.length > 0}
-                        aria-describedby={
-                          field.state.meta.errors.length > 0 ? `resume-${key}-error` : undefined
-                        }
-                      />
-                    ) : (
-                      <Input
-                        id={`resume-${key}`}
-                        value={field.state.value}
-                        onChange={(event) => field.handleChange(event.target.value)}
-                        onBlur={field.handleBlur}
-                        maxLength={1200}
-                        aria-invalid={field.state.meta.errors.length > 0}
-                        aria-describedby={
-                          field.state.meta.errors.length > 0 ? `resume-${key}-error` : undefined
-                        }
-                      />
-                    )}
-                    <EmployeeError
-                      id={`resume-${key}-error`}
-                      message={field.state.meta.errors[0]?.message}
-                    />
-                  </div>
-                )}
-              </form.Field>
-            ))}
-            <EmployeeError message={write.error?.message} />
-          </DialogBody>
-          <DialogFooter>
-            <Button type="button" variant="outline" disabled={write.isPending} onClick={close}>
-              {write.error ? "Descartar rascunho" : "Cancelar"}
-            </Button>
-            <Button type="submit" disabled={write.isPending}>
-              {write.isPending ? "Salvando…" : "Salvar currículo"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 export function ResumePreview({ state }: { state: CareerState }) {

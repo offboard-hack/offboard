@@ -15,11 +15,11 @@ export class EmployeeAccessChanged extends Error {
   }
 }
 
-function checkEmployeeAccess(status: number) {
+export function checkEmployeeAccess(status: number) {
   if (status === 401 || status === 412) throw new EmployeeAccessChanged();
 }
 
-function employeeAccountQueryKey(account: EmployeeAccount) {
+export function employeeAccountQueryKey(account: EmployeeAccount) {
   return [...employeeQueryKey, account.id, account.caseId, account.grantId] as const;
 }
 
@@ -31,11 +31,11 @@ export function removeOtherEmployeeQueries(queryClient: QueryClient, account: Em
   });
 }
 
-function accessHeaders(account: EmployeeAccount) {
+export function employeeAccessHeaders(account: EmployeeAccount) {
   return { [employeeGrantHeader]: account.grantId };
 }
 
-function retryEmployeeRead(failureCount: number, error: Error) {
+export function retryEmployeeRead(failureCount: number, error: Error) {
   return (
     typeof window !== "undefined" && !(error instanceof EmployeeAccessChanged) && failureCount < 3
   );
@@ -48,7 +48,7 @@ export function employeeJourneyQuery(account: EmployeeAccount) {
     retry: retryEmployeeRead,
     queryFn: async ({ signal }) => {
       const result = await getApiClient().api.employee.journey.get({
-        headers: accessHeaders(account),
+        headers: employeeAccessHeaders(account),
         fetch: { signal },
       });
 
@@ -71,7 +71,7 @@ export function employeeStateQuery(account: EmployeeAccount, key: EmployeeState[
       const result = await getApiClient()
         .api.employee.state({ key })
         .get({
-          headers: accessHeaders(account),
+          headers: employeeAccessHeaders(account),
           fetch: { signal },
         });
 
@@ -90,7 +90,7 @@ export function useEmployeeWrite(account: EmployeeAccount) {
   return useMutation({
     async mutationFn(state: EmployeeState) {
       const result = await getApiClient().api.employee.state.put(state, {
-        headers: accessHeaders(account),
+        headers: employeeAccessHeaders(account),
       });
 
       checkEmployeeAccess(result.status);
@@ -140,7 +140,7 @@ export function useEmployeeChecklistWrite(account: EmployeeAccount) {
     async mutationFn({ taskId, done }: { taskId: string; done: boolean }) {
       const result = await getApiClient()
         .api.employee.checklist({ taskId })
-        .patch({ done }, { headers: accessHeaders(account) });
+        .patch({ done }, { headers: employeeAccessHeaders(account) });
 
       checkEmployeeAccess(result.status);
 
