@@ -197,6 +197,7 @@ function Suggestions({ account }: { account: EmployeeAccount }) {
       <ul className="divide-y">
         {suggestions.data?.map((suggestion) => {
           const busy = action.isPending && action.variables.id === suggestion.id;
+          const label = criterionLabel(suggestion.criterion);
 
           return (
             <li key={suggestion.id} className="grid gap-2 py-3 first:pt-0 last:pb-0">
@@ -207,10 +208,10 @@ function Suggestions({ account }: { account: EmployeeAccount }) {
                   className="size-4 text-primary"
                 />
                 <p className="font-medium wrap-anywhere">{suggestion.rationale}</p>
-                {criterionLabel(suggestion.criterion) ? (
-                  <Badge variant="secondary">{criterionLabel(suggestion.criterion)}</Badge>
+                {label ? <Badge variant="secondary">{label}</Badge> : null}
+                {suggestion.estimatedGain > 0 ? (
+                  <Badge variant="status-success">+{suggestion.estimatedGain} pontos</Badge>
                 ) : null}
-                <Badge variant="status-success">+{suggestion.estimatedGain} pontos</Badge>
               </div>
               <p className="text-sm text-muted-foreground line-through wrap-anywhere">
                 {suggestion.originalText}

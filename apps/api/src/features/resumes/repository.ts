@@ -1,6 +1,6 @@
 import type { Database } from "@offboard/db/client";
-import { resumes, type ResumeScoreBreakdown } from "@offboard/db/schema";
-import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { backgroundJobs, resumes, type ResumeScoreBreakdown } from "@offboard/db/schema";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { ResumeContent } from "./content.js";
 
 export type ResumeView = {
@@ -10,6 +10,7 @@ export type ResumeView = {
   score: number | null;
   scoreBreakdown: ResumeScoreBreakdown | null;
   scoredAt: string | null;
+  rescoring: boolean;
   updatedAt: string;
 };
 
@@ -19,10 +20,23 @@ export const resumeColumns = {
   score: resumes.score,
   scoreBreakdown: resumes.scoreBreakdown,
   scoredAt: resumes.scoredAt,
+  rescoring: sql<boolean>`exists (select 1 from background_jobs pending_score where pending_score.kind = 'score_resume' and pending_score.subject = "resumes"."id"::text and pending_score.status in ('pending', 'running'))`,
   updatedAt: sql<Date>`coalesce(${resumes.updatedAt}, ${resumes.createdAt})`.mapWith(
     resumes.updatedAt,
   ),
 };
+
+export function scoreIsCurrent(resume: {
+  scoreBreakdown: ResumeScoreBreakdown | null;
+  scoredAt: Date | string | null;
+  updatedAt: Date | string;
+}) {
+  return (
+    resume.scoreBreakdown !== null &&
+    resume.scoredAt !== null &&
+    new Date(resume.scoredAt).getTime() >= new Date(resume.updatedAt).getTime()
+  );
+}
 
 export function toResumeView(row: {
   id: string;
@@ -30,6 +44,7 @@ export function toResumeView(row: {
   score: number | null;
   scoreBreakdown: ResumeScoreBreakdown | null;
   scoredAt: Date | null;
+  rescoring: boolean;
   updatedAt: Date;
 }) {
   return {
@@ -39,6 +54,7 @@ export function toResumeView(row: {
     score: row.score,
     scoreBreakdown: row.scoreBreakdown,
     scoredAt: row.scoredAt?.toISOString() ?? null,
+    rescoring: row.rescoring,
     updatedAt: row.updatedAt.toISOString(),
   } satisfies ResumeView;
 }
@@ -95,7 +111,7 @@ export function createResumesRepository(db: Database) {
   async function updateBaseContent(profileId: string, content: ResumeContent) {
     const [row] = await db
       .update(resumes)
-      .set({ content, scoredAt: null, updatedAt: new Date() })
+      .set({ content, updatedAt: new Date() })
       .where(baseOf(profileId))
       .returning(resumeColumns);
 
@@ -117,21 +133,15 @@ export function createResumesRepository(db: Database) {
     return row;
   }
 
-  async function expireLegacyScore(profileId: string) {
-    const expired = await db
-      .update(resumes)
-      .set({ scoredAt: null })
-      .where(
-        and(
-          baseOf(profileId),
-          isNotNull(resumes.score),
-          isNull(resumes.scoreBreakdown),
-          isNotNull(resumes.scoredAt),
-        ),
-      )
-      .returning({ id: resumes.id });
+  async function lastScoreFailed(resumeId: string) {
+    const [job] = await db
+      .select({ status: backgroundJobs.status })
+      .from(backgroundJobs)
+      .where(and(eq(backgroundJobs.kind, "score_resume"), eq(backgroundJobs.subject, resumeId)))
+      .orderBy(desc(backgroundJobs.createdAt), desc(backgroundJobs.id))
+      .limit(1);
 
-    return expired.at(0)?.id;
+    return job?.status === "failed";
   }
 
   async function contentOf(profileId: string, id: string) {
@@ -143,7 +153,7 @@ export function createResumesRepository(db: Database) {
     return row?.content;
   }
 
-  return { getBase, replaceBase, updateBaseContent, forScoring, expireLegacyScore, contentOf };
+  return { getBase, replaceBase, updateBaseContent, forScoring, lastScoreFailed, contentOf };
 }
 
 export type ResumesRepository = ReturnType<typeof createResumesRepository>;

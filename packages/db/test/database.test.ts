@@ -295,7 +295,21 @@ it.skipIf(!url)("stores one base résumé per profile", async () => {
     expect(base.status).toBe("ready");
     expect(base.jobId).toBeNull();
     expect(base.score).toBe(82);
+    expect(base.scoreBreakdown).toMatchObject({
+      results: { points: 14, max: 20 },
+      length: { points: 4, max: 5 },
+    });
     expect(base.scoredAt).toBeInstanceOf(Date);
+    expect(
+      (
+        await db
+          .select({ criterion: resumeSuggestions.criterion })
+          .from(resumeSuggestions)
+          .where(eq(resumeSuggestions.resumeId, base.id))
+      )
+        .map((row) => row.criterion)
+        .sort(),
+    ).toEqual(["keywords", "results", "results"]);
     expect(base.content.headline.text).toBe("Analista de Marketing");
 
     const profileId = base.profileId;

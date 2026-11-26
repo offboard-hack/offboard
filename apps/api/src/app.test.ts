@@ -3749,7 +3749,8 @@ describe.skipIf(!url)("api", () => {
             ...breakdown(72),
             results: { points: 6, max: 20, reason: expect.any(String) },
           },
-          scoredAt: null,
+          scoredAt: expect.any(String),
+          rescoring: true,
         });
         expect(await (await request(instance, id, "/me/resume")).json()).toEqual(resume);
         expect(resume.content.experiences[0].bullets[0]).toEqual({
@@ -3780,7 +3781,7 @@ describe.skipIf(!url)("api", () => {
         expect(await (await request(instance, id, "/me/resume")).json()).toMatchObject({
           score: 79,
           scoreBreakdown: { results: { points: 7, max: 20, reason: "Um número" } },
-          scoredAt: expect.any(String),
+          rescoring: false,
         });
 
         const anchored = scoring.prompts.at(-1) ?? "";
@@ -3801,7 +3802,7 @@ describe.skipIf(!url)("api", () => {
         const first = await (await request(instance, id, "/me/resume")).json();
         const again = await (await request(instance, id, "/me/resume")).json();
 
-        expect(first).toMatchObject({ score: 64, scoreBreakdown: null, scoredAt: null });
+        expect(first).toMatchObject({ score: 64, scoreBreakdown: null, rescoring: true });
         expect(again).toEqual(first);
         expect(await scoreJobs()).toMatchObject([
           { status: "done" },
@@ -3817,9 +3818,77 @@ describe.skipIf(!url)("api", () => {
         expect(await (await request(instance, id, "/me/resume")).json()).toMatchObject({
           score: 72,
           scoreBreakdown: breakdown(72),
-          scoredAt: expect.any(String),
+          rescoring: false,
         });
         expect(await scoreJobs()).toHaveLength(2);
+      });
+
+      it("keeps the previous score when its rescore failed, and never rescores without AI", async () => {
+        const { instance, id, created, scoring } = await scoredResume();
+
+        await db
+          .update(resumes)
+          .set({ scoreBreakdown: null, score: 64 })
+          .where(eq(resumes.id, created.id));
+        await db
+          .update(backgroundJobs)
+          .set({ status: "failed" })
+          .where(eq(backgroundJobs.subject, created.id));
+
+        expect(await (await request(instance, id, "/me/resume")).json()).toMatchObject({
+          score: 64,
+          rescoring: false,
+        });
+
+        await db.delete(backgroundJobs).where(eq(backgroundJobs.subject, created.id));
+
+        const unconfigured = resumesApp({ generate: null });
+
+        expect(await (await request(unconfigured.instance, id, "/me/resume")).json()).toMatchObject(
+          { score: 64, rescoring: false },
+        );
+        expect(await scoreJobs()).toEqual([]);
+        expect(scoring.calls).toBe(1);
+      });
+
+      it("runs the pending score in the request", async () => {
+        const app = resumesApp();
+        const id = await profile();
+        const run = () => request(app.instance, id, "/me/resume/score/run", { method: "POST" });
+
+        expect((await run()).status).toBe(404);
+        expect(await (await run()).json()).toEqual({ error: "Résumé not found" });
+
+        const created = await (await upload(app.instance, id)).json();
+
+        expect(created).toMatchObject({ score: null, rescoring: true });
+
+        app.scoring.output = { criteria: assessed(66), suggestions: [] };
+
+        const ran = await run();
+
+        expect(ran.status).toBe(200);
+        expect(await ran.json()).toMatchObject({
+          id: created.id,
+          score: 66,
+          scoreBreakdown: breakdown(66),
+          rescoring: false,
+        });
+        expect(app.scoring.calls).toBe(1);
+        expect(await scoreJobs()).toMatchObject([{ status: "done" }]);
+
+        const idle = await run();
+
+        expect(await idle.json()).toMatchObject({ score: 66, rescoring: false });
+        expect(app.scoring.calls).toBe(1);
+        expect(
+          (
+            await request(app.instance, id, "/me/resume/score/run", {
+              method: "POST",
+              session: "admin",
+            })
+          ).status,
+        ).toBe(403);
       });
 
       it("refuses to apply a suggestion whose text was edited", async () => {
@@ -4059,37 +4128,9 @@ describe.skipIf(!url)("api", () => {
 
         expect(await request(instance, id, "/me/resume").then((res) => res.json())).toMatchObject({
           score: 50,
-          scoredAt: null,
+          rescoring: false,
         });
         expect(await scoreJobs()).toEqual([]);
-      });
-
-      it("reports a legacy score as pending when another read already expired it", async () => {
-        const id = await profile();
-        const created = await (await upload(resumesApp().instance, id)).json();
-        const jobs = await scoreJobs();
-
-        await db
-          .update(resumes)
-          .set({ score: 50, scoredAt: new Date() })
-          .where(eq(resumes.id, created.id));
-
-        const instance = createApp(
-          webOrigin,
-          { ...repos, resumes: { ...repos.resumes, expireLegacyScore: async () => undefined } },
-          {
-            ...appOptions,
-            runInBackground: () => {
-              throw new Error("should not kick a drain");
-            },
-          },
-        );
-
-        expect(await request(instance, id, "/me/resume").then((res) => res.json())).toMatchObject({
-          score: 50,
-          scoredAt: null,
-        });
-        expect(await scoreJobs()).toEqual(jobs);
       });
 
       it("drains due jobs from the cron route", async () => {

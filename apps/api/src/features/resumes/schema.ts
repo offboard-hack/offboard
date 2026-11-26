@@ -52,6 +52,7 @@ export const resumeResponse = t.Object({
     t.Null(),
   ]),
   scoredAt: nullable,
+  rescoring: t.Boolean(),
   updatedAt: t.String(),
 });
 

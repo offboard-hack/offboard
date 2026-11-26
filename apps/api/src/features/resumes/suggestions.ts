@@ -185,7 +185,6 @@ export function createSuggestionsRepository(db: Database) {
           content: rewrite(resume.content, suggestion.targetNodeId, suggestion.suggestedText),
           score: provisional.score,
           scoreBreakdown: provisional.breakdown,
-          scoredAt: null,
           updatedAt: now,
         })
         .where(eq(resumes.id, resume.id))

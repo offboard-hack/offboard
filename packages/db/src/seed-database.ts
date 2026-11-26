@@ -279,7 +279,11 @@ export async function seedDatabase(
             profileId: inserted.id,
             kind: "base",
             content: resume.content,
-            score: resume.score,
+            score: Object.values(resume.scoreBreakdown).reduce(
+              (sum, entry) => sum + entry.points,
+              0,
+            ),
+            scoreBreakdown: resume.scoreBreakdown,
             scoredAt,
             updatedAt: scoredAt,
           })

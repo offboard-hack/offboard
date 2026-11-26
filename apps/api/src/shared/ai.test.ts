@@ -81,6 +81,24 @@ describe("createGenerateStructured", () => {
     timeout.mockRestore();
   });
 
+  it("keeps the provider's reasoning unless a call lowers it", async () => {
+    for (const [reasoning, expected] of [
+      [undefined, undefined],
+      ["low", "low"],
+    ] as const) {
+      const model = jsonModel('{"title":"x"}');
+
+      await createGenerateStructured(model)({
+        schema: z.object({ title: z.string() }),
+        system: "s",
+        prompt: "p",
+        reasoning,
+      });
+
+      expect(model.doGenerateCalls[0]?.reasoning).toBe(expected);
+    }
+  });
+
   it("lets a call ask for a longer bound", async () => {
     const timeout = vi.spyOn(AbortSignal, "timeout");
 

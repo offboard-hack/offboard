@@ -204,12 +204,16 @@ describe("scoreResume", () => {
     expect((await scoreResume(generate, resume)).suggestions).toEqual([]);
   });
 
-  it("keeps at most five suggestions in model order", async () => {
+  it("keeps at most five suggestions in model order, counted after filtering", async () => {
     const ids = ["b5", "headline", "b3", "summary", "b1", "b2", "b4"];
 
-    const { generate } = fake({
+    const { generate, requests } = fake({
       criteria: {},
-      suggestions: ids.map((id) => suggestion(id, `Nova versão de ${id}`)),
+      suggestions: [
+        suggestion("b5", "Versão sem critério", 3, 0, "style"),
+        suggestion("ghost", "Inventado"),
+        ...ids.map((id) => suggestion(id, `Nova versão de ${id}`)),
+      ],
     });
 
     const { suggestions } = await scoreResume(generate, resume);
@@ -221,6 +225,7 @@ describe("scoreResume", () => {
       "summary",
       "b1",
     ]);
+    expect(requests[0]?.system).toContain("up to eight");
   });
 
   it("scores the sum of the clamped criterion points", async () => {
@@ -239,13 +244,20 @@ describe("scoreResume", () => {
     expect(score).toBe(52 - 10 + 20 - 8 + 15 - 3);
   });
 
-  it("rejects a criterion outside the rubric", async () => {
+  it("drops a suggestion whose criterion is outside the rubric", async () => {
     const { generate } = fake({
       criteria: {},
-      suggestions: [suggestion("b3", "Criou 8 APIs REST", 3, 0, "style")],
+      suggestions: [
+        suggestion("b3", "Criou 8 APIs REST", 3, 0, "style"),
+        suggestion("b3", "Criou oito APIs REST", 3, 0, "results"),
+        suggestion("b4", "Treinou 4 estagiários", 3, 0, "results"),
+      ],
     });
 
-    await expect(scoreResume(generate, resume)).rejects.toThrow();
+    expect((await scoreResume(generate, resume)).suggestions).toMatchObject([
+      { targetNodeId: "b3", suggestedText: "Criou oito APIs REST" },
+      { targetNodeId: "b4" },
+    ]);
   });
 
   it("bounds the gain by what its criterion can still gain", async () => {
@@ -434,6 +446,7 @@ describe("scoreResume", () => {
     }
 
     expect(requests[0]?.timeoutMs).toBe(120_000);
+    expect(requests[0]?.reasoning).toBe("medium");
     expect(system).toContain("exactly as written");
     expect(system).toContain("maximum minus the points you gave it");
     expect(system).toContain("extraGainWithFacts");

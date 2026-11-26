@@ -478,7 +478,8 @@ describe.skipIf(!url)("resume suggestions repository", () => {
           results: { points: 16, max: 20, reason: "Resultados." },
           keywords: { points: 60, max: 90, reason: "Palavras-chave." },
         },
-        scoredAt: null,
+        scoredAt: now.toISOString(),
+        rescoring: false,
         updatedAt: later.toISOString(),
       });
       expect(await repos.resumes.getBase(profileId)).toEqual(view);
@@ -510,7 +511,7 @@ describe.skipIf(!url)("resume suggestions repository", () => {
       expect(await repository.apply(profileId, ids.b1 ?? "", now)).toMatchObject({
         score: 50,
         scoreBreakdown: { results: { points: 20, max: 20, reason: "Quase todos." } },
-        scoredAt: null,
+        scoredAt: now.toISOString(),
       });
       expect(await repository.apply(profileId, ids.headline ?? "", now)).toMatchObject({
         score: 53,
@@ -530,7 +531,7 @@ describe.skipIf(!url)("resume suggestions repository", () => {
       expect(await repository.apply(profileId, ids.headline ?? "", now)).toMatchObject({
         score: 100,
         scoreBreakdown: null,
-        scoredAt: null,
+        scoredAt: now.toISOString(),
       });
 
       await db.update(resumes).set({ score: null }).where(eq(resumes.id, resumeId));

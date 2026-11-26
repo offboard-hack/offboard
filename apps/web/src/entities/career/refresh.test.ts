@@ -8,12 +8,12 @@ import {
 } from "./refresh";
 
 describe("resumeRefetchInterval", () => {
-  it("polls while the résumé waits for a score", () => {
-    expect(resumeRefetchInterval({ scoredAt: null })).toBe(resumeRefreshMs);
+  it("polls while the résumé is being scored", () => {
+    expect(resumeRefetchInterval({ rescoring: true })).toBe(resumeRefreshMs);
   });
 
   it("stops once scored, absent or not loaded", () => {
-    expect(resumeRefetchInterval({ scoredAt: "2026-11-26T12:00:00.000Z" })).toBe(false);
+    expect(resumeRefetchInterval({ rescoring: false })).toBe(false);
     expect(resumeRefetchInterval(null)).toBe(false);
     expect(resumeRefetchInterval(undefined)).toBe(false);
   });
@@ -35,12 +35,10 @@ describe("jobsRefetchInterval", () => {
 });
 
 describe("scoreArrived", () => {
-  it("is true only when a pending score gets its time", () => {
-    const at = "2026-11-26T12:00:00.000Z";
-
-    expect(scoreArrived(null, at)).toBe(true);
-    expect(scoreArrived(null, null)).toBe(false);
-    expect(scoreArrived(undefined, at)).toBe(false);
-    expect(scoreArrived("2026-11-25T12:00:00.000Z", at)).toBe(false);
+  it("is true only when a rescore finishes", () => {
+    expect(scoreArrived(true, false)).toBe(true);
+    expect(scoreArrived(true, true)).toBe(false);
+    expect(scoreArrived(undefined, false)).toBe(false);
+    expect(scoreArrived(false, false)).toBe(false);
   });
 });

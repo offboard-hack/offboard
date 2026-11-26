@@ -152,8 +152,8 @@ export function scoreCriteria(breakdown: CareerResume["scoreBreakdown"]) {
   });
 }
 
-export function resumeScoreState(resume: Pick<CareerResume, "score" | "scoredAt">) {
+export function resumeScoreState(resume: Pick<CareerResume, "score" | "rescoring">) {
   if (resume.score === null) return "pending";
 
-  return resume.scoredAt === null ? "recalculating" : "ready";
+  return resume.rescoring ? "recalculating" : "ready";
 }

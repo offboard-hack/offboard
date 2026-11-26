@@ -8,6 +8,7 @@ export type GenerateStructured = <T>(request: {
   prompt: string;
   file?: { data: Uint8Array; mediaType: string };
   timeoutMs?: number;
+  reasoning?: "low" | "medium" | "high";
 }) => Promise<T>;
 
 export const createGenerateStructured = (model: LanguageModel) => {
@@ -17,6 +18,7 @@ export const createGenerateStructured = (model: LanguageModel) => {
     prompt,
     file,
     timeoutMs = 60_000,
+    reasoning,
   }) => {
     const { output } = await generateText({
       model,
@@ -38,6 +40,7 @@ export const createGenerateStructured = (model: LanguageModel) => {
       providerOptions: { gateway: { zeroDataRetention: true } },
       abortSignal: AbortSignal.timeout(timeoutMs),
       maxRetries: 1,
+      reasoning,
     });
 
     return output;

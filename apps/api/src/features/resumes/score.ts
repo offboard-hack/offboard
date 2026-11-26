@@ -46,7 +46,7 @@ const scoreSchema = z.object({
   suggestions: z.array(
     z.object({
       targetNodeId: z.string(),
-      criterion: z.enum(criteria),
+      criterion: z.string(),
       suggestedText: z.string(),
       rationale: z.string(),
       estimatedGain: z.number(),
@@ -67,7 +67,7 @@ const system = [
   "Score it criterion by criterion with this fixed rubric. Apply each rule literally, counting bullets where the rule counts them, so the same résumé always gets the same points:",
   rubric,
   "For every criterion give points between 0 and its maximum and a one-line reason in Brazilian Portuguese that names what earned or cost the points.",
-  "Propose at most five concrete rewrites, the ones that would raise the points the most. Each rewrite replaces the whole text of one node, identified by its id. Only the headline, the summary and experience bullets have ids; never target anything else.",
+  "Propose up to eight concrete rewrites, the ones that would raise the points the most. Each rewrite replaces the whole text of one node, identified by its id. Only the headline, the summary and experience bullets have ids; never target anything else.",
   "Each rewrite names the one criterion it improves most. estimatedGain is how many points that criterion would rise under the rubric if suggestedText replaced the node exactly as written and nothing else changed; it never exceeds the criterion's maximum minus the points you gave it. Count only what the text already contains: never assume the person later adds numbers, tools or other facts.",
   "extraGainWithFacts is the additional points, from 0 to 20, available only if the person also adds the real facts the rationale asks for. Use 0 when the rationale asks for nothing.",
   "Write suggestedText and rationale in Brazilian Portuguese, in the person's own voice and register.",
@@ -197,6 +197,7 @@ export async function scoreResume(
     schema: scoreSchema,
     system,
     timeoutMs: scoringTimeoutMs,
+    reasoning: "medium",
     prompt: `Score this résumé and suggest rewrites.\n\n<resume>\n${serialize(content)}\n</resume>${previousBlock(context.previous)}${historyBlock(nodes, context.history)}`,
   });
 
@@ -209,7 +210,9 @@ export async function scoreResume(
   for (const candidate of output.suggestions) {
     const node = nodes.get(candidate.targetNodeId);
 
-    if (!node || seen.has(node.id)) continue;
+    const criterion = criteria.find((key) => key === candidate.criterion);
+
+    if (!node || !criterion || seen.has(node.id)) continue;
 
     seen.add(node.id);
 
@@ -218,13 +221,9 @@ export async function scoreResume(
 
     if (!text || text === normalized(node.text) || used.has(text)) continue;
 
-    if (last?.targetNodeId === node.id && last.criterion === candidate.criterion) continue;
+    if (last?.targetNodeId === node.id && last.criterion === criterion) continue;
 
-    const estimatedGain = bounded(
-      candidate.estimatedGain,
-      0,
-      headroom(breakdown, candidate.criterion),
-    );
+    const estimatedGain = bounded(candidate.estimatedGain, 0, headroom(breakdown, criterion));
 
     const extraGainWithFacts = bounded(candidate.extraGainWithFacts ?? 0, 0, 20);
 
@@ -235,7 +234,7 @@ export async function scoreResume(
       originalText: node.text,
       suggestedText,
       rationale: storableText(candidate.rationale),
-      criterion: candidate.criterion,
+      criterion,
       estimatedGain,
       extraGainWithFacts,
     });

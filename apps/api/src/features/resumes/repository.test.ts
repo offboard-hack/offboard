@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
-import { defaultOrgId, offboardingCases, resumes } from "@offboard/db/schema";
+import { backgroundJobs, defaultOrgId, offboardingCases, resumes } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -8,6 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createRepositories } from "../../repositories.js";
 import type { ResumeContent } from "./content.js";
+import { scoreIsCurrent } from "./repository.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 
@@ -69,7 +70,7 @@ describe.skipIf(!url)("resumes repository", () => {
   function score(id: string, value: number, scoreBreakdown: typeof breakdown | null = breakdown) {
     return db
       .update(resumes)
-      .set({ score: value, scoreBreakdown, scoredAt: new Date() })
+      .set({ score: value, scoreBreakdown, scoredAt: new Date(Date.now() - 1_000) })
       .where(eq(resumes.id, id));
   }
 
@@ -87,6 +88,7 @@ describe.skipIf(!url)("resumes repository", () => {
       score: null,
       scoreBreakdown: null,
       scoredAt: null,
+      rescoring: false,
     });
     expect(new Date(first.resume.updatedAt).toISOString()).toBe(first.resume.updatedAt);
 
@@ -118,6 +120,7 @@ describe.skipIf(!url)("resumes repository", () => {
 
     await score(resume.id, 70);
 
+    const scored = await repository.getBase(profileId);
     const updated = await repository.updateBaseContent(profileId, content("C"));
 
     expect(updated).toMatchObject({
@@ -125,29 +128,80 @@ describe.skipIf(!url)("resumes repository", () => {
       content: content("C"),
       score: 70,
       scoreBreakdown: breakdown,
-      scoredAt: null,
+      scoredAt: scored?.scoredAt,
     });
+    expect(updated && scoreIsCurrent(updated)).toBe(false);
     expect(await repository.getBase(profileId)).toEqual(updated);
   });
 
-  it("expires only a score stored before the breakdown existed", async () => {
-    expect(await repository.expireLegacyScore(profileId)).toBeUndefined();
+  it("tells whether a score is current for the stored text", () => {
+    const at = "2026-11-26T12:00:00.000Z";
+    const later = "2026-11-26T12:00:00.001Z";
 
+    expect(scoreIsCurrent({ scoreBreakdown: breakdown, scoredAt: at, updatedAt: at })).toBe(true);
+    expect(
+      scoreIsCurrent({
+        scoreBreakdown: breakdown,
+        scoredAt: new Date(later),
+        updatedAt: new Date(at),
+      }),
+    ).toBe(true);
+    expect(scoreIsCurrent({ scoreBreakdown: breakdown, scoredAt: at, updatedAt: later })).toBe(
+      false,
+    );
+    expect(scoreIsCurrent({ scoreBreakdown: breakdown, scoredAt: null, updatedAt: at })).toBe(
+      false,
+    );
+    expect(scoreIsCurrent({ scoreBreakdown: null, scoredAt: later, updatedAt: at })).toBe(false);
+  });
+
+  it("reports a pending or running score job as rescoring", async () => {
     const { resume } = await repository.replaceBase(profileId, content("A"), "resumes/a.pdf");
 
-    expect(await repository.expireLegacyScore(profileId)).toBeUndefined();
+    const job = (status: "pending" | "running" | "done" | "failed", subject = resume.id) =>
+      db
+        .insert(backgroundJobs)
+        .values({ kind: "score_resume", subject, status, runAfter: new Date() });
 
-    await score(resume.id, 80);
-    expect(await repository.expireLegacyScore(profileId)).toBeUndefined();
+    await job("done");
+    await job("failed");
+    await job("pending", crypto.randomUUID());
+    await db
+      .insert(backgroundJobs)
+      .values({ kind: "compute_matches", subject: resume.id, runAfter: new Date() });
+    expect(await repository.getBase(profileId)).toMatchObject({ rescoring: false });
 
-    await score(resume.id, 75, null);
+    await job("running");
+    expect(await repository.getBase(profileId)).toMatchObject({ rescoring: true });
 
-    const before = await repository.getBase(profileId);
+    await db.delete(backgroundJobs).where(eq(backgroundJobs.status, "running"));
+    await job("pending");
+    expect(await repository.getBase(profileId)).toMatchObject({ rescoring: true });
+    expect(await repository.updateBaseContent(profileId, content("B"))).toMatchObject({
+      rescoring: true,
+    });
+  });
 
-    expect(await repository.expireLegacyScore(otherProfileId)).toBeUndefined();
-    expect(await repository.expireLegacyScore(profileId)).toBe(resume.id);
-    expect(await repository.getBase(profileId)).toEqual({ ...before, scoredAt: null });
-    expect(await repository.expireLegacyScore(profileId)).toBeUndefined();
+  it("tells whether the latest score job of a résumé failed", async () => {
+    const { resume } = await repository.replaceBase(profileId, content("A"), "resumes/a.pdf");
+
+    const job = (status: "done" | "failed", createdAt: string, kind = "score_resume") =>
+      db.insert(backgroundJobs).values({
+        kind,
+        subject: resume.id,
+        status,
+        runAfter: new Date(),
+        createdAt: new Date(createdAt),
+      });
+
+    expect(await repository.lastScoreFailed(resume.id)).toBe(false);
+
+    await job("failed", "2026-11-26T10:00:00Z");
+    expect(await repository.lastScoreFailed(resume.id)).toBe(true);
+
+    await job("done", "2026-11-26T11:00:00Z");
+    await job("failed", "2026-11-26T12:00:00Z", "compute_matches");
+    expect(await repository.lastScoreFailed(resume.id)).toBe(false);
   });
 
   it("keeps the stored file key when content is updated", async () => {

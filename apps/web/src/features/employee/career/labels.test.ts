@@ -117,10 +117,9 @@ describe("career labels", () => {
   });
 
   it("tells a pending, a recalculating and a ready score apart", () => {
-    const at = "2026-11-26T12:00:00.000Z";
-
-    expect(resumeScoreState({ score: null, scoredAt: null })).toBe("pending");
-    expect(resumeScoreState({ score: 62, scoredAt: null })).toBe("recalculating");
-    expect(resumeScoreState({ score: 0, scoredAt: at })).toBe("ready");
+    expect(resumeScoreState({ score: null, rescoring: true })).toBe("pending");
+    expect(resumeScoreState({ score: null, rescoring: false })).toBe("pending");
+    expect(resumeScoreState({ score: 62, rescoring: true })).toBe("recalculating");
+    expect(resumeScoreState({ score: 0, rescoring: false })).toBe("ready");
   });
 });
