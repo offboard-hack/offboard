@@ -112,3 +112,7 @@ export function evidenceValue(value: string | string[] | null) {
 
   return Array.isArray(value) ? value.join("; ") || "Sem resposta" : value || "Sem resposta";
 }
+
+export function isLongText(text: string) {
+  return text.length > 400 || text.split("\n").length > 6;
+}

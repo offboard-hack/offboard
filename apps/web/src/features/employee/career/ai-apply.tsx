@@ -87,6 +87,10 @@ function Start({
 
   if (profile.isError) return <EmployeeError message={profile.error.message} />;
 
+  if (!profile.data.aiApply.eligible) {
+    return <EmployeeError message="Disponível no plano Platinum Premium da sua empresa." />;
+  }
+
   if (!profile.data.aiApply.consented) {
     return (
       <div className="grid gap-3">

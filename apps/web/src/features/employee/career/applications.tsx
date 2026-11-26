@@ -26,10 +26,6 @@ export function CareerApplications({ account }: { account: EmployeeAccount }) {
   const attempts = useQuery(aiAttemptsQuery(account));
   const applications = useQuery(careerApplicationsQuery(account));
 
-  const viaAi = new Set(
-    attempts.data?.flatMap((attempt) => (attempt.state === "submitted" ? [attempt.job.id] : [])),
-  );
-
   return (
     <div className="space-y-5">
       <EmployeePanel
@@ -98,7 +94,9 @@ export function CareerApplications({ account }: { account: EmployeeAccount }) {
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions className="flex-wrap justify-end">
-                  {viaAi.has(application.job.id) ? <Badge variant="outline">via IA</Badge> : null}
+                  {application.channel === "ai_apply" ? (
+                    <Badge variant="outline">via IA</Badge>
+                  ) : null}
                   <Badge variant="secondary">{applicationStatus(application)}</Badge>
                 </ItemActions>
               </Item>

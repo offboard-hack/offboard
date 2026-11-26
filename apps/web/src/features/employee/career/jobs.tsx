@@ -9,11 +9,13 @@ import { useState } from "react";
 import {
   type CareerJob,
   careerJobsQuery,
+  careerProfileQuery,
   careerResumeQuery,
   useMarkApplied,
   type WorkModel,
 } from "@/entities/career";
 import type { EmployeeAccount } from "@/entities/employee";
+import { cn } from "@/shared/lib/utils";
 import { PortalFilter } from "@/shared/ui/select";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button, buttonVariants } from "@/shared/ui/shadcn/button";
@@ -45,7 +47,7 @@ import {
 import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "../ui";
 import { AiApplyDialog } from "./ai-apply";
-import { careerDate, jobPlace, matchScore, salaryRange } from "./labels";
+import { careerDate, isLongText, jobPlace, matchScore, salaryRange } from "./labels";
 import { CareerRetry } from "./resume";
 
 const workModels = [
@@ -57,6 +59,35 @@ const workModels = [
 
 function isWorkModel(value: string): value is WorkModel {
   return value === "remote" || value === "hybrid" || value === "onsite";
+}
+
+function JobDescription({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const long = isLongText(text);
+
+  return (
+    <div className="grid gap-1">
+      <p
+        className={cn(
+          "text-sm whitespace-pre-line wrap-anywhere",
+          long && !expanded && "line-clamp-6",
+        )}
+      >
+        {text}
+      </p>
+      {long ? (
+        <Button
+          variant="link"
+          size="sm"
+          className="h-auto w-fit p-0"
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? "Ver menos" : "Ver mais"}
+        </Button>
+      ) : null}
+    </div>
+  );
 }
 
 function JobDialog({
@@ -73,8 +104,11 @@ function JobDialog({
   applyWithAi: () => void;
 }) {
   const markApplied = useMarkApplied(account);
+  const profile = useQuery(careerProfileQuery(account));
   const salary = salaryRange(job);
   const score = matchScore(job.match);
+  const offersAi = job.aiApplyCapable && !job.applied;
+  const eligible = profile.data?.aiApply.eligible === true;
 
   return (
     <Dialog
@@ -95,6 +129,7 @@ function JobDialog({
           {job.postedAt ? (
             <p className="text-sm text-muted-foreground">Publicada em {careerDate(job.postedAt)}</p>
           ) : null}
+          {job.description ? <JobDescription text={job.description} /> : null}
           {job.match ? (
             <div className="grid gap-2">
               <p className="font-medium">{score} com seu currículo</p>
@@ -120,10 +155,15 @@ function JobDialog({
             <p className="text-sm text-muted-foreground">Você já se candidatou a esta vaga.</p>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Leia a descrição completa no site da vaga. Se você se candidatou por lá, registre aqui
-              para acompanhar em Candidaturas.
+              Se você se candidatou pelo site da vaga, registre aqui para acompanhar em
+              Candidaturas.
             </p>
           )}
+          {offersAi && profile.data && !eligible ? (
+            <p className="text-sm text-muted-foreground">
+              Candidatura com IA: disponível no plano Platinum Premium da sua empresa.
+            </p>
+          ) : null}
           {!job.applied && resumeId === null ? (
             <p className="text-sm text-muted-foreground">
               Para registrar a candidatura, envie seu currículo primeiro.
@@ -152,11 +192,11 @@ function JobDialog({
               {markApplied.isPending ? "Registrando…" : "Já me candidatei"}
             </Button>
           )}
-          {job.applied || job.origin !== "external" ? null : (
+          {offersAi && eligible ? (
             <Button disabled={markApplied.isPending} onClick={applyWithAi}>
               <HugeiconsIcon icon={AiMagicIcon} aria-hidden="true" /> Candidatar com IA
             </Button>
-          )}
+          ) : null}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -5,6 +5,7 @@ import {
   attemptState,
   careerDate,
   evidenceValue,
+  isLongText,
   jobPlace,
   matchScore,
   salaryRange,
@@ -62,5 +63,11 @@ describe("career labels", () => {
     expect(evidenceValue([])).toBe("Sem resposta");
     expect(evidenceValue("")).toBe("Sem resposta");
     expect(evidenceValue(null)).toBe("Sem resposta");
+  });
+
+  it("detects descriptions worth clamping", () => {
+    expect(isLongText("Vaga curta.")).toBe(false);
+    expect(isLongText("a".repeat(401))).toBe(true);
+    expect(isLongText("1\n2\n3\n4\n5\n6\n7")).toBe(true);
   });
 });
