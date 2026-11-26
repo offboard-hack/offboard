@@ -16,7 +16,7 @@ import { createRepositories } from "../../repositories.js";
 import { portalAccess } from "../../shared/access.js";
 import type { PortalAuth } from "../../shared/portal-auth.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
-import { benefitRoutes } from "./routes.js";
+import { addMonths, benefitRoutes } from "./routes.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const webOrigin = "http://localhost:5173";
@@ -33,7 +33,7 @@ const auth: PortalAuth = {
         name: "Test Member",
         email: "member@example.com",
         role,
-        orgId: defaultOrgId,
+        orgId: headers.get("x-test-org") ?? defaultOrgId,
       },
     });
   },
@@ -66,10 +66,15 @@ describe.skipIf(!url)("benefit routes", () => {
     await db.$client.end();
   });
 
-  function call(path: string, init: { method?: string; role?: string; json?: unknown } = {}) {
+  function call(
+    path: string,
+    init: { method?: string; role?: string; org?: string; json?: unknown } = {},
+  ) {
     const headers = new Headers({ origin: webOrigin });
 
     if (init.role) headers.set("x-test-role", init.role);
+
+    if (init.org) headers.set("x-test-org", init.org);
 
     if (init.json !== undefined) headers.set("content-type", "application/json");
 
@@ -122,6 +127,25 @@ describe.skipIf(!url)("benefit routes", () => {
 
     return date.toISOString().slice(0, 10);
   }
+
+  it("clamps month-end dates to the last day of the target month", () => {
+    expect(addMonths("2027-01-31", 1)).toBe("2027-02-28");
+    expect(addMonths("2027-03-31", 1)).toBe("2027-04-30");
+    expect(addMonths("2027-01-15", 1)).toBe("2027-02-15");
+  });
+
+  it("hides policies and assignments from other organizations", async () => {
+    const { low } = await planIds();
+    const profileId = await profile();
+    const otherOrg = crypto.randomUUID();
+
+    await savePolicy();
+    await call("/benefit-assignments", { method: "POST", json: { profileId, planId: low } });
+
+    expect((await call("/benefit-policy", { org: otherOrg })).status).toBe(404);
+    expect(await (await call("/benefit-assignments", { org: otherOrg })).json()).toEqual([]);
+    expect(await (await call("/benefit-assignments")).json()).toHaveLength(1);
+  });
 
   it("returns 404 when no policy exists", async () => {
     expect((await call("/benefit-policy")).status).toBe(404);

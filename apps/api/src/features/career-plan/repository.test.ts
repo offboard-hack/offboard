@@ -259,7 +259,10 @@ describe.skipIf(!url)("career plan repository", () => {
       .set({ validUntil: "2026-11-25" })
       .where(eq(benefitAssignments.profileId, profileId));
 
-    expect((await repos.careerPlan.plan(profileId, now))?.aiApply.allowedBy).toBeNull();
+    const expired = await repos.careerPlan.plan(profileId, now);
+
+    expect(expired?.aiApply.allowedBy).toBeNull();
+    expect(expired?.benefit).toBeNull();
   });
 
   it("has no benefit without an assignment", async () => {

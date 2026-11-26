@@ -8,7 +8,7 @@ import {
   talentProfiles,
   talentSubscriptions,
 } from "@offboard/db/schema";
-import { and, desc, eq, isNotNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, lt, or, sql } from "drizzle-orm";
 import { careerPlanOf, checkoutRetryMs } from "../../shared/career-pro.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 
@@ -25,7 +25,7 @@ export function createCareerPlanRepository(db: Database) {
     return row ?? null;
   }
 
-  async function benefitOf(profileId: string) {
+  async function benefitOf(profileId: string, today: string) {
     const [row] = await db
       .select({
         planName: plans.name,
@@ -37,7 +37,9 @@ export function createCareerPlanRepository(db: Database) {
       })
       .from(benefitAssignments)
       .innerJoin(plans, eq(plans.id, benefitAssignments.effectivePlanId))
-      .where(eq(benefitAssignments.profileId, profileId))
+      .where(
+        and(eq(benefitAssignments.profileId, profileId), gte(benefitAssignments.validUntil, today)),
+      )
       .limit(1);
 
     return row ?? null;
@@ -78,7 +80,11 @@ export function createCareerPlanRepository(db: Database) {
     const { orgId, ...standing } = row;
 
     return careerPlanOf(
-      { ...standing, company: await companyOf(orgId), benefit: await benefitOf(profileId) },
+      {
+        ...standing,
+        company: await companyOf(orgId),
+        benefit: await benefitOf(profileId, saoPauloDate(now)),
+      },
       now,
     );
   }
