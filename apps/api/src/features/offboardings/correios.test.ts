@@ -160,6 +160,26 @@ describe("trackPackage", () => {
     });
   });
 
+  it("handles missing dtHrCriado", async () => {
+    responseStatus = 200;
+    responseBody = JSON.stringify({
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: {
+        temEventoEntrega: false,
+        eventos: [{ descricao: "Objeto em trânsito" }],
+      },
+    });
+
+    const result = await trackPackage("MM555555555BR", config);
+
+    expect(result).toEqual({
+      delivered: false,
+      lastEvent: "Objeto em trânsito",
+      lastUpdate: "",
+    });
+  });
+
   it("handles empty eventos array", async () => {
     responseStatus = 200;
     responseBody = JSON.stringify({
