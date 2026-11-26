@@ -49,6 +49,7 @@ import {
 import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "../ui";
 import { AiApplyDialog } from "./ai-apply";
+import { DismissJob } from "./dismiss-job";
 import { jobsEmpty, jobsSummary, jobsViews } from "./jobs-view";
 import { careerDate, isLongText, jobPlace, matchScore, salaryRange } from "./labels";
 import { CareerRetry } from "./resume";
@@ -107,6 +108,7 @@ function JobDialog({
   applyWithAi: () => void;
 }) {
   const markApplied = useMarkApplied(account);
+  const [dismissing, setDismissing] = useState(false);
   const profile = useQuery(careerProfileQuery(account));
   const salary = salaryRange(job);
   const score = matchScore(job.match);
@@ -174,8 +176,26 @@ function JobDialog({
             </p>
           ) : null}
           <EmployeeError message={markApplied.error?.message} />
+          {dismissing ? (
+            <DismissJob
+              account={account}
+              job={job}
+              cancel={() => setDismissing(false)}
+              done={close}
+            />
+          ) : null}
         </DialogBody>
         <DialogFooter>
+          {job.applied || dismissing ? null : (
+            <Button
+              variant="ghost"
+              className="sm:mr-auto"
+              disabled={markApplied.isPending}
+              onClick={() => setDismissing(true)}
+            >
+              Não tenho interesse
+            </Button>
+          )}
           <a
             href={job.url}
             target="_blank"
