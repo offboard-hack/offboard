@@ -49,7 +49,7 @@ import {
   employeeStateSchema,
   type EmployeeState,
 } from "@offboard/employee";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { status } from "elysia";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9009,7 +9009,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       | { done: boolean }
       | { code: string; received: boolean }
       | { shareOutcomeWithHr: boolean }
-      | { email: string; callbackURL: string },
+      | { email: string; callbackURL: string }
+      | { code: string },
     origin = webOrigin,
     nativeOrigin?: string,
     grantId = cookie ? grants.get(cookie) : undefined,
@@ -9252,6 +9253,9 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     const taskPath = "/employee/checklist/";
     expect((await request(taskPath + manual.id, "PATCH", cookie, { done: true })).status).toBe(403);
     expect(
+      (await request("/employee/tracking-code", "PATCH", cookie, { code: "AA000000000BR" })).status,
+    ).toBe(403);
+    expect(
       (
         await request("/employee/state", "PUT", cookie, {
           key: "consent",
@@ -9285,6 +9289,34 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         },
       );
     }
+
+    expect(journey.trackingCode).toBeNull();
+
+    expect(
+      (await request("/employee/tracking-code", "PATCH", cookie, { code: "INVALID!" })).status,
+    ).toBe(422);
+
+    const trackingResult = await (
+      await request("/employee/tracking-code", "PATCH", cookie, { code: "AB123456789BR" })
+    ).json();
+
+    expect(trackingResult.trackingCode).toBe("AB123456789BR");
+
+    const journeyAfterTracking = await (await request("/employee/journey", "GET", cookie)).json();
+
+    expect(journeyAfterTracking.trackingCode).toBe("AB123456789BR");
+
+    await db
+      .update(tasks)
+      .set({ checklistStepId: null })
+      .where(and(eq(tasks.caseId, record.id), eq(tasks.checklistStepId, "collect")));
+    expect(
+      (await request("/employee/tracking-code", "PATCH", cookie, { code: "XX000000000BR" })).status,
+    ).toBe(404);
+    await db
+      .update(tasks)
+      .set({ checklistStepId: "collect" })
+      .where(and(eq(tasks.caseId, record.id), isNull(tasks.checklistStepId)));
 
     const booking = {
       method: "pickup",

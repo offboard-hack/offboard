@@ -8,6 +8,7 @@ import {
   Calendar03Icon,
   DragDropVerticalIcon,
   FilterHorizontalIcon,
+  MoreVerticalIcon,
   Tick02Icon,
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
@@ -44,6 +45,12 @@ import {
   ChecklistChanged,
   type ChecklistModel,
 } from "./checklist-model";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/shared/ui/shadcn/dropdown-menu";
 import { DeleteStepDialog, StepDialog } from "./step-dialog";
 import { sameStepSettings, type StepSettings } from "./step-settings";
 
@@ -350,6 +357,7 @@ function ChecklistEditor({
   actionRows: ActionConfigRow[];
   model: ChecklistModel;
 }) {
+  const template = applyActionConfigs(model.template, actionRows);
   const client = useQueryClient();
   const [restoredDraft] = useState(() => readDraftSnapshot(orgId));
 
@@ -514,7 +522,11 @@ function ChecklistEditor({
     setDialogOpen(false);
   }
 
-  function loadPublishedModel(next: ChecklistModel, rows: ActionConfigRow[], message: string) {
+  function loadPublishedModel(
+    next: Pick<ChecklistModel, "revision" | "steps">,
+    rows: ActionConfigRow[],
+    message: string,
+  ) {
     const saved = applyActionConfigs(next.steps, rows);
 
     clearDraftSteps(orgId);
@@ -532,7 +544,7 @@ function ChecklistEditor({
       return saveChecklistModel({ revision, steps, knownRowIds });
     },
     onSuccess: ({ actionRows: rows, ...next }) => {
-      client.setQueryData(checklistModelQuery(orgId).queryKey, next);
+      client.setQueryData(checklistModelQuery(orgId).queryKey, { ...next, template });
       client.setQueryData(checklistActionConfigsQuery(orgId).queryKey, rows);
       loadPublishedModel(next, rows, "Modelo publicado.");
     },
@@ -572,6 +584,14 @@ function ChecklistEditor({
       history: history.slice(0, -1),
       message: previous.undoMessage,
     });
+  }
+
+  function loadTemplate() {
+    commit(template, "Modelo padrão carregado.", "Carregamento do modelo padrão desfeito.");
+  }
+
+  function clearSteps() {
+    commit([], "Todas as etapas removidas.", "Remoção de todas as etapas desfeita.");
   }
 
   return (
@@ -614,6 +634,18 @@ function ChecklistEditor({
               <HugeiconsIcon icon={Undo02Icon} aria-hidden="true" />
               Desfazer
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<Button variant="outline" />}
+                disabled={saveMutation.isPending || restoreMutation.isPending}
+              >
+                <HugeiconsIcon icon={MoreVerticalIcon} aria-hidden="true" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={loadTemplate}>Carregar modelo padrão</DropdownMenuItem>
+                <DropdownMenuItem onClick={clearSteps}>Começar do zero</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               onClick={() => saveMutation.mutate()}
               disabled={isSaved || saveMutation.isPending || restoreMutation.isPending || conflict}
