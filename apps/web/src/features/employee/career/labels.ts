@@ -106,3 +106,9 @@ export function attemptReason(reason: string | null) {
 export function matchScore(match: CareerJob["match"]) {
   return match ? `${match.score}% compatível` : null;
 }
+
+export function evidenceValue(value: string | string[] | null) {
+  if (value === null) return "Sem resposta";
+
+  return Array.isArray(value) ? value.join("; ") || "Sem resposta" : value || "Sem resposta";
+}

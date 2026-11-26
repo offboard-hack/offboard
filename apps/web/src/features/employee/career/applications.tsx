@@ -3,12 +3,7 @@ import Briefcase01Icon from "@hugeicons/core-free-icons/Briefcase01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import {
-  type AiAttempt,
-  aiAttemptsQuery,
-  careerApplicationsQuery,
-  useAiCheck,
-} from "@/entities/career";
+import { type AiAttempt, aiAttemptsQuery, careerApplicationsQuery } from "@/entities/career";
 import type { EmployeeAccount } from "@/entities/employee";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
@@ -23,53 +18,8 @@ import {
 import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "../ui";
 import { AiApplyDialog } from "./ai-apply";
-import { applicationStatus, attemptReason, attemptState, careerDate } from "./labels";
-
-const attemptTones = {
-  draft: "status-warning",
-  queued: "secondary",
-  running: "secondary",
-  submitting: "secondary",
-  submitted: "status-success",
-  rehearsed: "status-success",
-  assisted: "status-warning",
-  needs_check: "status-warning",
-  cancelled: "outline",
-} as const;
-
-function SentCheck({ account, attempt }: { account: EmployeeAccount; attempt: AiAttempt }) {
-  const check = useAiCheck(account);
-
-  return (
-    <div className="grid gap-2">
-      <p className="text-sm">
-        A IA clicou em enviar, mas não viu a confirmação da empresa. Foi enviada?
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          disabled={check.isPending}
-          onClick={() => check.mutate({ id: attempt.id, sent: true })}
-        >
-          Sim, foi enviada
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={check.isPending}
-          onClick={() => check.mutate({ id: attempt.id, sent: false })}
-        >
-          Não foi
-        </Button>
-      </div>
-      <EmployeeError message={check.error?.message} />
-    </div>
-  );
-}
-
-export function AttemptBadge({ state }: { state: AiAttempt["state"] }) {
-  return <Badge variant={attemptTones[state]}>{attemptState(state)}</Badge>;
-}
+import { AttemptBadge, SentCheck } from "./attempt-result";
+import { applicationStatus, attemptReason, careerDate } from "./labels";
 
 export function CareerApplications({ account }: { account: EmployeeAccount }) {
   const [opened, setOpened] = useState<AiAttempt | null>(null);
@@ -116,11 +66,11 @@ export function CareerApplications({ account }: { account: EmployeeAccount }) {
                   </ItemContent>
                   <ItemActions className="max-sm:w-full max-sm:flex-wrap">
                     <AttemptBadge state={attempt.state} />
-                    {attempt.state === "draft" || attempt.state === "rehearsed" ? (
+                    {attempt.state === "cancelled" ? null : (
                       <Button size="sm" variant="outline" onClick={() => setOpened(attempt)}>
-                        Revisar respostas
+                        {attempt.state === "draft" ? "Revisar respostas" : "Ver detalhes"}
                       </Button>
-                    ) : null}
+                    )}
                   </ItemActions>
                 </Item>
               </li>

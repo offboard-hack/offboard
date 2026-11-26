@@ -4,6 +4,7 @@ import {
   attemptReason,
   attemptState,
   careerDate,
+  evidenceValue,
   jobPlace,
   matchScore,
   salaryRange,
@@ -53,5 +54,13 @@ describe("career labels", () => {
   it("labels the match score", () => {
     expect(matchScore({ score: 82, reasons: [] })).toBe("82% compatível");
     expect(matchScore(null)).toBeNull();
+  });
+
+  it("prints evidence values", () => {
+    expect(evidenceValue("Marina")).toBe("Marina");
+    expect(evidenceValue(["SQL", "CRM"])).toBe("SQL; CRM");
+    expect(evidenceValue([])).toBe("Sem resposta");
+    expect(evidenceValue("")).toBe("Sem resposta");
+    expect(evidenceValue(null)).toBe("Sem resposta");
   });
 });

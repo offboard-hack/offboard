@@ -6,12 +6,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   type AiAttempt,
-  aiAttemptQuery,
+  aiAttemptProgressQuery,
+  type ConfirmAnswers,
   careerProfileQuery,
   NotAiApplicable,
   useAiApplyConsent,
   useAiConfirm,
   useAiDraft,
+  useAiRun,
   useCoverLetter,
 } from "@/entities/career";
 import type { EmployeeAccount } from "@/entities/employee";
@@ -47,7 +49,7 @@ import {
   fileQuestions,
   initialAnswer,
 } from "./ai-apply-form";
-import { attemptReason, attemptState } from "./labels";
+import { AttemptProgress } from "./attempt-result";
 
 type AttemptJob = Pick<AiAttempt["job"], "id" | "title" | "company" | "url">;
 
@@ -222,13 +224,16 @@ function AnswerControl({
 function Review({
   account,
   attempt,
+  confirm,
+  submit,
   close,
 }: {
   account: EmployeeAccount;
   attempt: AiAttempt;
+  confirm: ReturnType<typeof useAiConfirm>;
+  submit: (answers: ConfirmAnswers, rehearsal: boolean) => void;
   close: () => void;
 }) {
-  const confirm = useAiConfirm(account);
   const coverLetter = useCoverLetter(account);
   const [mode, setMode] = useState<"rehearsal" | "send">("rehearsal");
   const [sending, setSending] = useState(false);
@@ -249,11 +254,7 @@ function Review({
       }
 
       setSending(false);
-      confirm.mutate({
-        id: attempt.id,
-        answers: confirmAnswers(asked, value.answers),
-        rehearsal: mode === "rehearsal",
-      });
+      submit(confirmAnswers(asked, value.answers), mode === "rehearsal");
     },
   });
 
@@ -422,35 +423,6 @@ function Review({
   );
 }
 
-function Status({ attempt }: { attempt: AiAttempt }) {
-  const reason = attemptReason(attempt.reason);
-
-  return (
-    <div className="grid gap-3">
-      <p className="font-medium">{attemptState(attempt.state)}</p>
-      {reason ? <p className="text-sm text-muted-foreground">{reason}</p> : null}
-      {attempt.state === "queued" ? (
-        <p className="text-sm text-muted-foreground">
-          {attempt.rehearsal
-            ? "Ensaio confirmado. O navegador começa a preencher o formulário em instantes."
-            : "Envio confirmado. O navegador começa a preencher o formulário em instantes."}{" "}
-          Acompanhe em Candidaturas.
-        </p>
-      ) : null}
-      {attempt.state === "assisted" ? (
-        <a
-          href={attempt.job.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={buttonVariants({ variant: "outline", className: "w-fit" })}
-        >
-          <HugeiconsIcon icon={LinkSquare02Icon} aria-hidden="true" /> Abrir vaga
-        </a>
-      ) : null}
-    </div>
-  );
-}
-
 function Attempt({
   account,
   id,
@@ -460,7 +432,22 @@ function Attempt({
   id: string;
   close: () => void;
 }) {
-  const attempt = useQuery(aiAttemptQuery(account, id));
+  const attempt = useQuery(aiAttemptProgressQuery(account, id));
+  const confirm = useAiConfirm(account);
+  const run = useAiRun(account);
+  const [reviewing, setReviewing] = useState(false);
+
+  function submit(answers: ConfirmAnswers, rehearsal: boolean) {
+    confirm.mutate(
+      { id, answers, rehearsal },
+      {
+        onSuccess(confirmed) {
+          setReviewing(false);
+          run.mutate(confirmed.id);
+        },
+      },
+    );
+  }
 
   if (attempt.isPending) {
     return (
@@ -478,19 +465,32 @@ function Attempt({
     );
   }
 
-  if (attempt.data.state === "draft" || attempt.data.state === "rehearsed") {
-    return <Review account={account} attempt={attempt.data} close={close} />;
+  if (attempt.data.state === "draft" || (reviewing && attempt.data.state === "rehearsed")) {
+    return (
+      <Review
+        account={account}
+        attempt={attempt.data}
+        confirm={confirm}
+        submit={submit}
+        close={close}
+      />
+    );
   }
 
   return (
     <>
       <DialogBody>
-        <Status attempt={attempt.data} />
+        <AttemptProgress account={account} attempt={attempt.data} runError={run.error?.message} />
       </DialogBody>
       <DialogFooter>
         <Button type="button" variant="outline" onClick={close}>
           Fechar
         </Button>
+        {attempt.data.state === "rehearsed" ? (
+          <Button type="button" onClick={() => setReviewing(true)}>
+            Revisar e enviar
+          </Button>
+        ) : null}
       </DialogFooter>
     </>
   );

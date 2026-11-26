@@ -351,6 +351,42 @@ export function useCoverLetter(account: EmployeeAccount) {
   });
 }
 
+const runningStates = new Set<AiAttempt["state"]>(["queued", "running", "submitting"]);
+
+export function isAttemptRunning(attempt: Pick<AiAttempt, "state">) {
+  return runningStates.has(attempt.state);
+}
+
+export function aiAttemptProgressQuery(account: EmployeeAccount, id: string) {
+  return queryOptions({
+    ...aiAttemptQuery(account, id),
+    refetchInterval: (query) =>
+      query.state.data && isAttemptRunning(query.state.data) ? 2_000 : false,
+  });
+}
+
+export function useAiRun(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) =>
+      settle(
+        await client()
+          ["ai-applications"]({ id })
+          .run.post(undefined, { headers: employeeAccessHeaders(account) }),
+        "Não foi possível iniciar o preenchimento.",
+      ),
+    onSuccess(attempt) {
+      queryClient.setQueryData(aiAttemptQuery(account, attempt.id).queryKey, attempt);
+    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: aiAttemptsQuery(account).queryKey }),
+        queryClient.invalidateQueries({ queryKey: careerApplicationsQuery(account).queryKey }),
+      ]),
+  });
+}
+
 export function useAiConfirm(account: EmployeeAccount) {
   const queryClient = useQueryClient();
 
