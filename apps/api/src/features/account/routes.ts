@@ -143,6 +143,16 @@ const exportResponse = t.Object({
       updatedAt: nullable,
     }),
   ),
+  careerSubscription: t.Union([
+    t.Object({
+      plan: t.String(),
+      status: t.String(),
+      currentPeriodEnd: nullable,
+      createdAt: nullable,
+      updatedAt: nullable,
+    }),
+    t.Null(),
+  ]),
 });
 
 export function accountRoutes(

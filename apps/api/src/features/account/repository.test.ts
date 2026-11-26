@@ -24,6 +24,7 @@ import {
   talentAnswers,
   talentPreferences,
   talentProfiles,
+  talentSubscriptions,
   teamMembers,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
@@ -745,6 +746,45 @@ describe.skipIf(!url)("account repository", () => {
     expect(await repository.deleteProfile(profileId)).toBe(true);
     expect(await db.select().from(applicationPackages)).toEqual([
       expect.objectContaining({ profileId: otherProfileId, coverLetter: "Alheia" }),
+    ]);
+  });
+
+  it("exports the Carreira Pro subscription without its provider id and deletes it with the profile", async () => {
+    expect((await repository.exportData(profileId))?.careerSubscription).toBeNull();
+
+    await db.insert(talentSubscriptions).values([
+      {
+        profileId,
+        status: "active",
+        providerSubscriptionId: "subs_provider_secret",
+        currentPeriodEnd: "2026-12-26",
+        createdAt: new Date("2026-11-26T12:00:00Z"),
+        updatedAt: new Date("2026-11-26T13:00:00Z"),
+      },
+      { profileId: otherProfileId, status: "pending", createdAt: null, updatedAt: null },
+    ]);
+
+    const exported = await repository.exportData(profileId);
+
+    expect(exported?.careerSubscription).toEqual({
+      plan: "carreira-pro",
+      status: "active",
+      currentPeriodEnd: "2026-12-26",
+      createdAt: "2026-11-26T12:00:00.000Z",
+      updatedAt: "2026-11-26T13:00:00.000Z",
+    });
+    expect(JSON.stringify(exported)).not.toContain("subs_provider_secret");
+    expect((await repository.exportData(otherProfileId))?.careerSubscription).toEqual({
+      plan: "carreira-pro",
+      status: "pending",
+      currentPeriodEnd: null,
+      createdAt: null,
+      updatedAt: null,
+    });
+
+    expect(await repository.deleteProfile(profileId)).toBe(true);
+    expect(await db.select().from(talentSubscriptions)).toEqual([
+      expect.objectContaining({ profileId: otherProfileId }),
     ]);
   });
 

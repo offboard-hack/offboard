@@ -19,6 +19,7 @@ import {
   talentAnswers,
   talentPreferences,
   talentProfiles,
+  talentSubscriptions,
   teamMembers,
 } from "@offboard/db/schema";
 import { and, asc, desc, eq, inArray, isNotNull, notExists, sql } from "drizzle-orm";
@@ -226,6 +227,17 @@ export function createAccountRepository(db: Database) {
       .where(eq(aiApplications.profileId, profileId))
       .orderBy(desc(aiApplications.createdAt), asc(aiApplications.id));
 
+    const [ownSubscription] = await db
+      .select({
+        plan: talentSubscriptions.plan,
+        status: talentSubscriptions.status,
+        currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
+        createdAt: talentSubscriptions.createdAt,
+        updatedAt: talentSubscriptions.updatedAt,
+      })
+      .from(talentSubscriptions)
+      .where(eq(talentSubscriptions.profileId, profileId));
+
     return {
       profile: {
         name: profile.name,
@@ -340,6 +352,13 @@ export function createAccountRepository(db: Database) {
         answer: item.answer,
         updatedAt: item.updatedAt?.toISOString() ?? null,
       })),
+      careerSubscription: ownSubscription
+        ? {
+            ...ownSubscription,
+            createdAt: ownSubscription.createdAt?.toISOString() ?? null,
+            updatedAt: ownSubscription.updatedAt?.toISOString() ?? null,
+          }
+        : null,
     };
   }
 

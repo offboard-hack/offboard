@@ -120,6 +120,13 @@
       "when": 1795740000011,
       "tag": "0016_add_resume_score_breakdown",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795740000012,
+      "tag": "0017_add_career_plans",
+      "breakpoints": true
     }
   ]
 }

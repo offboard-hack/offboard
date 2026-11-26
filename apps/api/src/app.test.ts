@@ -39,6 +39,7 @@ import {
   subscriptions,
   talentPreferences,
   talentProfiles,
+  talentSubscriptions,
   tasks,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
@@ -1023,6 +1024,27 @@ describe.skipIf(!url)("api", () => {
         aiApply: { eligible: false, consented: true, available: false },
       });
 
+      await db.insert(talentSubscriptions).values({
+        profileId: mine.id,
+        status: "active",
+        currentPeriodEnd: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      expect(await (await call(gated, "talent", "/me", "GET", mine.id)).json()).toMatchObject({
+        aiApply: { eligible: true, consented: true, available: true },
+      });
+      await repos.talent.acceptTerms(mine.id);
+
+      expect(await (await call(gated, "talent", "/me/plan", "GET", mine.id)).json()).toEqual({
+        company: { name: "Gold", includesAiApply: false, sponsoredUntil },
+        individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+        aiApply: { allowedBy: "individual" },
+        upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
+      });
+
+      await db.delete(talentSubscriptions).where(eq(talentSubscriptions.profileId, mine.id));
       await onPlan("platinum-premium");
 
       const stored = await consentOf(mine.id);

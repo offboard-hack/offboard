@@ -20,6 +20,7 @@ import { offboardingsRoutes } from "./features/offboardings/routes.js";
 import { toPublicResume } from "./features/pages/public-view.js";
 import { pagesRoutes } from "./features/pages/routes.js";
 import { talentRoutes } from "./features/talent/routes.js";
+import { careerPlanRoutes } from "./features/career-plan/routes.js";
 import { talentAccess } from "./shared/talent-access.js";
 import { companySponsors } from "./shared/entitlement.js";
 import { welcomeEmail, type WelcomeMessage } from "./features/talent/welcome.js";
@@ -136,7 +137,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
   const runner = {
     repo: repos.aiApply,
-    companyPlan: repos.billing.companyPlan,
+    allowedBy: repos.careerPlan.allowedBy,
     browserbase: options.browserbase && createBrowserbase(fetchBrowser, options.browserbase),
     openPage: (connectUrl: string) => openPage(fetchBrowser, connectUrl),
     storage: options.storage,
@@ -353,11 +354,12 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         talent,
         (profile) => options.sendEmail(welcomeEmail(profile, webOrigin)),
         {
-          companyPlan: repos.billing.companyPlan,
+          allowedBy: repos.careerPlan.allowedBy,
           configured: options.generateStructured !== undefined && options.browserbase !== undefined,
         },
       ),
     )
+    .use(careerPlanRoutes(repos.careerPlan, talent))
     .use(jobsRoutes(repos.jobs, talent))
     .use(applicationsRoutes(repos.applications, talent, publicPageUrl))
     .use(
@@ -398,7 +400,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     )
     .use(
       aiApplyRoutes(repos.aiApply, talent, {
-        companyPlan: repos.billing.companyPlan,
+        allowedBy: repos.careerPlan.allowedBy,
         generate: options.generateStructured,
         runnerConfigured: options.browserbase !== undefined,
         takeLlmCall: repos.llmUsage.takeLlmCall,

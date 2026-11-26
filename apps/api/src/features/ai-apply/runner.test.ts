@@ -14,6 +14,7 @@ import {
   subscriptions,
   talentPreferences,
   talentProfiles,
+  talentSubscriptions,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
@@ -558,7 +559,7 @@ describe.skipIf(!url)("ai apply runner", () => {
 
     const deps: RunnerDeps = {
       repo: repos.aiApply,
-      companyPlan: repos.billing.companyPlan,
+      allowedBy: repos.careerPlan.allowedBy,
       browserbase: bb.browserbase,
       openPage: async (connectUrl) => {
         opened.push(connectUrl);
@@ -645,6 +646,36 @@ describe.skipIf(!url)("ai apply runner", () => {
       ]);
       expect(run.released).toEqual(["session-1"]);
       expect(run.closes()).toBe(1);
+    });
+
+    it("runs for a person with Carreira Pro whose company has no top plan", async () => {
+      const { id, profileId } = await attempt();
+      const asked: [string, Date][] = [];
+
+      await onPlan("gold");
+
+      const run = rig({
+        deps: {
+          allowedBy: async (owner, at) => {
+            asked.push([owner, at]);
+
+            return repos.careerPlan.allowedBy(owner, at);
+          },
+        },
+      });
+
+      await db.insert(talentSubscriptions).values({
+        profileId,
+        status: "active",
+        currentPeriodEnd: "2026-11-25",
+        createdAt: clock,
+        updatedAt: clock,
+      });
+
+      await runAiApplication(run.deps, id, now);
+
+      expect((await stateOf(id)).state).toBe("submitted");
+      expect(asked).toEqual([[profileId, clock]]);
     });
 
     it("opens the canonical Greenhouse form instead of the listed job URL", async () => {
@@ -1691,6 +1722,17 @@ describe.skipIf(!url)("ai apply runner", () => {
         "a company that dropped from the top plan",
         async () => {
           await onPlan("gold");
+        },
+        {},
+        { state: "cancelled", reason: "not_allowed" },
+      ],
+      [
+        "a sponsorship date that passed",
+        async (setup: { profileId: string }) => {
+          await db
+            .update(talentProfiles)
+            .set({ sponsoredUntil: "2026-11-24" })
+            .where(eq(talentProfiles.id, setup.profileId));
         },
         {},
         { state: "cancelled", reason: "not_allowed" },
