@@ -5,7 +5,7 @@ export type CareerPlan = {
     status: "pending" | "active" | "past_due" | "canceled";
     currentPeriodEnd: string | null;
   } | null;
-  aiApply: { allowedBy: "company" | "individual" | null };
+  aiApply: { allowedBy: "company" | "individual" | "benefit" | null };
   upgrade: { offered: boolean; priceCents: number; dailyLimit: number };
 };
 

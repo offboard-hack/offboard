@@ -2,6 +2,7 @@ import { cors } from "@elysia/cors";
 import { Elysia, ElysiaCustomStatusResponse, t } from "elysia";
 import { actionConfigsRoutes } from "./features/action-configs/routes.js";
 import { fireActions } from "./features/action-configs/actions.js";
+import { saoPauloDate } from "./shared/sao-paulo-date.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 import { employeeRoutes } from "./features/employee/routes.js";
 import { applicationsRoutes } from "./features/applications/routes.js";
@@ -124,6 +125,8 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     talent: repos.talent,
     companyActive,
     individualPlan: repos.careerPlan.individual,
+    benefitPlan: (profileId) =>
+      repos.benefits.getEffectiveBenefit(profileId, saoPauloDate(new Date())),
   });
 
   const fetchGreenhouse = options.fetchGreenhouseImpl ?? fetch;

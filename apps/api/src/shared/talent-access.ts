@@ -1,11 +1,13 @@
 import { Elysia } from "elysia";
 import type { PortalAuth } from "./portal-auth.js";
 import {
+  benefitEntitlement,
   entitlementOf,
   individualEntitlement,
   type Entitlement,
   type IndividualPlan,
 } from "./entitlement.js";
+import { saoPauloDate } from "./sao-paulo-date.js";
 import type { TalentProfile } from "./talent-profile.js";
 
 const collaboratorEntitlement: Entitlement = { kind: "sponsored", until: null };
@@ -22,6 +24,9 @@ export function talentAccess(deps: {
   };
   companyActive: (orgId: string) => Promise<boolean>;
   individualPlan: (profileId: string) => Promise<IndividualPlan | null>;
+  benefitPlan?: (
+    profileId: string,
+  ) => Promise<{ aiApplyDailyLimit: number; validUntil: string } | null>;
   now?: () => Date;
 }) {
   const now = deps.now ?? (() => new Date());
@@ -66,10 +71,15 @@ export function talentAccess(deps: {
           now: at,
         });
 
-        const entitlement: Entitlement =
-          sponsored.kind === "lapsed"
-            ? individualEntitlement(await deps.individualPlan(me.id), at)
+        const benefit: Entitlement =
+          sponsored.kind === "lapsed" && deps.benefitPlan
+            ? benefitEntitlement(await deps.benefitPlan(me.id), saoPauloDate(at))
             : sponsored;
+
+        const entitlement: Entitlement =
+          benefit.kind === "lapsed"
+            ? individualEntitlement(await deps.individualPlan(me.id), at)
+            : benefit;
 
         if (mode === "active") {
           if (me.termsAcceptedAt === null) return status(403, { error: "Terms not accepted" });

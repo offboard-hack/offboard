@@ -1058,7 +1058,8 @@ describe.skipIf(!url)("api", () => {
       expect(await (await call(gated, "talent", "/me/plan", "GET", mine.id)).json()).toEqual({
         company: { name: "Gold", includesAiApply: false, sponsoredUntil },
         individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
-        aiApply: { allowedBy: "individual" },
+        benefit: null,
+        aiApply: { allowedBy: "individual", dailyLimit: 10 },
         upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
       });
 

@@ -1,5 +1,6 @@
 import type { Database } from "@offboard/db/client";
 import {
+  benefitAssignments,
   employeeAccess,
   offboardingCases,
   plans,
@@ -19,6 +20,24 @@ export function createCareerPlanRepository(db: Database) {
       .innerJoin(plans, eq(plans.id, subscriptions.planId))
       .where(eq(subscriptions.orgId, orgId))
       .orderBy(desc(subscriptions.createdAt))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async function benefitOf(profileId: string) {
+    const [row] = await db
+      .select({
+        planName: plans.name,
+        aiApplyDailyLimit: plans.aiApplyDailyLimit,
+        aiApplyPriority: plans.aiApplyPriority,
+        detailedScore: plans.detailedScore,
+        validUntil: benefitAssignments.validUntil,
+        source: benefitAssignments.source,
+      })
+      .from(benefitAssignments)
+      .innerJoin(plans, eq(plans.id, benefitAssignments.effectivePlanId))
+      .where(eq(benefitAssignments.profileId, profileId))
       .limit(1);
 
     return row ?? null;
@@ -58,7 +77,10 @@ export function createCareerPlanRepository(db: Database) {
 
     const { orgId, ...standing } = row;
 
-    return careerPlanOf({ ...standing, company: await companyOf(orgId) }, now);
+    return careerPlanOf(
+      { ...standing, company: await companyOf(orgId), benefit: await benefitOf(profileId) },
+      now,
+    );
   }
 
   async function allowedBy(profileId: string, now: Date) {

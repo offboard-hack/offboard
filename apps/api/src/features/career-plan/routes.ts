@@ -26,8 +26,25 @@ const careerPlanResponse = t.Object({
     }),
     t.Null(),
   ]),
+  benefit: t.Union([
+    t.Object({
+      planName: t.String(),
+      aiApplyDailyLimit: t.Number(),
+      aiApplyPriority: t.Boolean(),
+      detailedScore: t.Boolean(),
+      validUntil: t.String(),
+      source: t.Union([t.Literal("default"), t.Literal("rule"), t.Literal("manual")]),
+    }),
+    t.Null(),
+  ]),
   aiApply: t.Object({
-    allowedBy: t.Union([t.Literal("company"), t.Literal("individual"), t.Null()]),
+    allowedBy: t.Union([
+      t.Literal("company"),
+      t.Literal("individual"),
+      t.Literal("benefit"),
+      t.Null(),
+    ]),
+    dailyLimit: t.Number(),
   }),
   upgrade: t.Object({
     offered: t.Boolean(),
