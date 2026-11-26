@@ -10,7 +10,7 @@ import { logFailure, logFailureCode } from "../../shared/error-summary.js";
 import type { ObjectStorage } from "../../shared/object-storage.js";
 import { renderLetterPdf } from "../../shared/resume-pdf.js";
 import { shareFilteredResume } from "../../shared/shared-resume.js";
-import type { createBrowserbase } from "./browser/browserbase.js";
+import { BrowserbaseError, type createBrowserbase } from "./browser/browserbase.js";
 import type { Page } from "./browser/cdp.js";
 import {
   awaitOutcome,
@@ -40,7 +40,7 @@ type Ending = {
   reason: string | null;
 };
 
-type Outcome = { state: "submitted"; reason: null } | Ending;
+type Outcome = { state: "submitted"; reason: null } | { state: "queued"; reason: null } | Ending;
 
 type Account = { firstName: string; lastName: string; email: string };
 
@@ -48,6 +48,7 @@ type Run = {
   deps: RunnerDeps;
   browserbase: NonNullable<RunnerDeps["browserbase"]>;
   run: Runnable;
+  formUrl: string;
   resume: ResumeContent;
   confirmed: ConfirmedAnswer[];
   attemptId: string;
@@ -66,6 +67,8 @@ const uploadDir = "/tmp/.uploads/";
 const resumeFile = "curriculo.pdf";
 const letterFile = "carta-de-apresentacao.pdf";
 const submitMarginMs = 15_000;
+const busyRetryMs = 5 * 60_000;
+const busyStatuses = new Set([402, 429]);
 
 const skipped = { skipped: true } as const;
 
@@ -78,16 +81,24 @@ const changedAfter = (at: Date | null, confirmedAt: Date) => at !== null && at >
 const assisted = (reason: string) => ({ state: "assisted", reason }) satisfies Ending;
 const cancelled = (reason: string) => ({ state: "cancelled", reason }) satisfies Ending;
 const needsCheck = { state: "needs_check", reason: null } satisfies Ending;
+const requeued = { state: "queued", reason: null } satisfies Outcome;
 
 const afterClick = {
   confirmed: { state: "submitted", reason: null },
-  blocked: assisted("blocked"),
+  blocked: needsCheck,
   invalid: assisted("form_changed"),
   timeout: needsCheck,
 } satisfies Record<Awaited<ReturnType<typeof awaitOutcome>>, Outcome>;
 
 const firstField = (questions: FormQuestion[], name: string) =>
   questions.find((question) => question.fields[0]?.name === name);
+
+function foreignPhone(questions: FormQuestion[], confirmed: ConfirmedAnswer[]) {
+  const phone = firstField(questions, "phone");
+  const value = confirmed.find((answer) => answer.questionId === phone?.id)?.value;
+
+  return [value ?? ""].flat().some((item) => /^\+(?!55)/.test(item));
+}
 
 function refusal(run: Runnable, allowlist: string[]) {
   const { profile } = run;
@@ -181,12 +192,19 @@ async function rendered(ready: Run, letter: string | null) {
 }
 
 async function operate(ready: Run, progress: Progress, deadline: number) {
-  const { deps, browserbase, run, confirmed, attemptId, now } = ready;
+  const { deps, browserbase, run, formUrl, confirmed, attemptId, now } = ready;
   const { questions } = run.attempt.form;
   const { rehearsal } = run.attempt;
   const letter = letterPlan(questions, run.coverLetter);
   const files = rehearsal ? [] : await rendered(ready, letter.file);
-  const session = await browserbase.createSession();
+
+  const session = await browserbase.createSession().catch((cause) => {
+    if (cause instanceof BrowserbaseError && busyStatuses.has(cause.status)) return undefined;
+
+    throw cause;
+  });
+
+  if (session === undefined) return requeued;
 
   progress.sessionId = session.id;
 
@@ -211,7 +229,7 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
   progress.page = page;
 
   withinBudget(deadline);
-  await page.navigate(run.job.url);
+  await page.navigate(formUrl);
 
   const live = await readLiveForm(page);
 
@@ -281,6 +299,8 @@ async function record(ready: Run, progress: Progress, outcome: Outcome) {
   const { deps, attemptId, now } = ready;
   const { evidence, screenshotKey } = progress;
 
+  if (outcome.state === "queued") return deps.repo.requeue(attemptId, now());
+
   if (outcome.state === "submitted") {
     const result = await deps.repo.submittedWithApplication(
       attemptId,
@@ -290,12 +310,12 @@ async function record(ready: Run, progress: Progress, outcome: Outcome) {
 
     if (result !== "submitted") logFailure("AI application result lost")(new Error(result));
 
-    return;
+    return result !== "lost";
   }
 
   const from = progress.submitting ? "submitting" : "running";
 
-  await deps.repo.finish(attemptId, [from], { ...outcome, evidence, screenshotKey }, now());
+  return deps.repo.finish(attemptId, [from], { ...outcome, evidence, screenshotKey }, now());
 }
 
 async function drive(ready: Run, deadline: number) {
@@ -328,11 +348,23 @@ async function drive(ready: Run, deadline: number) {
     }
   }
 
-  await record(ready, progress, outcome).catch(logFailureCode("AI application result not saved"));
+  const saved = await record(ready, progress, outcome).catch(
+    logFailureCode("AI application result not saved"),
+  );
+
+  if (saved !== true && progress.screenshotKey !== null) {
+    await ready.deps.storage
+      ?.remove([progress.screenshotKey])
+      .catch(logFailureCode("AI application screenshot not removed"));
+  }
 
   if (sessionId !== undefined) {
     await ready.browserbase.release(sessionId).catch(logFailure("Browserbase release failed"));
   }
+
+  return outcome.state === "queued"
+    ? { postponeUntil: new Date(ready.now().getTime() + busyRetryMs) }
+    : undefined;
 }
 
 export async function runAiApplication(deps: RunnerDeps, attemptId: string, now: () => Date) {
@@ -363,11 +395,19 @@ export async function runAiApplication(deps: RunnerDeps, attemptId: string, now:
   }
 
   const { browserbase } = deps;
-  const { resume } = run;
+  const { resume, formUrl } = run;
   const { confirmedAt } = run.attempt;
 
-  if (browserbase === undefined || resume === null || confirmed === null || confirmedAt === null) {
-    logFailure("AI application cannot run")(new Error("Browserbase or the résumé is missing"));
+  if (
+    browserbase === undefined ||
+    resume === null ||
+    confirmed === null ||
+    confirmedAt === null ||
+    formUrl === null
+  ) {
+    logFailure("AI application cannot run")(
+      new Error("Browserbase, the résumé or the form URL is missing"),
+    );
     await deps.repo.finish(attemptId, ["queued", "running"], assisted("error"), now());
 
     return skipped;
@@ -375,9 +415,16 @@ export async function runAiApplication(deps: RunnerDeps, attemptId: string, now:
 
   if (
     changedAfter(run.resumeUpdatedAt, confirmedAt) ||
-    changedAfter(run.letterUpdatedAt, confirmedAt)
+    changedAfter(run.letterUpdatedAt, confirmedAt) ||
+    changedAfter(run.preferencesUpdatedAt, confirmedAt)
   ) {
     await deps.repo.finish(attemptId, ["queued", "running"], assisted("files_changed"), now());
+
+    return skipped;
+  }
+
+  if (foreignPhone(run.attempt.form.questions, confirmed)) {
+    await deps.repo.finish(attemptId, ["queued", "running"], assisted("form_changed"), now());
 
     return skipped;
   }
@@ -386,5 +433,5 @@ export async function runAiApplication(deps: RunnerDeps, attemptId: string, now:
 
   const deadline = Date.now() + deps.budgetMs;
 
-  await drive({ deps, browserbase, run, resume, confirmed, attemptId, now }, deadline);
+  return drive({ deps, browserbase, run, formUrl, resume, confirmed, attemptId, now }, deadline);
 }

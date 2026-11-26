@@ -10,6 +10,7 @@ import {
   jobs,
   offboardingCases,
   resumes,
+  talentPreferences,
   talentProfiles,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
@@ -331,7 +332,7 @@ const fakePage = (setup: PageSetup = {}) => {
 type Upload = { sessionId: string; name: string; bytes: Uint8Array; type: string };
 
 const fakeBrowserbase = (
-  setup: { failCreate?: boolean; failUpload?: boolean; failRelease?: boolean } = {},
+  setup: { failCreate?: number; failUpload?: boolean; failRelease?: boolean } = {},
 ) => {
   const uploads: Upload[] = [];
   const released: string[] = [];
@@ -341,7 +342,9 @@ const fakeBrowserbase = (
     async createSession() {
       created += 1;
 
-      if (setup.failCreate) throw new BrowserbaseError("create session", 429);
+      if (setup.failCreate !== undefined) {
+        throw new BrowserbaseError("create session", setup.failCreate);
+      }
 
       return { id: "session-1", connectUrl: "wss://connect.test/session-1" };
     },
@@ -360,20 +363,33 @@ const fakeBrowserbase = (
   return { browserbase, uploads, released, created: () => created };
 };
 
-const fakeStorage = () => {
+const fakeStorage = (setup: { failRemove?: boolean } = {}) => {
   const stored: { key: string; data: Uint8Array; contentType: string }[] = [];
+  const objects = new Map<string, Uint8Array>();
 
   return {
     stored,
+    objects,
     storage: {
       async put(key: string, data: Uint8Array, contentType: string) {
         stored.push({ key, data, contentType });
+        objects.set(key, data);
       },
-      async get() {
-        return null;
+      async get(key: string) {
+        return objects.get(key) ?? null;
       },
-      async remove() {},
-      async removePrefix() {},
+      async remove(keys: string[]) {
+        if (setup.failRemove) {
+          throw Object.assign(new Error(`cannot remove ${keys.join(",")}`), { code: "EACCES" });
+        }
+
+        for (const key of keys) objects.delete(key);
+      },
+      async removePrefix(prefix: string) {
+        for (const key of objects.keys()) {
+          if (key.startsWith(prefix)) objects.delete(key);
+        }
+      },
     },
   };
 };
@@ -439,6 +455,7 @@ describe.skipIf(!url)("ai apply runner", () => {
     state?: "queued" | "running" | "submitting" | "rehearsed";
     updatedAt?: Date;
     letter?: string;
+    jobUrl?: string;
   };
 
   async function attempt(setup: AttemptSetup = {}) {
@@ -457,7 +474,7 @@ describe.skipIf(!url)("ai apply runner", () => {
         sourceKey: "acme:7",
         title: "Backend",
         company: "Acme",
-        url: jobUrl,
+        url: setup.jobUrl ?? jobUrl,
       })
       .returning({ id: jobs.id });
 
@@ -495,6 +512,7 @@ describe.skipIf(!url)("ai apply runner", () => {
   type Rig = {
     page?: PageSetup;
     browserbase?: Parameters<typeof fakeBrowserbase>[0];
+    storage?: Parameters<typeof fakeStorage>[0];
     deps?: Partial<RunnerDeps>;
     failConnect?: boolean;
   };
@@ -502,7 +520,7 @@ describe.skipIf(!url)("ai apply runner", () => {
   function rig(setup: Rig = {}) {
     const fake = fakePage(setup.page);
     const bb = fakeBrowserbase(setup.browserbase);
-    const files = fakeStorage();
+    const files = fakeStorage(setup.storage);
     const opened: string[] = [];
     const rendered: { name: string; content: ResumeContent }[] = [];
 
@@ -595,6 +613,16 @@ describe.skipIf(!url)("ai apply runner", () => {
       ]);
       expect(run.released).toEqual(["session-1"]);
       expect(run.closes()).toBe(1);
+    });
+
+    it("opens the canonical Greenhouse form instead of the listed job URL", async () => {
+      const { id } = await attempt({ jobUrl: "https://careers.acme.com/vagas?gh_jid=7" });
+      const run = rig();
+
+      await runAiApplication(run.deps, id, now);
+
+      expect((await stateOf(id)).state).toBe("submitted");
+      expect(run.actions[0]).toBe("navigate https://job-boards.greenhouse.io/acme/jobs/7");
     });
 
     it("types the cover letter where the form takes text", async () => {
@@ -808,15 +836,16 @@ describe.skipIf(!url)("ai apply runner", () => {
   });
 
   describe("outcomes after the click", () => {
-    it("treats a visible captcha as blocked", async () => {
+    it("asks for a check when a captcha shows after the click", async () => {
       const { id, profileId } = await attempt();
       const run = rig({ page: { outcome: "blocked" } });
 
       await runAiApplication(run.deps, id, now);
 
       expect(await stateOf(id)).toMatchObject({
-        state: "assisted",
-        reason: "blocked",
+        state: "needs_check",
+        reason: null,
+        finishedAt: null,
         screenshotKey: `ai-applications/${profileId}/${id}.png`,
       });
       expect(run.submits()).toBe(1);
@@ -856,7 +885,11 @@ describe.skipIf(!url)("ai apply runner", () => {
 
       await runAiApplication(run.deps, id, now);
 
-      expect(await stateOf(id)).toMatchObject({ state: "needs_check" });
+      expect(await stateOf(id)).toMatchObject({
+        state: "needs_check",
+        screenshotKey: `ai-applications/${profileId}/${id}.png`,
+      });
+      expect([...run.objects.keys()]).toEqual([`ai-applications/${profileId}/${id}.png`]);
       expect(await db.select().from(applications)).toHaveLength(1);
       expect(logged).toHaveBeenCalledWith("AI application result lost", {
         name: "Error",
@@ -1142,6 +1175,65 @@ describe.skipIf(!url)("ai apply runner", () => {
       expect(run.created()).toBe(0);
     });
 
+    it("stops before a browser when the share settings changed after confirm", async () => {
+      const { id, profileId } = await attempt();
+
+      await db.insert(talentPreferences).values({
+        profileId,
+        createdAt: earlier(),
+        updatedAt: new Date(Date.now() + 60_000),
+      });
+
+      const run = rig();
+
+      expect(await runAiApplication(run.deps, id, now)).toEqual({ skipped: true });
+      expect(await stateOf(id)).toMatchObject({ state: "assisted", reason: "files_changed" });
+      expect(run.created()).toBe(0);
+
+      await seedDatabase(db, testSeedFixtures);
+
+      const unchanged = await attempt();
+
+      await db
+        .insert(talentPreferences)
+        .values({ profileId: unchanged.profileId, createdAt: earlier(), updatedAt: earlier() });
+
+      await runAiApplication(run.deps, unchanged.id, now);
+
+      expect((await stateOf(unchanged.id)).state).toBe("submitted");
+    });
+
+    it("hands a foreign phone number back before a browser", async () => {
+      const phone = question("phone", "Telefone", "phone", [text("phone")]);
+      const questions = [...baseQuestions, phone];
+
+      const { id } = await attempt({
+        questions,
+        confirmed: [...baseConfirmed, { questionId: "phone", value: "+1 415 555 0100" }],
+      });
+
+      const run = rig({ page: { questions } });
+
+      expect(await runAiApplication(run.deps, id, now)).toEqual({ skipped: true });
+      expect(await stateOf(id)).toMatchObject({
+        state: "assisted",
+        reason: "form_changed",
+        finishedAt: clock,
+      });
+      expect(run.created()).toBe(0);
+
+      await seedDatabase(db, testSeedFixtures);
+
+      const brazilian = await attempt({
+        questions,
+        confirmed: [...baseConfirmed, { questionId: "phone", value: "+55 11 97777-6666" }],
+      });
+
+      await runAiApplication(run.deps, brazilian.id, now);
+
+      expect(run.created()).toBe(1);
+    });
+
     it("stops at the run deadline before uploading", async () => {
       const { id } = await attempt();
       const run = rig({ deps: { budgetMs: 0 } });
@@ -1230,7 +1322,7 @@ describe.skipIf(!url)("ai apply runner", () => {
 
     it("needs no release when no session was created", async () => {
       const { id } = await attempt();
-      const run = rig({ browserbase: { failCreate: true } });
+      const run = rig({ browserbase: { failCreate: 503 } });
       const logged = vi.spyOn(console, "error");
 
       await runAiApplication(run.deps, id, now);
@@ -1244,9 +1336,33 @@ describe.skipIf(!url)("ai apply runner", () => {
       expect(run.opened).toEqual([]);
       expect(logged).toHaveBeenCalledWith("AI application run failed", {
         name: "BrowserbaseError",
-        message: "Browserbase create session failed with status 429",
+        message: "Browserbase create session failed with status 503",
       });
     });
+
+    for (const status of [429, 402]) {
+      it(`queues the attempt again when Browserbase answers ${status}`, async () => {
+        const { id } = await attempt();
+        const run = rig({ browserbase: { failCreate: status } });
+
+        expect(await runAiApplication(run.deps, id, now)).toEqual({
+          postponeUntil: new Date(clock.getTime() + 5 * 60_000),
+        });
+
+        expect(await stateOf(id)).toMatchObject({
+          state: "queued",
+          reason: null,
+          finishedAt: null,
+          updatedAt: clock,
+        });
+        expect(run.created()).toBe(1);
+        expect(run.opened).toEqual([]);
+        expect(run.released).toEqual([]);
+
+        expect(await runAiApplication(rig().deps, id, now)).toBeUndefined();
+        expect((await stateOf(id)).state).toBe("submitted");
+      });
+    }
 
     it("logs a failed save without the evidence it carried", async () => {
       const { id } = await attempt();
@@ -1286,7 +1402,103 @@ describe.skipIf(!url)("ai apply runner", () => {
       await expect(runAiApplication(run.deps, id, now)).resolves.toBeUndefined();
 
       expect(run.released).toEqual(["session-1"]);
+      expect(run.stored).toHaveLength(1);
+      expect(run.objects.size).toBe(0);
       expect(logged).toHaveBeenCalledWith("AI application result not saved", { name: "Error" });
+    });
+  });
+
+  describe("never leaves an orphan screenshot", () => {
+    it("removes the screenshot when the account is deleted during a rehearsal fill", async () => {
+      const { id, profileId } = await attempt({ rehearsal: true });
+
+      const run = rig({
+        page: {
+          duringFill: async () => {
+            await run.storage.removePrefix(`ai-applications/${profileId}/`);
+            expect(await repos.account.deleteProfile(profileId)).toBe(true);
+          },
+        },
+      });
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(await stateOf(id)).toBeUndefined();
+      expect(run.stored.map((object) => object.key)).toEqual([
+        `ai-applications/${profileId}/${id}.png`,
+      ]);
+      expect(run.objects.size).toBe(0);
+      expect(run.released).toEqual(["session-1"]);
+    });
+
+    it("removes the screenshot when a manual application cancels a running rehearsal", async () => {
+      const { id, profileId, jobId, resumeId } = await attempt({ rehearsal: true });
+
+      const run = rig({
+        page: {
+          duringFill: async () => {
+            expect(await repos.applications.apply(profileId, jobId, resumeId)).toMatchObject({
+              applicationId: expect.any(String),
+            });
+          },
+        },
+      });
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(await stateOf(id)).toMatchObject({
+        state: "cancelled",
+        reason: "applied_manually",
+        screenshotKey: null,
+        evidence: null,
+      });
+      expect(run.stored).toHaveLength(1);
+      expect(run.objects.size).toBe(0);
+    });
+
+    it("cancels a running rehearsal on withdrawn consent and removes its screenshot", async () => {
+      const { id, profileId } = await attempt({ rehearsal: true });
+
+      const run = rig({
+        page: {
+          duringFill: async () => {
+            await repos.talent.setAiApplyConsent(profileId, false, new Date());
+          },
+        },
+      });
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(await stateOf(id)).toMatchObject({
+        state: "cancelled",
+        reason: "consent_withdrawn",
+        screenshotKey: null,
+      });
+      expect(run.stored).toHaveLength(1);
+      expect(run.objects.size).toBe(0);
+    });
+
+    it("logs a screenshot it could not remove by name and code only", async () => {
+      const { id, profileId } = await attempt({ rehearsal: true });
+      const logged = vi.spyOn(console, "error");
+
+      const run = rig({
+        storage: { failRemove: true },
+        page: {
+          duringFill: async () => {
+            await repos.account.deleteProfile(profileId);
+          },
+        },
+      });
+
+      await expect(runAiApplication(run.deps, id, now)).resolves.toBeUndefined();
+
+      expect(logged).toHaveBeenCalledWith("AI application screenshot not removed", {
+        name: "Error",
+        code: "EACCES",
+      });
+      expect(JSON.stringify(logged.mock.calls)).not.toContain(profileId);
+      expect(run.released).toEqual(["session-1"]);
     });
   });
 
@@ -1329,6 +1541,14 @@ describe.skipIf(!url)("ai apply runner", () => {
         "Browserbase not configured",
         async () => undefined,
         { browserbase: undefined },
+        { state: "assisted", reason: "error" },
+      ],
+      [
+        "an unreadable job key",
+        async (setup: { jobId: string }) => {
+          await db.update(jobs).set({ sourceKey: "acme" }).where(eq(jobs.id, setup.jobId));
+        },
+        {},
         { state: "assisted", reason: "error" },
       ],
       [

@@ -25,11 +25,26 @@ describe("logUnhandled", () => {
       cause: { code: "23514", detail: "Marina Lopes" },
     });
 
+    const own = Object.assign(new Error("connect ECONNREFUSED Marina Lopes"), {
+      code: "ECONNREFUSED",
+    });
+
+    const both = Object.assign(new Error("Marina Lopes"), {
+      code: "ERR_DB",
+      cause: { code: "23505" },
+    });
+
     logUnhandled(failure);
+    logUnhandled(own);
+    logUnhandled(both);
+    logUnhandled(new DOMException("Marina Lopes", "TimeoutError"));
     logUnhandled("Marina Lopes");
 
     expect(log.mock.calls).toEqual([
       ["unhandled error", { name: "Error", code: "23514" }],
+      ["unhandled error", { name: "Error", code: "ECONNREFUSED" }],
+      ["unhandled error", { name: "Error", code: "23505" }],
+      ["unhandled error", { name: "TimeoutError" }],
       ["unhandled error", { name: "Unknown" }],
     ]);
 

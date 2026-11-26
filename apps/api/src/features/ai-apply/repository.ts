@@ -343,6 +343,8 @@ export function createAiApplyRepository(db: Database) {
             rehearsal: confirmation.rehearsal,
             confirmedAt: now,
             finishedAt: null,
+            evidence: null,
+            screenshotKey: null,
             updatedAt: now,
           })
           .where(
@@ -435,7 +437,7 @@ export function createAiApplyRepository(db: Database) {
     const [row] = await db
       .select({
         attempt: aiApplications,
-        job: { url: jobs.url, closedAt: jobs.closedAt },
+        job: { sourceKey: jobs.sourceKey, closedAt: jobs.closedAt },
         profile: {
           name: talentProfiles.name,
           email: talentProfiles.personalEmail,
@@ -445,6 +447,7 @@ export function createAiApplyRepository(db: Database) {
         resumeUpdatedAt: resumes.updatedAt,
         coverLetter: applicationPackages.coverLetter,
         letterUpdatedAt: applicationPackages.updatedAt,
+        preferencesUpdatedAt: talentPreferences.updatedAt,
       })
       .from(aiApplications)
       .innerJoin(jobs, eq(jobs.id, aiApplications.jobId))
@@ -457,11 +460,18 @@ export function createAiApplyRepository(db: Database) {
           eq(applicationPackages.jobId, aiApplications.jobId),
         ),
       )
+      .leftJoin(talentPreferences, eq(talentPreferences.profileId, aiApplications.profileId))
       .where(eq(aiApplications.id, id));
 
-    return row === undefined
-      ? undefined
-      : { ...row, applied: await hasApplied(row.attempt.profileId, row.attempt.jobId) };
+    if (row === undefined) return undefined;
+
+    const key = sourceKey.exec(row.job.sourceKey);
+
+    return {
+      ...row,
+      formUrl: key === null ? null : `https://job-boards.greenhouse.io/${key[1]}/jobs/${key[2]}`,
+      applied: await hasApplied(row.attempt.profileId, row.attempt.jobId),
+    };
   }
 
   async function queuedIds() {
@@ -489,6 +499,16 @@ export function createAiApplyRepository(db: Database) {
           ),
         ),
       )
+      .returning({ id: aiApplications.id });
+
+    return rows.length > 0;
+  }
+
+  async function requeue(id: string, now: Date) {
+    const rows = await db
+      .update(aiApplications)
+      .set({ state: "queued", updatedAt: now })
+      .where(and(eq(aiApplications.id, id), eq(aiApplications.state, "running")))
       .returning({ id: aiApplications.id });
 
     return rows.length > 0;
@@ -638,6 +658,7 @@ export function createAiApplyRepository(db: Database) {
     queuedIds,
     sweepStale,
     claimForRun,
+    requeue,
     markSubmitting,
     finish,
     submittedWithApplication,

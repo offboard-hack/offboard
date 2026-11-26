@@ -60,7 +60,7 @@ const standardKinds = new Map<string, QuestionKind>([
 ]);
 
 export const cityLabelPattern =
-  /^(?!.*(?:natal|nascimento|relocat\w*|mudar|gostaria)).*(?:\bcidade\b|localizacao|\blocation\b|onde (?:voce )?mora|\breside\b|\bresidencia\b)/;
+  /^(?!.*(?:natal|nascimento|relocat\w*|mudar|gostaria)).*(?:\bcidade\b|\blocalizacao|\blocation\b|onde (?:voce )?mora|\breside\b|\bresidencia\b)/;
 
 const labelKinds: [RegExp, QuestionKind][] = [
   [/linkedin/, "linkedin"],

@@ -980,6 +980,7 @@ describe.skipIf(!url)("api", () => {
 
       const draft = await seedAttempt(mine.id, "ai-draft", "draft");
       const queued = await seedAttempt(mine.id, "ai-queued", "queued");
+      const running = await seedAttempt(mine.id, "ai-running", "running");
       const submitted = await seedAttempt(mine.id, "ai-submitted", "submitted");
       const others = await seedAttempt(other.id, "ai-other", "draft");
 
@@ -1005,7 +1006,7 @@ describe.skipIf(!url)("api", () => {
       });
       expect(await consentOf(mine.id)).toEqual({ at: null, version: null });
 
-      for (const id of [draft, queued]) {
+      for (const id of [draft, queued, running]) {
         expect(await stateOf(id)).toEqual({
           state: "cancelled",
           reason: "consent_withdrawn",
@@ -1429,6 +1430,12 @@ describe.skipIf(!url)("api", () => {
 
         expect(JSON.stringify(logged.mock.calls)).not.toContain("ana@example.com");
         expect(JSON.stringify(logged.mock.calls)).not.toContain("10.0.0.7");
+        expect(logged).toHaveBeenCalledWith("unhandled error", {
+          name: "Error",
+          code: "ECONNREFUSED",
+        });
+        expect(logged).toHaveBeenCalledWith("unhandled error", { name: "TimeoutError" });
+        expect(logged).toHaveBeenCalledWith("unhandled error", { name: "Error" });
       } finally {
         logged.mockRestore();
       }

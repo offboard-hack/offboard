@@ -2,7 +2,7 @@ import type { FormQuestion, ResumeContent } from "@offboard/db/schema";
 import { Elysia, t } from "elysia";
 import { aiApplyAccess } from "../../shared/ai-apply-access.js";
 import type { GenerateStructured } from "../../shared/ai.js";
-import { logFailure } from "../../shared/error-summary.js";
+import { logFailure, logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import type { UsageRepository } from "../../shared/llm-usage.js";
 import type { ObjectStorage } from "../../shared/object-storage.js";
@@ -269,6 +269,14 @@ export function aiApplyRoutes(
 
         if (result === "in_progress" || result === "expired" || result === "applied") {
           return status(409, { error: conflicts[result] });
+        }
+
+        const stale = found.attempt.screenshotKey;
+
+        if (stale !== null) {
+          await deps.storage
+            ?.remove([stale])
+            .catch(logFailureCode("AI application screenshot not removed"));
         }
 
         await deps.enqueueRun(result.id).catch(logFailure("AI application enqueue failed"));

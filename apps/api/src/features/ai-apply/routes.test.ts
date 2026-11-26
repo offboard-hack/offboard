@@ -2050,7 +2050,23 @@ describe.skipIf(!url)("ai apply route", () => {
       });
 
       it("confirms a rehearsed attempt again within seven days of the rehearsal", async () => {
-        const { call, profileId, jobId } = await ready();
+        const events: string[] = [];
+
+        const storage: ObjectStorage = {
+          ...memoryStorage({}).storage,
+          remove: async (keys) => {
+            events.push(`remove ${keys.join(",")}`);
+          },
+        };
+
+        const { call, profileId, jobId } = await ready({
+          storage,
+          enqueueRun: async (attemptId) => {
+            events.push("enqueue");
+            await repos.background.enqueue("ai_apply", attemptId);
+          },
+        });
+
         const day = 24 * 60 * 60 * 1000;
 
         const id = await seed(profileId, jobId, [why, pcd, source, mail, cv], {
@@ -2069,13 +2085,51 @@ describe.skipIf(!url)("ai apply route", () => {
           id,
           state: "queued",
           rehearsal: false,
-          evidence,
-          hasScreenshot: true,
+          evidence: null,
+          hasScreenshot: false,
         });
+        expect(await attempts(profileId)).toEqual([
+          expect.objectContaining({ evidence: null, screenshotKey: null }),
+        ]);
+        expect(events).toEqual([`remove ${key(profileId)}`, "enqueue"]);
         expect(await db.select().from(backgroundJobs)).toEqual([
           expect.objectContaining({ kind: "ai_apply", subject: id }),
         ]);
         expect((await library(profileId)).length).toBeGreaterThan(0);
+      });
+
+      it("still queues a re-confirmed rehearsal when its old screenshot cannot be removed", async () => {
+        const logged = vi.spyOn(console, "error");
+
+        const storage: ObjectStorage = {
+          ...memoryStorage({}).storage,
+          remove: async (keys) => {
+            throw Object.assign(new Error(`cannot remove ${keys.join(",")}`), { code: "EIO" });
+          },
+        };
+
+        const { call, profileId, jobId } = await ready({ storage });
+
+        const id = await seed(profileId, jobId, [why, pcd, source, mail, cv], {
+          state: "rehearsed",
+          rehearsal: true,
+          preparedAt: new Date(),
+          finishedAt: new Date(),
+          evidence,
+          screenshotKey: key(profileId),
+        });
+
+        const res = await call(profileId, confirmPath(id), { answers: complete });
+
+        expect(res.status).toBe(200);
+        expect(await res.json()).toMatchObject({ state: "queued", hasScreenshot: false });
+        expect(logged).toHaveBeenCalledWith("AI application screenshot not removed", {
+          name: "Error",
+          code: "EIO",
+        });
+        expect(JSON.stringify(logged.mock.calls)).not.toContain(profileId);
+
+        logged.mockRestore();
       });
 
       it("refuses to confirm a rehearsal after seven days, or from needs_check and submitted", async () => {

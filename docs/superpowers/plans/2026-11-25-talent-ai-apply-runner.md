@@ -43,7 +43,7 @@ The scheduled drain runs ordinary jobs, then at most one `ai_apply` job with its
 - **Outcomes** (`reason` values):
   - `submitted`;
   - `rehearsed`;
-  - `needs_check` (confirmation not seen within 30 s after the click);
+  - `needs_check` (confirmation not seen within 30 s after the click, or a challenge visible after it);
   - `assisted`, with reason `blocked` (captcha challenge visible or access denied), `form_changed`, `login_required`, `job_closed` (the form page says the job is closed, or 404), `upload_failed`, or `error` (anything else, logged with `logFailure` name and message only);
   - `cancelled`, with reason `consent_withdrawn` / `not_allowed` / `applied_manually` when the gate or preconditions fail at run time.
 - `TEST_DATABASE_URL=postgres://offboard:offboard@127.0.0.1:5432/offboard_talent_test` only.
@@ -127,7 +127,7 @@ The scheduled drain runs ordinary jobs, then at most one `ai_apply` job with its
 2. In `submitting` → `needs_check`, done. Otherwise, in anything but `queued`/`running` → done.
 3. Re-check the gate and preconditions. A failure gives `cancelled` with its reason, or `assisted`/`job_closed`.
 4. Set `running`, then render the files.
-5. Create the session (a Browserbase error gives `assisted`/`error`), upload the files, connect, navigate to the job's form URL, and `readLiveForm`.
+5. Create the session (Browserbase 429/402 puts the attempt back in `queued` and postpones the job 5 min; any other Browserbase error gives `assisted`/`error`), upload the files, connect, navigate to `https://job-boards.greenhouse.io/<board>/jobs/<id>` from `jobs.source_key`, and `readLiveForm`.
 6. Closed → `job_closed`; login required → `login_required`; then `checkForm`.
 7. Fill.
 8. **Rehearsal:** screenshot → `rehearsed`.
@@ -135,7 +135,7 @@ The scheduled drain runs ordinary jobs, then at most one `ai_apply` job with its
    - `markSubmitting` (if 0 rows → stop);
    - submit, then `awaitOutcome`;
    - `confirmed` → screenshot → `submittedWithApplication`;
-   - `blocked` → `assisted`/`blocked` (the click happened, but a visible challenge means nothing was accepted);
+   - `blocked` → `needs_check` (the click happened; a visible challenge does not prove nothing was accepted);
    - `invalid` → `assisted`/`form_changed`;
    - `timeout` → `needs_check`.
 10. **Always:** store evidence (`fields`: the question labels with the values sent; `files`: the file names; `finalUrl`) and release the session.

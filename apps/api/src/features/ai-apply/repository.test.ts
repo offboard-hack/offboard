@@ -503,7 +503,7 @@ describe.skipIf(!url)("ai apply repository", () => {
       return seeded;
     }
 
-    it("queues it with the new answers and keeps the rehearsal evidence", async () => {
+    it("queues it with the new answers and clears the old rehearsal evidence", async () => {
       const { id, profileId } = await rehearsed(new Date(now.getTime() - 6 * day));
 
       const result = await repos.aiApply.confirm(
@@ -514,14 +514,14 @@ describe.skipIf(!url)("ai apply repository", () => {
         save,
       );
 
-      expect(result).toMatchObject({ id, state: "queued", rehearsal: false, hasScreenshot: true });
+      expect(result).toMatchObject({ id, state: "queued", rehearsal: false, hasScreenshot: false });
       expect(await stateOf(id)).toMatchObject({
         state: "queued",
         confirmed: [{ questionId: "q", value: "x" }],
         confirmedAt: now,
         finishedAt: null,
-        evidence,
-        screenshotKey: "k.png",
+        evidence: null,
+        screenshotKey: null,
       });
     });
 

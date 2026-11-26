@@ -115,6 +115,8 @@ describe("reads a Greenhouse form", () => {
         question("LinkedIn", true, field("q4", "multi_value_single_select")),
         question("Cidade onde você mora", true, field("q5", "multi_value_single_select")),
         question("CPF", true, field("q6", "multi_value_multi_select")),
+        question("Sua localização atual", true, field("q7", "input_text")),
+        question("Relocalização", true, field("q8", "input_text")),
       ],
     });
 
@@ -125,6 +127,8 @@ describe("reads a Greenhouse form", () => {
       "custom",
       "custom",
       "custom",
+      "custom",
+      "city",
       "custom",
     ]);
   });

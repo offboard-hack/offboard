@@ -203,7 +203,7 @@ export function createTalentRepository(db: Database) {
           .where(
             and(
               eq(aiApplications.profileId, id),
-              inArray(aiApplications.state, ["draft", "queued"]),
+              inArray(aiApplications.state, ["draft", "queued", "running"]),
             ),
           );
       }
