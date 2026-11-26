@@ -6,7 +6,7 @@ import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button, buttonVariants } from "@/shared/ui/shadcn/button";
 import { Spinner } from "@/shared/ui/shadcn/spinner";
 import { EmployeeError } from "../ui";
-import { attemptReason, attemptState, evidenceValue } from "./labels";
+import { attemptReason, attemptState, evidenceValue, failedFieldNote } from "./labels";
 
 const attemptTones = {
   draft: "status-warning",
@@ -128,6 +128,7 @@ export function AttemptProgress({
   runError?: string;
 }) {
   const reason = attemptReason(attempt.reason);
+  const failed = failedFieldNote(attempt);
   const running = isAttemptRunning(attempt);
 
   return (
@@ -150,6 +151,7 @@ export function AttemptProgress({
       ) : null}
       {running && attempt.liveUrl ? <LiveView url={attempt.liveUrl} /> : null}
       {reason ? <p className="text-sm text-muted-foreground">{reason}</p> : null}
+      {failed ? <p className="text-sm wrap-anywhere">{failed}</p> : null}
       {attempt.state === "rehearsed" ? (
         <p className="text-sm">Ensaio concluído. Nada foi enviado para {attempt.job.company}.</p>
       ) : null}

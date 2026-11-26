@@ -29,6 +29,21 @@ const attention = {
   sensitive: "Pergunta sensível. A IA não responde por você.",
 } as const;
 
+const profileKinds = new Set<Question["kind"]>(["phone", "linkedin", "website", "city", "cpf"]);
+
+export function savesToProfile(
+  question: Question,
+  draft: DraftAnswer | undefined,
+  value: AnswerValue,
+) {
+  return (
+    profileKinds.has(question.kind) &&
+    draft?.status === "blank" &&
+    !Array.isArray(value) &&
+    value.trim() !== ""
+  );
+}
+
 export function fileQuestionLabel(question: Question) {
   return fileLabels.get(question.kind);
 }

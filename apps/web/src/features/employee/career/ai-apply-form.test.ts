@@ -11,6 +11,7 @@ import {
   fileQuestionLabel,
   fileQuestions,
   initialAnswer,
+  savesToProfile,
 } from "./ai-apply-form";
 
 type Question = AiAttempt["questions"][number];
@@ -171,5 +172,31 @@ describe("AI application form", () => {
       { questionId: "bare", value: null },
     ]);
     expect(confirmAnswers([multi], [[]])).toEqual([{ questionId: "multi", value: null }]);
+  });
+
+  it("tells when a typed answer will be saved to the profile", () => {
+    const draft = (status: AiAttempt["answers"][number]["status"]) => ({
+      questionId: "x",
+      value: null,
+      source: null,
+      inferred: false,
+      status,
+    });
+
+    for (const kind of ["phone", "linkedin", "website", "city", "cpf"] as const) {
+      expect(savesToProfile(question(kind, "text", { kind }), draft("blank"), " x ")).toBe(true);
+    }
+
+    const phone = question("phone", "text", { kind: "phone" });
+
+    expect(savesToProfile(phone, draft("blank"), "  ")).toBe(false);
+    expect(savesToProfile(phone, draft("blank"), ["x"])).toBe(false);
+    expect(savesToProfile(phone, draft("not_shared"), "11 9999")).toBe(false);
+    expect(savesToProfile(phone, draft("filled"), "11 9999")).toBe(false);
+    expect(savesToProfile(phone, undefined, "11 9999")).toBe(false);
+
+    for (const kind of ["address", "birth_date", "cep", "custom"] as const) {
+      expect(savesToProfile(question(kind, "text", { kind }), draft("blank"), "x")).toBe(false);
+    }
   });
 });

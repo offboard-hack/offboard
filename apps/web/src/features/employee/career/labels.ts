@@ -103,6 +103,18 @@ export function attemptReason(reason: string | null) {
   return reason === null ? null : (attemptReasons.get(reason) ?? null);
 }
 
+export function failedFieldNote(attempt: Pick<AiAttempt, "reason" | "evidence">) {
+  const field = attempt.evidence?.failedField;
+
+  if (!field) return null;
+
+  if (attempt.reason === "form_changed") {
+    return `O campo “${field}” não pôde ser preenchido (o formulário da vaga mudou).`;
+  }
+
+  return attempt.reason === "upload_failed" ? `O campo “${field}” não pôde ser preenchido.` : null;
+}
+
 export function matchScore(match: CareerJob["match"]) {
   return match ? `${match.score}% compatível` : null;
 }

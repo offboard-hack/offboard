@@ -5,6 +5,7 @@ import {
   attemptState,
   careerDate,
   evidenceValue,
+  failedFieldNote,
   isLongText,
   jobPlace,
   matchScore,
@@ -69,5 +70,24 @@ describe("career labels", () => {
     expect(isLongText("Vaga curta.")).toBe(false);
     expect(isLongText("a".repeat(401))).toBe(true);
     expect(isLongText("1\n2\n3\n4\n5\n6\n7")).toBe(true);
+  });
+
+  it("names the field the browser could not fill", () => {
+    const evidence = (failedField: string | null) => ({
+      fields: [],
+      files: [],
+      finalUrl: null,
+      failedField,
+    });
+
+    expect(failedFieldNote({ reason: "form_changed", evidence: evidence("Telefone") })).toBe(
+      "O campo “Telefone” não pôde ser preenchido (o formulário da vaga mudou).",
+    );
+    expect(failedFieldNote({ reason: "upload_failed", evidence: evidence("Currículo") })).toBe(
+      "O campo “Currículo” não pôde ser preenchido.",
+    );
+    expect(failedFieldNote({ reason: "form_changed", evidence: evidence(null) })).toBeNull();
+    expect(failedFieldNote({ reason: "form_changed", evidence: null })).toBeNull();
+    expect(failedFieldNote({ reason: "error", evidence: evidence("Telefone") })).toBeNull();
   });
 });

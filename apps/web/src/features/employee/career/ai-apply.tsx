@@ -48,6 +48,7 @@ import {
   fileQuestionLabel,
   fileQuestions,
   initialAnswer,
+  savesToProfile,
 } from "./ai-apply-form";
 import { AttemptProgress } from "./attempt-result";
 
@@ -279,7 +280,8 @@ function Review({
         </p>
         {asked.map((question, index) => {
           const id = `ai-answer-${index}`;
-          const note = answerNote(draftFor(attempt, question));
+          const drafted = draftFor(attempt, question);
+          const note = answerNote(drafted);
 
           return (
             <form.Field
@@ -312,6 +314,11 @@ function Review({
                       {note.inferred ? <Badge variant="outline">inferido pela IA</Badge> : null}
                       {note.attention ? (
                         <Badge variant="status-warning">{note.attention}</Badge>
+                      ) : null}
+                      {savesToProfile(question, drafted, field.state.value) ? (
+                        <span className="text-muted-foreground">
+                          Vamos salvar no seu perfil para as próximas candidaturas.
+                        </span>
                       ) : null}
                     </div>
                     <EmployeeError id={`${id}-error`} message={error} />
