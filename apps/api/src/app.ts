@@ -39,6 +39,7 @@ import { createAnswersRepository } from "./features/preferences/answers.js";
 import { aiApplyRoutes } from "./features/ai-apply/routes.js";
 import { packageRoutes } from "./features/preferences/package-routes.js";
 import { preferencesRoutes } from "./features/preferences/routes.js";
+import type { TrackingConfig } from "./features/offboardings/correios.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
 import type { DispatchAction } from "./shared/action-dispatch.js";
@@ -54,7 +55,7 @@ type AppOptions = {
   adapter?: NonNullable<ConstructorParameters<typeof Elysia>[0]>["adapter"];
   auth: PortalAuth;
   sendEmail: (message: WelcomeMessage) => Promise<void>;
-  correiosBaseUrl?: string;
+  tracking?: TrackingConfig;
   cronSecret?: string;
   webhookSecret?: string;
   slackSigningSecret?: string;
@@ -287,7 +288,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         repos.actionConfigs.readChecklist,
         options.cronSecret,
         options.webhookSecret,
-        options.correiosBaseUrl,
+        options.tracking,
       ),
     )
     .use(actionConfigsRoutes(repos.actionConfigs, access))

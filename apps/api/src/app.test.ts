@@ -51,6 +51,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.ts";
+import type { TrackingConfig } from "./features/offboardings/correios.ts";
 import { createAuth, createRuntimeAuth } from "./features/auth/auth.js";
 import type { CatalogSource } from "./features/sources/catalog.js";
 import type { GenerateStructured } from "./shared/ai.js";
@@ -179,15 +180,15 @@ describe.skipIf(!url)("api", () => {
   const db = createClient(url ?? "");
   const repos = createRepositories(db);
 
-  let correiosBody = "";
-  let correiosStatus = 200;
+  let trackingBody = "";
+  let trackingStatus = 200;
 
-  const correiosServer = createServer((_req, res) => {
-    res.writeHead(correiosStatus, { "content-type": "application/json" });
-    res.end(correiosBody);
+  const trackingServer = createServer((_req, res) => {
+    res.writeHead(trackingStatus, { "content-type": "application/json" });
+    res.end(trackingBody);
   });
 
-  let correiosBaseUrl: string;
+  let trackingConfig: TrackingConfig;
 
   const app = createApp(webOrigin, repos, appOptions);
 
@@ -267,12 +268,17 @@ describe.skipIf(!url)("api", () => {
     });
 
     await new Promise<void>((resolve) => {
-      correiosServer.listen(0, "127.0.0.1", resolve);
+      trackingServer.listen(0, "127.0.0.1", resolve);
     });
 
     // WARNING: listen(0) guarantees AddressInfo with a port
-    const addr = correiosServer.address() as AddressInfo;
-    correiosBaseUrl = `http://127.0.0.1:${addr.port}`;
+    const addr = trackingServer.address() as AddressInfo;
+
+    trackingConfig = {
+      baseUrl: `http://127.0.0.1:${addr.port}`,
+      user: "test@example.com",
+      token: "test-token",
+    };
   });
 
   beforeEach(async () => {
@@ -6097,7 +6103,7 @@ describe.skipIf(!url)("api", () => {
 
   afterAll(async () => {
     await new Promise<void>((resolve) => {
-      correiosServer.close(() => resolve());
+      trackingServer.close(() => resolve());
     });
 
     await db.$client.end();
@@ -7189,20 +7195,18 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("returns tracking info for a task with tracking code", async () => {
-    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
+    const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
 
-    correiosStatus = 200;
-    correiosBody = JSON.stringify({
-      objetos: [
+    trackingStatus = 200;
+    trackingBody = JSON.stringify({
+      codigo: "AB123456789BR",
+      eventos: [
         {
-          eventos: [
-            {
-              codigo: "RO",
-              tipo: "01",
-              descricao: "Objeto em trânsito",
-              dtHrCriado: "2026-11-18T16:00:00",
-            },
-          ],
+          data: "18/11/2026",
+          hora: "16:00",
+          local: "SAO PAULO/SP",
+          status: "Objeto em trânsito - por favor aguarde",
+          subStatus: [],
         },
       ],
     });
@@ -7213,7 +7217,7 @@ describe.skipIf(!url)("api", () => {
 
     await db.update(tasks).set({ trackingCode: "AB123456789BR" }).where(eq(tasks.id, task.id));
 
-    const res = await correiosApp.handle(
+    const res = await trackingApp.handle(
       new Request(`http://localhost/api/tasks/${task.id}/tracking`),
     );
 
@@ -7222,8 +7226,8 @@ describe.skipIf(!url)("api", () => {
     expect(body.trackingCode).toBe("AB123456789BR");
     expect(body.tracking).toEqual({
       delivered: false,
-      lastEvent: "Objeto em trânsito",
-      lastUpdate: "2026-11-18T16:00:00",
+      lastEvent: "Objeto em trânsito - por favor aguarde",
+      lastUpdate: "18/11/2026 16:00",
     });
   });
 
@@ -7238,6 +7242,19 @@ describe.skipIf(!url)("api", () => {
     expect(await res.json()).toEqual({ trackingCode: null, tracking: null });
   });
 
+  it("returns null tracking when tracking is not configured", async () => {
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const task = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    await db.update(tasks).set({ trackingCode: "XX000000000BR" }).where(eq(tasks.id, task.id));
+
+    const res = await app.handle(new Request(`http://localhost/api/tasks/${task.id}/tracking`));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ trackingCode: "XX000000000BR", tracking: null });
+  });
+
   it("returns 404 for tracking on unknown task", async () => {
     const res = await app.handle(
       new Request(`http://localhost/api/tasks/${missingTaskId}/tracking`),
@@ -7248,20 +7265,18 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("checks tracked shipments via GET and marks delivered tasks done", async () => {
-    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
+    const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
 
-    correiosStatus = 200;
-    correiosBody = JSON.stringify({
-      objetos: [
+    trackingStatus = 200;
+    trackingBody = JSON.stringify({
+      codigo: "CD987654321BR",
+      eventos: [
         {
-          eventos: [
-            {
-              codigo: "BDE",
-              tipo: "01",
-              descricao: "Objeto entregue ao destinatário",
-              dtHrCriado: "2026-11-20T10:30:00",
-            },
-          ],
+          data: "20/11/2026",
+          hora: "10:30",
+          local: "SAO PAULO/SP",
+          status: "Objeto entregue ao destinatário",
+          subStatus: [],
         },
       ],
     });
@@ -7272,7 +7287,7 @@ describe.skipIf(!url)("api", () => {
 
     await db.update(tasks).set({ trackingCode: "CD987654321BR" }).where(eq(tasks.id, todo.id));
 
-    const res = await correiosApp.handle(cronRequest());
+    const res = await trackingApp.handle(cronRequest());
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -7283,13 +7298,27 @@ describe.skipIf(!url)("api", () => {
     expect(after.tasks.find((t: { id: string }) => t.id === todo.id).status).toBe("done");
   });
 
+  it("skips tracking check when tracking is not configured", async () => {
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const todo = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    await db.update(tasks).set({ trackingCode: "ZZ000000000BR" }).where(eq(tasks.id, todo.id));
+
+    const res = await app.handle(cronRequest());
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.delivered).toEqual([]);
+  });
+
   it("checks tracked shipments via POST", async () => {
-    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
+    const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
 
-    correiosStatus = 200;
-    correiosBody = JSON.stringify({ objetos: [] });
+    trackingStatus = 200;
+    trackingBody = JSON.stringify({ codigo: "XX000000000BR" });
 
-    const res = await correiosApp.handle(cronRequest("POST"));
+    const res = await trackingApp.handle(cronRequest("POST"));
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -7298,20 +7327,18 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("does not mark non-delivered tracked tasks as done", async () => {
-    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
+    const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
 
-    correiosStatus = 200;
-    correiosBody = JSON.stringify({
-      objetos: [
+    trackingStatus = 200;
+    trackingBody = JSON.stringify({
+      codigo: "EF111222333BR",
+      eventos: [
         {
-          eventos: [
-            {
-              codigo: "RO",
-              tipo: "01",
-              descricao: "Objeto em trânsito",
-              dtHrCriado: "2026-11-18T16:00:00",
-            },
-          ],
+          data: "18/11/2026",
+          hora: "16:00",
+          local: "SAO PAULO/SP",
+          status: "Objeto em trânsito - por favor aguarde",
+          subStatus: [],
         },
       ],
     });
@@ -7322,7 +7349,7 @@ describe.skipIf(!url)("api", () => {
 
     await db.update(tasks).set({ trackingCode: "EF111222333BR" }).where(eq(tasks.id, todo.id));
 
-    const res = await correiosApp.handle(cronRequest());
+    const res = await trackingApp.handle(cronRequest());
 
     const body = await res.json();
     expect(body.delivered).toEqual([]);
@@ -7332,20 +7359,18 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("fires actions for delivered tasks with a phase", async () => {
-    const correiosApp = createApp(webOrigin, repos, { ...appOptions, correiosBaseUrl });
+    const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
 
-    correiosStatus = 200;
-    correiosBody = JSON.stringify({
-      objetos: [
+    trackingStatus = 200;
+    trackingBody = JSON.stringify({
+      codigo: "GH444555666BR",
+      eventos: [
         {
-          eventos: [
-            {
-              codigo: "BDE",
-              tipo: "01",
-              descricao: "Objeto entregue",
-              dtHrCriado: "2026-11-21T09:00:00",
-            },
-          ],
+          data: "21/11/2026",
+          hora: "09:00",
+          local: "RIO DE JANEIRO/RJ",
+          status: "Objeto entregue ao destinatário",
+          subStatus: [],
         },
       ],
     });
@@ -7364,7 +7389,7 @@ describe.skipIf(!url)("api", () => {
       .set({ trackingCode: "GH444555666BR" })
       .where(eq(tasks.id, taskWithPhase.id));
 
-    const res = await correiosApp.handle(cronRequest());
+    const res = await trackingApp.handle(cronRequest());
 
     const body = await res.json();
     expect(body.delivered).toContain(taskWithPhase.id);
@@ -7378,7 +7403,7 @@ describe.skipIf(!url)("api", () => {
     expect(task).toHaveProperty("trackingCode");
   });
 
-  it("handles task deletion during correios check gracefully", async () => {
+  it("handles task deletion during tracking check gracefully", async () => {
     const stubbedApp = createApp(
       webOrigin,
       {
@@ -7398,21 +7423,19 @@ describe.skipIf(!url)("api", () => {
             ]),
         },
       },
-      { ...appOptions, correiosBaseUrl },
+      { ...appOptions, tracking: trackingConfig },
     );
 
-    correiosStatus = 200;
-    correiosBody = JSON.stringify({
-      objetos: [
+    trackingStatus = 200;
+    trackingBody = JSON.stringify({
+      codigo: "ZZ999999999BR",
+      eventos: [
         {
-          eventos: [
-            {
-              codigo: "BDE",
-              tipo: "01",
-              descricao: "Entregue",
-              dtHrCriado: "2026-11-21T10:00:00",
-            },
-          ],
+          data: "21/11/2026",
+          hora: "10:00",
+          local: "SAO PAULO/SP",
+          status: "Objeto entregue ao destinatário",
+          subStatus: [],
         },
       ],
     });

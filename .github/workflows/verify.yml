@@ -81,3 +81,9 @@ jobs:
           ../../node_modules/.bin/cf deploy --prebuilt --mode cloudflare --no-provision
           curl --fail --silent --show-error --retry 5 https://app.off-board.xyz/api/health
           curl --fail --silent --show-error --retry 5 https://app.off-board.xyz/entrar --output /dev/null
+          cd landing
+          landing_assets=$(mktemp -d)
+          cp ../src/features/landing/recolocacao/index.html "$landing_assets/index.html"
+          ../../../node_modules/.bin/cf deploy "$landing_assets" --no-provision
+          curl --fail --silent --show-error --retry 5 --retry-all-errors https://off-board.xyz/ --output /dev/null
+          test "$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' https://off-board.xyz/api/health)" = 404
