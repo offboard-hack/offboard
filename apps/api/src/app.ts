@@ -41,6 +41,7 @@ import { createBrowserbase } from "./features/ai-apply/browser/browserbase.js";
 import { openPage } from "./features/ai-apply/browser/cdp.js";
 import { runAiApplication, type RunnerDeps } from "./features/ai-apply/runner.js";
 import { packageRoutes } from "./features/preferences/package-routes.js";
+import { createPreferencesRepository } from "./features/preferences/repository.js";
 import { preferencesRoutes } from "./features/preferences/routes.js";
 import type { TrackingConfig } from "./features/offboardings/correios.js";
 import { teamRoutes } from "./features/team/routes.js";
@@ -417,6 +418,8 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
           await answers.answer(profileId, questionId, text, now);
         },
+        saveProfile: (tx, profileId, values, now) =>
+          createPreferencesRepository(tx).fillUnset(profileId, values, now),
       }),
     )
     .use(

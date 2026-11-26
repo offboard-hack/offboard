@@ -23,7 +23,7 @@ import { createRepositories } from "../../repositories.js";
 import { BrowserbaseError } from "./browser/browserbase.js";
 import type { Page } from "./browser/cdp.js";
 import type { FormPage, OutcomePage } from "./browser/greenhouse-form.js";
-import { runAiApplication, type RunnerDeps } from "./runner.js";
+import { failedLabel, runAiApplication, type RunnerDeps } from "./runner.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const email = "ana.pessoal@example.com";
@@ -862,6 +862,29 @@ describe.skipIf(!url)("ai apply runner", () => {
   });
 
   describe("falls back when the form changed", () => {
+    it("names the question whose field could not be filled, without its answer", async () => {
+      const { id } = await attempt({
+        confirmed: baseConfirmed.map((answer) =>
+          answer.questionId === "question_1"
+            ? { ...answer, value: "linha um\nlinha dois" }
+            : answer,
+        ),
+      });
+
+      const run = rig();
+
+      await runAiApplication(run.deps, id, now);
+
+      const row = await stateOf(id);
+
+      expect(row).toMatchObject({
+        state: "assisted",
+        reason: "form_changed",
+        evidence: { failedField: "Por que a Acme?" },
+      });
+      expect(JSON.stringify(row.evidence?.failedField)).not.toContain("linha");
+    });
+
     it("stops before filling when a new required question appeared", async () => {
       const { id } = await attempt();
 
@@ -879,6 +902,7 @@ describe.skipIf(!url)("ai apply runner", () => {
       expect(run.actions).not.toContain("guard");
       expect(run.submits()).toBe(0);
       expect(run.released).toEqual(["session-1"]);
+      expect((await stateOf(id)).evidence?.failedField).toBeUndefined();
     });
 
     it("stops when a confirmed option was removed", async () => {
@@ -926,8 +950,26 @@ describe.skipIf(!url)("ai apply runner", () => {
 
       await runAiApplication(run.deps, id, now);
 
-      expect(await stateOf(id)).toMatchObject({ state: "assisted", reason: "upload_failed" });
+      expect(await stateOf(id)).toMatchObject({
+        state: "assisted",
+        reason: "upload_failed",
+        evidence: { failedField: "Currículo" },
+      });
       expect(run.submits()).toBe(0);
+    });
+
+    it("names the file Browserbase could not take", async () => {
+      const { id } = await attempt();
+      const run = rig({ browserbase: { failUpload: true } });
+      vi.spyOn(console, "error");
+
+      await runAiApplication(run.deps, id, now);
+
+      expect(await stateOf(id)).toMatchObject({
+        state: "assisted",
+        reason: "upload_failed",
+        evidence: { failedField: "Currículo" },
+      });
     });
 
     it("maps a closed job, a sign-in wall and a blocked page", async () => {
@@ -1708,5 +1750,26 @@ describe.skipIf(!url)("ai apply runner", () => {
         expect(run.opened).toEqual([]);
       });
     }
+  });
+});
+
+describe("failedLabel", () => {
+  const phone = question("phone", "Telefone", "phone", [text("phone")]);
+  const location = question("location", "Localização", "city", [text("location")]);
+
+  const questions = [...baseQuestions, phone, location, letterWithText];
+
+  it("maps the failed field to its question label", () => {
+    expect(failedLabel(questions, "question_1")).toBe("Por que a Acme?");
+    expect(failedLabel(questions, "location")).toBe("Localização");
+    expect(failedLabel(questions, "country")).toBe("Telefone");
+    expect(failedLabel(questions, "cover_letter_text")).toBe("Cover Letter");
+    expect(failedLabel(questions, "resume")).toBe("Currículo");
+    expect(failedLabel(questions, "cover_letter")).toBe("Cover Letter");
+  });
+
+  it("names nothing for an unknown field", () => {
+    expect(failedLabel(questions, "question_99")).toBeUndefined();
+    expect(failedLabel(baseQuestions, "country")).toBeUndefined();
   });
 });

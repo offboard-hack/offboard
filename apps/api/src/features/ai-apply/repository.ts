@@ -34,7 +34,7 @@ import {
 import { z } from "zod";
 import { greenhouseKey } from "../../shared/ai-apply-access.js";
 import { uniqueViolation } from "../../shared/http.js";
-import { toPreferences } from "../../shared/talent-preferences.js";
+import { type ProfileFill, toPreferences } from "../../shared/talent-preferences.js";
 import { toAttemptView } from "./view.js";
 
 const nonFinal = ["queued", "running", "submitting", "needs_check"] as const;
@@ -71,10 +71,18 @@ export type SaveAnswer = (
   now: Date,
 ) => Promise<void>;
 
+export type SaveProfile = (
+  tx: Transaction,
+  profileId: string,
+  values: ProfileFill,
+  now: Date,
+) => Promise<void>;
+
 type Confirmation = {
   confirmed: ConfirmedAnswer[];
   rehearsal: boolean;
   entries: { label: string; text: string; sensitive: boolean }[];
+  profile: ProfileFill;
 };
 
 export function draftBlock(
@@ -327,7 +335,7 @@ export function createAiApplyRepository(db: Database) {
     id: string,
     confirmation: Confirmation,
     now: Date,
-    save: SaveAnswer,
+    save: { answer: SaveAnswer; profile: SaveProfile },
   ) {
     const since = new Date(now.getTime() - expiry);
 
@@ -378,8 +386,12 @@ export function createAiApplyRepository(db: Database) {
 
         if (rows.length > 0) {
           for (const entry of confirmation.entries) {
-            await save(tx, profileId, entry.label, entry.text, { sensitive: entry.sensitive }, now);
+            const { label, text, sensitive } = entry;
+
+            await save.answer(tx, profileId, label, text, { sensitive }, now);
           }
+
+          await save.profile(tx, profileId, confirmation.profile, now);
         }
 
         return rows[0];

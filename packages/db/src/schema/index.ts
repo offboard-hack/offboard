@@ -131,6 +131,7 @@ export type AttemptEvidence = {
   fields: { question: string; value: string | string[] | null }[];
   files: string[];
   finalUrl: string | null;
+  failedField?: string;
 };
 
 export type ConfigValue =

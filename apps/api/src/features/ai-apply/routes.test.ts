@@ -32,7 +32,7 @@ import type { GenerateStructured } from "../../shared/ai.js";
 import type { ObjectStorage } from "../../shared/object-storage.js";
 import type { PortalAuth } from "../../shared/portal-auth.js";
 import { talentAccess } from "../../shared/talent-access.js";
-import type { SaveAnswer } from "./repository.js";
+import type { SaveAnswer, SaveProfile } from "./repository.js";
 import { aiApplyRoutes } from "./routes.js";
 import { readGreenhouseForm } from "./greenhouse.js";
 import type { Page } from "./browser/cdp.js";
@@ -110,6 +110,7 @@ type Setup = {
   runnerConfigured?: boolean;
   form?: () => Response | Promise<Response>;
   saveAnswer?: SaveAnswer;
+  saveProfile?: SaveProfile;
   enqueueRun?: (attemptId: string) => Promise<void>;
   runNow?: (attemptId: string) => Promise<boolean>;
   storage?: ObjectStorage;
@@ -266,6 +267,7 @@ describe.skipIf(!url)("ai apply route", () => {
                 : [{ question: item.text, answer: item.answer, sensitive: item.sensitive }],
             ),
           saveAnswer: setup.saveAnswer ?? saveToLibrary,
+          saveProfile: setup.saveProfile ?? (async () => undefined),
           enqueueRun:
             setup.enqueueRun ?? ((attemptId) => repos.background.enqueue("ai_apply", attemptId)),
           runNow: setup.runNow ?? (async () => false),
@@ -611,7 +613,7 @@ describe.skipIf(!url)("ai apply route", () => {
 
       const salary = questionOf(body, "Qual é a sua pretensão salarial");
 
-      expect(text(salary.id)).toMatchObject({ value: null, status: "not_shared" });
+      expect(text(salary.id)).toMatchObject({ value: null, status: "blank" });
 
       const rows = await attempts(profileId);
 
@@ -1596,6 +1598,38 @@ describe.skipIf(!url)("ai apply route", () => {
 
       expect((await attempts(profileId)).filter((row) => row.state === "queued")).toHaveLength(1);
       expect(await library(profileId)).toEqual([]);
+    });
+
+    it("saves what the person typed for blank profile questions to the profile", async () => {
+      const saved: object[] = [];
+
+      const recording = build({
+        generate: fakeModel().generate,
+        saveProfile: async (_tx, owner, values) => {
+          saved.push({ owner, values });
+        },
+      });
+
+      const phone = question("phone", { label: "Telefone", kind: "phone" });
+      const city = question("city", { label: "Cidade", kind: "city" });
+      const profileId = await profile();
+
+      const id = await seed(profileId, await addJob(), [phone, city], {
+        draft: [
+          { questionId: "phone", value: null, source: null, inferred: false, status: "blank" },
+          { questionId: "city", value: null, source: null, inferred: false, status: "not_shared" },
+        ],
+      });
+
+      const res = await recording.call(profileId, confirmPath(id), {
+        answers: [
+          { questionId: "phone", value: " 11 99999-8888 " },
+          { questionId: "city", value: "Santos" },
+        ],
+      });
+
+      expect(res.status).toBe(200);
+      expect(saved).toEqual([{ owner: profileId, values: { phone: "11 99999-8888" } }]);
     });
 
     it("rolls back the attempt and every library row when saving fails", async () => {

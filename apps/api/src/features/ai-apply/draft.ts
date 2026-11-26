@@ -242,7 +242,10 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
   const names = splitName(account.name);
 
   const blocked = (normalized: string) =>
-    overlaps.some(({ field, pattern }) => !fields[field].share && pattern.test(normalized));
+    overlaps.some(
+      ({ field, pattern }) =>
+        !fields[field].share && fields[field].value !== null && pattern.test(normalized),
+    );
 
   const hidden = hiddenDigits(fields);
 
@@ -343,7 +346,7 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
     if (read !== undefined) {
       const { value, share } = read(fields);
 
-      if (!share) return draft(question, "not_shared");
+      if (!share && value !== null) return draft(question, "not_shared");
 
       if (value !== null) return draft(question, "filled", value, "profile");
 

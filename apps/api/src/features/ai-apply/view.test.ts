@@ -58,7 +58,13 @@ describe("toAttemptView", () => {
 
     const view = toAttemptView({ ...row, evidence, screenshotKey: "ai-applications/p/a.png" }, job);
 
-    expect(view).toMatchObject({ evidence, hasScreenshot: true });
+    expect(view).toMatchObject({
+      evidence: { ...evidence, failedField: null },
+      hasScreenshot: true,
+    });
+    expect(
+      toAttemptView({ ...row, evidence: { ...evidence, failedField: "Telefone" } }, job).evidence,
+    ).toEqual({ ...evidence, failedField: "Telefone" });
     expect(JSON.stringify(view)).not.toContain("ai-applications/p/a.png");
   });
 

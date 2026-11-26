@@ -264,13 +264,17 @@ export const classifyOutcome = (page: OutcomePage) => {
   return errorsVisible(page) ? "invalid" : "timeout";
 };
 
+const cityName = (place: string) => {
+  const [name = ""] = place.split(",");
+
+  return name.trim();
+};
+
 export const locationMatches = (city: string, shown: string | null, states: LocationState[]) => {
   if (shown === null) return false;
 
-  const [place = ""] = shown.split(",");
-
   return (
-    loose(place) === loose(city) &&
+    loose(cityName(shown)) === loose(cityName(city)) &&
     states.some(
       (state) =>
         state.latitude.trim() !== "" &&
@@ -389,7 +393,7 @@ const fillLocation = async (page: Page, city: string) => {
   if (!(await exists(page, selector))) return fail("form_changed", "location");
 
   await page.click(selector);
-  await page.type(city);
+  await page.type(cityName(city));
 
   if (!(await page.waitFor(`${found(first)} !== null`, suggestionMs))) {
     await page.press("Escape");

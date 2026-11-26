@@ -93,6 +93,14 @@ const afterClick = {
 const firstField = (questions: FormQuestion[], name: string) =>
   questions.find((question) => question.fields[0]?.name === name);
 
+export const failedLabel = (questions: FormQuestion[], field: string) => {
+  const name = field === "country" ? "phone" : field;
+
+  return questions.find(
+    (question) => question.id === name || question.fields.some((item) => item.name === name),
+  )?.label;
+};
+
 function foreignPhone(questions: FormQuestion[], confirmed: ConfirmedAnswer[]) {
   const phone = firstField(questions, "phone");
   const value = confirmed.find((answer) => answer.questionId === phone?.id)?.value;
@@ -175,20 +183,35 @@ async function capture(deps: RunnerDeps, page: Page, key: string) {
 async function rendered(ready: Run, letter: string | null) {
   const { deps, run } = ready;
   const { questions } = run.attempt.form;
-  const files: { name: string; bytes: Uint8Array }[] = [];
+  const files: { field: string; name: string; bytes: Uint8Array }[] = [];
 
   if (firstField(questions, "resume") !== undefined) {
     const fields = await deps.repo.profileFields(run.attempt.profileId);
     const content = shareFilteredResume(ready.resume, fields);
+    const bytes = await deps.renderResume(run.profile.name, content);
 
-    files.push({ name: resumeFile, bytes: await deps.renderResume(run.profile.name, content) });
+    files.push({ field: "resume", name: resumeFile, bytes });
   }
 
   if (letter !== null) {
-    files.push({ name: letterFile, bytes: await renderLetterPdf(run.profile.name, letter) });
+    const bytes = await renderLetterPdf(run.profile.name, letter);
+
+    files.push({ field: "cover_letter", name: letterFile, bytes });
   }
 
   return files;
+}
+
+function failedAt(
+  progress: Progress,
+  questions: FormQuestion[],
+  failure: { failed: "upload_failed" | "form_changed"; field: string },
+) {
+  const label = failedLabel(questions, failure.field);
+
+  if (label !== undefined) progress.evidence.failedField = label;
+
+  return assisted(failure.failed);
 }
 
 async function operate(ready: Run, progress: Progress, deadline: number) {
@@ -217,16 +240,16 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
 
   withinBudget(deadline);
 
-  for (const file of files) {
+  for (const { field, name, bytes } of files) {
     try {
-      await browserbase.upload(session.id, { ...file, type: "application/pdf" });
+      await browserbase.upload(session.id, { name, bytes, type: "application/pdf" });
     } catch (cause) {
       logFailure("AI application upload failed")(cause);
 
-      return assisted("upload_failed");
+      return failedAt(progress, questions, { failed: "upload_failed", field });
     }
 
-    uploaded.push(file.name);
+    uploaded.push(name);
   }
 
   const page = await deps.openPage(session.connectUrl);
@@ -267,7 +290,7 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
     attach: !rehearsal,
   });
 
-  if (failure !== undefined) return assisted(failure.failed);
+  if (failure !== undefined) return failedAt(progress, questions, failure);
 
   const key = `ai-applications/${run.attempt.profileId}/${attemptId}.png`;
 

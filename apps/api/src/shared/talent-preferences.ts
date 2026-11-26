@@ -8,6 +8,10 @@ export type StoredPreferences = {
   profileFields: ProfileFields;
 };
 
+export type ProfileFill = Partial<
+  Record<"phone" | "linkedin" | "portfolio" | "city" | "cpf", string>
+>;
+
 function field(stored: ProfileField | undefined) {
   return { value: stored?.value ?? null, share: stored?.share ?? false };
 }

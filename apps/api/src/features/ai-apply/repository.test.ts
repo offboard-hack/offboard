@@ -15,6 +15,7 @@ import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createRepositories } from "../../repositories.js";
+import type { SaveProfile } from "./repository.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const missingId = "00000000-0000-4000-8000-000000000001";
@@ -129,8 +130,8 @@ describe.skipIf(!url)("ai apply repository", () => {
       })
       .returning({ id: aiApplications.id });
 
-    const confirmation = { confirmed: [], rehearsal: false, entries: [] };
-    const save = async () => undefined;
+    const confirmation = { confirmed: [], rehearsal: false, entries: [], profile: {} };
+    const save = { answer: async () => undefined, profile: async () => undefined };
 
     expect(await repos.aiApply.confirm(created.id, stale.id, confirmation, new Date(), save)).toBe(
       "expired",
@@ -609,9 +610,9 @@ describe.skipIf(!url)("ai apply repository", () => {
             await repos.aiApply.confirm(
               profileId,
               id,
-              { confirmed: [], rehearsal: true, entries: [] },
+              { confirmed: [], rehearsal: true, entries: [], profile: {} },
               now,
-              async () => undefined,
+              { answer: async () => undefined, profile: async () => undefined },
             );
           },
         ],
@@ -634,8 +635,8 @@ describe.skipIf(!url)("ai apply repository", () => {
   });
 
   describe("confirming a rehearsed attempt again", () => {
-    const confirmation = { confirmed: [], rehearsal: false, entries: [] };
-    const save = async () => undefined;
+    const confirmation = { confirmed: [], rehearsal: false, entries: [], profile: {} };
+    const save = { answer: async () => undefined, profile: async () => undefined };
     const day = 24 * 60 * 60 * 1000;
     const now = new Date("2026-11-25T12:00:00.000Z");
 
@@ -656,7 +657,12 @@ describe.skipIf(!url)("ai apply repository", () => {
       const result = await repos.aiApply.confirm(
         profileId,
         id,
-        { confirmed: [{ questionId: "q", value: "x" }], rehearsal: false, entries: [] },
+        {
+          confirmed: [{ questionId: "q", value: "x" }],
+          rehearsal: false,
+          entries: [],
+          profile: {},
+        },
         now,
         save,
       );
@@ -670,6 +676,49 @@ describe.skipIf(!url)("ai apply repository", () => {
         evidence: null,
         screenshotKey: null,
       });
+    });
+
+    it("saves the typed profile values in the confirm transaction, only when it confirms", async () => {
+      const { id, profileId } = await rehearsed(new Date(now.getTime() - day));
+      const saved: unknown[] = [];
+
+      const profile = { phone: "11 99999-8888" };
+
+      const record: SaveProfile = async (_tx, owner, values, at) => {
+        saved.push([owner, values, at]);
+      };
+
+      const recording = { answer: async () => undefined, profile: record };
+
+      await repos.aiApply.confirm(profileId, id, { ...confirmation, profile }, now, recording);
+
+      expect(saved).toEqual([[profileId, profile, now]]);
+
+      await repos.aiApply.confirm(profileId, id, { ...confirmation, profile }, now, recording);
+
+      expect(saved).toHaveLength(1);
+    });
+
+    it("rolls the confirm back when the profile cannot be saved", async () => {
+      const { id, profileId } = await rehearsed(new Date(now.getTime() - day));
+
+      const failing = {
+        answer: async () => undefined,
+        profile: async () => {
+          throw new Error("profile write failed");
+        },
+      };
+
+      await expect(
+        repos.aiApply.confirm(
+          profileId,
+          id,
+          { ...confirmation, profile: { city: "Santos" } },
+          now,
+          failing,
+        ),
+      ).rejects.toThrow("profile write failed");
+      expect((await stateOf(id)).state).toBe("rehearsed");
     });
 
     it("counts the seven days from the end of the rehearsal", async () => {

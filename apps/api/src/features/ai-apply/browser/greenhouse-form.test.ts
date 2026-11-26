@@ -892,6 +892,21 @@ describe("fills each field kind", () => {
     ]);
   });
 
+  it('types only the city of a "Cidade, UF" answer and accepts its suggestion', async () => {
+    const { page, actions } = fakePage({ suggestions: ["São Paulo, Brazil"] });
+
+    const [location] = (await stoneQuestions()).filter((item) => item.id === "location");
+
+    if (location === undefined) throw new Error("location");
+
+    expect(await fill(page, [location], answers({ location: "São Paulo, SP" }))).toBeUndefined();
+    expect(steps(actions)).toEqual([
+      'click [id="candidate-location"]',
+      "type São Paulo",
+      'click [id="react-select-candidate-location-option-0"]',
+    ]);
+  });
+
   it("reports a first suggestion for another city", async () => {
     const location = {
       ...question("location", "text"),
@@ -1252,6 +1267,12 @@ describe("checks the chosen city", () => {
 
   it("matches the city ignoring case and accents", () => {
     expect(locationMatches(" sao paulo ", "São Paulo, Brazil", [state])).toBe(true);
+    expect(locationMatches("São Paulo, SP", "São Paulo, Brazil", [state])).toBe(true);
+    expect(
+      locationMatches(" sao paulo ,sp", "São Paulo, State of São Paulo, Brazil", [
+        { ...state, location: "São Paulo, State of São Paulo, Brazil" },
+      ]),
+    ).toBe(true);
   });
 
   it("rejects another city, no value, a stale state or missing coordinates", () => {

@@ -1,6 +1,8 @@
 import { normalizeQuestion } from "@offboard/db/question";
 import type { ConfirmedAnswer, DraftAnswer, FormQuestion } from "@offboard/db/schema";
+import { isValidCpf } from "../../shared/cpf.js";
 import { sanitizeText } from "../../shared/storable-text.js";
+import type { ProfileFill } from "../../shared/talent-preferences.js";
 import { isHiddenQuestion } from "./questions.js";
 
 export type GivenAnswer = { questionId: string; value: string | string[] | null };
@@ -9,6 +11,15 @@ const fileKinds = new Set<FormQuestion["kind"]>(["resume", "cover_letter", "docu
 
 const textLimit = 2_000;
 const labelLimit = 500;
+const profileLimit = 500;
+
+const profileTargets = new Map<FormQuestion["kind"], keyof ProfileFill>([
+  ["phone", "phone"],
+  ["linkedin", "linkedin"],
+  ["website", "portfolio"],
+  ["city", "city"],
+  ["cpf", "cpf"],
+]);
 
 export const isFileQuestion = (question: FormQuestion) => fileKinds.has(question.kind);
 
@@ -103,4 +114,41 @@ export function libraryEntries(
 
     return text === "" ? [] : [{ label, text, sensitive: question.sensitive }];
   });
+}
+
+function profileValue(target: keyof ProfileFill, value: string) {
+  if (target !== "cpf") return value.length > profileLimit ? undefined : value;
+
+  const digits = value.replace(/\D/g, "");
+
+  return isValidCpf(digits) ? digits : undefined;
+}
+
+export function profileFills(
+  questions: FormQuestion[],
+  confirmed: ConfirmedAnswer[],
+  draft: DraftAnswer[],
+) {
+  const values = new Map(confirmed.map((answer) => [answer.questionId, answer.value]));
+
+  const blank = new Set(
+    draft.flatMap((answer) => (answer.status === "blank" ? [answer.questionId] : [])),
+  );
+
+  const fills: ProfileFill = {};
+
+  for (const question of questions) {
+    const target = profileTargets.get(question.kind);
+    const value = values.get(question.id);
+
+    if (target === undefined || !blank.has(question.id)) continue;
+
+    if (value === undefined || value === null || Array.isArray(value)) continue;
+
+    const kept = profileValue(target, value);
+
+    if (kept !== undefined && fills[target] === undefined) fills[target] = kept;
+  }
+
+  return fills;
 }

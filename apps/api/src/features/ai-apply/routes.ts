@@ -7,10 +7,15 @@ import { errorResponse } from "../../shared/http.js";
 import type { UsageRepository } from "../../shared/llm-usage.js";
 import type { ObjectStorage } from "../../shared/object-storage.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
-import { confirmedAnswers, libraryEntries, needsCoverLetter } from "./confirm.js";
+import { confirmedAnswers, libraryEntries, needsCoverLetter, profileFills } from "./confirm.js";
 import { draftAnswers } from "./draft.js";
 import type { FormResult } from "./greenhouse.js";
-import { draftBlock, type AiApplyRepository, type SaveAnswer } from "./repository.js";
+import {
+  draftBlock,
+  type AiApplyRepository,
+  type SaveAnswer,
+  type SaveProfile,
+} from "./repository.js";
 import { attemptResponse } from "./view.js";
 
 const params = t.Object({ jobId: t.String() });
@@ -44,6 +49,7 @@ export function aiApplyRoutes(
       profileId: string,
     ) => Promise<{ question: string; answer: string; sensitive: boolean }[]>;
     saveAnswer: SaveAnswer;
+    saveProfile: SaveProfile;
     enqueueRun: (attemptId: string) => Promise<void>;
     runNow: (attemptId: string) => Promise<boolean>;
     storage: ObjectStorage | undefined;
@@ -251,16 +257,19 @@ export function aiApplyRoutes(
           return status(409, { error: "Generate a cover letter first" });
         }
 
+        const { draft } = found.attempt;
+
         const result = await repos.confirm(
           me.id,
           params.id,
           {
             confirmed,
             rehearsal: body.rehearsal ?? false,
-            entries: libraryEntries(questions, confirmed, found.attempt.draft),
+            entries: libraryEntries(questions, confirmed, draft),
+            profile: profileFills(questions, confirmed, draft),
           },
           now,
-          deps.saveAnswer,
+          { answer: deps.saveAnswer, profile: deps.saveProfile },
         );
 
         if (result === "job_closed") return status(404, { error: "Job not found" });

@@ -1137,6 +1137,11 @@ describe.skipIf(!url)("api", () => {
                   required: false,
                   fields: [{ name: "question_1", type: "input_text", values: [] }],
                 },
+                {
+                  label: "Telefone",
+                  required: true,
+                  fields: [{ name: "phone", type: "input_text", values: [] }],
+                },
               ],
             }),
           );
@@ -1168,6 +1173,13 @@ describe.skipIf(!url)("api", () => {
           inferred: false,
           status: "filled",
         },
+        {
+          questionId: "phone",
+          value: null,
+          source: null,
+          inferred: false,
+          status: "blank",
+        },
       ]);
 
       const confirmed = await instance.handle(
@@ -1180,7 +1192,10 @@ describe.skipIf(!url)("api", () => {
             "content-type": "application/json",
           },
           body: JSON.stringify({
-            answers: [{ questionId: "question_1", value: "Resposta final" }],
+            answers: [
+              { questionId: "question_1", value: "Resposta final" },
+              { questionId: "phone", value: "11 99999-8888" },
+            ],
           }),
         }),
       );
@@ -1190,6 +1205,22 @@ describe.skipIf(!url)("api", () => {
         (await repos.answers.library(created.id)).questions.find((item) => item.id === common.id)
           ?.answer,
       ).toBe("Resposta final");
+      expect((await repos.preferences.get(created.id)).profileFields.phone).toEqual({
+        value: "11 99999-8888",
+        share: true,
+      });
+
+      const [saved] = await db
+        .select({ updatedAt: talentPreferences.updatedAt })
+        .from(talentPreferences)
+        .where(eq(talentPreferences.profileId, created.id));
+
+      const [row] = await db
+        .select({ confirmedAt: aiApplications.confirmedAt })
+        .from(aiApplications)
+        .where(eq(aiApplications.id, attempt.id));
+
+      expect(saved.updatedAt).toEqual(row.confirmedAt);
     });
 
     it("runs a confirmed AI application from the scheduled drain", async () => {
