@@ -216,6 +216,8 @@ export function createSourcesRepository(db: Database) {
               url: sql`excluded.url`,
               description: sql`excluded.description`,
               postedAt: sql`excluded.posted_at`,
+              embedding: sql`case when jobs.title is distinct from excluded.title or jobs.description is distinct from excluded.description then null else jobs.embedding end`,
+              embeddedAt: sql`case when jobs.title is distinct from excluded.title or jobs.description is distinct from excluded.description then null else jobs.embedded_at end`,
               lastSeenAt: now,
               closedAt: null,
               updatedAt: now,

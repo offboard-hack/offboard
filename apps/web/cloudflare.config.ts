@@ -43,6 +43,8 @@ if (apiConfigured) {
     env.RESUMES = bindings.r2({ name: process.env.OFFBOARD_RESUMES_BUCKET });
   }
 
+  env.AI = bindings.ai();
+
   if (cronEnabled) env.CRON_SECRET = bindings.secret();
 
   env.TRACKING_API_KEY = bindings.secret();

@@ -38,7 +38,9 @@ export type TalentJobView = JobView & {
   description: string;
 };
 
-type Row = typeof jobs.$inferSelect;
+type Row = Omit<typeof jobs.$inferSelect, "embedding" | "embeddedAt">;
+
+const { embedding: _embedding, embeddedAt: _embeddedAt, ...listColumns } = getTableColumns(jobs);
 
 function toJob(row: Row) {
   return {
@@ -131,7 +133,7 @@ export function createJobsRepository(db: Database) {
     const [rows, [totals], [computing]] = await Promise.all([
       db
         .select({
-          job: getTableColumns(jobs),
+          job: listColumns,
           score: jobMatches.score,
           reasons: jobMatches.reasons,
           fits: fits.as("fits"),
