@@ -4,6 +4,7 @@ import { canonicalValue, topicOf } from "./topics.js";
 describe("finds the topic of a question", () => {
   it.each([
     ["Consentimento - Diversidade e Inclusão (D&I)", "consent"],
+    ["I consent to the use of my demographic data", "consent"],
     ["Do you have any relatives currently working at Bees Brasil?", "relative"],
     ["Contato com pessoas que já trabalham na empresa", "relative"],
     ["Você tem parentes na empresa?", "relative"],
@@ -29,6 +30,9 @@ describe("finds the topic of a question", () => {
     "Are you a currently Group ABInBev | Ambev employee?",
     "If yes, what is the relationship with the person?",
     "Transporte próprio?",
+    "Você é cisgênero?",
+    "Consentimento LGPD para tratamento dos dados pessoais",
+    "I consent to a background check",
   ])("leaves %s without a topic", (label) => {
     expect(topicOf(label)).toBeUndefined();
   });
@@ -73,6 +77,9 @@ describe("reads an option as a canonical value", () => {
     ["consent", "Sim. Eu concordo com a coleta", "yes"],
     ["consent", "Não. Eu não concordo com a coleta", "no"],
     ["trans", "Prefiro não responder", "decline"],
+    ["trans", "I don't wish to answer", "decline"],
+    ["relative", "I do not want to disclose", "decline"],
+    ["relative", "I don't have relatives here", "no"],
   ] as const)("%s: %s → %s", (topic, label, value) => {
     expect(canonicalValue(topic, label)).toBe(value);
   });
@@ -82,6 +89,10 @@ describe("reads an option as a canonical value", () => {
     ["race", "Outra"],
     ["relative", "Eu e esta pessoa estudamos juntos."],
     ["disability", "Sim"],
+    ["disability", "Deficiência Mental/Psicossocial (ex: Transtorno do Espectro Autista...)"],
+    ["orientation", "Gay or Lesbian"],
+    ["race", "Negra (preta ou parda)"],
+    ["gender", "Mulher cisgênero"],
   ] as const)("does not read %s: %s", (topic, label) => {
     expect(canonicalValue(topic, label)).toBeUndefined();
   });

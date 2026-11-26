@@ -282,21 +282,34 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
     }
   }
 
-  const topicAnswers = new Map<Topic, string | null>();
+  const topicAnswers = new Map<Topic, Set<string> | null>();
+
+  const within = (small: Set<string>, large: Set<string>) =>
+    [...small].every((item) => large.has(item));
 
   for (const entry of input.library) {
     const topic = topicOf(entry.question);
 
     if (topic === undefined || !library.has(normalizeQuestion(entry.question))) continue;
 
-    const canonical = entry.answer.split(";").map((item) => canonicalValue(topic, item.trim()));
+    const parts = entry.answer.split(";");
 
-    if (canonical.some((item) => item === undefined)) continue;
+    const read = parts.flatMap((item) => {
+      const value = canonicalValue(topic, item.trim());
 
-    const key = [...new Set(canonical)].sort().join(";");
+      return value === undefined ? [] : [value];
+    });
+
+    if (read.length !== parts.length) continue;
+
+    const saved = new Set(read);
     const known = topicAnswers.get(topic);
 
-    topicAnswers.set(topic, known === undefined || known === key ? key : null);
+    if (known === undefined || (known !== null && within(known, saved))) {
+      topicAnswers.set(topic, saved);
+    } else if (known !== null && !within(saved, known)) {
+      topicAnswers.set(topic, null);
+    }
   }
 
   const profile = profileKeys.flatMap((key) => {
@@ -337,23 +350,23 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
 
     if (topic === undefined || field === undefined) return undefined;
 
-    const wanted = topicAnswers.get(topic)?.split(";");
+    const wanted = topicAnswers.get(topic);
 
-    if (wanted === undefined || field.options.length === 0) return undefined;
+    if (wanted === undefined || wanted === null) return undefined;
 
-    const picks = wanted.map((value) => {
-      const matches = field.options.filter(
-        (option) => canonicalValue(topic, option.label) === value,
-      );
+    const matches = [...wanted].map((value) =>
+      field.options.filter((option) => canonicalValue(topic, option.label) === value),
+    );
 
-      return matches.length === 1 ? matches[0].value : undefined;
-    });
+    if (matches.some((options) => options.length > 1)) return undefined;
 
-    if (picks.some((pick) => pick === undefined)) return undefined;
+    const picked = new Set(matches.flat().map((option) => option.value));
 
     const chosen = field.options.flatMap((option) =>
-      picks.includes(option.value) ? [option.value] : [],
+      picked.has(option.value) ? [option.value] : [],
     );
+
+    if (chosen.length === 0) return undefined;
 
     if (field.type === "multi_select") return draft(question, "suggested", chosen, "library");
 

@@ -734,15 +734,16 @@ describe("draftAnswers", () => {
       });
 
       it("stays blank when the options do not map to exactly one choice", async () => {
-        const ambiguous = select(
-          "race",
-          "Raça",
-          options("Preta", "Negra (preta ou parda)", "Branca"),
-          true,
-        );
+        const ambiguous = select("race", "Raça", options("Preta", "Negra", "Branca"), true);
 
         const missing = select("race", "Raça", options("Amarela", "Indígena"), true);
         const single = select("gender", "Gênero", options("Masculino", "Cisgênero"), true);
+
+        const conflicting = [
+          { question: "Identidade de gênero", answer: "Masculino", sensitive: true },
+          { question: "Sexo", answer: "Feminino", sensitive: true },
+        ];
+
         const free = question({ id: "gender", label: "Identidade de gênero", sensitive: true });
         const blackSaved = [{ question: "Raça/cor", answer: "Preta", sensitive: true }];
 
@@ -751,11 +752,31 @@ describe("draftAnswers", () => {
           draftAnswers(fake([]).generate, input([missing], { library: saved })),
           draftAnswers(fake([]).generate, input([single], { library: saved })),
           draftAnswers(fake([]).generate, input([free], { library: saved })),
+          draftAnswers(fake([]).generate, input([single], { library: conflicting })),
         ]);
 
         for (const [answer] of results) {
           expect(answer).toMatchObject({ value: null, status: "sensitive" });
         }
+      });
+
+      it("reads answers given at different levels of detail as one answer", async () => {
+        const plain = select("plain", "Gênero", options("Feminino", "Masculino", "Outro"), true);
+        const multi = { ...gender, id: "multi" };
+
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([plain, multi], {
+            library: [
+              { question: "Sexo", answer: "Masculino", sensitive: true },
+              ...saved,
+              { question: "Identidade de gênero", answer: "Homem", sensitive: true },
+            ],
+          }),
+        );
+
+        expect(find(answers, "plain")).toMatchObject({ value: "2", status: "suggested" });
+        expect(find(answers, "multi")).toMatchObject({ value: ["2", "4"], status: "suggested" });
       });
 
       it("ignores a saved answer the profile withholds", async () => {
