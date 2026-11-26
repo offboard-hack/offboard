@@ -19,6 +19,120 @@ import { authUser } from "./auth.ts";
 
 export { authAccount, authRateLimit, authSession, authUser, authVerification } from "./auth.ts";
 
+export type ResumeContent = {
+  headline: { id: string; text: string };
+  summary: { id: string; text: string };
+  experiences: {
+    id: string;
+    company: string;
+    role: string;
+    start: string;
+    end: string | null;
+    bullets: { id: string; text: string }[];
+  }[];
+  education: {
+    id: string;
+    institution: string;
+    degree: string;
+    start: string | null;
+    end: string | null;
+  }[];
+  skills: { id: string; name: string }[];
+  languages: { id: string; name: string; level: string | null }[];
+  contact: {
+    email: string | null;
+    phone: string | null;
+    city: string | null;
+    links: string[];
+  };
+};
+
+export type JobPreferences = {
+  workModels?: ("remote" | "hybrid" | "onsite")[];
+  locations?: { city: string | null; state: string }[];
+  relocate?: boolean;
+  salaryFloorCents?: number | null;
+  seniorities?: ("intern" | "junior" | "mid" | "senior" | "lead" | "manager" | "director")[];
+  excludedCompanies?: string[];
+};
+
+export type ProfileField = { value: string | null; share: boolean };
+
+export type Address = {
+  cep: string;
+  street: string;
+  number: string;
+  complement: string | null;
+  neighborhood: string;
+  city: string;
+  state: string;
+};
+
+export type AddressField = { value: Address | null; share: boolean };
+
+export type ProfileFields = {
+  phone?: ProfileField;
+  city?: ProfileField;
+  linkedin?: ProfileField;
+  portfolio?: ProfileField;
+  workAuthorization?: ProfileField;
+  availability?: ProfileField;
+  noticePeriod?: ProfileField;
+  salaryExpectation?: ProfileField;
+  cpf?: ProfileField;
+  birthDate?: ProfileField;
+  address?: AddressField;
+};
+
+export type FormField = {
+  name: string;
+  type: "text" | "textarea" | "file" | "hidden" | "single_select" | "multi_select";
+  options: { label: string; value: string }[];
+};
+
+export type QuestionKind =
+  | "first_name"
+  | "last_name"
+  | "email"
+  | "phone"
+  | "resume"
+  | "cover_letter"
+  | "linkedin"
+  | "website"
+  | "cpf"
+  | "birth_date"
+  | "cep"
+  | "address"
+  | "city"
+  | "document"
+  | "custom";
+
+export type FormQuestion = {
+  id: string;
+  label: string;
+  required: boolean;
+  section: "questions" | "location" | "compliance" | "demographic";
+  fields: FormField[];
+  kind: QuestionKind;
+  sensitive: boolean;
+};
+
+export type DraftAnswer = {
+  questionId: string;
+  value: string | string[] | null;
+  source: "account" | "profile" | "library" | "resume" | "cover_letter" | null;
+  inferred: boolean;
+  status: "filled" | "blank" | "not_shared" | "sensitive";
+};
+
+export type ConfirmedAnswer = { questionId: string; value: string | string[] | null };
+
+export type AttemptEvidence = {
+  fields: { question: string; value: string | string[] | null }[];
+  files: string[];
+  finalUrl: string | null;
+};
+
 export type ConfigValue =
   | boolean
   | number
@@ -177,12 +291,197 @@ export const exitSurveys = pgTable(
   ],
 );
 
+export const talentProfiles = pgTable(
+  "talent_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    caseId: uuid("case_id")
+      .unique()
+      .references(() => offboardingCases.id, { onDelete: "set null" }),
+    personalEmail: varchar("personal_email", { length: 255 }).notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    sponsoredUntil: date("sponsored_until").notNull(),
+    termsAcceptedAt: timestamp("terms_accepted_at"),
+    firstSignedInAt: timestamp("first_signed_in_at"),
+    shareOutcomeWithHr: boolean("share_outcome_with_hr").notNull().default(false),
+    aiApplyConsentAt: timestamp("ai_apply_consent_at"),
+    aiApplyConsentVersion: varchar("ai_apply_consent_version", { length: 20 }),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("talent_profiles_org_id_idx").on(table.orgId),
+    uniqueIndex("talent_profiles_email_lower_idx").on(sql`lower(${table.personalEmail})`),
+  ],
+);
+
+export const jobOriginEnum = pgEnum("job_origin", ["external", "hr", "recruiter"]);
+
+export const jobWorkModelEnum = pgEnum("job_work_model", ["remote", "hybrid", "onsite"]);
+
+export const jobSourceKindEnum = pgEnum("job_source_kind", ["greenhouse", "lever"]);
+
+export const jobSources = pgTable(
+  "job_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: jobSourceKindEnum("kind").notNull(),
+    target: varchar("target", { length: 100 }).notNull(),
+    label: varchar("label", { length: 255 }),
+    enabled: boolean("enabled").notNull().default(true),
+    lastSyncedAt: timestamp("last_synced_at"),
+    lastError: varchar("last_error", { length: 100 }),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("job_sources_kind_target_idx").on(table.kind, table.target),
+    check("job_sources_target_format", sql`${table.target} ~ '^[a-z0-9][a-z0-9_-]{0,99}$'`),
+  ],
+);
+
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    origin: jobOriginEnum("origin").notNull(),
+    source: varchar("source", { length: 50 }).notNull(),
+    sourceKey: varchar("source_key", { length: 2048 }).notNull(),
+    title: varchar("title", { length: 255 }).notNull(),
+    company: varchar("company", { length: 255 }).notNull(),
+    workModel: jobWorkModelEnum("work_model"),
+    city: varchar("city", { length: 255 }),
+    state: varchar("state", { length: 2 }),
+    salaryMinCents: integer("salary_min_cents"),
+    salaryMaxCents: integer("salary_max_cents"),
+    url: text("url").notNull(),
+    description: text("description").notNull().default(""),
+    postedAt: timestamp("posted_at"),
+    closedAt: timestamp("closed_at"),
+    lastSeenAt: timestamp("last_seen_at"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("jobs_source_key_idx").on(table.source, table.sourceKey),
+    check(
+      "jobs_salary_range",
+      sql`${table.salaryMinCents} is null or ${table.salaryMaxCents} is null or ${table.salaryMinCents} <= ${table.salaryMaxCents}`,
+    ),
+    index("jobs_search_idx").using(
+      "gin",
+      sql`to_tsvector('portuguese', ${table.title} || ' ' || ${table.description})`,
+    ),
+  ],
+);
+
+export const applicationStatusEnum = pgEnum("application_status", [
+  "sent",
+  "in_review",
+  "interview",
+  "offer",
+  "closed",
+]);
+
+export const applicationClosedReasonEnum = pgEnum("application_closed_reason", [
+  "rejected",
+  "withdrawn",
+  "hired",
+]);
+
+export const interviewModeEnum = pgEnum("interview_mode", ["video", "in_person", "phone"]);
+
+export const applicationChannelEnum = pgEnum("application_channel", ["manual", "ai_apply"]);
+
+export const applications = pgTable(
+  "applications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "restrict" }),
+    resumeId: uuid("resume_id").references(() => resumes.id, { onDelete: "set null" }),
+    publicToken: varchar("public_token", { length: 64 }),
+    channel: applicationChannelEnum("channel").notNull().default("manual"),
+    status: applicationStatusEnum("status").notNull().default("sent"),
+    furthestStage: applicationStatusEnum("furthest_stage").notNull().default("sent"),
+    closedReason: applicationClosedReasonEnum("closed_reason"),
+    appliedAt: timestamp("applied_at").notNull().defaultNow(),
+    statusChangedAt: timestamp("status_changed_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("applications_profile_job_idx").on(table.profileId, table.jobId),
+    index("applications_profile_id_idx").on(table.profileId),
+    index("applications_resume_id_idx").on(table.resumeId),
+    uniqueIndex("applications_public_token_idx").on(table.publicToken),
+    check(
+      "applications_closed_reason",
+      sql`(${table.status} = 'closed') = (${table.closedReason} is not null)`,
+    ),
+    check("applications_furthest_stage", sql`${table.furthestStage} <> 'closed'`),
+  ],
+);
+
+export const applicationEvents = pgTable(
+  "application_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    status: applicationStatusEnum("status").notNull(),
+    closedReason: applicationClosedReasonEnum("closed_reason"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("application_events_application_id_idx").on(table.applicationId)],
+);
+
+export const interviews = pgTable(
+  "interviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    mode: interviewModeEnum("mode").notNull(),
+    withWhom: varchar("with_whom", { length: 255 }).notNull(),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("interviews_application_id_idx").on(table.applicationId),
+    index("interviews_starts_at_idx").on(table.startsAt),
+  ],
+);
+
 export const offboardingCasesRelations = relations(offboardingCases, ({ many, one }) => ({
   tasks: many(tasks),
   equipment: many(equipment),
   exitSurvey: one(exitSurveys),
   organization: one(organizations, {
     fields: [offboardingCases.orgId],
+    references: [organizations.id],
+  }),
+  talentProfile: one(talentProfiles),
+}));
+
+export const talentProfilesRelations = relations(talentProfiles, ({ one }) => ({
+  case: one(offboardingCases, {
+    fields: [talentProfiles.caseId],
+    references: [offboardingCases.id],
+  }),
+  organization: one(organizations, {
+    fields: [talentProfiles.orgId],
     references: [organizations.id],
   }),
 }));
@@ -432,4 +731,320 @@ export const organizationsRelations = relations(organizations, ({ many }) => ({
   invoices: many(invoices),
   employeeAccess: many(employeeAccess),
   employeeStates: many(employeeStates),
+  talentProfiles: many(talentProfiles),
 }));
+
+export const resumeKindEnum = pgEnum("resume_kind", ["base", "tailored"]);
+
+export const resumeStatusEnum = pgEnum("resume_status", ["draft", "ready"]);
+
+export const resumes = pgTable(
+  "resumes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    kind: resumeKindEnum("kind").notNull(),
+    status: resumeStatusEnum("status").notNull().default("ready"),
+    jobId: uuid("job_id").references(() => jobs.id, { onDelete: "restrict" }),
+    content: jsonb("content").$type<ResumeContent>().notNull(),
+    score: integer("score"),
+    scoredAt: timestamp("scored_at"),
+    matchScore: integer("match_score"),
+    sourceFileKey: varchar("source_file_key", { length: 512 }),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("resumes_one_base_idx")
+      .on(table.profileId)
+      .where(sql`${table.kind} = 'base'`),
+    uniqueIndex("resumes_profile_job_idx")
+      .on(table.profileId, table.jobId)
+      .where(sql`${table.kind} = 'tailored'`),
+    check("resumes_kind_job", sql`(${table.kind} = 'base') = (${table.jobId} is null)`),
+    check("resumes_base_ready", sql`${table.kind} <> 'base' or ${table.status} = 'ready'`),
+    check("resumes_score_range", sql`${table.score} is null or ${table.score} between 0 and 100`),
+    check(
+      "resumes_match_score_range",
+      sql`${table.matchScore} is null or ${table.matchScore} between 0 and 100`,
+    ),
+  ],
+);
+
+export const backgroundJobStatusEnum = pgEnum("background_job_status", [
+  "pending",
+  "running",
+  "done",
+  "failed",
+]);
+
+export const backgroundJobs = pgTable(
+  "background_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: varchar("kind", { length: 50 }).notNull(),
+    subject: varchar("subject", { length: 255 }).notNull(),
+    payload: jsonb("payload").$type<Record<string, ConfigValue>>().notNull().default({}),
+    status: backgroundJobStatusEnum("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    runAfter: timestamp("run_after").notNull(),
+    lockedUntil: timestamp("locked_until"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("background_jobs_pending_idx")
+      .on(table.kind, table.subject)
+      .where(sql`${table.status} = 'pending'`),
+    index("background_jobs_claim_idx").on(table.status, table.runAfter),
+  ],
+);
+
+export const resumeSuggestionStatusEnum = pgEnum("resume_suggestion_status", [
+  "open",
+  "applied",
+  "dismissed",
+]);
+
+export const resumeSuggestions = pgTable(
+  "resume_suggestions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    resumeId: uuid("resume_id")
+      .notNull()
+      .references(() => resumes.id, { onDelete: "cascade" }),
+    targetNodeId: varchar("target_node_id", { length: 64 }).notNull(),
+    originalText: text("original_text").notNull(),
+    suggestedText: text("suggested_text").notNull(),
+    rationale: text("rationale").notNull(),
+    estimatedGain: integer("estimated_gain").notNull(),
+    status: resumeSuggestionStatusEnum("status").notNull().default("open"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("resume_suggestions_resume_idx").on(table.resumeId),
+    check("resume_suggestions_gain", sql`${table.estimatedGain} between 1 and 20`),
+  ],
+);
+
+export const llmUsage = pgTable(
+  "llm_usage",
+  {
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    calls: integer("calls").notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.profileId, table.day] })],
+);
+
+export const jobMatches = pgTable(
+  "job_matches",
+  {
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    score: integer("score").notNull(),
+    reasons: jsonb("reasons").$type<string[]>().notNull().default([]),
+    resumeUpdatedAt: timestamp("resume_updated_at").notNull(),
+    computedAt: timestamp("computed_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.profileId, table.jobId] }),
+    index("job_matches_job_idx").on(table.jobId),
+    check("job_matches_score_range", sql`${table.score} between 0 and 100`),
+  ],
+);
+
+export const publicPages = pgTable(
+  "public_pages",
+  {
+    profileId: uuid("profile_id")
+      .primaryKey()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    slug: varchar("slug", { length: 40 }).notNull(),
+    enabled: boolean("enabled").notNull().default(false),
+    resumeId: uuid("resume_id").references(() => resumes.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("public_pages_slug_idx").on(table.slug),
+    check(
+      "public_pages_slug_format",
+      sql`${table.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' and char_length(${table.slug}) between 3 and 40`,
+    ),
+  ],
+);
+
+export const publicPageDailyViews = pgTable(
+  "public_page_daily_views",
+  {
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    visits: integer("visits").notNull().default(0),
+    recruiterVisits: integer("recruiter_visits").notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.profileId, table.day] }),
+    check(
+      "public_page_daily_views_counts",
+      sql`${table.visits} >= 0 and ${table.recruiterVisits} >= 0 and ${table.recruiterVisits} <= ${table.visits}`,
+    ),
+  ],
+);
+
+export const applicationModeEnum = pgEnum("application_mode", ["automatic", "hybrid", "review"]);
+
+export const talentPreferences = pgTable(
+  "talent_preferences",
+  {
+    profileId: uuid("profile_id")
+      .primaryKey()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    mode: applicationModeEnum("mode").notNull().default("review"),
+    hybridThreshold: integer("hybrid_threshold").notNull().default(75),
+    targetTitles: jsonb("target_titles").$type<string[]>().notNull().default([]),
+    jobPreferences: jsonb("job_preferences").$type<JobPreferences>().notNull().default({}),
+    profileFields: jsonb("profile_fields").$type<ProfileFields>().notNull().default({}),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    check("talent_preferences_threshold", sql`${table.hybridThreshold} between 50 and 100`),
+  ],
+);
+
+export const answerQuestions = pgTable(
+  "answer_questions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    normalized: varchar("normalized", { length: 500 }).notNull(),
+    text: varchar("text", { length: 500 }).notNull(),
+    common: boolean("common").notNull().default(false),
+    sensitive: boolean("sensitive").notNull().default(false),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [uniqueIndex("answer_questions_normalized_idx").on(table.normalized)],
+);
+
+export const talentAnswers = pgTable(
+  "talent_answers",
+  {
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    questionId: uuid("question_id")
+      .notNull()
+      .references(() => answerQuestions.id, { onDelete: "cascade" }),
+    answer: text("answer").notNull(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.profileId, table.questionId] }),
+    index("talent_answers_question_idx").on(table.questionId),
+  ],
+);
+
+export const rejectionReasonEnum = pgEnum("rejection_reason", [
+  "salary",
+  "location",
+  "company",
+  "seniority",
+  "work_model",
+  "not_interested",
+  "other",
+]);
+
+export const jobRejections = pgTable(
+  "job_rejections",
+  {
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    reason: rejectionReasonEnum("reason").notNull(),
+    note: varchar("note", { length: 500 }),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.profileId, table.jobId] }),
+    index("job_rejections_job_idx").on(table.jobId),
+  ],
+);
+
+export const aiApplicationStateEnum = pgEnum("ai_application_state", [
+  "draft",
+  "queued",
+  "running",
+  "submitting",
+  "submitted",
+  "rehearsed",
+  "assisted",
+  "needs_check",
+  "cancelled",
+]);
+
+export const aiApplications = pgTable(
+  "ai_applications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "restrict" }),
+    state: aiApplicationStateEnum("state").notNull().default("draft"),
+    reason: varchar("reason", { length: 50 }),
+    form: jsonb("form").$type<{ questions: FormQuestion[] }>().notNull(),
+    draft: jsonb("draft").$type<DraftAnswer[]>().notNull(),
+    confirmed: jsonb("confirmed").$type<ConfirmedAnswer[]>(),
+    rehearsal: boolean("rehearsal").notNull().default(false),
+    resumeId: uuid("resume_id").references(() => resumes.id, { onDelete: "set null" }),
+    evidence: jsonb("evidence").$type<AttemptEvidence>(),
+    screenshotKey: varchar("screenshot_key", { length: 512 }),
+    preparedAt: timestamp("prepared_at").notNull(),
+    confirmedAt: timestamp("confirmed_at"),
+    finishedAt: timestamp("finished_at"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("ai_applications_active_idx")
+      .on(table.profileId, table.jobId)
+      .where(sql`${table.state} in ('draft', 'queued', 'running', 'submitting', 'needs_check')`),
+    index("ai_applications_profile_created_idx").on(table.profileId, table.createdAt),
+  ],
+);
+
+export const applicationPackages = pgTable(
+  "application_packages",
+  {
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => talentProfiles.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    coverLetter: text("cover_letter").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.profileId, table.jobId] }),
+    index("application_packages_job_idx").on(table.jobId),
+  ],
+);

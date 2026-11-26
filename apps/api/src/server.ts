@@ -5,6 +5,9 @@ import { z } from "zod";
 import { createApp } from "./app.js";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
+import { parseAllowlist } from "./shared/ai-apply-access.js";
+import { createGenerateStructured, gatewayModel } from "./shared/ai.js";
+import { diskStorage } from "./shared/disk-storage.js";
 
 const config = z
   .object({
@@ -19,11 +22,13 @@ const config = z
   .parse(process.env);
 
 const db = createClient(config.POSTGRES_URL);
-const { auth, origin } = createRuntimeAuth(db, config.WEB_ORIGIN);
+const repos = createRepositories(db);
+const { auth, origin, sender } = createRuntimeAuth(db, repos.talent, config.WEB_ORIGIN);
 
-createApp(origin, createRepositories(db), {
+createApp(origin, repos, {
   adapter: node(),
   auth,
+  sendEmail: (message) => sender.send(message),
   cronSecret: process.env.CRON_SECRET,
   webhookSecret: process.env.WEBHOOK_SECRET,
   tracking:
@@ -37,6 +42,12 @@ createApp(origin, createRepositories(db), {
   slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
   abacatepay: createAbacatePayGateway(process.env.ABACATEPAY_API_KEY),
   abacatepayWebhookSecret: process.env.ABACATEPAY_WEBHOOK_SECRET,
+  generateStructured: process.env.AI_GATEWAY_API_KEY
+    ? createGenerateStructured(gatewayModel(process.env.AI_GATEWAY_API_KEY))
+    : undefined,
+  storage: process.env.RESUME_STORAGE_DIR ? diskStorage(process.env.RESUME_STORAGE_DIR) : undefined,
+  publicPageOrigin: process.env.PUBLIC_PAGE_ORIGIN,
+  aiApplyAllowlist: parseAllowlist(process.env.AI_APPLY_ALLOWLIST),
 }).listen({
   hostname: config.API_HOST,
   reusePort: false,

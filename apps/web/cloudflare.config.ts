@@ -1,6 +1,7 @@
 import { bindings, defineConfig, triggers, type WorkerConfig } from "cf/config";
 import { z } from "zod";
 import * as entrypoint from "./cloudflare.worker.ts" with { type: "cf-worker" };
+import { cronSchedules } from "./src/cron-schedules.ts";
 
 const apiConfigured = process.env.OFFBOARD_API_CONFIGURED === "1";
 const cronEnabled = apiConfigured && process.env.OFFBOARD_ENABLE_CRON === "1";
@@ -29,6 +30,14 @@ if (apiConfigured) {
 
   if (provider === "resend") env.RESEND_API_KEY = bindings.secret();
 
+  if (process.env.OFFBOARD_AI_CONFIGURED === "1") env.AI_GATEWAY_API_KEY = bindings.secret();
+
+  if (process.env.OFFBOARD_AI_APPLY_CONFIGURED === "1") env.AI_APPLY_ALLOWLIST = bindings.secret();
+
+  if (process.env.OFFBOARD_RESUMES_BUCKET) {
+    env.RESUMES = bindings.r2({ name: process.env.OFFBOARD_RESUMES_BUCKET });
+  }
+
   if (cronEnabled) env.CRON_SECRET = bindings.secret();
 }
 
@@ -42,6 +51,8 @@ export default defineConfig({
     workersDev: true,
     domains: ["app.off-board.xyz"],
     env,
-    triggers: cronEnabled ? [triggers.scheduled({ schedule: "0 8 * * *" })] : [],
+    triggers: cronEnabled
+      ? Object.values(cronSchedules).map((schedule) => triggers.scheduled({ schedule }))
+      : [],
   },
 });

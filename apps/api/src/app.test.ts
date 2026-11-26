@@ -1,17 +1,42 @@
 import { createHmac, randomUUID } from "node:crypto";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createPortalAbility } from "@offboard/access";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import type { ConfigValue } from "@offboard/db/schema";
 import {
+  aiApplications,
+  answerQuestions,
+  applicationPackages,
+  applications,
   authSession,
+  authUser,
+  backgroundJobs,
   checklistModels,
   defaultOrgId,
   employeeAccess,
+  employeeStates,
   equipment,
+  interviews,
+  jobSources,
+  jobMatches,
+  jobRejections,
+  jobs,
+  llmUsage,
+  offboardingCases,
   organizations,
+  plans,
+  publicPageDailyViews,
+  publicPages,
+  resumes,
+  subscriptions,
+  talentPreferences,
+  talentProfiles,
   tasks,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
@@ -21,13 +46,19 @@ import {
   employeeStateSchema,
   type EmployeeState,
 } from "@offboard/employee";
-import { eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.ts";
 import type { TrackingConfig } from "./features/offboardings/correios.ts";
 import { createAuth, createRuntimeAuth } from "./features/auth/auth.js";
+import type { CatalogSource } from "./features/sources/catalog.js";
+import type { GenerateStructured } from "./shared/ai.js";
+import { diskStorage } from "./shared/disk-storage.js";
+import type { ObjectStorage } from "./shared/object-storage.js";
+import { zipSync } from "fflate";
+import { PDFArray, PDFDocument, PDFRawStream, decodePDFRawStream } from "pdf-lib";
 import type { PortalAuth } from "./shared/portal-auth.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -35,6 +66,23 @@ const webOrigin = "http://localhost:5173";
 const cronSecret = "test-cron-secret";
 const webhookSecret = "test-webhook-secret";
 const slackSigningSecret = "test-slack-secret";
+
+const invitedEmails: string[] = [];
+const sentTexts: string[] = [];
+const inviteFailures = { remaining: 0 };
+
+function sendEmail(message: { to: string; text: string }) {
+  if (inviteFailures.remaining > 0) {
+    inviteFailures.remaining -= 1;
+
+    return Promise.reject(new Error("invite failed"));
+  }
+
+  invitedEmails.push(message.to);
+  sentTexts.push(message.text);
+
+  return Promise.resolve();
+}
 
 const auth: PortalAuth = {
   async handler(request) {
@@ -49,6 +97,17 @@ const auth: PortalAuth = {
 
     if (session === "revoked") return Promise.resolve({ kind: "forbidden" });
 
+    if (session === "talent") {
+      return Promise.resolve({
+        kind: "talent",
+        profile: {
+          id: headers.get("x-test-talent-id") ?? "test-talent",
+          name: "Test Talent",
+          email: "talent@example.com",
+        },
+      });
+    }
+
     const role =
       session === "rh" || session === "gestor" || session === "visualizador" ? session : "admin";
 
@@ -59,16 +118,56 @@ const auth: PortalAuth = {
         name: "Test Member",
         email: "member@example.com",
         role,
-        orgId: defaultOrgId,
+        orgId: headers.get("x-test-org-id") ?? defaultOrgId,
       },
     });
   },
 };
 
-const appOptions = { auth, cronSecret, webhookSecret, slackSigningSecret };
+const appOptions = {
+  auth,
+  sendEmail,
+  cronSecret,
+  webhookSecret,
+  slackSigningSecret,
+  catalog: [],
+  runInBackground: () => undefined,
+};
+
+function leakyError(prompt: string) {
+  return Object.assign(new Error("gateway down"), { requestBodyValues: { prompt } });
+}
+
+async function drawnText(bytes: Uint8Array) {
+  const document = await PDFDocument.load(bytes);
+  const decoder = new TextDecoder("windows-1252");
+
+  return document
+    .getPages()
+    .flatMap((page) => {
+      const contents = page.node.Contents();
+
+      return contents instanceof PDFArray ? contents.asArray() : [];
+    })
+    .map((ref) => {
+      const stream = document.context.lookup(ref);
+
+      return stream instanceof PDFRawStream
+        ? decoder.decode(decodePDFRawStream(stream).decode())
+        : "";
+    })
+    .join("");
+}
+
+function hex(text: string) {
+  return Array.from(text, (char) =>
+    char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"),
+  ).join("");
+}
 
 const missingTaskId = "00000000-0000-4000-8000-000000000000";
 const missingCaseId = "00000000-0000-4000-8000-000000000001";
+const otherOrgId = "00000000-0000-0000-0000-0000000000b2";
 
 type SurveyPayload = {
   caseId: string;
@@ -103,6 +202,7 @@ describe.skipIf(!url)("api", () => {
     rows?: { name: string; department?: string }[];
     actionId?: string;
     enabled?: boolean;
+    shareOutcomeWithHr?: boolean | string;
     config?: Record<string, ConfigValue>;
     phase?: string;
     event?: string | { type: string; user?: string };
@@ -114,6 +214,8 @@ describe.skipIf(!url)("api", () => {
     api_app_id?: string;
     event_id?: string;
     event_time?: number;
+    personalEmail?: string;
+    sponsoredUntil?: string;
   };
 
   function call(
@@ -180,7 +282,5823 @@ describe.skipIf(!url)("api", () => {
   });
 
   beforeEach(async () => {
+    invitedEmails.length = 0;
+    sentTexts.length = 0;
+    inviteFailures.remaining = 0;
     await seedDatabase(db, testSeedFixtures);
+  });
+
+  describe("talent access", () => {
+    const personalEmail = "ana.pessoal@example.com";
+    const sponsoredUntil = "2099-12-31";
+
+    async function firstCaseId() {
+      const [first] = await (await call("/offboardings")).json();
+
+      return z.string().parse(first.id);
+    }
+
+    function asSession(session: string, path: string, method = "GET", body?: Payload, extra = {}) {
+      return app.handle(
+        new Request(`http://localhost/api${path}`, {
+          method,
+          headers: {
+            "x-test-session": session,
+            origin: webOrigin,
+            "content-type": "application/json",
+            ...extra,
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        }),
+      );
+    }
+
+    it("enables talent access from a case and invites the person", async () => {
+      const caseId = await firstCaseId();
+      const path = `/offboardings/${caseId}/talent-access`;
+      const body = { personalEmail, sponsoredUntil };
+
+      expect((await asSession("visualizador", path, "POST", body)).status).toBe(403);
+      expect(invitedEmails).toEqual([]);
+
+      const created = await asSession("rh", path, "POST", body);
+
+      expect(created.status).toBe(201);
+      expect(await created.json()).toEqual({ personalEmail, sponsoredUntil, signedIn: false });
+      expect(invitedEmails).toEqual([personalEmail]);
+      expect(sentTexts.at(-1)).toContain(`${webOrigin}/app/entrar`);
+
+      expect((await asSession("rh", path, "POST", body)).status).toBe(409);
+      expect(
+        (await asSession("rh", `/offboardings/${missingCaseId}/talent-access`, "POST", body))
+          .status,
+      ).toBe(404);
+      expect(invitedEmails).toEqual([personalEmail]);
+
+      const read = await asSession("visualizador", path);
+
+      expect(read.status).toBe(200);
+      expect(await read.json()).toEqual({ personalEmail, sponsoredUntil, signedIn: false });
+    });
+
+    it("rejects a duplicate personal email and invalid input without inviting", async () => {
+      const cases: { id: string }[] = await (await call("/offboardings")).json();
+      const [first, second] = cases;
+
+      await repos.talent.enable({
+        orgId: defaultOrgId,
+        caseId: first.id,
+        personalEmail,
+        sponsoredUntil,
+      });
+
+      const taken = await asSession("rh", `/offboardings/${second.id}/talent-access`, "POST", {
+        personalEmail,
+        sponsoredUntil,
+      });
+
+      const invalid = await asSession("rh", `/offboardings/${second.id}/talent-access`, "POST", {
+        personalEmail: "nope",
+        sponsoredUntil: "tomorrow",
+      });
+
+      expect(taken.status).toBe(409);
+      expect(invalid.status).toBe(422);
+      expect(invitedEmails).toEqual([]);
+    });
+
+    it("returns 404 when reading or updating a case without talent access", async () => {
+      const path = `/offboardings/${await firstCaseId()}/talent-access`;
+
+      expect((await asSession("rh", path)).status).toBe(404);
+      expect((await asSession("rh", path, "PATCH", { sponsoredUntil })).status).toBe(404);
+      expect((await asSession("visualizador", path, "PATCH", { sponsoredUntil })).status).toBe(403);
+    });
+
+    it("fixes the email only before first sign-in", async () => {
+      const caseId = await firstCaseId();
+      const path = `/offboardings/${caseId}/talent-access`;
+
+      const created = await repos.talent.enable({
+        orgId: defaultOrgId,
+        caseId,
+        personalEmail,
+        sponsoredUntil,
+      });
+
+      if (
+        created === "case_not_found" ||
+        created === "already_enabled" ||
+        created === "email_taken"
+      ) {
+        throw new Error(created);
+      }
+
+      const changed = await asSession("rh", path, "PATCH", { personalEmail: "novo@example.com" });
+
+      expect(changed.status).toBe(200);
+      expect(await changed.json()).toEqual({
+        personalEmail: "novo@example.com",
+        sponsoredUntil,
+        signedIn: false,
+      });
+      expect(invitedEmails).toEqual(["novo@example.com"]);
+
+      const sameEmail = await asSession("rh", path, "PATCH", { personalEmail: "NOVO@example.com" });
+
+      expect(sameEmail.status).toBe(200);
+      expect(invitedEmails).toEqual(["novo@example.com", "novo@example.com"]);
+
+      await repos.talent.markSignedIn(created.id);
+
+      const locked = await asSession("rh", path, "PATCH", { personalEmail: "outro@example.com" });
+
+      expect(locked.status).toBe(409);
+      expect(invitedEmails).toEqual(["novo@example.com", "novo@example.com"]);
+
+      const extended = await asSession("rh", path, "PATCH", { sponsoredUntil: "2100-01-31" });
+
+      expect(extended.status).toBe(200);
+      expect(invitedEmails).toEqual(["novo@example.com", "novo@example.com"]);
+      expect(await extended.json()).toEqual({
+        personalEmail: "novo@example.com",
+        sponsoredUntil: "2100-01-31",
+        signedIn: true,
+      });
+    });
+
+    it("lets a PATCH resend the invite after a failed one", async () => {
+      const path = `/offboardings/${await firstCaseId()}/talent-access`;
+
+      inviteFailures.remaining = 1;
+
+      const failed = await asSession("rh", path, "POST", { personalEmail, sponsoredUntil });
+
+      expect(failed.status).toBe(500);
+      expect(invitedEmails).toEqual([]);
+
+      const resent = await asSession("rh", path, "PATCH", { personalEmail });
+
+      expect(resent.status).toBe(200);
+      expect(invitedEmails).toEqual([personalEmail]);
+    });
+
+    it("rejects an empty PATCH body", async () => {
+      const path = `/offboardings/${await firstCaseId()}/talent-access`;
+
+      expect((await asSession("rh", path, "PATCH", {})).status).toBe(422);
+    });
+
+    it("rejects a taken email on update without inviting", async () => {
+      const [first, second]: { id: string }[] = await (await call("/offboardings")).json();
+
+      await repos.talent.enable({
+        orgId: defaultOrgId,
+        caseId: first.id,
+        personalEmail,
+        sponsoredUntil,
+      });
+      await repos.talent.enable({
+        orgId: defaultOrgId,
+        caseId: second.id,
+        personalEmail: "outra@example.com",
+        sponsoredUntil,
+      });
+
+      const taken = await asSession("rh", `/offboardings/${second.id}/talent-access`, "PATCH", {
+        personalEmail,
+      });
+
+      expect(taken.status).toBe(409);
+      expect(invitedEmails).toEqual([]);
+    });
+
+    it("isolates talent across organizations", async () => {
+      const otherOrg = { "x-test-org-id": otherOrgId };
+      const ownCase = await firstCaseId();
+      const ownPath = `/offboardings/${ownCase}/talent-access`;
+
+      await db
+        .insert(organizations)
+        .values({ id: otherOrgId, name: "Org B", slug: "org-b" })
+        .onConflictDoNothing();
+
+      const [otherCase] = await db
+        .insert(offboardingCases)
+        .values({
+          orgId: otherOrgId,
+          name: "Pessoa da Org B",
+          role: "Dev",
+          department: "Eng",
+          deadline: "2026-12-01",
+        })
+        .returning({ id: offboardingCases.id });
+
+      const otherPath = `/offboardings/${otherCase.id}/talent-access`;
+      const body = { personalEmail, sponsoredUntil };
+
+      expect((await asSession("rh", ownPath, "POST", body, otherOrg)).status).toBe(404);
+      expect(invitedEmails).toEqual([]);
+      expect((await asSession("rh", ownPath, "POST", body)).status).toBe(201);
+      expect((await asSession("rh", ownPath, "GET", undefined, otherOrg)).status).toBe(404);
+
+      const foreignPatch = await asSession(
+        "rh",
+        ownPath,
+        "PATCH",
+        { personalEmail: "invasora@example.com", sponsoredUntil: "2100-01-31" },
+        otherOrg,
+      );
+
+      expect(foreignPatch.status).toBe(404);
+      expect(invitedEmails).toEqual([personalEmail]);
+      expect(await repos.talent.findByCase(defaultOrgId, ownCase)).toMatchObject({
+        email: personalEmail,
+        sponsoredUntil,
+      });
+
+      const otherEmail = "pessoa.b@example.com";
+
+      const created = await asSession(
+        "rh",
+        otherPath,
+        "POST",
+        { personalEmail: otherEmail, sponsoredUntil },
+        otherOrg,
+      );
+
+      expect(created.status).toBe(201);
+      expect(invitedEmails).toEqual([personalEmail, otherEmail]);
+      expect((await asSession("rh", otherPath)).status).toBe(404);
+
+      const own = await repos.talent.findByCase(defaultOrgId, ownCase);
+      const other = await repos.talent.findByCase(otherOrgId, otherCase.id);
+
+      if (!own || !other) throw new Error("missing talent profiles");
+
+      expect(other.orgId).toBe(otherOrgId);
+      expect(await repos.talent.findByCase(defaultOrgId, otherCase.id)).toBeUndefined();
+
+      const [job] = await db
+        .insert(jobs)
+        .values({
+          origin: "external",
+          source: "seed",
+          sourceKey: "isolation",
+          title: "Analista",
+          company: "Acme",
+          url: "https://jobs.example.com/isolation",
+        })
+        .returning({ id: jobs.id });
+
+      const sponsoredBy = async (orgId: string, total: number) => {
+        const rows = await db
+          .insert(talentProfiles)
+          .values(
+            Array.from({ length: total }, (_, index) => ({
+              orgId,
+              name: `Pessoa ${orgId.slice(-2)} ${index}`,
+              personalEmail: `pessoa.${orgId.slice(-2)}.${index}@example.com`,
+              sponsoredUntil,
+            })),
+          )
+          .returning({ id: talentProfiles.id });
+
+        return rows.map((row) => row.id);
+      };
+
+      const ownPeople = [own.id, ...(await sponsoredBy(defaultOrgId, 4))];
+      const otherPeople = [other.id, ...(await sponsoredBy(otherOrgId, 3))];
+
+      await db
+        .insert(applications)
+        .values([...ownPeople, ...otherPeople].map((profileId) => ({ profileId, jobId: job.id })));
+
+      const ownAggregates = await asSession("rh", "/talent/aggregates");
+
+      const otherAggregates = await asSession(
+        "rh",
+        "/talent/aggregates",
+        "GET",
+        undefined,
+        otherOrg,
+      );
+
+      expect(await ownAggregates.json()).toEqual({
+        enabled: 5,
+        activated: null,
+        funnel: { sent: 5, responded: null, interviews: null, offers: null },
+        hiresShared: null,
+        topJobs: [{ title: "Analista", company: "Acme", applications: 5 }],
+      });
+      expect(await otherAggregates.json()).toEqual({
+        enabled: 4,
+        activated: null,
+        funnel: { sent: null, responded: null, interviews: null, offers: null },
+        hiresShared: null,
+        topJobs: [],
+      });
+
+      const [plan] = await db.select({ id: plans.id }).from(plans).limit(1);
+
+      await db.insert(subscriptions).values({
+        orgId: otherOrgId,
+        planId: plan.id,
+        currentPeriodStart: "2026-11-01",
+        currentPeriodEnd: "2099-12-01",
+      });
+
+      const ownSubscription = await repos.billing.getSubscription(defaultOrgId);
+
+      if (!ownSubscription) throw new Error("missing subscription");
+
+      await repos.billing.updateSubscription(defaultOrgId, ownSubscription.id, {
+        status: "canceled",
+      });
+
+      const entitlement = async (profileId: string) => {
+        const me = await asSession("talent", "/me", "GET", undefined, {
+          "x-test-talent-id": profileId,
+        });
+
+        return z.object({ entitlement: z.object({ kind: z.string() }) }).parse(await me.json())
+          .entitlement.kind;
+      };
+
+      expect(await entitlement(own.id)).toBe("lapsed");
+      expect(await entitlement(other.id)).toBe("sponsored");
+
+      const resume = {
+        headline: { id: "h", text: "Engenheira" },
+        summary: { id: "s", text: "Dados" },
+        experiences: [],
+        education: [],
+        skills: [],
+        languages: [],
+        contact: { email: null, phone: null, city: null, links: [] },
+      };
+
+      await db.insert(resumes).values([
+        { profileId: own.id, kind: "base", content: resume },
+        { profileId: other.id, kind: "base", content: resume },
+      ]);
+      await db.insert(publicPages).values([
+        { profileId: own.id, slug: "pessoa-org-a", enabled: true },
+        { profileId: other.id, slug: "pessoa-org-b", enabled: true },
+      ]);
+
+      expect((await call("/public/pages/pessoa-org-a")).status).toBe(404);
+      expect((await call("/public/pages/pessoa-org-b")).status).toBe(200);
+    });
+
+    it("isolates talent and portal sessions", async () => {
+      for (const [path, method] of [
+        ["/team", "GET"],
+        ["/offboardings", "GET"],
+        ["/session", "GET"],
+        ["/team", "POST"],
+      ]) {
+        const denied = await asSession(
+          "talent",
+          path,
+          method,
+          method === "POST" ? { name: "Test", email: "test@example.com", role: "rh" } : undefined,
+        );
+
+        expect(denied.status).toBe(403);
+      }
+
+      expect((await asSession("admin", "/me")).status).toBe(403);
+      expect((await asSession("admin", "/me/terms", "POST")).status).toBe(403);
+      expect((await asSession("anonymous", "/me")).status).toBe(401);
+    });
+
+    it("serves the profile and records terms", async () => {
+      const caseId = await firstCaseId();
+
+      const created = await repos.talent.enable({
+        orgId: defaultOrgId,
+        caseId,
+        personalEmail,
+        sponsoredUntil,
+      });
+
+      if (
+        created === "case_not_found" ||
+        created === "already_enabled" ||
+        created === "email_taken"
+      ) {
+        throw new Error(created);
+      }
+
+      const talentHeaders = { "x-test-talent-id": created.id };
+      const me = await asSession("talent", "/me", "GET", undefined, talentHeaders);
+
+      expect(me.status).toBe(200);
+      expect(await me.json()).toEqual({
+        id: created.id,
+        name: created.name,
+        email: personalEmail,
+        termsAccepted: false,
+        shareOutcomeWithHr: false,
+        aiApply: { consented: false, available: false },
+        entitlement: { kind: "sponsored", until: sponsoredUntil },
+      });
+
+      const accepted = await asSession("talent", "/me/terms", "POST", undefined, talentHeaders);
+
+      expect(accepted.status).toBe(200);
+      expect(await accepted.json()).toMatchObject({ termsAccepted: true });
+
+      const subscription = await repos.billing.getSubscription(defaultOrgId);
+
+      if (!subscription) throw new Error("missing subscription");
+
+      await repos.billing.updateSubscription(defaultOrgId, subscription.id, { status: "canceled" });
+
+      const lapsed = await asSession("talent", "/me", "GET", undefined, talentHeaders);
+
+      expect(await lapsed.json()).toMatchObject({ entitlement: { kind: "lapsed", until: null } });
+    });
+
+    it("grants the aggregates permission to admin and rh only", () => {
+      expect(createPortalAbility("admin").can("read", "TalentAggregates")).toBe(true);
+      expect(createPortalAbility("rh").can("read", "TalentAggregates")).toBe(true);
+      expect(createPortalAbility("gestor").can("read", "TalentAggregates")).toBe(false);
+      expect(createPortalAbility("visualizador").can("read", "TalentAggregates")).toBe(false);
+    });
+
+    it("stores the person's own consent", async () => {
+      const [firstCase, secondCase] = await db
+        .select({ id: offboardingCases.id })
+        .from(offboardingCases);
+
+      const enable = async (caseId: string, email: string) => {
+        const created = await repos.talent.enable({
+          orgId: defaultOrgId,
+          caseId,
+          personalEmail: email,
+          sponsoredUntil,
+        });
+
+        if (
+          created === "case_not_found" ||
+          created === "already_enabled" ||
+          created === "email_taken"
+        ) {
+          throw new Error(created);
+        }
+
+        return created;
+      };
+
+      const mine = await enable(firstCase.id, personalEmail);
+      const other = await enable(secondCase.id, "outra@example.com");
+
+      const asMine = { "x-test-talent-id": mine.id };
+
+      expect(
+        (await asSession("rh", "/me/consent", "PUT", { shareOutcomeWithHr: true })).status,
+      ).toBe(403);
+      expect((await repos.talent.findById(mine.id))?.shareOutcomeWithHr).toBe(false);
+
+      const early = await asSession(
+        "talent",
+        "/me/consent",
+        "PUT",
+        { shareOutcomeWithHr: true },
+        asMine,
+      );
+
+      expect(early.status).toBe(200);
+      expect(await early.json()).toMatchObject({ termsAccepted: false, shareOutcomeWithHr: true });
+
+      const shared = await asSession(
+        "talent",
+        "/me/consent",
+        "PUT",
+        { shareOutcomeWithHr: true },
+        asMine,
+      );
+
+      expect(shared.status).toBe(200);
+      expect(await shared.json()).toMatchObject({ id: mine.id, shareOutcomeWithHr: true });
+      expect(
+        await (await asSession("talent", "/me", "GET", undefined, asMine)).json(),
+      ).toMatchObject({ shareOutcomeWithHr: true });
+      expect((await repos.talent.findById(other.id))?.shareOutcomeWithHr).toBe(false);
+
+      const withdrawn = await asSession(
+        "talent",
+        "/me/consent",
+        "PUT",
+        { shareOutcomeWithHr: false },
+        asMine,
+      );
+
+      expect(await withdrawn.json()).toMatchObject({ shareOutcomeWithHr: false });
+
+      await repos.talent.setConsent(mine.id, true, new Date());
+
+      const subscription = await repos.billing.getSubscription(defaultOrgId);
+
+      if (!subscription) throw new Error("missing subscription");
+
+      await repos.billing.updateSubscription(defaultOrgId, subscription.id, { status: "canceled" });
+
+      const lapsed = await asSession(
+        "talent",
+        "/me/consent",
+        "PUT",
+        { shareOutcomeWithHr: false },
+        asMine,
+      );
+
+      expect(lapsed.status).toBe(200);
+      expect(await lapsed.json()).toMatchObject({
+        entitlement: { kind: "lapsed" },
+        shareOutcomeWithHr: false,
+      });
+      expect(
+        (await asSession("talent", "/me/consent", "PUT", { shareOutcomeWithHr: "yes" }, asMine))
+          .status,
+      ).toBe(422);
+    });
+
+    it("stores AI Apply consent", async () => {
+      const [firstCase, secondCase] = await db
+        .select({ id: offboardingCases.id })
+        .from(offboardingCases);
+
+      const enable = async (caseId: string, email: string) => {
+        const created = await repos.talent.enable({
+          orgId: defaultOrgId,
+          caseId,
+          personalEmail: email,
+          sponsoredUntil,
+        });
+
+        if (
+          created === "case_not_found" ||
+          created === "already_enabled" ||
+          created === "email_taken"
+        ) {
+          throw new Error(created);
+        }
+
+        return created;
+      };
+
+      const mine = await enable(firstCase.id, personalEmail);
+      const other = await enable(secondCase.id, "outra@example.com");
+
+      const gated = createApp(webOrigin, repos, {
+        ...appOptions,
+        aiApplyAllowlist: ["ANA.PESSOAL@example.com", "outra@example.com"],
+        generateStructured: async ({ schema }) => schema.parse({}),
+      });
+
+      const call = (
+        instance: typeof gated,
+        session: string,
+        path: string,
+        method: string,
+        id: string,
+        body?: { accept: boolean | string },
+      ) =>
+        instance.handle(
+          new Request(`http://localhost/api${path}`, {
+            method,
+            headers: {
+              "x-test-session": session,
+              "x-test-talent-id": id,
+              origin: webOrigin,
+              "content-type": "application/json",
+            },
+            body: body === undefined ? undefined : JSON.stringify(body),
+          }),
+        );
+
+      const seedAttempt = async (
+        profileId: string,
+        sourceKey: string,
+        state: (typeof aiApplications.$inferInsert)["state"],
+      ) => {
+        const [job] = await db
+          .insert(jobs)
+          .values({
+            origin: "external",
+            source: "seed",
+            sourceKey,
+            title: sourceKey,
+            company: "Acme",
+            url: `https://jobs.example.com/${sourceKey}`,
+          })
+          .returning({ id: jobs.id });
+
+        const [row] = await db
+          .insert(aiApplications)
+          .values({
+            profileId,
+            jobId: job.id,
+            state,
+            form: { questions: [] },
+            draft: [],
+            preparedAt: new Date("2026-11-01T00:00:00Z"),
+          })
+          .returning({ id: aiApplications.id });
+
+        return row.id;
+      };
+
+      const stateOf = async (id: string) => {
+        const [row] = await db
+          .select({
+            state: aiApplications.state,
+            reason: aiApplications.reason,
+            finishedAt: aiApplications.finishedAt,
+          })
+          .from(aiApplications)
+          .where(eq(aiApplications.id, id));
+
+        return row;
+      };
+
+      const consentOf = async (id: string) => {
+        const [row] = await db
+          .select({
+            at: talentProfiles.aiApplyConsentAt,
+            version: talentProfiles.aiApplyConsentVersion,
+          })
+          .from(talentProfiles)
+          .where(eq(talentProfiles.id, id));
+
+        return row;
+      };
+
+      const put = (instance: typeof gated, session: string, id: string, accept: boolean | string) =>
+        call(instance, session, "/me/ai-apply/consent", "PUT", id, { accept });
+
+      expect((await put(gated, "rh", mine.id, true)).status).toBe(403);
+      expect((await put(gated, "talent", mine.id, "yes")).status).toBe(422);
+
+      expect(await (await call(gated, "talent", "/me", "GET", mine.id)).json()).toMatchObject({
+        aiApply: { consented: false, available: false },
+      });
+
+      const accepted = await put(gated, "talent", mine.id, true);
+
+      expect(accepted.status).toBe(200);
+      expect(await accepted.json()).toMatchObject({
+        id: mine.id,
+        aiApply: { consented: true, available: true },
+      });
+
+      const stored = await consentOf(mine.id);
+
+      expect(stored.at).toBeInstanceOf(Date);
+      expect(stored.version).toBe("2026-11-25");
+      expect(await (await call(app, "talent", "/me", "GET", mine.id)).json()).toMatchObject({
+        aiApply: { consented: true, available: false },
+      });
+
+      const draft = await seedAttempt(mine.id, "ai-draft", "draft");
+      const queued = await seedAttempt(mine.id, "ai-queued", "queued");
+      const submitted = await seedAttempt(mine.id, "ai-submitted", "submitted");
+      const others = await seedAttempt(other.id, "ai-other", "draft");
+
+      await put(gated, "talent", other.id, true);
+
+      const older = new Date("2020-01-01T00:00:00Z");
+
+      await db
+        .update(talentProfiles)
+        .set({ aiApplyConsentAt: older, aiApplyConsentVersion: "2020-01-01" })
+        .where(eq(talentProfiles.id, mine.id));
+      await put(gated, "talent", mine.id, true);
+
+      const refreshed = await consentOf(mine.id);
+
+      expect(refreshed.at?.getTime()).toBeGreaterThan(older.getTime());
+      expect(refreshed.version).toBe("2026-11-25");
+
+      const withdrawn = await put(gated, "talent", mine.id, false);
+
+      expect(await withdrawn.json()).toMatchObject({
+        aiApply: { consented: false, available: false },
+      });
+      expect(await consentOf(mine.id)).toEqual({ at: null, version: null });
+
+      for (const id of [draft, queued]) {
+        expect(await stateOf(id)).toEqual({
+          state: "cancelled",
+          reason: "consent_withdrawn",
+          finishedAt: expect.any(Date),
+        });
+      }
+
+      expect(await stateOf(submitted)).toEqual({
+        state: "submitted",
+        reason: null,
+        finishedAt: null,
+      });
+      expect(await stateOf(others)).toEqual({ state: "draft", reason: null, finishedAt: null });
+      expect((await consentOf(other.id)).at).toBeInstanceOf(Date);
+
+      await put(gated, "talent", mine.id, true);
+
+      expect((await stateOf(draft)).state).toBe("cancelled");
+    });
+
+    it("prepares an AI Apply draft through the composed app", async () => {
+      const [firstCase] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
+
+      const created = await repos.talent.enable({
+        orgId: defaultOrgId,
+        caseId: firstCase.id,
+        personalEmail,
+        sponsoredUntil,
+      });
+
+      if (
+        created === "case_not_found" ||
+        created === "already_enabled" ||
+        created === "email_taken"
+      ) {
+        throw new Error(created);
+      }
+
+      await repos.talent.acceptTerms(created.id);
+      await repos.talent.setAiApplyConsent(created.id, true, new Date());
+
+      await db.insert(resumes).values({
+        profileId: created.id,
+        kind: "base",
+        content: {
+          headline: { id: "h", text: "Engenheira" },
+          summary: { id: "s", text: "Backend" },
+          experiences: [],
+          education: [],
+          skills: [],
+          languages: [],
+          contact: { email: null, phone: null, city: null, links: [] },
+        },
+      });
+
+      await db.insert(jobs).values({
+        origin: "external",
+        source: "greenhouse",
+        sourceKey: "acme:42",
+        title: "Backend",
+        company: "Acme",
+        url: "https://job-boards.greenhouse.io/acme/jobs/42",
+      });
+
+      const [job] = await db
+        .select({ id: jobs.id })
+        .from(jobs)
+        .where(eq(jobs.sourceKey, "acme:42"));
+
+      const [common] = await db
+        .select({ id: answerQuestions.id, text: answerQuestions.text })
+        .from(answerQuestions)
+        .where(eq(answerQuestions.text, "Como você soube da vaga?"));
+
+      await repos.answers.answer(created.id, common.id, "Resposta pronta", new Date());
+
+      const urls: string[] = [];
+
+      const instance = createApp(webOrigin, repos, {
+        ...appOptions,
+        aiApplyAllowlist: [personalEmail],
+        generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
+        fetchGreenhouseImpl: async (input) => {
+          urls.push(String(input));
+
+          return new Response(
+            JSON.stringify({
+              questions: [
+                {
+                  label: common.text,
+                  required: false,
+                  fields: [{ name: "question_1", type: "input_text", values: [] }],
+                },
+              ],
+            }),
+          );
+        },
+      });
+
+      const res = await instance.handle(
+        new Request(`http://localhost/api/me/jobs/${job.id}/ai-apply`, {
+          method: "POST",
+          headers: {
+            "x-test-session": "talent",
+            "x-test-talent-id": created.id,
+            origin: webOrigin,
+          },
+        }),
+      );
+
+      expect(res.status).toBe(201);
+      expect(urls).toEqual([
+        "https://boards-api.greenhouse.io/v1/boards/acme/jobs/42?questions=true",
+      ]);
+      const { attempt } = await res.json();
+
+      expect(attempt.answers).toEqual([
+        {
+          questionId: "question_1",
+          value: "Resposta pronta",
+          source: "library",
+          inferred: false,
+          status: "filled",
+        },
+      ]);
+
+      const confirmed = await instance.handle(
+        new Request(`http://localhost/api/me/ai-applications/${attempt.id}/confirm`, {
+          method: "POST",
+          headers: {
+            "x-test-session": "talent",
+            "x-test-talent-id": created.id,
+            origin: webOrigin,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            answers: [{ questionId: "question_1", value: "Resposta final" }],
+          }),
+        }),
+      );
+
+      expect(confirmed.status).toBe(200);
+      expect(
+        (await repos.answers.library(created.id)).questions.find((item) => item.id === common.id)
+          ?.answer,
+      ).toBe("Resposta final");
+    });
+
+    it("answers 500 without data and rolls back every library save when a confirm fails", async () => {
+      const [firstCase] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
+
+      const created = await repos.talent.enable({
+        orgId: defaultOrgId,
+        caseId: firstCase.id,
+        personalEmail,
+        sponsoredUntil,
+      });
+
+      if (
+        created === "case_not_found" ||
+        created === "already_enabled" ||
+        created === "email_taken"
+      ) {
+        throw new Error(created);
+      }
+
+      await repos.talent.acceptTerms(created.id);
+      await repos.talent.setAiApplyConsent(created.id, true, new Date());
+
+      await db.insert(resumes).values({
+        profileId: created.id,
+        kind: "base",
+        content: {
+          headline: { id: "h", text: "Engenheira" },
+          summary: { id: "s", text: "Backend" },
+          experiences: [],
+          education: [],
+          skills: [],
+          languages: [],
+          contact: { email: null, phone: null, city: null, links: [] },
+        },
+      });
+
+      const [job] = await db
+        .insert(jobs)
+        .values({
+          origin: "external",
+          source: "greenhouse",
+          sourceKey: "acme:43",
+          title: "Backend",
+          company: "Acme",
+          url: "https://job-boards.greenhouse.io/acme/jobs/43",
+        })
+        .returning({ id: jobs.id });
+
+      const text = (name: string) => ({
+        label: `Pergunta ${name}`,
+        required: false,
+        fields: [{ name, type: "input_text", values: [] }],
+      });
+
+      const instance = createApp(webOrigin, repos, {
+        ...appOptions,
+        aiApplyAllowlist: [personalEmail],
+        generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
+        fetchGreenhouseImpl: async () =>
+          new Response(JSON.stringify({ questions: [text("one"), text("two")] })),
+      });
+
+      const headers = {
+        "x-test-session": "talent",
+        "x-test-talent-id": created.id,
+        origin: webOrigin,
+        "content-type": "application/json",
+      };
+
+      const prepared = await instance.handle(
+        new Request(`http://localhost/api/me/jobs/${job.id}/ai-apply`, {
+          method: "POST",
+          headers,
+        }),
+      );
+
+      const { attempt } = await prepared.json();
+
+      await db.execute(
+        sql`alter table talent_answers add constraint boom_check check (answer <> 'segredo-da-ana')`,
+      );
+
+      try {
+        const res = await instance.handle(
+          new Request(`http://localhost/api/me/ai-applications/${attempt.id}/confirm`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              answers: [
+                { questionId: "one", value: "resposta-valida" },
+                { questionId: "two", value: "segredo-da-ana" },
+              ],
+            }),
+          }),
+        );
+
+        expect(res.status).toBe(500);
+        expect(await res.text()).toBe('{"error":"Internal error"}');
+      } finally {
+        await db.execute(sql`alter table talent_answers drop constraint boom_check`);
+      }
+
+      const [row] = await db
+        .select({ state: aiApplications.state, confirmed: aiApplications.confirmed })
+        .from(aiApplications)
+        .where(eq(aiApplications.id, attempt.id));
+
+      expect(row).toEqual({ state: "draft", confirmed: null });
+      expect(
+        (await repos.answers.library(created.id)).questions.filter((item) => item.answer !== null),
+      ).toEqual([]);
+    });
+
+    it("keeps Elysia's own answer for a malformed JSON body", async () => {
+      const instance = createApp(webOrigin, repos, appOptions);
+
+      for (const path of ["/api/me/resume", "/api/me/resumes/any"]) {
+        const res = await instance.handle(
+          new Request(`http://localhost${path}`, {
+            method: "PATCH",
+            headers: {
+              "x-test-session": "talent",
+              "content-type": "application/json",
+              origin: webOrigin,
+            },
+            body: "{",
+          }),
+        );
+
+        expect(res.status).toBe(400);
+        expect(await res.text()).not.toContain("Internal error");
+      }
+    });
+
+    it("denies a talent session whose profile no longer exists", async () => {
+      const gone = await asSession("talent", "/me", "GET", undefined, {
+        "x-test-talent-id": missingCaseId,
+      });
+
+      expect(gone.status).toBe(403);
+    });
+
+    it("restricts aggregates to admin and rh", async () => {
+      const expected = {
+        enabled: 0,
+        activated: null,
+        funnel: { sent: null, responded: null, interviews: null, offers: null },
+        hiresShared: null,
+        topJobs: [],
+      };
+
+      for (const session of ["admin", "rh"]) {
+        const response = await asSession(session, "/talent/aggregates");
+
+        expect(response.status).toBe(200);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        expect(await response.json()).toEqual(expected);
+      }
+
+      for (const session of ["gestor", "visualizador", "talent"]) {
+        expect((await asSession(session, "/talent/aggregates")).status).toBe(403);
+      }
+
+      expect((await asSession("anonymous", "/talent/aggregates")).status).toBe(401);
+    });
+
+    describe("jobs catalog", () => {
+      it("guards the job list with active talent access", async () => {
+        const caseId = await firstCaseId();
+
+        const created = await repos.talent.enable({
+          orgId: defaultOrgId,
+          caseId,
+          personalEmail,
+          sponsoredUntil,
+        });
+
+        if (
+          created === "case_not_found" ||
+          created === "already_enabled" ||
+          created === "email_taken"
+        ) {
+          throw new Error(created);
+        }
+
+        const talentHeaders = { "x-test-talent-id": created.id };
+
+        await db.insert(jobs).values([
+          {
+            origin: "external",
+            source: "seed",
+            sourceKey: "a",
+            title: "A",
+            company: "Acme",
+            workModel: "remote",
+            url: "https://jobs.example.com/a",
+            postedAt: new Date("2026-01-02"),
+          },
+          {
+            origin: "external",
+            source: "seed",
+            sourceKey: "b",
+            title: "B",
+            company: "Acme",
+            workModel: "onsite",
+            url: "https://jobs.example.com/b",
+            postedAt: new Date("2026-01-01"),
+          },
+          {
+            origin: "external",
+            source: "seed",
+            sourceKey: "c",
+            title: "C",
+            company: "Acme",
+            url: "https://jobs.example.com/c",
+            closedAt: new Date(),
+          },
+        ]);
+
+        expect(
+          (await asSession("talent", "/me/jobs", "GET", undefined, talentHeaders)).status,
+        ).toBe(403);
+
+        await repos.talent.acceptTerms(created.id);
+
+        const listed = await asSession("talent", "/me/jobs", "GET", undefined, talentHeaders);
+        const body = await listed.json();
+
+        expect(listed.status).toBe(200);
+        expect(body).toMatchObject({ page: 1, pageSize: 20, total: 2 });
+        expect(body.items.map((item: { title: string }) => item.title)).toEqual(["A", "B"]);
+        expect(body.items[0]).toMatchObject({ match: null, applied: false });
+
+        const remote = await asSession(
+          "talent",
+          "/me/jobs?workModel=remote",
+          "GET",
+          undefined,
+          talentHeaders,
+        );
+
+        expect((await remote.json()).items).toHaveLength(1);
+        expect(
+          (await asSession("talent", "/me/jobs?page=0", "GET", undefined, talentHeaders)).status,
+        ).toBe(422);
+        expect(
+          (await asSession("talent", "/me/jobs?page=10001", "GET", undefined, talentHeaders))
+            .status,
+        ).toBe(422);
+        expect(
+          (await asSession("talent", "/me/jobs?page=abc", "GET", undefined, talentHeaders)).status,
+        ).toBe(422);
+        expect(
+          (await asSession("talent", "/me/jobs?workModel=moon", "GET", undefined, talentHeaders))
+            .status,
+        ).toBe(422);
+        expect((await asSession("admin", "/me/jobs")).status).toBe(403);
+
+        const subscription = await repos.billing.getSubscription(defaultOrgId);
+
+        if (!subscription) throw new Error("missing subscription");
+
+        await repos.billing.updateSubscription(defaultOrgId, subscription.id, {
+          status: "canceled",
+        });
+
+        expect(
+          (await asSession("talent", "/me/jobs", "GET", undefined, talentHeaders)).status,
+        ).toBe(402);
+      });
+    });
+
+    describe("applications", () => {
+      type TalentHeaders = { "x-test-talent-id": string };
+
+      async function talentProfile(email: string, caseIndex: number) {
+        const cases: { id: string }[] = await (await call("/offboardings")).json();
+
+        const created = await repos.talent.enable({
+          orgId: defaultOrgId,
+          caseId: cases[caseIndex].id,
+          personalEmail: email,
+          sponsoredUntil,
+        });
+
+        if (
+          created === "case_not_found" ||
+          created === "already_enabled" ||
+          created === "email_taken"
+        ) {
+          throw new Error(created);
+        }
+
+        await repos.talent.acceptTerms(created.id);
+        await repos.resumes.replaceBase(
+          created.id,
+          {
+            headline: { id: "headline", text: "Engenheira" },
+            summary: { id: "summary", text: "Backend." },
+            experiences: [],
+            education: [],
+            skills: [],
+            languages: [],
+            contact: { email: null, phone: null, city: null, links: [] },
+          },
+          `resumes/${created.id}.pdf`,
+        );
+
+        return { "x-test-talent-id": created.id };
+      }
+
+      async function baseResume(headers: TalentHeaders) {
+        const base = await repos.resumes.getBase(headers["x-test-talent-id"]);
+
+        return { resumeId: z.object({ id: z.string() }).parse(base).id };
+      }
+
+      async function seedJob(sourceKey: string, closedAt?: Date) {
+        const [job] = await db
+          .insert(jobs)
+          .values({
+            origin: "external",
+            source: "seed",
+            sourceKey,
+            title: `Job ${sourceKey}`,
+            company: "Acme",
+            url: `https://jobs.example.com/${sourceKey}`,
+            closedAt,
+          })
+          .returning({ id: jobs.id });
+
+        return job.id;
+      }
+
+      function send(
+        headers: TalentHeaders,
+        path: string,
+        method = "GET",
+        body?: Record<string, string>,
+      ) {
+        return app.handle(
+          new Request(`http://localhost/api${path}`, {
+            method,
+            headers: {
+              "x-test-session": "talent",
+              origin: webOrigin,
+              "content-type": "application/json",
+              ...headers,
+            },
+            body: body === undefined ? undefined : JSON.stringify(body),
+          }),
+        );
+      }
+
+      async function applyTo(headers: TalentHeaders, jobId: string) {
+        const response = await send(
+          headers,
+          `/me/jobs/${jobId}/apply`,
+          "POST",
+          await baseResume(headers),
+        );
+
+        expect(response.status).toBe(201);
+
+        return z.object({ applicationId: z.string() }).parse(await response.json()).applicationId;
+      }
+
+      it("applies once to open jobs", async () => {
+        const headers = await talentProfile(personalEmail, 0);
+        const jobId = await seedJob("open");
+        const body = await baseResume(headers);
+
+        const notReady = await send(headers, `/me/jobs/${jobId}/apply`, "POST", {
+          resumeId: crypto.randomUUID(),
+        });
+
+        expect(notReady.status).toBe(422);
+        expect(await notReady.json()).toEqual({ error: "Résumé not ready for this job" });
+        expect((await send(headers, `/me/jobs/${jobId}/apply`, "POST")).status).toBe(422);
+
+        const applied = await send(headers, `/me/jobs/${jobId}/apply`, "POST", body);
+
+        expect(applied.status).toBe(201);
+        expect(await applied.json()).toEqual({
+          applicationId: expect.any(String),
+          jobUrl: "https://jobs.example.com/open",
+          publicPageUrl: null,
+        });
+
+        const again = await send(headers, `/me/jobs/${jobId}/apply`, "POST", body);
+
+        expect(again.status).toBe(409);
+        expect(await again.json()).toEqual({ error: "Already applied" });
+
+        const closed = await send(
+          headers,
+          `/me/jobs/${await seedJob("gone", new Date())}/apply`,
+          "POST",
+          body,
+        );
+
+        expect(closed.status).toBe(404);
+        expect(await closed.json()).toEqual({ error: "Job not found" });
+
+        const unknown = await send(headers, `/me/jobs/${crypto.randomUUID()}/apply`, "POST", body);
+
+        expect(unknown.status).toBe(404);
+        expect((await send(headers, "/me/jobs/not-a-uuid/apply", "POST", body)).status).toBe(422);
+        expect(
+          (await send(headers, `/me/jobs/${jobId}/apply`, "POST", { resumeId: "not-a-uuid" }))
+            .status,
+        ).toBe(422);
+
+        const listed = await (await send(headers, "/me/applications")).json();
+
+        expect(listed).toHaveLength(1);
+        expect(listed[0]).toMatchObject({ status: "sent", closedReason: null });
+      });
+
+      it("moves an application through the funnel", async () => {
+        const headers = await talentProfile(personalEmail, 0);
+        const id = await applyTo(headers, await seedJob("funnel"));
+
+        const patch = (body: Record<string, string>) =>
+          send(headers, `/me/applications/${id}`, "PATCH", body);
+
+        const reviewed = await patch({ status: "in_review" });
+
+        expect(reviewed.status).toBe(200);
+        expect(await reviewed.json()).toMatchObject({ id, status: "in_review" });
+
+        const backwards = await patch({ status: "sent" });
+
+        expect(backwards.status).toBe(409);
+        expect(await backwards.json()).toEqual({ error: "Invalid status transition" });
+        expect((await patch({ status: "offer" })).status).toBe(200);
+
+        const closed = await patch({ status: "closed", closedReason: "hired" });
+
+        expect(await closed.json()).toMatchObject({ status: "closed", closedReason: "hired" });
+        expect((await patch({ status: "closed", closedReason: "rejected" })).status).toBe(409);
+        expect((await patch({ status: "moon" })).status).toBe(422);
+
+        expect(await (await send(headers, "/me/applications/summary")).json()).toEqual({
+          sent: 1,
+          responded: 1,
+          interviews: 1,
+          offers: 1,
+        });
+
+        expect(
+          (await send(headers, "/me/applications/not-a-uuid", "PATCH", { status: "offer" })).status,
+        ).toBe(422);
+      });
+
+      it("logs interviews and lists the week", async () => {
+        const headers = await talentProfile(personalEmail, 0);
+        const id = await applyTo(headers, await seedJob("agenda"));
+        const path = `/me/applications/${id}/interviews`;
+
+        const created = await send(headers, path, "POST", {
+          startsAt: "2026-03-10T17:00:00.000Z",
+          mode: "video",
+          with: "Maria",
+          notes: "Prepare a case",
+        });
+
+        expect(created.status).toBe(201);
+
+        const interview = await created.json();
+
+        expect(interview).toMatchObject({
+          applicationId: id,
+          startsAt: "2026-03-10T17:00:00.000Z",
+          mode: "video",
+          with: "Maria",
+          job: { title: "Job agenda", company: "Acme" },
+        });
+
+        expect(await (await send(headers, "/me/applications")).json()).toMatchObject([
+          { status: "interview" },
+        ]);
+
+        const week = await send(headers, "/me/interviews?from=2026-03-09&to=2026-03-15");
+
+        expect(week.status).toBe(200);
+        expect(await week.json()).toHaveLength(1);
+        expect(
+          await (await send(headers, "/me/interviews?from=2026-03-11&to=2026-03-15")).json(),
+        ).toEqual([]);
+
+        const bad = await send(headers, path, "POST", {
+          startsAt: "tomorrow",
+          mode: "video",
+          with: "Maria",
+        });
+
+        expect(bad.status).toBe(422);
+        expect(
+          (
+            await send(headers, path, "POST", {
+              startsAt: "2026-03-10T17:00:00Z",
+              mode: "video",
+              with: "",
+            })
+          ).status,
+        ).toBe(422);
+
+        expect(
+          (
+            await send(headers, "/me/applications/not-a-uuid/interviews", "POST", {
+              startsAt: "2026-03-10T17:00:00Z",
+              mode: "phone",
+              with: "Ana",
+            })
+          ).status,
+        ).toBe(422);
+
+        await send(headers, `/me/applications/${id}`, "PATCH", {
+          status: "closed",
+          closedReason: "withdrawn",
+        });
+
+        const onClosed = await send(headers, path, "POST", {
+          startsAt: "2026-03-11T17:00:00Z",
+          mode: "phone",
+          with: "Ana",
+        });
+
+        expect(onClosed.status).toBe(409);
+        expect(await onClosed.json()).toEqual({ error: "Application is closed" });
+
+        const removed = await send(headers, `/me/interviews/${interview.id}`, "DELETE");
+
+        expect(removed.status).toBe(204);
+        expect(await removed.text()).toBe("");
+
+        const gone = await send(headers, `/me/interviews/${interview.id}`, "DELETE");
+
+        expect(gone.status).toBe(404);
+        expect(await gone.json()).toEqual({ error: "Interview not found" });
+        expect((await send(headers, "/me/interviews/not-a-uuid", "DELETE")).status).toBe(422);
+      });
+
+      it("hides other profiles' applications", async () => {
+        const owner = await talentProfile(personalEmail, 0);
+        const other = await talentProfile("outra@example.com", 1);
+        const id = await applyTo(owner, await seedJob("private"));
+
+        const patched = await send(other, `/me/applications/${id}`, "PATCH", {
+          status: "in_review",
+        });
+
+        expect(patched.status).toBe(404);
+        expect(await patched.json()).toEqual({ error: "Application not found" });
+
+        expect(await (await send(owner, "/me/applications")).json()).toMatchObject([
+          { status: "sent" },
+        ]);
+
+        const created = await send(owner, `/me/applications/${id}/interviews`, "POST", {
+          startsAt: "2026-03-10T17:00:00Z",
+          mode: "video",
+          with: "Maria",
+        });
+
+        const interview = await created.json();
+
+        const logged = await send(other, `/me/applications/${id}/interviews`, "POST", {
+          startsAt: "2026-03-10T18:00:00Z",
+          mode: "phone",
+          with: "Ana",
+        });
+
+        expect(logged.status).toBe(404);
+        expect((await send(other, `/me/interviews/${interview.id}`, "DELETE")).status).toBe(404);
+        expect(await (await send(other, "/me/applications")).json()).toEqual([]);
+        expect(
+          await (await send(other, "/me/interviews?from=2026-03-09&to=2026-03-15")).json(),
+        ).toEqual([]);
+        expect(await (await send(owner, "/me/applications")).json()).toMatchObject([
+          { status: "interview" },
+        ]);
+        expect(
+          await (await send(owner, "/me/interviews?from=2026-03-09&to=2026-03-15")).json(),
+        ).toHaveLength(1);
+      });
+
+      it("rejects invalid interview input without storing anything", async () => {
+        const headers = await talentProfile(personalEmail, 0);
+        const id = await applyTo(headers, await seedJob("invalid"));
+        const path = `/me/applications/${id}/interviews`;
+        const valid = { startsAt: "2026-03-10T17:00:00Z", mode: "video", with: "Maria" };
+
+        const bodies = [
+          { ...valid, startsAt: "2026-11-26T23:59:60Z" },
+          { ...valid, startsAt: "2026-11-26T10:00:00+03" },
+          { ...valid, with: "a".repeat(256) },
+          { ...valid, notes: "a".repeat(2001) },
+          { ...valid, mode: "carrier_pigeon" },
+        ];
+
+        for (const body of bodies) {
+          expect((await send(headers, path, "POST", body)).status).toBe(422);
+        }
+
+        const patched = await send(headers, `/me/applications/${id}`, "PATCH", {
+          status: "closed",
+          closedReason: "ghosted",
+        });
+
+        expect(patched.status).toBe(422);
+        expect(await (await send(headers, "/me/applications")).json()).toMatchObject([
+          { status: "sent" },
+        ]);
+
+        expect(await db.select().from(interviews)).toEqual([]);
+      });
+
+      it("validates the agenda range", async () => {
+        const headers = await talentProfile(personalEmail, 0);
+
+        const reversed = await send(headers, "/me/interviews?from=2026-03-15&to=2026-03-09");
+
+        expect(reversed.status).toBe(422);
+        expect(await reversed.json()).toEqual({ error: "Invalid date range" });
+
+        const wide = await send(headers, "/me/interviews?from=2026-03-01&to=2026-04-01");
+
+        expect(wide.status).toBe(422);
+        expect(await wide.json()).toEqual({ error: "Invalid date range" });
+        expect((await send(headers, "/me/interviews?from=2026-03-01")).status).toBe(422);
+        expect((await send(headers, "/me/interviews")).status).toBe(422);
+        expect((await send(headers, "/me/interviews?from=x&to=y")).status).toBe(422);
+      });
+
+      it("guards the routes with active talent access", async () => {
+        const headers = await talentProfile(personalEmail, 0);
+
+        expect(
+          (await send({ "x-test-talent-id": crypto.randomUUID() }, "/me/applications")).status,
+        ).toBe(403);
+        expect(
+          (
+            await app.handle(
+              new Request("http://localhost/api/me/applications", {
+                headers: { "x-test-session": "admin", origin: webOrigin },
+              }),
+            )
+          ).status,
+        ).toBe(403);
+
+        const subscription = await repos.billing.getSubscription(defaultOrgId);
+
+        if (!subscription) throw new Error("missing subscription");
+
+        await repos.billing.updateSubscription(defaultOrgId, subscription.id, {
+          status: "canceled",
+        });
+
+        expect((await send(headers, "/me/applications")).status).toBe(402);
+      });
+
+      describe("public pages", () => {
+        const phone = "+55 11 98765-4321";
+        const city = "Campinas";
+        const contactEmail = "ana.contato@example.com";
+
+        type PagePatch = { enabled?: boolean; slug?: string; resumeId?: string | null };
+
+        async function publicProfile(email = personalEmail, caseIndex = 0) {
+          const headers = await talentProfile(email, caseIndex);
+
+          await repos.resumes.updateBaseContent(headers["x-test-talent-id"], {
+            headline: { id: "headline", text: "Engenheira" },
+            summary: { id: "summary", text: "Backend." },
+            experiences: [],
+            education: [],
+            skills: [],
+            languages: [],
+            contact: { email: contactEmail, phone, city, links: ["https://ana.dev"] },
+          });
+
+          return headers;
+        }
+
+        function pageRequest(
+          headers: Record<string, string>,
+          path: string,
+          method = "GET",
+          body?: PagePatch,
+          instance = app,
+        ) {
+          return instance.handle(
+            new Request(`http://localhost/api${path}`, {
+              method,
+              headers: {
+                "x-test-session": "talent",
+                origin: webOrigin,
+                "content-type": "application/json",
+                ...headers,
+              },
+              body: body === undefined ? undefined : JSON.stringify(body),
+            }),
+          );
+        }
+
+        function visit(path: string, session = "anonymous", extra = {}) {
+          return app.handle(
+            new Request(`http://localhost/api${path}`, {
+              headers: { "x-test-session": session, ...extra },
+            }),
+          );
+        }
+
+        async function publish(headers: Record<string, string>, slug: string) {
+          const response = await pageRequest(headers, "/me/page", "PATCH", { enabled: true, slug });
+
+          expect(response.status).toBe(200);
+        }
+
+        function counters() {
+          return db.select().from(publicPageDailyViews);
+        }
+
+        function weekOf(response: Response) {
+          return response
+            .json()
+            .then((page) =>
+              z
+                .object({ week: z.object({ visits: z.number(), recruiterVisits: z.number() }) })
+                .parse(page),
+            );
+        }
+
+        it("publishes the page and counts visits", async () => {
+          const headers = await publicProfile();
+          const profileId = headers["x-test-talent-id"];
+
+          const initial = await pageRequest(headers, "/me/page");
+
+          expect(initial.status).toBe(200);
+          expect(initial.headers.get("cache-control")).toBe("no-store");
+          expect(await initial.json()).toEqual({
+            slug: expect.any(String),
+            enabled: false,
+            resumeId: null,
+            url: expect.stringMatching(new RegExp(`^${webOrigin}/p/[a-z0-9-]+$`)),
+            week: {
+              days: expect.any(Array),
+              visits: 0,
+              recruiterVisits: 0,
+            },
+          });
+          expect(await counters()).toEqual([]);
+
+          const saved = await pageRequest(headers, "/me/page", "PATCH", {
+            enabled: true,
+            slug: "ana-dev",
+          });
+
+          expect(saved.status).toBe(200);
+          expect(await saved.json()).toMatchObject({
+            slug: "ana-dev",
+            enabled: true,
+            resumeId: null,
+            url: `${webOrigin}/p/ana-dev`,
+          });
+
+          const viewed = await visit("/public/pages/ana-dev");
+
+          expect(viewed.status).toBe(200);
+          expect(viewed.headers.get("cache-control")).toBe("private, max-age=60");
+
+          const [profile] = await db
+            .select({ name: talentProfiles.name })
+            .from(talentProfiles)
+            .where(eq(talentProfiles.id, profileId));
+
+          const body = await viewed.json();
+
+          expect(body).toEqual({
+            name: profile.name,
+            headline: "Engenheira",
+            summary: "Backend.",
+            experiences: [],
+            education: [],
+            skills: [],
+            languages: [],
+            contact: { email: contactEmail, links: ["https://ana.dev"] },
+          });
+          expect(JSON.stringify(body)).not.toContain("98765");
+          expect(JSON.stringify(body)).not.toContain(city);
+
+          expect((await visit("/public/pages/ana-dev", "admin")).status).toBe(200);
+          expect((await visit(`/public/pages/ana-dev?a=${"x".repeat(65)}`)).status).toBe(200);
+          expect(
+            (
+              await visit("/public/pages/ana-dev", "talent", {
+                "x-test-talent-id": crypto.randomUUID(),
+              })
+            ).status,
+          ).toBe(200);
+          expect(
+            (await visit("/public/pages/ana-dev", "talent", { "x-test-talent-id": profileId }))
+              .status,
+          ).toBe(200);
+
+          const settings = await pageRequest(headers, "/me/page");
+
+          expect(await weekOf(settings)).toMatchObject({ week: { visits: 4, recruiterVisits: 0 } });
+        });
+
+        it("hides unpublishable pages without counting", async () => {
+          const headers = await publicProfile();
+          const profileId = headers["x-test-talent-id"];
+
+          await publish(headers, "ana-dev");
+
+          expect((await visit("/public/pages/ana-dev/pdf")).status).toBe(200);
+          expect(await counters()).toEqual([]);
+
+          async function expectHidden(slug: string) {
+            for (const path of [`/public/pages/${slug}`, `/public/pages/${slug}/pdf`]) {
+              const hidden = await visit(path);
+
+              expect(hidden.status).toBe(404);
+              expect(hidden.headers.get("content-type")).toContain("application/json");
+              expect(hidden.headers.get("cache-control")).toBe("no-store");
+              expect(await hidden.json()).toEqual({ error: "Page not found" });
+            }
+
+            expect(await counters()).toEqual([]);
+          }
+
+          await expectHidden("nobody-here");
+          await expectHidden("Not_A-Slug!");
+
+          await pageRequest(headers, "/me/page", "PATCH", { enabled: false });
+          await expectHidden("ana-dev");
+
+          await pageRequest(headers, "/me/page", "PATCH", { enabled: true });
+          await db
+            .update(talentProfiles)
+            .set({ sponsoredUntil: "2000-01-01" })
+            .where(eq(talentProfiles.id, profileId));
+          await expectHidden("ana-dev");
+
+          await db
+            .update(talentProfiles)
+            .set({ sponsoredUntil })
+            .where(eq(talentProfiles.id, profileId));
+          expect((await visit("/public/pages/ana-dev")).status).toBe(200);
+          await db.delete(publicPageDailyViews);
+
+          const subscription = await repos.billing.getSubscription(defaultOrgId);
+
+          if (!subscription) throw new Error("missing subscription");
+
+          await repos.billing.updateSubscription(defaultOrgId, subscription.id, {
+            status: "canceled",
+          });
+          await expectHidden("ana-dev");
+        });
+
+        it("links applications to the page and counts recruiter visits", async () => {
+          const headers = await publicProfile();
+          const resume = await baseResume(headers);
+
+          const before = await pageRequest(
+            headers,
+            `/me/jobs/${await seedJob("before")}/apply`,
+            "POST",
+            resume,
+          );
+
+          expect(before.status).toBe(201);
+          expect(await before.json()).toMatchObject({ publicPageUrl: null });
+
+          await publish(headers, "ana-dev");
+
+          const after = await pageRequest(
+            headers,
+            `/me/jobs/${await seedJob("after")}/apply`,
+            "POST",
+            resume,
+          );
+
+          const { publicPageUrl } = z
+            .object({ publicPageUrl: z.string() })
+            .parse(await after.json());
+
+          const link = new URL(publicPageUrl);
+
+          expect(`${link.origin}${link.pathname}`).toBe(`${webOrigin}/p/ana-dev`);
+
+          const [application] = await db
+            .select({ token: applications.publicToken })
+            .from(applications)
+            .innerJoin(jobs, eq(jobs.id, applications.jobId))
+            .where(eq(jobs.sourceKey, "after"));
+
+          expect(link.searchParams.get("a")).toBe(application.token);
+
+          expect(
+            (
+              await visit(`/public/pages/ana-dev?a=${application.token}`, "talent", {
+                "x-test-talent-id": headers["x-test-talent-id"],
+              })
+            ).status,
+          ).toBe(200);
+          expect(await counters()).toEqual([]);
+
+          expect((await visit(`/public/pages/ana-dev?a=${application.token}`)).status).toBe(200);
+
+          expect(await weekOf(await pageRequest(headers, "/me/page"))).toMatchObject({
+            week: { visits: 1, recruiterVisits: 1 },
+          });
+
+          await pageRequest(headers, "/me/page", "PATCH", { enabled: false });
+
+          const disabled = await pageRequest(
+            headers,
+            `/me/jobs/${await seedJob("disabled")}/apply`,
+            "POST",
+            resume,
+          );
+
+          expect(await disabled.json()).toMatchObject({ publicPageUrl: null });
+        });
+
+        it("public PDF never contains the phone", async () => {
+          const headers = await publicProfile();
+
+          await publish(headers, "ana-dev");
+
+          const response = await visit("/public/pages/ana-dev/pdf");
+
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-type")).toBe("application/pdf");
+          expect(response.headers.get("content-disposition")).toBe(
+            'attachment; filename="ana-dev.pdf"',
+          );
+          expect(response.headers.get("cache-control")).toBe("private, max-age=300");
+
+          const text = await drawnText(new Uint8Array(await response.arrayBuffer()));
+
+          expect(text).toContain(hex(contactEmail));
+          expect(text).toContain(hex("https://ana.dev"));
+          expect(text).not.toContain(hex("98765"));
+          expect(text).not.toContain(hex(city));
+          expect(await counters()).toEqual([]);
+        });
+
+        it("downloads the person's own résumé PDF with phone and city", async () => {
+          const headers = await publicProfile();
+          const other = await publicProfile("outra@example.com", 1);
+          const { resumeId } = await baseResume(headers);
+
+          const own = await pageRequest(headers, `/me/resume/${resumeId}/pdf`);
+
+          expect(own.status).toBe(200);
+          expect(own.headers.get("content-type")).toBe("application/pdf");
+          expect(own.headers.get("content-disposition")).toBe(
+            'attachment; filename="curriculo.pdf"',
+          );
+          expect(own.headers.get("cache-control")).toBe("no-store");
+
+          const text = await drawnText(new Uint8Array(await own.arrayBuffer()));
+
+          expect(text).toContain(hex(phone));
+          expect(text).toContain(hex(city));
+          expect(text).toContain(hex(contactEmail));
+
+          const jobId = await seedJob("tailored");
+          const base = await repos.resumes.getBase(headers["x-test-talent-id"]);
+
+          if (!base) throw new Error("missing base");
+
+          const draft = await repos.resumeVersions.saveDraft(
+            headers["x-test-talent-id"],
+            jobId,
+            base.content,
+            null,
+            new Date(),
+          );
+
+          if (draft === "used") throw new Error(draft);
+
+          expect((await pageRequest(headers, `/me/resume/${draft.id}/pdf`)).status).toBe(200);
+
+          const foreign = await pageRequest(other, `/me/resume/${resumeId}/pdf`);
+
+          expect(foreign.status).toBe(404);
+          expect(await foreign.json()).toEqual({ error: "Résumé not found" });
+          expect((await pageRequest(headers, `/me/resume/${crypto.randomUUID()}/pdf`)).status).toBe(
+            404,
+          );
+          expect((await pageRequest(headers, "/me/resume/not-a-uuid/pdf")).status).toBe(422);
+          expect((await visit(`/me/resume/${resumeId}/pdf`, "admin")).status).toBe(403);
+        });
+
+        it("validates page settings", async () => {
+          const headers = await publicProfile();
+          const other = await publicProfile("outra@example.com", 1);
+
+          await publish(other, "taken-slug");
+
+          const patch = (body: PagePatch) => pageRequest(headers, "/me/page", "PATCH", body);
+
+          const reserved = await patch({ slug: "admin" });
+
+          expect(reserved.status).toBe(422);
+          expect(await reserved.json()).toEqual({ error: "Invalid slug" });
+
+          const taken = await patch({ slug: "taken-slug" });
+
+          expect(taken.status).toBe(409);
+          expect(await taken.json()).toEqual({ error: "Slug taken" });
+
+          const missing = await patch({ resumeId: crypto.randomUUID() });
+
+          expect(missing.status).toBe(422);
+          expect(await missing.json()).toEqual({ error: "Résumé not ready" });
+
+          expect((await patch({})).status).toBe(422);
+
+          const long = await patch({ slug: "a".repeat(41) });
+
+          expect(long.status).toBe(422);
+          expect(await long.json()).toEqual({ error: "Invalid slug" });
+          expect((await patch({ resumeId: "not-a-uuid" })).status).toBe(422);
+
+          const { resumeId } = await baseResume(headers);
+          const chosen = await patch({ resumeId });
+
+          expect(chosen.status).toBe(200);
+          expect(await chosen.json()).toMatchObject({ resumeId, enabled: false });
+
+          const cleared = await patch({ resumeId: null });
+
+          expect(await cleared.json()).toMatchObject({ resumeId: null });
+        });
+
+        it("guards the page settings with active talent access", async () => {
+          await publicProfile();
+
+          expect((await visit("/me/page", "admin")).status).toBe(403);
+          expect((await visit("/me/page")).status).toBe(401);
+          expect(
+            (
+              await app.handle(
+                new Request("http://localhost/api/me/page", {
+                  method: "PATCH",
+                  headers: {
+                    "x-test-session": "admin",
+                    origin: webOrigin,
+                    "content-type": "application/json",
+                  },
+                  body: JSON.stringify({ enabled: true }),
+                }),
+              )
+            ).status,
+          ).toBe(403);
+        });
+
+        it("serves the page when the viewer lookup or the visit write fails", async () => {
+          const headers = await publicProfile();
+
+          await publish(headers, "ana-dev");
+
+          const logged = vi.spyOn(console, "error");
+
+          const sessionDown = createApp(webOrigin, repos, {
+            ...appOptions,
+            auth: { ...auth, resolvePrincipal: () => Promise.reject(new Error("session down")) },
+          });
+
+          const viewed = await sessionDown.handle(
+            new Request("http://localhost/api/public/pages/ana-dev"),
+          );
+
+          expect(viewed.status).toBe(200);
+          expect(await viewed.json()).toMatchObject({ headline: "Engenheira" });
+          expect(await counters()).toMatchObject([{ visits: 1, recruiterVisits: 0 }]);
+
+          const visitsDown = createApp(
+            webOrigin,
+            {
+              ...repos,
+              pages: {
+                ...repos.pages,
+                recordVisit: () => Promise.reject(new Error("visits down")),
+              },
+            },
+            appOptions,
+          );
+
+          const unrecorded = await visitsDown.handle(
+            new Request("http://localhost/api/public/pages/ana-dev", {
+              headers: { "x-test-session": "anonymous" },
+            }),
+          );
+
+          expect(unrecorded.status).toBe(200);
+          expect(unrecorded.headers.get("cache-control")).toBe("private, max-age=60");
+          expect(await unrecorded.json()).toMatchObject({ headline: "Engenheira" });
+          expect(await counters()).toMatchObject([{ visits: 1, recruiterVisits: 0 }]);
+          expect(logged.mock.calls).toEqual([
+            ["public page viewer lookup failed", { name: "Error", message: "session down" }],
+            ["public page visit failed", { name: "Error", message: "visits down" }],
+          ]);
+          logged.mockRestore();
+        });
+
+        it("applies without a page link when the link lookup fails", async () => {
+          const headers = await publicProfile();
+
+          await publish(headers, "ana-dev");
+
+          const logged = vi.spyOn(console, "error");
+
+          const linksDown = createApp(
+            webOrigin,
+            {
+              ...repos,
+              pages: { ...repos.pages, urlFor: () => Promise.reject(new Error("links down")) },
+            },
+            appOptions,
+          );
+
+          const applied = await pageRequest(
+            headers,
+            `/me/jobs/${await seedJob("links-down")}/apply`,
+            "POST",
+            await baseResume(headers),
+            linksDown,
+          );
+
+          expect(applied.status).toBe(201);
+          expect(await applied.json()).toMatchObject({ publicPageUrl: null });
+          expect(await db.select().from(applications)).toHaveLength(1);
+          expect(logged.mock.calls).toEqual([
+            ["public page link failed", { name: "Error", message: "links down" }],
+          ]);
+          logged.mockRestore();
+        });
+
+        it("falls back to the portal origin for an empty page origin", async () => {
+          const headers = await publicProfile();
+
+          const instance = createApp(webOrigin, repos, { ...appOptions, publicPageOrigin: "" });
+
+          const saved = await pageRequest(
+            headers,
+            "/me/page",
+            "PATCH",
+            { enabled: true, slug: "ana-dev" },
+            instance,
+          );
+
+          expect(await saved.json()).toMatchObject({ url: `${webOrigin}/p/ana-dev` });
+        });
+
+        it("builds page URLs on the configured origin", async () => {
+          const headers = await publicProfile();
+
+          const instance = createApp(webOrigin, repos, {
+            ...appOptions,
+            publicPageOrigin: "https://cv.example.com/",
+          });
+
+          const saved = await pageRequest(
+            headers,
+            "/me/page",
+            "PATCH",
+            { enabled: true, slug: "ana-dev" },
+            instance,
+          );
+
+          expect(await saved.json()).toMatchObject({ url: "https://cv.example.com/p/ana-dev" });
+
+          const applied = await pageRequest(
+            headers,
+            `/me/jobs/${await seedJob("configured")}/apply`,
+            "POST",
+            await baseResume(headers),
+            instance,
+          );
+
+          expect(await applied.json()).toMatchObject({
+            publicPageUrl: expect.stringMatching(/^https:\/\/cv\.example\.com\/p\/ana-dev\?a=/),
+          });
+        });
+      });
+    });
+
+    describe("résumés", () => {
+      const pdf = new TextEncoder().encode("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n");
+
+      const draft = {
+        isResume: true,
+        headline: { text: "Engenheira de Software" },
+        summary: { text: "Dez anos de experiência" },
+        experiences: [
+          { company: "Acme", role: "Dev", start: "2019", end: null, bullets: [{ text: "Fez X" }] },
+        ],
+        education: [],
+        skills: [{ name: "TypeScript" }],
+        languages: [],
+        contact: { email: null, phone: null, city: null, links: [] },
+      };
+
+      type Store = {
+        puts: { key: string; contentType: string }[];
+        removed: string[];
+        prefixes: string[];
+        failRemove: boolean;
+      };
+
+      type Scoring = { output: object; calls: number };
+
+      type Matching = {
+        scores: Record<string, number>;
+        batches: string[][];
+        before?: () => Promise<void>;
+        omit?: boolean;
+        fail?: boolean;
+      };
+
+      type Tailoring = { output: object; fail?: boolean };
+
+      type Cover = { letter: string; fail?: boolean };
+
+      type ModelCall = { kind: "tailor" | "match" | "cover"; prompt: string };
+
+      const jobsInPrompt = z.array(z.object({ id: z.string(), title: z.string() }));
+
+      function resumesApp(
+        options: { generate?: GenerateStructured | null; storage?: boolean; draft?: object } = {},
+      ) {
+        const store: Store = { puts: [], removed: [], prefixes: [], failRemove: false };
+
+        const scoring: Scoring = { output: { score: 0, suggestions: [] }, calls: 0 };
+
+        const matching: Matching = { scores: {}, batches: [] };
+
+        const tailoring: Tailoring = {
+          output: { rewrites: [], experienceOrder: [], bulletOrder: [], skillIds: [] },
+        };
+
+        const cover: Cover = { letter: "Tenho experiência com backend." };
+
+        const calls: ModelCall[] = [];
+
+        const background: (() => Promise<void>)[] = [];
+
+        const storage: ObjectStorage = {
+          put: async (key, _data, contentType) => {
+            store.puts.push({ key, contentType });
+          },
+          remove: async (keys) => {
+            if (store.failRemove) throw new Error("storage down");
+
+            store.removed.push(...keys);
+          },
+          removePrefix: async (prefix) => {
+            if (store.failRemove) throw new Error("storage down");
+
+            store.prefixes.push(prefix);
+          },
+        };
+
+        const generate: GenerateStructured = async ({ schema, system, prompt }) => {
+          if (system.startsWith("You write one cover letter")) {
+            calls.push({ kind: "cover", prompt });
+
+            if (cover.fail) throw leakyError(prompt);
+
+            return schema.parse({ coverLetter: cover.letter });
+          }
+
+          if (system.startsWith("You tailor")) {
+            calls.push({ kind: "tailor", prompt });
+
+            if (tailoring.fail) throw leakyError(prompt);
+
+            return schema.parse(tailoring.output);
+          }
+
+          const extracted = schema.safeParse(options.draft ?? draft);
+
+          if (extracted.success) return extracted.data;
+
+          if (system.startsWith("You rate how well")) {
+            calls.push({ kind: "match", prompt });
+
+            if (matching.fail) throw leakyError(prompt);
+
+            const batch = jobsInPrompt.parse(
+              JSON.parse(prompt.slice(prompt.indexOf("<jobs>") + 6, prompt.indexOf("</jobs>"))),
+            );
+
+            matching.batches.push(batch.map((job) => job.title));
+
+            const before = matching.before;
+
+            matching.before = undefined;
+            await before?.();
+
+            return schema.parse({
+              matches: matching.omit
+                ? []
+                : batch.map((job) => ({
+                    jobId: job.id,
+                    score: matching.scores[job.title] ?? 50,
+                    reasons: [`Combina com ${job.title}`],
+                  })),
+            });
+          }
+
+          scoring.calls += 1;
+
+          return schema.parse(scoring.output);
+        };
+
+        const instance = createApp(webOrigin, repos, {
+          ...appOptions,
+          generateStructured:
+            options.generate === null ? undefined : (options.generate ?? generate),
+          storage: options.storage === false ? undefined : storage,
+          runInBackground: (task) => {
+            background.push(task);
+          },
+        });
+
+        async function kicks() {
+          const tasks = background.splice(0);
+
+          await Promise.all(tasks.map((task) => task()));
+
+          return tasks.length;
+        }
+
+        async function settle() {
+          await kicks();
+
+          for (let round = 0; round < 10; round += 1) {
+            const drained = await instance.handle(
+              new Request("http://localhost/api/background/drain", {
+                method: "POST",
+                headers: { authorization: `Bearer ${cronSecret}` },
+              }),
+            );
+
+            if ((await drained.json()).processed === 0) return;
+          }
+
+          throw new Error("background queue did not settle");
+        }
+
+        return { instance, store, scoring, matching, tailoring, cover, calls, kicks, settle };
+      }
+
+      async function profile(email = personalEmail, caseIndex = 0) {
+        const cases: { id: string }[] = await (await call("/offboardings")).json();
+
+        const created = await repos.talent.enable({
+          orgId: defaultOrgId,
+          caseId: cases[caseIndex].id,
+          personalEmail: email,
+          sponsoredUntil,
+        });
+
+        if (
+          created === "case_not_found" ||
+          created === "already_enabled" ||
+          created === "email_taken"
+        ) {
+          throw new Error(created);
+        }
+
+        await repos.talent.acceptTerms(created.id);
+
+        return created.id;
+      }
+
+      function request(
+        instance: ReturnType<typeof resumesApp>["instance"],
+        talentId: string,
+        path: string,
+        init: { method?: string; body?: BodyInit; json?: unknown; session?: string } = {},
+      ) {
+        const headers = new Headers({
+          "x-test-session": init.session ?? "talent",
+          "x-test-talent-id": talentId,
+          origin: webOrigin,
+        });
+
+        if (init.json !== undefined) headers.set("content-type", "application/json");
+
+        return instance.handle(
+          new Request(`http://localhost/api${path}`, {
+            method: init.method ?? "GET",
+            headers,
+            body: init.json === undefined ? init.body : JSON.stringify(init.json),
+          }),
+        );
+      }
+
+      function upload(
+        instance: ReturnType<typeof resumesApp>["instance"],
+        talentId: string,
+        bytes: Uint8Array = pdf,
+        name = "cv.pdf",
+      ) {
+        const form = new FormData();
+
+        form.set("file", new File([new Uint8Array(bytes)], name, { type: "application/pdf" }));
+
+        return request(instance, talentId, "/me/resume/upload", { method: "POST", body: form });
+      }
+
+      function docx() {
+        return zipSync({
+          "word/document.xml": new TextEncoder().encode(
+            '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Maria CV</w:t></w:r></w:p></w:body></w:document>',
+          ),
+          "[Content_Types].xml": new TextEncoder().encode("<Types/>"),
+        });
+      }
+
+      it("uploads a résumé and replaces it on the next upload", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        const first = await upload(instance, id);
+
+        expect(first.status).toBe(200);
+
+        const created = await first.json();
+
+        expect(created).toMatchObject({ kind: "base", score: null });
+        expect(created.content.headline.text).toBe("Engenheira de Software");
+        expect(store.puts).toHaveLength(1);
+        expect(store.puts[0].key).toMatch(new RegExp(`^resumes/${id}/[0-9a-f-]+\\.pdf$`));
+        expect(store.puts[0].contentType).toBe("application/pdf");
+
+        const second = await upload(instance, id, docx(), "cv.docx");
+
+        expect(second.status).toBe(200);
+        expect((await second.json()).id).toBe(created.id);
+        expect(store.puts[1].key).toMatch(/\.docx$/);
+        expect(store.puts[1].contentType).toBe(
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        );
+        expect(store.removed).toEqual([store.puts[0].key]);
+      });
+
+      it("keeps the new résumé when removing the previous file fails", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        expect((await upload(instance, id)).status).toBe(200);
+
+        store.failRemove = true;
+
+        expect((await upload(instance, id)).status).toBe(200);
+        expect(store.puts).toHaveLength(2);
+      });
+
+      it("rejects files whose bytes are not a PDF or DOCX", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        const html = await upload(instance, id, new TextEncoder().encode("<html></html>"));
+
+        expect(html.status).toBe(422);
+        expect(await html.json()).toEqual({ error: "Unsupported file" });
+        expect(store.puts).toEqual([]);
+      });
+
+      it("rejects an oversized docx expansion", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        const bomb = zipSync({
+          "word/document.xml": new Uint8Array(3_000_000).fill(0x61),
+        });
+
+        const res = await upload(instance, id, bomb, "cv.docx");
+
+        expect(res.status).toBe(422);
+        expect(await res.json()).toEqual({ error: "File too large" });
+        expect(store.puts).toEqual([]);
+      });
+
+      it("rejects files above the size limit", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+        const big = new Uint8Array(5_242_881);
+
+        big.set(pdf);
+
+        expect((await upload(instance, id, big)).status).toBe(422);
+        expect(store.puts).toEqual([]);
+      });
+
+      it("cleans up the stored file when extraction fails", async () => {
+        const logged = vi.spyOn(console, "error");
+
+        const failing = resumesApp({
+          generate: async ({ prompt }) => {
+            throw leakyError(prompt);
+          },
+        });
+
+        const id = await profile();
+        const res = await upload(failing.instance, id);
+
+        expect(res.status).toBe(502);
+        expect(await res.json()).toEqual({ error: "Could not read the résumé" });
+        expect(failing.store.removed).toEqual([failing.store.puts[0].key]);
+        expect(logged.mock.calls).toEqual([
+          ["résumé extraction failed", { name: "Error", message: "gateway down" }],
+        ]);
+        logged.mockRestore();
+
+        const notResume = resumesApp({ draft: { ...draft, isResume: false } });
+        const refused = await upload(notResume.instance, id);
+
+        expect(refused.status).toBe(422);
+        expect(await refused.json()).toEqual({ error: "File is not a résumé" });
+        expect(notResume.store.removed).toEqual([notResume.store.puts[0].key]);
+        expect((await request(notResume.instance, id, "/me/resume")).status).toBe(404);
+
+        const stuck = resumesApp({ draft: { ...draft, isResume: false } });
+
+        stuck.store.failRemove = true;
+
+        expect((await upload(stuck.instance, id)).status).toBe(422);
+      });
+
+      it("cleans up the stored file when saving fails", async () => {
+        const store: string[] = [];
+
+        const instance = createApp(
+          webOrigin,
+          {
+            ...repos,
+            resumes: {
+              ...repos.resumes,
+              replaceBase: () => Promise.reject(new Error("db down")),
+            },
+          },
+          {
+            ...appOptions,
+            generateStructured: async ({ schema }) => schema.parse(draft),
+            storage: {
+              put: async () => undefined,
+              remove: async (keys) => {
+                store.push(...keys);
+              },
+              removePrefix: async () => undefined,
+            },
+          },
+        );
+
+        const res = await upload(instance, await profile());
+
+        expect(res.status).toBe(500);
+        expect(store).toHaveLength(1);
+      });
+
+      it("answers 503 when upload is not configured", async () => {
+        const id = await profile();
+
+        for (const options of [{ storage: false }, { generate: null }]) {
+          const { instance, store } = resumesApp(options);
+          const res = await upload(instance, id);
+
+          expect(res.status).toBe(503);
+          expect(await res.json()).toEqual({ error: "Résumé upload not configured" });
+          expect(store.puts).toEqual([]);
+        }
+      });
+
+      it("reads and edits the résumé", async () => {
+        const { instance } = resumesApp();
+        const id = await profile();
+
+        expect(await (await request(instance, id, "/me/resume")).json()).toEqual({
+          error: "Résumé not found",
+        });
+        expect(
+          (await request(instance, id, "/me/resume", { method: "PATCH", json: { content: {} } }))
+            .status,
+        ).toBe(422);
+
+        const emptyContent = {
+          headline: { text: "" },
+          summary: { text: "" },
+          experiences: [],
+          education: [],
+          skills: [],
+          languages: [],
+          contact: { email: null, phone: null, city: null, links: [] },
+        };
+
+        const missing = await request(instance, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: emptyContent },
+        });
+
+        expect(missing.status).toBe(404);
+
+        const created = await (await upload(instance, id)).json();
+        const read = await request(instance, id, "/me/resume");
+
+        expect(read.status).toBe(200);
+        expect(await read.json()).toEqual(created);
+      });
+
+      it("assigns and validates node ids on edit", async () => {
+        const { instance } = resumesApp();
+        const id = await profile();
+
+        const created = await (await upload(instance, id)).json();
+        const { id: _headlineId, ...headline } = created.content.headline;
+
+        const edited = {
+          ...created.content,
+          headline: { ...headline, text: "Nova" },
+          skills: [{ name: "Go" }, { name: "Rust" }],
+        };
+
+        const ok = await request(instance, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: edited },
+        });
+
+        expect(ok.status).toBe(200);
+
+        const saved = await ok.json();
+
+        expect(saved.content.headline.text).toBe("Nova");
+        expect(saved.content.headline.id).toEqual(expect.any(String));
+        expect(saved.content.skills.map((skill: { id: string }) => skill.id)).toHaveLength(2);
+
+        const duplicate = await request(instance, id, "/me/resume", {
+          method: "PATCH",
+          json: {
+            content: {
+              ...edited,
+              headline: { id: "same", text: "a" },
+              summary: { id: "same", text: "b" },
+            },
+          },
+        });
+
+        expect(duplicate.status).toBe(422);
+        expect(await duplicate.json()).toEqual({ error: "Duplicate node ids" });
+
+        const invalid = await request(instance, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: { headline: 1 } },
+        });
+
+        expect(invalid.status).toBe(422);
+        expect(await invalid.json()).toEqual({ error: "Invalid résumé content" });
+      });
+
+      it("validates edits structurally and against the content limits", async () => {
+        const { instance } = resumesApp();
+        const id = await profile();
+
+        const created = await (await upload(instance, id)).json();
+
+        const structural = await request(instance, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: { ...created.content, skills: [{ name: 1 }] } },
+        });
+
+        expect(structural.status).toBe(422);
+        expect(await structural.json()).toEqual({ error: "Invalid résumé content" });
+
+        const tooMany = await request(instance, id, "/me/resume", {
+          method: "PATCH",
+          json: {
+            content: {
+              ...created.content,
+              skills: Array.from({ length: 51 }, (_, index) => ({ name: `Skill ${index}` })),
+            },
+          },
+        });
+
+        expect(tooMany.status).toBe(422);
+        expect(await tooMany.json()).toEqual({ error: "Invalid résumé content" });
+
+        const failing = createApp(
+          webOrigin,
+          {
+            ...repos,
+            resumes: {
+              ...repos.resumes,
+              updateBaseContent: () => Promise.reject(new Error("db down")),
+            },
+          },
+          appOptions,
+        );
+
+        const crashed = await request(failing, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: created.content },
+        });
+
+        expect(crashed.status).toBe(500);
+      });
+
+      it("guards the résumé routes", async () => {
+        const { instance } = resumesApp();
+        const id = await profile();
+
+        expect((await request(instance, id, "/me/resume", { session: "admin" })).status).toBe(403);
+        expect((await request(instance, id, "/me/resume", { session: "anonymous" })).status).toBe(
+          401,
+        );
+
+        const subscription = await repos.billing.getSubscription(defaultOrgId);
+
+        if (!subscription) throw new Error("missing subscription");
+
+        await repos.billing.updateSubscription(defaultOrgId, subscription.id, {
+          status: "canceled",
+        });
+
+        expect((await upload(instance, id)).status).toBe(402);
+        expect((await request(instance, id, "/me/export")).status).toBe(200);
+      });
+
+      function scoreJobs() {
+        return db
+          .select({
+            subject: backgroundJobs.subject,
+            status: backgroundJobs.status,
+            attempts: backgroundJobs.attempts,
+            runAfter: backgroundJobs.runAfter,
+            lastError: backgroundJobs.lastError,
+          })
+          .from(backgroundJobs)
+          .where(eq(backgroundJobs.kind, "score_resume"))
+          .orderBy(backgroundJobs.createdAt);
+      }
+
+      async function scoredResume() {
+        const app = resumesApp();
+        const id = await profile();
+        const created = await (await upload(app.instance, id)).json();
+        const bullet = created.content.experiences[0].bullets[0];
+
+        app.scoring.output = {
+          score: 72,
+          suggestions: [
+            {
+              targetNodeId: bullet.id,
+              suggestedText: "Reduziu o tempo de deploy com X",
+              rationale: "Mostra o impacto",
+              estimatedGain: 6,
+            },
+            {
+              targetNodeId: created.content.headline.id,
+              suggestedText: "Engenheira de Software Sênior",
+              rationale: "Destaca a senioridade",
+              estimatedGain: 4,
+            },
+          ],
+        };
+
+        await app.settle();
+
+        const suggestions = await (
+          await request(app.instance, id, "/me/resume/suggestions")
+        ).json();
+
+        return { ...app, id, created, bullet, suggestions };
+      }
+
+      it("scores an uploaded résumé in the background and lists its suggestions", async () => {
+        const { instance, id, created, bullet, suggestions, scoring } = await scoredResume();
+
+        expect(scoring.calls).toBe(1);
+        expect(await scoreJobs()).toMatchObject([{ subject: created.id, status: "done" }]);
+        expect(await (await request(instance, id, "/me/resume")).json()).toMatchObject({
+          id: created.id,
+          score: 72,
+          scoredAt: expect.any(String),
+        });
+        expect(suggestions).toEqual([
+          {
+            id: expect.any(String),
+            targetNodeId: bullet.id,
+            originalText: "Fez X",
+            suggestedText: "Reduziu o tempo de deploy com X",
+            rationale: "Mostra o impacto",
+            estimatedGain: 6,
+          },
+          {
+            id: expect.any(String),
+            targetNodeId: created.content.headline.id,
+            originalText: "Engenheira de Software",
+            suggestedText: "Engenheira de Software Sênior",
+            rationale: "Destaca a senioridade",
+            estimatedGain: 4,
+          },
+        ]);
+      });
+
+      it("enqueues one score job per change and kicks a drain after each", async () => {
+        const app = resumesApp();
+        const id = await profile();
+        const created = await (await upload(app.instance, id)).json();
+
+        expect(await scoreJobs()).toMatchObject([{ subject: created.id, status: "pending" }]);
+
+        const patched = await request(app.instance, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: created.content },
+        });
+
+        expect(patched.status).toBe(200);
+        expect(await scoreJobs()).toHaveLength(1);
+
+        await app.settle();
+
+        expect(app.scoring.calls).toBe(1);
+        expect(await scoreJobs()).toMatchObject([{ status: "done" }]);
+      });
+
+      it("applies a suggestion and scores the new text", async () => {
+        const { instance, id, bullet, suggestions, settle } = await scoredResume();
+
+        expect(
+          (
+            await request(instance, id, "/me/resume/suggestions/not-a-uuid/apply", {
+              method: "POST",
+            })
+          ).status,
+        ).toBe(422);
+
+        const missing = await request(
+          instance,
+          id,
+          `/me/resume/suggestions/${crypto.randomUUID()}/apply`,
+          { method: "POST" },
+        );
+
+        expect(missing.status).toBe(404);
+        expect(await missing.json()).toEqual({ error: "Suggestion not found" });
+
+        const applied = await request(
+          instance,
+          id,
+          `/me/resume/suggestions/${suggestions[0].id}/apply`,
+          { method: "POST" },
+        );
+
+        expect(applied.status).toBe(200);
+
+        const resume = await applied.json();
+
+        expect(resume.score).toBeNull();
+        expect(resume.content.experiences[0].bullets[0]).toEqual({
+          id: bullet.id,
+          text: "Reduziu o tempo de deploy com X",
+        });
+        expect(await scoreJobs()).toMatchObject([
+          { status: "done" },
+          { subject: resume.id, status: "pending" },
+        ]);
+        expect(await matchJobs()).toMatchObject([
+          { subject: id, status: "done" },
+          { subject: id, status: "pending" },
+        ]);
+        expect(
+          (await (await request(instance, id, "/me/resume/suggestions")).json()).map(
+            (suggestion: { id: string }) => suggestion.id,
+          ),
+        ).toEqual([suggestions[1].id]);
+
+        await settle();
+
+        expect(await (await request(instance, id, "/me/resume")).json()).toMatchObject({
+          score: 72,
+        });
+      });
+
+      it("refuses to apply a suggestion whose text was edited", async () => {
+        const { instance, id, created, suggestions } = await scoredResume();
+
+        const edited = await request(instance, id, "/me/resume", {
+          method: "PATCH",
+          json: {
+            content: {
+              ...created.content,
+              experiences: [
+                {
+                  ...created.content.experiences[0],
+                  bullets: [{ ...created.content.experiences[0].bullets[0], text: "Fez Y" }],
+                },
+              ],
+            },
+          },
+        });
+
+        expect(edited.status).toBe(200);
+        expect(
+          (await (await request(instance, id, "/me/resume/suggestions")).json()).map(
+            (suggestion: { id: string }) => suggestion.id,
+          ),
+        ).toEqual([suggestions[1].id]);
+
+        const pending = await scoreJobs();
+
+        const stale = await request(
+          instance,
+          id,
+          `/me/resume/suggestions/${suggestions[0].id}/apply`,
+          { method: "POST" },
+        );
+
+        expect(stale.status).toBe(409);
+        expect(await stale.json()).toEqual({ error: "Résumé changed since this suggestion" });
+        expect(await (await request(instance, id, "/me/resume")).json()).toEqual(
+          await edited.json(),
+        );
+        expect(await scoreJobs()).toEqual(pending);
+      });
+
+      it("dismisses a suggestion", async () => {
+        const { instance, id, suggestions } = await scoredResume();
+        const path = `/me/resume/suggestions/${suggestions[0].id}/dismiss`;
+
+        expect(
+          (
+            await request(instance, id, "/me/resume/suggestions/not-a-uuid/dismiss", {
+              method: "POST",
+            })
+          ).status,
+        ).toBe(422);
+
+        const dismissed = await request(instance, id, path, { method: "POST" });
+
+        expect(dismissed.status).toBe(204);
+        expect(
+          (await (await request(instance, id, "/me/resume/suggestions")).json()).map(
+            (suggestion: { id: string }) => suggestion.id,
+          ),
+        ).toEqual([suggestions[1].id]);
+
+        const again = await request(instance, id, path, { method: "POST" });
+
+        expect(again.status).toBe(404);
+        expect(await again.json()).toEqual({ error: "Suggestion not found" });
+      });
+
+      it("hides suggestions from another profile", async () => {
+        const { instance, suggestions } = await scoredResume();
+        const other = await profile("outra.pessoal@example.com", 1);
+
+        expect(await (await request(instance, other, "/me/resume/suggestions")).json()).toEqual([]);
+
+        for (const action of ["apply", "dismiss"]) {
+          const res = await request(
+            instance,
+            other,
+            `/me/resume/suggestions/${suggestions[0].id}/${action}`,
+            { method: "POST" },
+          );
+
+          expect(res.status).toBe(404);
+        }
+
+        expect(
+          (await request(instance, other, "/me/resume/suggestions", { session: "admin" })).status,
+        ).toBe(403);
+      });
+
+      it("postpones scoring over the daily cap without calling the model", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        for (let call = 0; call < 30; call += 1) {
+          await repos.llmUsage.takeLlmCall(id, new Date());
+        }
+
+        await upload(app.instance, id);
+        await app.settle();
+
+        const [job] = await scoreJobs();
+
+        expect(app.scoring.calls).toBe(0);
+        expect(job).toMatchObject({ status: "pending", attempts: 0, lastError: null });
+        expect(job.runAfter.getTime()).toBeGreaterThan(Date.now());
+        expect((await (await request(app.instance, id, "/me/resume")).json()).score).toBeNull();
+      });
+
+      it("retries scoring when the AI is not configured", async () => {
+        const id = await profile();
+        const created = await (await upload(resumesApp().instance, id)).json();
+        const unconfigured = resumesApp({ generate: null });
+
+        await request(unconfigured.instance, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: created.content },
+        });
+        await unconfigured.settle();
+
+        expect(await scoreJobs()).toMatchObject([
+          { status: "pending", attempts: 1, lastError: "Error: AI not configured" },
+        ]);
+        expect(await matchJobs()).toMatchObject([
+          { status: "pending", attempts: 1, lastError: "Error: AI not configured" },
+        ]);
+        expect(await db.select().from(llmUsage).where(eq(llmUsage.profileId, id))).toEqual([]);
+      });
+
+      it("completes an already scored résumé without calling the model", async () => {
+        const { instance, id, created, scoring } = await scoredResume();
+        const usage = () => db.select().from(llmUsage).where(eq(llmUsage.profileId, id));
+        const before = await usage();
+
+        await repos.background.enqueue("score_resume", created.id);
+
+        const drained = await instance.handle(
+          new Request("http://localhost/api/background/drain", {
+            method: "POST",
+            headers: { authorization: `Bearer ${cronSecret}` },
+          }),
+        );
+
+        expect(await drained.json()).toEqual({ processed: 1, failed: 0 });
+        expect(scoring.calls).toBe(1);
+        expect(await usage()).toEqual(before);
+        expect(before).toMatchObject([{ calls: 1 }]);
+        expect(await scoreJobs()).toMatchObject([{ status: "done" }, { status: "done" }]);
+      });
+
+      it("kicks only the score of the edited résumé, leaving older jobs to the cron", async () => {
+        const app = resumesApp();
+        const id = await profile();
+        const other = await profile("outra.pessoal@example.com", 1);
+        const created = await (await upload(app.instance, id)).json();
+
+        await app.settle();
+
+        const past = new Date(Date.now() - 60_000);
+        const backlog = crypto.randomUUID();
+
+        await repos.background.enqueue("compute_matches", id, {}, past);
+        await repos.background.enqueue("compute_matches", other, {}, past);
+        await repos.background.enqueue("score_resume", backlog, {}, past);
+
+        await request(app.instance, id, "/me/resume", {
+          method: "PATCH",
+          json: { content: created.content },
+        });
+
+        expect(await app.kicks()).toBe(1);
+        expect(app.scoring.calls).toBe(2);
+        expect(
+          (
+            await db
+              .select({
+                kind: backgroundJobs.kind,
+                subject: backgroundJobs.subject,
+                status: backgroundJobs.status,
+              })
+              .from(backgroundJobs)
+              .where(eq(backgroundJobs.status, "pending"))
+          )
+            .map((job) => `${job.kind}:${job.subject}`)
+            .sort(),
+        ).toEqual(
+          [`compute_matches:${id}`, `compute_matches:${other}`, `score_resume:${backlog}`].sort(),
+        );
+        expect(await scoreJobs()).toMatchObject([
+          { subject: created.id, status: "done" },
+          { subject: backlog, status: "pending" },
+          { subject: created.id, status: "done" },
+        ]);
+      });
+
+      it("keeps a saved résumé when enqueueing its score fails", async () => {
+        const instance = createApp(
+          webOrigin,
+          {
+            ...repos,
+            background: {
+              ...repos.background,
+              enqueue: () => Promise.reject(new Error("queue down")),
+            },
+          },
+          {
+            ...appOptions,
+            generateStructured: async ({ schema }) => schema.parse(draft),
+            storage: {
+              put: async () => undefined,
+              remove: async () => undefined,
+              removePrefix: async () => undefined,
+            },
+            runInBackground: () => {
+              throw new Error("should not kick a drain");
+            },
+          },
+        );
+
+        const id = await profile();
+        const uploaded = await upload(instance, id);
+
+        expect(uploaded.status).toBe(200);
+        expect(await request(instance, id, "/me/resume").then((res) => res.json())).toEqual(
+          await uploaded.json(),
+        );
+        expect(await scoreJobs()).toEqual([]);
+      });
+
+      it("drains due jobs from the cron route", async () => {
+        const { instance } = resumesApp();
+
+        await repos.background.enqueue("score_resume", crypto.randomUUID());
+
+        const drainRequest = (method: string, authorization?: string) =>
+          new Request("http://localhost/api/background/drain", {
+            method,
+            headers: authorization ? { authorization } : {},
+          });
+
+        expect((await instance.handle(drainRequest("GET"))).status).toBe(401);
+        expect(
+          (await instance.handle(drainRequest("POST", "Bearer test-cron-wrong!"))).status,
+        ).toBe(401);
+        expect(
+          (
+            await createApp(webOrigin, repos, { auth, sendEmail }).handle(
+              drainRequest("GET", `Bearer ${cronSecret}`),
+            )
+          ).status,
+        ).toBe(401);
+
+        const drained = await instance.handle(drainRequest("POST", `Bearer ${cronSecret}`));
+
+        expect(drained.status).toBe(200);
+        expect(await drained.json()).toEqual({ processed: 1, failed: 0 });
+        expect(await scoreJobs()).toMatchObject([{ status: "done" }]);
+
+        const idle = await instance.handle(drainRequest("GET", `Bearer ${cronSecret}`));
+
+        expect(idle.status).toBe(200);
+        expect(await idle.json()).toEqual({ processed: 0, failed: 0 });
+      });
+
+      it("swallows a background drain that fails", async () => {
+        let claims = 0;
+
+        const instance = createApp(
+          webOrigin,
+          {
+            ...repos,
+            background: {
+              ...repos.background,
+              claim: () => {
+                claims += 1;
+
+                return Promise.reject(new Error("queue down"));
+              },
+            },
+          },
+          {
+            auth,
+            sendEmail,
+            generateStructured: async ({ schema }) => schema.parse(draft),
+            storage: {
+              put: async () => undefined,
+              remove: async () => undefined,
+              removePrefix: async () => undefined,
+            },
+          },
+        );
+
+        expect((await upload(instance, await profile())).status).toBe(200);
+        await vi.waitFor(() => expect(claims).toBe(1));
+      });
+
+      function matchJobs() {
+        return db
+          .select({
+            subject: backgroundJobs.subject,
+            status: backgroundJobs.status,
+            attempts: backgroundJobs.attempts,
+            runAfter: backgroundJobs.runAfter,
+            lastError: backgroundJobs.lastError,
+          })
+          .from(backgroundJobs)
+          .where(eq(backgroundJobs.kind, "compute_matches"))
+          .orderBy(backgroundJobs.createdAt);
+      }
+
+      function storedMatches(profileId: string) {
+        return db.select().from(jobMatches).where(eq(jobMatches.profileId, profileId));
+      }
+
+      async function openJobs(titles: string[]) {
+        await db.insert(jobs).values(
+          titles.map(
+            (title, index) =>
+              ({
+                origin: "external",
+                source: "seed",
+                sourceKey: `match-${index}`,
+                title,
+                company: "Acme",
+                description: `Vaga de ${title}`,
+                url: `https://jobs.example.com/match-${index}`,
+                postedAt: new Date(Date.UTC(2026, 0, 31 - index)),
+              }) satisfies typeof jobs.$inferInsert,
+          ),
+        );
+      }
+
+      async function listedMatches(
+        instance: ReturnType<typeof resumesApp>["instance"],
+        talentId: string,
+      ) {
+        const listed = await (await request(instance, talentId, "/me/jobs")).json();
+
+        return listed.items.map((item: { title: string; match: { score: number } | null }) => [
+          item.title,
+          item.match?.score ?? null,
+        ]);
+      }
+
+      it("lists jobs by match score after an upload", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        await openJobs(["Engenheira de Software", "Designer", "Analista de Dados"]);
+        app.matching.scores = {
+          "Engenheira de Software": 40,
+          Designer: 90,
+          "Analista de Dados": 70,
+        };
+
+        await upload(app.instance, id);
+        await app.settle();
+
+        expect(app.matching.batches).toHaveLength(1);
+        expect(await matchJobs()).toMatchObject([{ subject: id, status: "done" }]);
+        expect(await listedMatches(app.instance, id)).toEqual([
+          ["Designer", 90],
+          ["Analista de Dados", 70],
+          ["Engenheira de Software", 40],
+        ]);
+        expect((await (await request(app.instance, id, "/me/jobs")).json()).items[0].match).toEqual(
+          { score: 90, reasons: ["Combina com Designer"] },
+        );
+      });
+
+      it("does not score jobs the person rejected", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        await openJobs(["Engenheira de Software", "Designer", "Analista de Dados"]);
+
+        const [designer] = await db
+          .select({ id: jobs.id })
+          .from(jobs)
+          .where(eq(jobs.title, "Designer"));
+
+        await db
+          .insert(jobRejections)
+          .values({ profileId: id, jobId: designer.id, reason: "other" });
+
+        await upload(app.instance, id);
+        await app.settle();
+
+        expect(app.matching.batches.flat().sort()).toEqual([
+          "Analista de Dados",
+          "Engenheira de Software",
+        ]);
+        expect((await storedMatches(id)).map((row) => row.jobId)).not.toContain(designer.id);
+      });
+
+      it("searches for the target titles before the résumé terms", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        await openJobs([
+          ...Array.from({ length: 34 }, (_, index) => `Vaga ${index}`),
+          "Zootecnista Veterinária",
+        ]);
+
+        await upload(app.instance, id);
+        await app.settle();
+
+        expect(app.matching.batches.flat()).not.toContain("Zootecnista Veterinária");
+
+        await db.delete(jobMatches);
+        await db.insert(talentPreferences).values({ profileId: id, targetTitles: ["Zootecnista"] });
+        await repos.background.enqueue("compute_matches", id);
+        await app.settle();
+
+        expect(app.matching.batches.flat()).toContain("Zootecnista Veterinária");
+      });
+
+      it("hides matches of an edited résumé until they are recomputed", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        await openJobs(["Engenheira de Software", "Designer"]);
+        app.matching.scores = { "Engenheira de Software": 30, Designer: 80 };
+
+        const created = await (await upload(app.instance, id)).json();
+
+        await app.settle();
+
+        const edited = await request(app.instance, id, "/me/resume", {
+          method: "PATCH",
+          json: {
+            content: {
+              ...created.content,
+              headline: { ...created.content.headline, text: "Designer" },
+            },
+          },
+        });
+
+        expect(edited.status).toBe(200);
+        expect(await listedMatches(app.instance, id)).toEqual([
+          ["Engenheira de Software", null],
+          ["Designer", null],
+        ]);
+        expect(await matchJobs()).toMatchObject([{ status: "done" }, { status: "pending" }]);
+
+        await app.settle();
+
+        expect(app.matching.batches).toHaveLength(2);
+        expect(await listedMatches(app.instance, id)).toEqual([
+          ["Designer", 80],
+          ["Engenheira de Software", 30],
+        ]);
+      });
+
+      it("postpones matching at the daily cap", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        const usage = () =>
+          db.select({ calls: llmUsage.calls }).from(llmUsage).where(eq(llmUsage.profileId, id));
+
+        await upload(app.instance, id);
+        await app.settle();
+
+        expect(await usage()).toEqual([{ calls: 1 }]);
+
+        await openJobs(Array.from({ length: 25 }, (_, index) => `Vaga ${index}`));
+        await db.update(llmUsage).set({ calls: 29 }).where(eq(llmUsage.profileId, id));
+        await repos.background.enqueue("compute_matches", id);
+        await app.settle();
+
+        const day = new Date(Date.now() - 3 * 60 * 60_000).toISOString().slice(0, 10);
+        const [, postponed] = await matchJobs();
+
+        expect(app.matching.batches.map((batch) => batch.length)).toEqual([10]);
+        expect(await usage()).toEqual([{ calls: 30 }]);
+        expect(await storedMatches(id)).toHaveLength(10);
+        expect(postponed).toMatchObject({
+          subject: id,
+          status: "pending",
+          attempts: 0,
+          lastError: null,
+        });
+        expect(postponed.runAfter.getTime()).toBe(
+          Date.parse(`${day}T03:00:00.000Z`) + 24 * 60 * 60_000,
+        );
+
+        await db.update(llmUsage).set({ calls: 0 }).where(eq(llmUsage.profileId, id));
+        await db
+          .update(backgroundJobs)
+          .set({ runAfter: new Date() })
+          .where(
+            and(eq(backgroundJobs.kind, "compute_matches"), eq(backgroundJobs.status, "pending")),
+          );
+        await app.settle();
+
+        expect(app.matching.batches.map((batch) => batch.length)).toEqual([10, 10, 5]);
+        expect(new Set(app.matching.batches.flat()).size).toBe(25);
+        expect(await usage()).toEqual([{ calls: 2 }]);
+        expect(await storedMatches(id)).toHaveLength(25);
+        expect((await matchJobs()).map((job) => job.status)).toEqual(["done", "done"]);
+      });
+
+      it("stops matching when the résumé changes during a run", async () => {
+        const app = resumesApp();
+        const id = await profile();
+
+        await openJobs(Array.from({ length: 15 }, (_, index) => `Vaga ${index}`));
+
+        const created = await (await upload(app.instance, id)).json();
+
+        app.matching.before = async () => {
+          await repos.resumes.updateBaseContent(id, created.content);
+        };
+
+        await app.settle();
+
+        expect(app.matching.batches).toHaveLength(1);
+        expect(await storedMatches(id)).toEqual([]);
+        expect(await matchJobs()).toMatchObject([{ status: "done" }]);
+      });
+
+      it("completes matching for a profile without a base résumé", async () => {
+        const app = resumesApp();
+
+        await openJobs(["Designer"]);
+        await repos.background.enqueue("compute_matches", crypto.randomUUID());
+        await app.settle();
+
+        expect(app.matching.batches).toEqual([]);
+        expect(await matchJobs()).toMatchObject([{ status: "done", attempts: 1 }]);
+      });
+
+      it("enqueues matching when enqueueing the score fails", async () => {
+        let kicks = 0;
+
+        const instance = createApp(
+          webOrigin,
+          {
+            ...repos,
+            background: {
+              ...repos.background,
+              enqueue: (kind, ...rest) =>
+                kind === "score_resume"
+                  ? Promise.reject(new Error("queue down"))
+                  : repos.background.enqueue(kind, ...rest),
+            },
+          },
+          {
+            ...appOptions,
+            generateStructured: async ({ schema }) => schema.parse(draft),
+            storage: {
+              put: async () => undefined,
+              remove: async () => undefined,
+              removePrefix: async () => undefined,
+            },
+            runInBackground: () => {
+              kicks += 1;
+            },
+          },
+        );
+
+        const id = await profile();
+
+        expect((await upload(instance, id)).status).toBe(200);
+        expect(kicks).toBe(0);
+        expect(await scoreJobs()).toEqual([]);
+        expect(await matchJobs()).toMatchObject([{ subject: id, status: "pending" }]);
+      });
+
+      describe("tailored résumés", () => {
+        const emptyTailoring = {
+          rewrites: [],
+          experienceOrder: [],
+          bulletOrder: [],
+          skillIds: [],
+        };
+
+        async function openJob(sourceKey: string, closedAt?: Date) {
+          const [job] = await db
+            .insert(jobs)
+            .values({
+              origin: "external",
+              source: "seed",
+              sourceKey,
+              title: "Backend",
+              company: "Acme",
+              description: "Vaga de backend",
+              url: `https://jobs.example.com/${sourceKey}`,
+              closedAt,
+            })
+            .returning({ id: jobs.id });
+
+          return job.id;
+        }
+
+        function usage(profileId: string) {
+          return db
+            .select({ calls: llmUsage.calls })
+            .from(llmUsage)
+            .where(eq(llmUsage.profileId, profileId));
+        }
+
+        function tailoredRows(profileId: string) {
+          return db
+            .select({
+              id: resumes.id,
+              jobId: resumes.jobId,
+              status: resumes.status,
+              content: resumes.content,
+              matchScore: resumes.matchScore,
+              updatedAt: resumes.updatedAt,
+            })
+            .from(resumes)
+            .where(and(eq(resumes.profileId, profileId), eq(resumes.kind, "tailored")));
+        }
+
+        async function tailoringApp(email = personalEmail, caseIndex = 0) {
+          const app = resumesApp();
+          const id = await profile(email, caseIndex);
+          const base = await (await upload(app.instance, id)).json();
+
+          await app.settle();
+
+          app.tailoring.output = {
+            ...emptyTailoring,
+            rewrites: [{ nodeId: base.content.headline.id, text: "Engenheira Backend" }],
+          };
+          app.matching.scores = { Backend: 88 };
+          app.calls.length = 0;
+
+          const call = (
+            path: string,
+            init: { method?: string; json?: unknown; session?: string } = {},
+            talentId = id,
+          ) => request(app.instance, talentId, path, init);
+
+          const tailor = (jobId: string, talentId = id) =>
+            call(`/me/jobs/${jobId}/tailor`, { method: "POST" }, talentId);
+
+          const ready = (versionId: string, talentId = id) =>
+            call(`/me/resumes/${versionId}/ready`, { method: "POST" }, talentId);
+
+          const apply = (jobId: string, resumeId: string, talentId = id) =>
+            call(`/me/jobs/${jobId}/apply`, { method: "POST", json: { resumeId } }, talentId);
+
+          return { app, id, base, call, tailor, ready, apply };
+        }
+
+        it("tailors a résumé for a job, edits it and applies with it once ready", async () => {
+          const jobId = await openJob("fluxo");
+          const { app, id, base, call, tailor, ready, apply } = await tailoringApp();
+          const queued = await db.select().from(backgroundJobs);
+          const [before] = await usage(id);
+
+          const tailored = await tailor(jobId);
+
+          expect(tailored.status).toBe(200);
+
+          const body = await tailored.json();
+
+          const headlineDiff = {
+            nodeId: base.content.headline.id,
+            kind: "headline",
+            before: "Engenheira de Software",
+            after: "Engenheira Backend",
+          };
+
+          expect(body).toEqual({
+            version: {
+              id: expect.any(String),
+              job: { id: jobId, title: "Backend", company: "Acme" },
+              status: "draft",
+              matchScore: 88,
+              content: {
+                ...base.content,
+                headline: { ...base.content.headline, text: "Engenheira Backend" },
+              },
+              application: null,
+              updatedAt: expect.any(String),
+            },
+            diff: [headlineDiff],
+          });
+          expect(app.calls.map((modelCall) => modelCall.kind)).toEqual(["tailor", "match"]);
+          expect(app.calls[1].prompt).toContain("Engenheira Backend");
+          expect(await usage(id)).toEqual([{ calls: before.calls + 2 }]);
+
+          const versionId = body.version.id;
+
+          expect(await (await call("/me/resumes")).json()).toEqual([body.version]);
+          expect(await (await call(`/me/resumes/${versionId}`)).json()).toEqual(body);
+
+          const marked = await ready(versionId);
+
+          expect(marked.status).toBe(200);
+          expect(await marked.json()).toMatchObject({ id: versionId, status: "ready" });
+
+          const edited = await call(`/me/resumes/${versionId}`, {
+            method: "PATCH",
+            json: {
+              content: {
+                ...body.version.content,
+                experiences: [
+                  {
+                    ...body.version.content.experiences[0],
+                    bullets: [
+                      ...body.version.content.experiences[0].bullets,
+                      { text: "Escreveu testes" },
+                    ],
+                  },
+                ],
+              },
+            },
+          });
+
+          expect(edited.status).toBe(200);
+
+          const editedBody = await edited.json();
+          const added = editedBody.version.content.experiences[0].bullets[1];
+
+          expect(editedBody.version).toMatchObject({
+            id: versionId,
+            status: "draft",
+            matchScore: 88,
+          });
+          expect(added).toEqual({ id: expect.any(String), text: "Escreveu testes" });
+          expect(editedBody.diff).toEqual([
+            headlineDiff,
+            { nodeId: added.id, kind: "bullet", before: "", after: "Escreveu testes" },
+          ]);
+          expect((await ready(versionId)).status).toBe(200);
+          expect(await db.select().from(backgroundJobs)).toEqual(queued);
+
+          const applied = await apply(jobId, versionId);
+
+          expect(applied.status).toBe(201);
+
+          const { applicationId } = await applied.json();
+
+          expect(await (await call("/me/resumes")).json()).toEqual([
+            expect.objectContaining({
+              id: versionId,
+              status: "ready",
+              application: { id: applicationId, status: "sent", appliedAt: expect.any(String) },
+            }),
+          ]);
+
+          const locked = await call(`/me/resumes/${versionId}`, {
+            method: "PATCH",
+            json: { content: base.content },
+          });
+
+          expect(locked.status).toBe(409);
+          expect(await locked.json()).toEqual({ error: "Already applied with this version" });
+        });
+
+        it("refuses to tailor for a job already applied to without spending AI calls", async () => {
+          const jobId = await openJob("usada");
+          const baseJobId = await openJob("usada-base");
+          const { app, id, base, tailor, ready, apply } = await tailoringApp();
+          const { version } = await (await tailor(jobId)).json();
+
+          await ready(version.id);
+          expect((await apply(jobId, version.id)).status).toBe(201);
+          expect((await apply(baseJobId, base.id)).status).toBe(201);
+
+          const [stored] = await tailoredRows(id);
+          const [before] = await usage(id);
+
+          app.tailoring.output = {
+            ...emptyTailoring,
+            rewrites: [{ nodeId: base.content.headline.id, text: "Outra versão" }],
+          };
+          app.calls.length = 0;
+
+          for (const appliedJobId of [jobId, baseJobId]) {
+            const again = await tailor(appliedJobId);
+
+            expect(again.status).toBe(409);
+            expect(await again.json()).toEqual({ error: "Already applied" });
+          }
+
+          expect(app.calls).toEqual([]);
+          expect(await usage(id)).toEqual([before]);
+          expect(await tailoredRows(id)).toEqual([stored]);
+          expect(stored).toMatchObject({ status: "ready", matchScore: 88 });
+        });
+
+        it("refuses to replace a version used by an application sent while tailoring", async () => {
+          const jobId = await openJob("corrida");
+          const { app, id, base, tailor, ready, apply } = await tailoringApp();
+          const { version } = await (await tailor(jobId)).json();
+
+          await ready(version.id);
+
+          const [stored] = await tailoredRows(id);
+          const sent: number[] = [];
+
+          app.tailoring.output = {
+            ...emptyTailoring,
+            rewrites: [{ nodeId: base.content.headline.id, text: "Outra versão" }],
+          };
+          app.matching.before = async () => {
+            sent.push((await apply(jobId, version.id)).status);
+          };
+
+          const raced = await tailor(jobId);
+
+          expect(sent).toEqual([201]);
+          expect(raced.status).toBe(409);
+          expect(await raced.json()).toEqual({ error: "Already applied with this version" });
+          expect(await tailoredRows(id)).toEqual([stored]);
+        });
+
+        it("requires a ready résumé for this job", async () => {
+          const jobId = await openJob("pronta");
+          const otherJobId = await openJob("outra");
+          const { id, tailor, ready, apply } = await tailoringApp();
+          const other = await tailoringApp("outra.pessoal@example.com", 1);
+
+          const { version: draftVersion } = await (await tailor(jobId)).json();
+          const { version: otherJobVersion } = await (await tailor(otherJobId)).json();
+          const { version: foreignVersion } = await (await other.tailor(jobId)).json();
+
+          await ready(otherJobVersion.id);
+          await other.ready(foreignVersion.id);
+
+          for (const resumeId of [
+            draftVersion.id,
+            otherJobVersion.id,
+            foreignVersion.id,
+            other.base.id,
+          ]) {
+            const refused = await apply(jobId, resumeId);
+
+            expect(refused.status).toBe(422);
+            expect(await refused.json()).toEqual({ error: "Résumé not ready for this job" });
+          }
+
+          expect(await db.select().from(applications)).toEqual([]);
+          expect(await tailoredRows(id)).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ id: draftVersion.id, status: "draft" }),
+            ]),
+          );
+
+          await ready(draftVersion.id);
+
+          expect((await apply(jobId, draftVersion.id)).status).toBe(201);
+        });
+
+        it("writes nothing when the cap is hit mid-tailoring", async () => {
+          const jobId = await openJob("teto");
+          const { app, id, base, tailor } = await tailoringApp();
+
+          await db.update(llmUsage).set({ calls: 29 }).where(eq(llmUsage.profileId, id));
+
+          const capped = await tailor(jobId);
+
+          expect(capped.status).toBe(429);
+          expect(await capped.json()).toEqual({ error: "Daily AI limit reached" });
+          expect(app.calls.map((modelCall) => modelCall.kind)).toEqual(["tailor"]);
+          expect(await usage(id)).toEqual([{ calls: 30 }]);
+          expect(await tailoredRows(id)).toEqual([]);
+
+          app.calls.length = 0;
+
+          const exhausted = await tailor(jobId);
+
+          expect(exhausted.status).toBe(429);
+          expect(app.calls).toEqual([]);
+
+          await db.update(llmUsage).set({ calls: 0 }).where(eq(llmUsage.profileId, id));
+
+          expect((await tailor(jobId)).status).toBe(200);
+
+          const [saved] = await tailoredRows(id);
+
+          await db.update(llmUsage).set({ calls: 29 }).where(eq(llmUsage.profileId, id));
+          app.tailoring.output = {
+            ...emptyTailoring,
+            rewrites: [{ nodeId: base.content.headline.id, text: "Outra versão" }],
+          };
+          app.matching.scores = { Backend: 10 };
+          app.calls.length = 0;
+
+          expect((await tailor(jobId)).status).toBe(429);
+          expect(app.calls.map((modelCall) => modelCall.kind)).toEqual(["tailor"]);
+          expect(await tailoredRows(id)).toEqual([saved]);
+          expect(saved).toMatchObject({ status: "draft", matchScore: 88 });
+        });
+
+        it("checks the base, the job, the AI and the cap in order", async () => {
+          const { app, id, tailor } = await tailoringApp();
+          const jobId = await openJob("ordem");
+          const closedId = await openJob("fechada", new Date());
+          const unconfigured = resumesApp({ generate: null });
+          const bare = await profile("sem.curriculo@example.com", 1);
+
+          const noBase = await tailor(crypto.randomUUID(), bare);
+
+          expect(noBase.status).toBe(409);
+          expect(await noBase.json()).toEqual({ error: "Upload a résumé first" });
+
+          for (const missing of [crypto.randomUUID(), closedId]) {
+            const notFound = await request(
+              unconfigured.instance,
+              id,
+              `/me/jobs/${missing}/tailor`,
+              {
+                method: "POST",
+              },
+            );
+
+            expect(notFound.status).toBe(404);
+            expect(await notFound.json()).toEqual({ error: "Job not found" });
+          }
+
+          await db.update(llmUsage).set({ calls: 30 }).where(eq(llmUsage.profileId, id));
+
+          const noAi = await request(unconfigured.instance, id, `/me/jobs/${jobId}/tailor`, {
+            method: "POST",
+          });
+
+          expect(noAi.status).toBe(503);
+          expect(await noAi.json()).toEqual({ error: "AI not configured" });
+          expect(await usage(id)).toEqual([{ calls: 30 }]);
+          expect((await tailor("not-a-uuid")).status).toBe(422);
+          expect(
+            (
+              await request(app.instance, id, `/me/jobs/${jobId}/tailor`, {
+                method: "POST",
+                session: "admin",
+              })
+            ).status,
+          ).toBe(403);
+          expect(app.calls).toEqual([]);
+        });
+
+        it("answers a failed model call without writing a version", async () => {
+          const jobId = await openJob("falha");
+          const { app, id, tailor } = await tailoringApp();
+          const [before] = await usage(id);
+          const logged = vi.spyOn(console, "error");
+
+          app.tailoring.fail = true;
+
+          const tailorFailed = await tailor(jobId);
+
+          expect(tailorFailed.status).toBe(502);
+          expect(await tailorFailed.json()).toEqual({ error: "Could not tailor the résumé" });
+          expect(await usage(id)).toEqual([{ calls: before.calls + 1 }]);
+
+          app.tailoring.fail = false;
+          app.matching.fail = true;
+
+          const matchFailed = await tailor(jobId);
+
+          expect(matchFailed.status).toBe(502);
+          expect(await matchFailed.json()).toEqual({ error: "Could not tailor the résumé" });
+          expect(await usage(id)).toEqual([{ calls: before.calls + 3 }]);
+          expect(app.calls.map((modelCall) => modelCall.kind)).toEqual([
+            "tailor",
+            "tailor",
+            "match",
+          ]);
+          expect(await tailoredRows(id)).toEqual([]);
+          expect(logged.mock.calls).toEqual([
+            ["résumé tailoring failed", { name: "Error", message: "gateway down" }],
+            ["résumé fit scoring failed", { name: "Error", message: "gateway down" }],
+          ]);
+          logged.mockRestore();
+
+          app.matching.fail = false;
+          app.matching.omit = true;
+
+          const unscored = await tailor(jobId);
+
+          expect(unscored.status).toBe(200);
+          expect((await unscored.json()).version.matchScore).toBeNull();
+        });
+
+        describe("cover letter and package", () => {
+          const letterCalls = (calls: { kind: string }[]) =>
+            calls.filter((modelCall) => modelCall.kind === "cover").length;
+
+          const packageRows = (profileId: string) =>
+            db
+              .select({
+                jobId: applicationPackages.jobId,
+                coverLetter: applicationPackages.coverLetter,
+                createdAt: applicationPackages.createdAt,
+                updatedAt: applicationPackages.updatedAt,
+              })
+              .from(applicationPackages)
+              .where(eq(applicationPackages.profileId, profileId));
+
+          it("keeps non-shared fields out of the package", async () => {
+            const jobId = await openJob("pacote");
+            const { app, id, base, call } = await tailoringApp();
+
+            const [{ id: questionId }] = await db
+              .select({ id: answerQuestions.id })
+              .from(answerQuestions)
+              .where(eq(answerQuestions.common, true))
+              .orderBy(asc(answerQuestions.text))
+              .limit(1);
+
+            await db.insert(talentPreferences).values({
+              profileId: id,
+              profileFields: {
+                phone: { value: "11 90000-0000", share: false },
+                city: { value: null, share: true },
+                linkedin: { value: "linkedin.com/in/eu", share: true },
+                availability: { value: "Imediata", share: true },
+                salaryExpectation: { value: "R$ 9.000", share: false },
+              },
+            });
+            await repos.answers.answer(id, questionId, "Resposta pronta", new Date());
+
+            const res = await call(`/me/jobs/${jobId}/package`);
+            const body = await res.json();
+
+            expect(res.status).toBe(200);
+            expect(body).toEqual({
+              job: { title: "Backend", company: "Acme", url: "https://jobs.example.com/pacote" },
+              resume: { id: base.id, kind: "base" },
+              coverLetter: null,
+              profile: [
+                { field: "linkedin", value: "linkedin.com/in/eu" },
+                { field: "availability", value: "Imediata" },
+              ],
+              answers: [{ question: expect.any(String), answer: "Resposta pronta" }],
+            });
+            expect(JSON.stringify(body)).not.toContain("90000");
+            expect(JSON.stringify(body)).not.toContain("9.000");
+            expect(app.calls).toEqual([]);
+          });
+
+          it("lists only the shared CPF, birth date and address in the package", async () => {
+            const jobId = await openJob("formulario");
+            const { id, call } = await tailoringApp();
+
+            await db.insert(talentPreferences).values({
+              profileId: id,
+              profileFields: {
+                linkedin: { value: "linkedin.com/in/eu", share: true },
+                cpf: { value: "52998224725", share: true },
+                birthDate: { value: "1990-05-17", share: true },
+                address: {
+                  value: {
+                    cep: "01310100",
+                    street: "Avenida Paulista",
+                    number: "1000",
+                    complement: "Sala 2",
+                    neighborhood: "Bela Vista",
+                    city: "São Paulo",
+                    state: "SP",
+                  },
+                  share: true,
+                },
+              },
+            });
+
+            const shown = await (await call(`/me/jobs/${jobId}/package`)).json();
+
+            expect(shown.profile).toEqual([
+              { field: "linkedin", value: "linkedin.com/in/eu" },
+              { field: "cpf", value: "529.982.247-25" },
+              { field: "birthDate", value: "17/05/1990" },
+              {
+                field: "address",
+                value:
+                  "Avenida Paulista, 1000 - Sala 2 - Bela Vista, São Paulo - SP, CEP 01310-100",
+              },
+            ]);
+
+            await db
+              .update(talentPreferences)
+              .set({
+                profileFields: {
+                  cpf: { value: "52998224725", share: false },
+                  birthDate: { value: null, share: true },
+                  address: {
+                    value: {
+                      cep: "01310100",
+                      street: "Rua A",
+                      number: "5",
+                      complement: null,
+                      neighborhood: "Centro",
+                      city: "Campinas",
+                      state: "SP",
+                    },
+                    share: true,
+                  },
+                },
+              })
+              .where(eq(talentPreferences.profileId, id));
+
+            const partial = await (await call(`/me/jobs/${jobId}/package`)).json();
+
+            expect(partial.profile).toEqual([
+              { field: "address", value: "Rua A, 5 - Centro, Campinas - SP, CEP 01310-100" },
+            ]);
+            expect(JSON.stringify(partial)).not.toContain("529");
+          });
+
+          it("writes, stores and replaces the cover letter", async () => {
+            const jobId = await openJob("carta");
+            const { app, id, call } = await tailoringApp();
+
+            app.cover.letter = "Primeira carta.";
+
+            const first = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(first.status).toBe(200);
+            expect(await first.json()).toEqual({ coverLetter: "Primeira carta." });
+
+            const [created] = await packageRows(id);
+
+            expect(created).toMatchObject({ jobId, coverLetter: "Primeira carta." });
+            expect(created.createdAt).toEqual(created.updatedAt);
+            expect(await usage(id)).toEqual([{ calls: expect.any(Number) }]);
+
+            app.cover.letter = "Segunda carta.";
+
+            const second = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(await second.json()).toEqual({ coverLetter: "Segunda carta." });
+
+            const [replaced] = await packageRows(id);
+
+            expect(replaced).toMatchObject({ coverLetter: "Segunda carta." });
+            expect(replaced.createdAt).toEqual(created.createdAt);
+            expect(replaced.updatedAt?.getTime()).toBeGreaterThanOrEqual(
+              created.updatedAt?.getTime() ?? 0,
+            );
+            expect((await packageRows(id)).length).toBe(1);
+
+            const shown = await (await call(`/me/jobs/${jobId}/package`)).json();
+
+            expect(shown.coverLetter).toBe("Segunda carta.");
+          });
+
+          it("rejects an invented number with 502 and stores nothing", async () => {
+            const jobId = await openJob("inventada");
+            const { app, id, call } = await tailoringApp();
+            const logged = vi.spyOn(console, "error");
+
+            app.cover.letter = "Aumentei vendas em 40%.";
+
+            const res = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(res.status).toBe(502);
+            expect(await res.json()).toEqual({ error: "Could not write the cover letter" });
+            expect(await packageRows(id)).toEqual([]);
+
+            app.cover.letter = "Segunda tentativa";
+            await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+            app.cover.letter = "Aumentei vendas em 40%.";
+
+            const kept = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(kept.status).toBe(502);
+            expect((await packageRows(id)).map((row) => row.coverLetter)).toEqual([
+              "Segunda tentativa",
+            ]);
+            logged.mockRestore();
+          });
+
+          it("allows a digit that comes from the company name", async () => {
+            const [job] = await db
+              .insert(jobs)
+              .values({
+                origin: "external",
+                source: "seed",
+                sourceKey: "noventa",
+                title: "Backend",
+                company: "99",
+                description: "Vaga de 500 pessoas",
+                url: "https://jobs.example.com/noventa",
+              })
+              .returning({ id: jobs.id });
+
+            const { app, call } = await tailoringApp();
+
+            app.cover.letter = "Quero trabalhar na 99.";
+
+            expect((await call(`/me/jobs/${job.id}/cover-letter`, { method: "POST" })).status).toBe(
+              200,
+            );
+
+            app.cover.letter = "Quero atender 500 pessoas.";
+
+            expect((await call(`/me/jobs/${job.id}/cover-letter`, { method: "POST" })).status).toBe(
+              502,
+            );
+          });
+
+          it("uses the ready tailored version and otherwise the base résumé", async () => {
+            const jobId = await openJob("versao");
+            const otherJobId = await openJob("outra-versao");
+            const { app, base, call, tailor, ready } = await tailoringApp();
+            const { version } = await (await tailor(jobId)).json();
+
+            app.calls.length = 0;
+
+            const draftPackage = await (await call(`/me/jobs/${jobId}/package`)).json();
+
+            expect(draftPackage.resume).toEqual({ id: base.id, kind: "base" });
+
+            await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(app.calls.at(-1)?.prompt).toContain("Engenheira de Software");
+
+            await ready(version.id);
+
+            expect((await (await call(`/me/jobs/${jobId}/package`)).json()).resume).toEqual({
+              id: version.id,
+              kind: "tailored",
+            });
+
+            await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(app.calls.at(-1)?.prompt).toContain("Engenheira Backend");
+            expect(app.calls.at(-1)?.prompt).not.toContain("Engenheira de Software");
+
+            expect((await (await call(`/me/jobs/${otherJobId}/package`)).json()).resume).toEqual({
+              id: base.id,
+              kind: "base",
+            });
+          });
+
+          it("shows another profile only its own package", async () => {
+            const jobId = await openJob("isolada");
+            const { app, call } = await tailoringApp();
+            const other = await tailoringApp("outra.pessoal@example.com", 1);
+
+            app.cover.letter = "Carta da primeira pessoa.";
+            await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            const theirs = await other.call(`/me/jobs/${jobId}/package`);
+
+            expect(await theirs.json()).toMatchObject({ coverLetter: null, profile: [] });
+            expect(
+              JSON.stringify(await other.call(`/me/jobs/${jobId}/package`).then((r) => r.json())),
+            ).not.toContain("primeira pessoa");
+            expect((await (await call(`/me/jobs/${jobId}/package`)).json()).coverLetter).toBe(
+              "Carta da primeira pessoa.",
+            );
+          });
+
+          it("answers 429 without generating once the cap is reached", async () => {
+            const jobId = await openJob("teto-carta");
+            const { app, id, call } = await tailoringApp();
+
+            await db.update(llmUsage).set({ calls: 30 }).where(eq(llmUsage.profileId, id));
+            app.calls.length = 0;
+
+            const res = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(res.status).toBe(429);
+            expect(await res.json()).toEqual({ error: "Daily AI limit reached" });
+            expect(letterCalls(app.calls)).toBe(0);
+            expect(await usage(id)).toEqual([{ calls: 30 }]);
+            expect(await packageRows(id)).toEqual([]);
+          });
+
+          it("refuses a cover letter after applying without spending a call", async () => {
+            const jobId = await openJob("carta-aplicada");
+            const { app, id, base, call, apply } = await tailoringApp();
+
+            expect((await apply(jobId, base.id)).status).toBe(201);
+
+            const spent = await usage(id);
+
+            app.calls.length = 0;
+
+            const res = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(res.status).toBe(409);
+            expect(await res.json()).toEqual({ error: "Already applied" });
+            expect(letterCalls(app.calls)).toBe(0);
+            expect(await usage(id)).toEqual(spent);
+            expect(await packageRows(id)).toEqual([]);
+          });
+
+          it("shows the package of a closed job only to someone who applied or has a package", async () => {
+            const applied = await openJob("fechada-aplicada");
+            const stored = await openJob("fechada-pacote");
+            const untouched = await openJob("fechada-nada");
+            const { id, base, call, apply } = await tailoringApp();
+            const other = await tailoringApp("outra.fechada@example.com", 1);
+
+            expect((await apply(applied, base.id)).status).toBe(201);
+            await db.insert(applicationPackages).values({
+              profileId: id,
+              jobId: stored,
+              coverLetter: "Carta guardada.",
+            });
+            await db.update(jobs).set({ closedAt: new Date() });
+
+            const appliedRes = await call(`/me/jobs/${applied}/package`);
+
+            expect(appliedRes.status).toBe(200);
+            expect(await appliedRes.json()).toMatchObject({
+              job: { title: "Backend" },
+              resume: { id: base.id, kind: "base" },
+            });
+
+            const storedRes = await call(`/me/jobs/${stored}/package`);
+
+            expect(storedRes.status).toBe(200);
+            expect((await storedRes.json()).coverLetter).toBe("Carta guardada.");
+
+            for (const jobId of [applied, stored, untouched]) {
+              const denied = jobId === untouched ? call : other.call;
+              const res = await denied(`/me/jobs/${jobId}/package`);
+
+              expect(res.status).toBe(404);
+              expect(await res.json()).toEqual({ error: "Job not found" });
+            }
+
+            const letter = await call(`/me/jobs/${stored}/cover-letter`, { method: "POST" });
+
+            expect(letter.status).toBe(404);
+          });
+
+          it("answers 502 when the model fails and logs a summary", async () => {
+            const jobId = await openJob("falha-carta");
+            const { app, id, call } = await tailoringApp();
+            const logged = vi.spyOn(console, "error");
+
+            app.cover.fail = true;
+
+            const res = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
+
+            expect(res.status).toBe(502);
+            expect(await res.json()).toEqual({ error: "Could not write the cover letter" });
+            expect(await packageRows(id)).toEqual([]);
+            expect(logged.mock.calls).toEqual([
+              ["cover letter failed", { name: "Error", message: "gateway down" }],
+            ]);
+            logged.mockRestore();
+          });
+
+          it("checks the job, the résumé and the AI before spending a call", async () => {
+            const jobId = await openJob("ordem-carta");
+            const closedId = await openJob("fechada-carta", new Date());
+            const { app, id, call } = await tailoringApp();
+            const unconfigured = resumesApp({ generate: null });
+            const bare = await profile("sem.curriculo@example.com", 1);
+            const spent = await usage(id);
+
+            for (const missing of [crypto.randomUUID(), closedId, "not-a-uuid"]) {
+              for (const [path, method] of [
+                ["cover-letter", "POST"],
+                ["package", "GET"],
+              ]) {
+                const res = await call(`/me/jobs/${missing}/${path}`, { method });
+
+                expect(res.status).toBe(404);
+                expect(await res.json()).toEqual({ error: "Job not found" });
+              }
+            }
+
+            expect(await usage(id)).toEqual(spent);
+            expect(letterCalls(app.calls)).toBe(0);
+
+            const bareSpent = await usage(bare);
+
+            const noBase = await request(app.instance, bare, `/me/jobs/${jobId}/cover-letter`, {
+              method: "POST",
+            });
+
+            expect(noBase.status).toBe(409);
+            expect(await noBase.json()).toEqual({ error: "Upload a résumé first" });
+            expect(await usage(bare)).toEqual(bareSpent);
+
+            const bareView = await request(app.instance, bare, `/me/jobs/${jobId}/package`);
+
+            expect(await bareView.json()).toMatchObject({ resume: null, coverLetter: null });
+
+            const before = await usage(id);
+
+            const noAi = await request(
+              unconfigured.instance,
+              id,
+              `/me/jobs/${jobId}/cover-letter`,
+              {
+                method: "POST",
+              },
+            );
+
+            expect(noAi.status).toBe(503);
+            expect(await noAi.json()).toEqual({ error: "AI not configured" });
+            expect(await usage(id)).toEqual(before);
+
+            for (const path of ["cover-letter", "package"]) {
+              expect(
+                (
+                  await request(app.instance, id, `/me/jobs/${jobId}/${path}`, {
+                    method: path === "package" ? "GET" : "POST",
+                    session: "admin",
+                  })
+                ).status,
+              ).toBe(403);
+            }
+          });
+        });
+
+        it("lists jobs with a tailored version present", async () => {
+          const jobId = await openJob("lista");
+          const { app, id, tailor } = await tailoringApp();
+
+          expect(await listedMatches(app.instance, id)).toEqual([["Backend", 50]]);
+          expect((await tailor(jobId)).status).toBe(200);
+
+          const queued = await db.select().from(backgroundJobs);
+
+          await app.settle();
+
+          expect(await listedMatches(app.instance, id)).toEqual([["Backend", 50]]);
+          expect(await db.select().from(backgroundJobs)).toEqual(queued);
+          expect(app.matching.batches).toEqual([["Backend"], ["Backend"]]);
+        });
+
+        it("reads and edits only the profile's own tailored versions", async () => {
+          const jobId = await openJob("leitura");
+          const { id, base, call, tailor, ready } = await tailoringApp();
+          const other = await tailoringApp("outra.pessoal@example.com", 1);
+          const { version } = await (await tailor(jobId)).json();
+          const { version: foreign } = await (await other.tailor(jobId)).json();
+
+          const edit = (versionId: string, body: { content: object }) =>
+            call(`/me/resumes/${versionId}`, { method: "PATCH", json: body });
+
+          for (const missing of [foreign.id, base.id, crypto.randomUUID()]) {
+            const read = await call(`/me/resumes/${missing}`);
+
+            expect(read.status).toBe(404);
+            expect(await read.json()).toEqual({ error: "Résumé version not found" });
+            expect((await edit(missing, { content: base.content })).status).toBe(404);
+            expect((await ready(missing)).status).toBe(404);
+          }
+
+          for (const path of ["/me/resumes/not-a-uuid", "/me/resumes/not-a-uuid/ready"]) {
+            expect(
+              (await call(path, { method: path.endsWith("ready") ? "POST" : "GET" })).status,
+            ).toBe(422);
+          }
+
+          const invalid = await edit(version.id, {
+            content: { ...version.content, headline: { text: "x".repeat(2_001) } },
+          });
+
+          expect(invalid.status).toBe(422);
+          expect(await invalid.json()).toEqual({ error: "Invalid résumé content" });
+
+          const malformed = await edit(version.id, { content: { headline: 1 } });
+
+          expect(malformed.status).toBe(422);
+          expect(await malformed.json()).toEqual({ error: "Invalid résumé content" });
+
+          const duplicated = await edit(version.id, {
+            content: { ...version.content, summary: { ...version.content.headline } },
+          });
+
+          expect(duplicated.status).toBe(422);
+          expect(await duplicated.json()).toEqual({ error: "Duplicate node ids" });
+          expect(await tailoredRows(id)).toEqual([
+            expect.objectContaining({ content: version.content }),
+          ]);
+          expect((await call("/me/resumes", { session: "admin" })).status).toBe(403);
+          expect(await (await other.call("/me/resumes")).json()).toEqual([foreign]);
+
+          await db.delete(resumes).where(and(eq(resumes.profileId, id), eq(resumes.kind, "base")));
+
+          expect(await (await call(`/me/resumes/${version.id}`)).json()).toEqual({
+            version,
+            diff: [],
+          });
+
+          const edited = await edit(version.id, { content: version.content });
+
+          expect(edited.status).toBe(200);
+          expect((await edited.json()).diff).toEqual([]);
+
+          const tailorWithoutBase = await tailor(jobId);
+
+          expect(tailorWithoutBase.status).toBe(409);
+        });
+
+        it("answers 500 when saving an edited version fails", async () => {
+          const jobId = await openJob("quebra");
+          const { id, tailor } = await tailoringApp();
+          const { version } = await (await tailor(jobId)).json();
+
+          const failing = createApp(
+            webOrigin,
+            {
+              ...repos,
+              resumeVersions: {
+                ...repos.resumeVersions,
+                update: () => Promise.reject(new Error("db down")),
+              },
+            },
+            appOptions,
+          );
+
+          const crashed = await request(failing, id, `/me/resumes/${version.id}`, {
+            method: "PATCH",
+            json: { content: version.content },
+          });
+
+          expect(crashed.status).toBe(500);
+          expect(await tailoredRows(id)).toEqual([
+            expect.objectContaining({ content: version.content }),
+          ]);
+        });
+      });
+
+      it("exports the person's data", async () => {
+        const { instance, scoring, settle } = resumesApp();
+        const id = await profile();
+        const created = await (await upload(instance, id)).json();
+
+        scoring.output = {
+          score: 64,
+          suggestions: [
+            {
+              targetNodeId: created.content.experiences[0].bullets[0].id,
+              suggestedText: "Fez X com impacto",
+              rationale: "Mostra o impacto",
+              estimatedGain: 5,
+            },
+          ],
+        };
+
+        await settle();
+
+        const [job] = await db
+          .insert(jobs)
+          .values({
+            origin: "external",
+            source: "seed",
+            sourceKey: "export-job",
+            title: "Backend",
+            company: "Acme",
+            url: "https://jobs.example.com/export-job",
+          })
+          .returning({ id: jobs.id });
+
+        await repos.applications.apply(id, job.id, created.id);
+
+        const [tailoredJob] = await db
+          .insert(jobs)
+          .values({
+            origin: "external",
+            source: "seed",
+            sourceKey: "export-tailored",
+            title: "Frontend",
+            company: "Globex",
+            url: "https://jobs.example.com/export-tailored",
+          })
+          .returning({ id: jobs.id });
+
+        const version = await repos.resumeVersions.saveDraft(
+          id,
+          tailoredJob.id,
+          created.content,
+          77,
+          new Date(),
+        );
+
+        if (version === "used") throw new Error(version);
+
+        await repos.resumeVersions.markReady(id, version.id, new Date());
+        await repos.applications.apply(id, tailoredJob.id, version.id);
+        await db
+          .update(applications)
+          .set({ appliedAt: new Date("2026-01-01T00:00:00Z") })
+          .where(eq(applications.jobId, job.id));
+        await db
+          .update(resumes)
+          .set({ createdAt: new Date("2026-01-01T00:00:00Z") })
+          .where(eq(resumes.id, created.id));
+        await db.insert(jobMatches).values({
+          profileId: id,
+          jobId: job.id,
+          score: 81,
+          reasons: ["Stack em comum"],
+          resumeUpdatedAt: new Date("2026-01-01T00:00:00Z"),
+          computedAt: new Date("2026-02-01T00:00:00Z"),
+        });
+
+        await db.insert(publicPages).values({
+          profileId: id,
+          slug: "export-page",
+          enabled: true,
+          resumeId: version.id,
+          createdAt: new Date("2026-03-01T00:00:00Z"),
+          updatedAt: new Date("2026-03-02T00:00:00Z"),
+        });
+        await db.insert(publicPageDailyViews).values([
+          { profileId: id, day: "2026-03-03", visits: 4, recruiterVisits: 1 },
+          { profileId: id, day: "2026-03-02", visits: 2, recruiterVisits: 0 },
+        ]);
+
+        const res = await request(instance, id, "/me/export");
+
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-disposition")).toBe(
+          'attachment; filename="offboard-dados.json"',
+        );
+        expect(res.headers.get("cache-control")).toBe("no-store");
+
+        const body = await res.json();
+
+        expect(body.profile).toEqual({
+          name: expect.any(String),
+          email: personalEmail,
+          sponsoredUntil,
+          termsAcceptedAt: expect.any(String),
+          shareOutcomeWithHr: false,
+          aiApplyConsentAt: null,
+          aiApplyConsentVersion: null,
+          firstSignedInAt: null,
+          createdAt: expect.any(String),
+        });
+        expect(body.resumes).toEqual([
+          {
+            kind: "base",
+            status: "ready",
+            content: expect.any(Object),
+            score: 64,
+            scoredAt: expect.any(String),
+            updatedAt: expect.any(String),
+            job: null,
+            matchScore: null,
+            suggestions: [
+              {
+                originalText: "Fez X",
+                suggestedText: "Fez X com impacto",
+                rationale: "Mostra o impacto",
+                estimatedGain: 5,
+                status: "open",
+                createdAt: expect.any(String),
+              },
+            ],
+          },
+          {
+            kind: "tailored",
+            status: "ready",
+            content: created.content,
+            score: null,
+            scoredAt: null,
+            updatedAt: expect.any(String),
+            job: {
+              title: "Frontend",
+              company: "Globex",
+              url: "https://jobs.example.com/export-tailored",
+            },
+            matchScore: 77,
+            suggestions: [],
+          },
+        ]);
+        expect(body.applications).toEqual([
+          expect.objectContaining({
+            job: expect.objectContaining({ title: "Frontend" }),
+            resume: { kind: "tailored", job: { title: "Frontend", company: "Globex" } },
+          }),
+          expect.objectContaining({
+            job: expect.objectContaining({ title: "Backend" }),
+            resume: { kind: "base", job: null },
+          }),
+        ]);
+        expect(JSON.stringify(body)).not.toContain(version.id);
+        expect(body.matches).toEqual([
+          {
+            job: { title: "Backend", company: "Acme", url: "https://jobs.example.com/export-job" },
+            score: 81,
+            reasons: ["Stack em comum"],
+            computedAt: "2026-02-01T00:00:00.000Z",
+          },
+        ]);
+        expect(body.page).toEqual({
+          slug: "export-page",
+          enabled: true,
+          resume: { kind: "tailored", job: { title: "Frontend", company: "Globex" } },
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+        });
+        expect(body.pageViews).toEqual([
+          { day: "2026-03-02", visits: 2, recruiterVisits: 0 },
+          { day: "2026-03-03", visits: 4, recruiterVisits: 1 },
+        ]);
+        expect((await request(instance, id, "/me/export", { session: "admin" })).status).toBe(403);
+      });
+
+      it("answers 404 when the profile disappears during export", async () => {
+        const instance = createApp(
+          webOrigin,
+          { ...repos, account: { ...repos.account, exportData: async () => undefined } },
+          appOptions,
+        );
+
+        const res = await request(instance, await profile(), "/me/export");
+
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual({ error: "Profile not found" });
+      });
+
+      describe("rejections", () => {
+        const reject = (
+          instance: ReturnType<typeof resumesApp>["instance"],
+          id: string,
+          jobId: string,
+          json: { reason?: string | number; note?: string | number | null } = { reason: "salary" },
+        ) => request(instance, id, `/me/jobs/${jobId}/reject`, { method: "POST", json });
+
+        const unreject = (
+          instance: ReturnType<typeof resumesApp>["instance"],
+          id: string,
+          jobId: string,
+        ) => request(instance, id, `/me/jobs/${jobId}/reject`, { method: "DELETE" });
+
+        async function openJob(title: string, values: Partial<typeof jobs.$inferInsert> = {}) {
+          const [row] = await db
+            .insert(jobs)
+            .values({
+              origin: "external",
+              source: "seed",
+              sourceKey: title,
+              title,
+              company: "Acme",
+              url: `https://jobs.example.com/${title}`,
+              ...values,
+            })
+            .returning({ id: jobs.id });
+
+          return row.id;
+        }
+
+        async function listed(instance: ReturnType<typeof resumesApp>["instance"], id: string) {
+          const body = await (await request(instance, id, "/me/jobs")).json();
+
+          return body.items.map((item: { title: string }) => item.title);
+        }
+
+        it("requires an active talent session", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const jobId = await openJob("Vaga");
+
+          expect((await reject(instance, id, jobId)).status).toBe(204);
+
+          for (const [path, method] of [
+            [`/me/jobs/${jobId}/reject`, "POST"],
+            [`/me/jobs/${jobId}/reject`, "DELETE"],
+            ["/me/rejections", "GET"],
+          ]) {
+            const json = method === "POST" ? { reason: "other" } : undefined;
+
+            expect(
+              (await request(instance, id, path, { method, json, session: "admin" })).status,
+            ).toBe(403);
+            expect(
+              (
+                await instance.handle(
+                  new Request(`http://localhost/api${path}`, {
+                    method,
+                    headers: json ? { "content-type": "application/json" } : {},
+                    body: json ? JSON.stringify(json) : undefined,
+                  }),
+                )
+              ).status,
+            ).toBe(403);
+          }
+        });
+
+        it("hides rejected jobs and brings them back when the rejection is removed", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const other = await profile("outra.pessoal@example.com", 1);
+          await openJob("Fica", { postedAt: new Date("2026-02-01T00:00:00Z") });
+          const drop = await openJob("Some", { postedAt: new Date("2026-01-01T00:00:00Z") });
+
+          expect(await listed(instance, id)).toEqual(["Fica", "Some"]);
+
+          const res = await reject(instance, id, drop, { reason: "company" });
+
+          expect(res.status).toBe(204);
+          expect(await res.text()).toBe("");
+          expect(await listed(instance, id)).toEqual(["Fica"]);
+          expect(await listed(instance, other)).toEqual(["Fica", "Some"]);
+          expect((await (await request(instance, id, "/me/jobs")).json()).total).toBe(1);
+
+          expect((await unreject(instance, id, drop)).status).toBe(204);
+          expect((await unreject(instance, id, drop)).status).toBe(204);
+          expect((await unreject(instance, id, "not-a-uuid")).status).toBe(204);
+          expect(await listed(instance, id)).toEqual(["Fica", "Some"]);
+        });
+
+        it("answers 404 for unknown, malformed and closed jobs", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const closed = await openJob("Fechada", { closedAt: new Date() });
+
+          for (const jobId of [crypto.randomUUID(), "not-a-uuid", closed]) {
+            const res = await reject(instance, id, jobId);
+
+            expect(res.status).toBe(404);
+            expect(await res.json()).toEqual({ error: "Job not found" });
+          }
+        });
+
+        it("validates the reason and the note", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const jobId = await openJob("Vaga");
+
+          const invalid = [
+            {},
+            { reason: "nope" },
+            { reason: 1 },
+            { reason: "other", note: 5 },
+            { reason: "other", note: "x".repeat(501) },
+            { reason: "other", note: `  ${"x".repeat(500)}  ${"y".repeat(1)}` },
+          ];
+
+          for (const json of invalid) {
+            const res = await reject(instance, id, jobId, json);
+
+            expect(res.status).toBe(422);
+            expect(await res.json()).toEqual({ error: "Invalid rejection" });
+          }
+
+          expect(await db.select().from(jobRejections)).toEqual([]);
+          expect(
+            (
+              await instance.handle(
+                new Request(`http://localhost/api/me/jobs/${jobId}/reject`, {
+                  method: "POST",
+                  headers: {
+                    "x-test-session": "talent",
+                    "x-test-talent-id": id,
+                    origin: webOrigin,
+                  },
+                }),
+              )
+            ).status,
+          ).toBe(422);
+        });
+
+        it("answers 400 for a malformed body", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const jobId = await openJob("Vaga");
+
+          const res = await instance.handle(
+            new Request(`http://localhost/api/me/jobs/${jobId}/reject`, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "x-test-session": "talent",
+                "x-test-talent-id": id,
+                origin: webOrigin,
+              },
+              body: "{",
+            }),
+          );
+
+          expect(res.status).toBe(400);
+        });
+
+        it("stores a trimmed, sanitized note and overwrites on repeat", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const jobId = await openJob("Vaga");
+
+          await reject(instance, id, jobId, { reason: "salary", note: `  paga\u0000 pouco  ` });
+
+          const [first] = await db.select().from(jobRejections);
+
+          expect(first).toMatchObject({ reason: "salary", note: "paga pouco" });
+
+          await reject(instance, id, jobId, { reason: "location", note: "x".repeat(500) });
+
+          const [second] = await db.select().from(jobRejections);
+
+          expect(second.note).toHaveLength(500);
+          expect(second.reason).toBe("location");
+          expect(second.createdAt?.getTime()).toBeGreaterThanOrEqual(
+            first.createdAt?.getTime() ?? 0,
+          );
+
+          await reject(instance, id, jobId, { reason: "other", note: "   " });
+          await reject(instance, id, jobId, { reason: "other", note: null });
+
+          expect(await db.select().from(jobRejections)).toMatchObject([
+            { reason: "other", note: null },
+          ]);
+        });
+
+        it("lists rejections with reason counts for the person only", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const other = await profile("outra.pessoal@example.com", 1);
+          const a = await openJob("A");
+          const b = await openJob("B", { closedAt: new Date() });
+          const c = await openJob("C");
+
+          await db.insert(jobRejections).values([
+            {
+              profileId: id,
+              jobId: a,
+              reason: "salary",
+              createdAt: new Date("2026-01-01T00:00:00Z"),
+            },
+            {
+              profileId: id,
+              jobId: b,
+              reason: "salary",
+              note: "fechou",
+              createdAt: new Date("2026-01-03T00:00:00Z"),
+            },
+            {
+              profileId: id,
+              jobId: c,
+              reason: "company",
+              createdAt: new Date("2026-01-02T00:00:00Z"),
+            },
+            { profileId: other, jobId: a, reason: "other" },
+          ]);
+
+          const res = await request(instance, id, "/me/rejections");
+
+          expect(res.status).toBe(200);
+          expect(await res.json()).toEqual({
+            items: [
+              {
+                job: { id: b, title: "B", company: "Acme" },
+                reason: "salary",
+                note: "fechou",
+                createdAt: "2026-01-03T00:00:00.000Z",
+              },
+              {
+                job: { id: c, title: "C", company: "Acme" },
+                reason: "company",
+                note: null,
+                createdAt: "2026-01-02T00:00:00.000Z",
+              },
+              {
+                job: { id: a, title: "A", company: "Acme" },
+                reason: "salary",
+                note: null,
+                createdAt: "2026-01-01T00:00:00.000Z",
+              },
+            ],
+            reasons: [
+              { reason: "salary", count: 2 },
+              { reason: "company", count: 1 },
+            ],
+          });
+        });
+
+        it("returns booleans when the fit is unknown in SQL", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          await openJob("Estranha", { workModel: null, state: "RJ" });
+          await db.insert(talentPreferences).values({
+            profileId: id,
+            jobPreferences: { locations: [{ state: "SP", city: null }] },
+          });
+
+          const body = await (await request(instance, id, "/me/jobs")).json();
+
+          expect(
+            body.items.map((item: { fitsPreferences: boolean }) => item.fitsPreferences),
+          ).toEqual([false]);
+        });
+
+        it("flags and ranks the jobs that fit the stored preferences", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          await openJob("Longe", { company: "Bad", postedAt: new Date("2026-03-01T00:00:00Z") });
+          await openJob("Perto", { postedAt: new Date("2026-01-01T00:00:00Z") });
+          await db
+            .insert(talentPreferences)
+            .values({ profileId: id, jobPreferences: { excludedCompanies: ["bad"] } });
+
+          const body = await (await request(instance, id, "/me/jobs")).json();
+
+          expect(
+            body.items.map((item: { title: string; fitsPreferences: boolean }) => [
+              item.title,
+              item.fitsPreferences,
+            ]),
+          ).toEqual([
+            ["Perto", true],
+            ["Longe", false],
+          ]);
+        });
+      });
+
+      describe("answers", () => {
+        type AnswerJson = { answer?: string | number | null };
+
+        const answers = (instance: ReturnType<typeof resumesApp>["instance"], id: string) =>
+          request(instance, id, "/me/answers");
+
+        const put = (
+          instance: ReturnType<typeof resumesApp>["instance"],
+          id: string,
+          questionId: string,
+          json: AnswerJson,
+        ) => request(instance, id, `/me/answers/${questionId}`, { method: "PUT", json });
+
+        it("requires an active talent session", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          expect((await request(instance, id, "/me/answers", { session: "admin" })).status).toBe(
+            403,
+          );
+          expect(
+            (await instance.handle(new Request("http://localhost/api/me/answers"))).status,
+          ).toBe(403);
+        });
+
+        it("lists the common questions unanswered", async () => {
+          const { instance } = resumesApp();
+          const res = await answers(instance, await profile());
+          const body = await res.json();
+
+          expect(res.status).toBe(200);
+          expect(body.unanswered).toBe(10);
+          expect(body.questions).toHaveLength(10);
+          expect(body.questions[0]).toEqual({
+            id: expect.any(String),
+            text: expect.any(String),
+            common: true,
+            answer: null,
+          });
+        });
+
+        it("saves, replaces and clears an answer returning the library", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const [{ id: questionId }] = (await (await answers(instance, id)).json()).questions;
+
+          const saved = await put(instance, id, questionId, { answer: "  R$ 9.000  " });
+          const body = await saved.json();
+
+          expect(saved.status).toBe(200);
+          expect(body.unanswered).toBe(9);
+          expect(body.questions[0]).toMatchObject({ id: questionId, answer: "R$ 9.000" });
+          expect(await (await answers(instance, id)).json()).toEqual(body);
+
+          const replaced = await (await put(instance, id, questionId, { answer: "Outra" })).json();
+
+          expect(replaced.questions[0].answer).toBe("Outra");
+
+          const cleared = await put(instance, id, questionId, { answer: "   " });
+
+          expect(cleared.status).toBe(200);
+          expect((await cleared.json()).unanswered).toBe(10);
+        });
+
+        it("accepts 2000 characters and rejects 2001", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const [{ id: questionId }] = (await (await answers(instance, id)).json()).questions;
+
+          expect((await put(instance, id, questionId, { answer: "a".repeat(2000) })).status).toBe(
+            200,
+          );
+
+          const res = await put(instance, id, questionId, { answer: "a".repeat(2001) });
+
+          expect(res.status).toBe(422);
+          expect(await res.json()).toEqual({ error: "Invalid answer" });
+          expect(
+            (await put(instance, id, questionId, { answer: ` ${"a".repeat(2000)} ` })).status,
+          ).toBe(200);
+        });
+
+        it("rejects malformed bodies", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const [{ id: questionId }] = (await (await answers(instance, id)).json()).questions;
+
+          for (const json of [{}, { answer: 1 }, { answer: null }]) {
+            const res = await put(instance, id, questionId, json);
+
+            expect(res.status).toBe(422);
+            expect(await res.json()).toEqual({ error: "Invalid answer" });
+          }
+
+          expect((await (await answers(instance, id)).json()).unanswered).toBe(10);
+        });
+
+        it("leaves a malformed JSON body to the framework", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const [{ id: questionId }] = (await (await answers(instance, id)).json()).questions;
+
+          const res = await instance.handle(
+            new Request(`http://localhost/api/me/answers/${questionId}`, {
+              method: "PUT",
+              headers: {
+                "x-test-session": "talent",
+                "x-test-talent-id": id,
+                origin: webOrigin,
+                "content-type": "application/json",
+              },
+              body: "{",
+            }),
+          );
+
+          expect(res.status).toBe(400);
+        });
+
+        it("answers 404 for an unknown or malformed question", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          for (const questionId of ["00000000-0000-4000-8000-000000000001", "nope"]) {
+            const res = await put(instance, id, questionId, { answer: "x" });
+
+            expect(res.status).toBe(404);
+            expect(await res.json()).toEqual({ error: "Question not found" });
+          }
+        });
+
+        it("isolates answers between people", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const other = await profile("outra.pessoal@example.com", 1);
+          const [{ id: questionId }] = (await (await answers(instance, id)).json()).questions;
+
+          await put(instance, id, questionId, { answer: "Minha" });
+
+          const body = await (await answers(instance, other)).json();
+
+          expect(body.unanswered).toBe(10);
+          expect(body.questions[0].answer).toBeNull();
+        });
+
+        it("includes answers in the export", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const [{ id: questionId, text }] = (await (await answers(instance, id)).json()).questions;
+
+          await put(instance, id, questionId, { answer: "Resposta" });
+
+          const exported = await (await request(instance, id, "/me/export")).json();
+
+          expect(exported.answers).toEqual([
+            { question: text, answer: "Resposta", updatedAt: expect.any(String) },
+          ]);
+        });
+      });
+
+      describe("preferences", () => {
+        const emptyField = { value: null, share: false };
+
+        const defaults = {
+          mode: "review",
+          hybridThreshold: 75,
+          targetTitles: [],
+          jobPreferences: {
+            workModels: [],
+            locations: [],
+            relocate: false,
+            salaryFloorCents: null,
+            seniorities: [],
+            excludedCompanies: [],
+          },
+          profileFields: {
+            phone: emptyField,
+            city: emptyField,
+            linkedin: emptyField,
+            portfolio: emptyField,
+            workAuthorization: emptyField,
+            availability: emptyField,
+            noticePeriod: emptyField,
+            salaryExpectation: emptyField,
+            cpf: emptyField,
+            birthDate: emptyField,
+            address: emptyField,
+          },
+        };
+
+        type PreferencesJson =
+          | string
+          | number
+          | boolean
+          | null
+          | PreferencesJson[]
+          | { [key: string]: PreferencesJson };
+
+        const save = (
+          instance: ReturnType<typeof resumesApp>["instance"],
+          id: string,
+          json: PreferencesJson,
+        ) => request(instance, id, "/me/preferences", { method: "PUT", json });
+
+        const matchJobs = () =>
+          db
+            .select({ subject: backgroundJobs.subject })
+            .from(backgroundJobs)
+            .where(eq(backgroundJobs.kind, "compute_matches"));
+
+        it("requires an active talent session", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          expect(
+            (await request(instance, id, "/me/preferences", { session: "admin" })).status,
+          ).toBe(403);
+          expect((await save(instance, id, { mode: "hybrid" })).status).toBe(200);
+          expect(
+            (await instance.handle(new Request("http://localhost/api/me/preferences"))).status,
+          ).toBe(403);
+        });
+
+        it("returns full defaults before anything is saved", async () => {
+          const { instance } = resumesApp();
+          const res = await request(instance, await profile(), "/me/preferences");
+
+          expect(res.status).toBe(200);
+          expect(await res.json()).toEqual(defaults);
+        });
+
+        it("saves a partial update and keeps the rest", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          const first = await save(instance, id, { mode: "hybrid", hybridThreshold: 90 });
+
+          expect(first.status).toBe(200);
+          expect(await first.json()).toEqual({ ...defaults, mode: "hybrid", hybridThreshold: 90 });
+
+          const second = await save(instance, id, {
+            jobPreferences: {
+              workModels: ["remote"],
+              locations: [{ city: " Campinas ", state: "SP" }],
+              excludedCompanies: ["Acme", "acme"],
+            },
+            profileFields: { phone: { value: " 11 90000-0000 ", share: true } },
+          });
+
+          const body = await second.json();
+
+          expect(body.mode).toBe("hybrid");
+          expect(body.jobPreferences).toEqual({
+            ...defaults.jobPreferences,
+            workModels: ["remote"],
+            locations: [{ city: "Campinas", state: "SP" }],
+            excludedCompanies: ["Acme"],
+          });
+          expect(body.profileFields.phone).toEqual({ value: "11 90000-0000", share: true });
+          expect(await (await request(instance, id, "/me/preferences")).json()).toEqual(body);
+        });
+
+        it("validates CPF, birth date and address", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          const address = {
+            cep: "01310-100",
+            street: " Avenida Paulista ",
+            number: "1000",
+            complement: "",
+            neighborhood: "Bela Vista",
+            city: "São Paulo",
+            state: "SP",
+          };
+
+          const birth = (years: number, shift = 0) => {
+            const date = new Date(Date.now() - 3 * 3_600_000);
+
+            return new Date(
+              Date.UTC(
+                date.getUTCFullYear() - years,
+                date.getUTCMonth(),
+                date.getUTCDate() + shift,
+              ),
+            )
+              .toISOString()
+              .slice(0, 10);
+          };
+
+          const saved = await save(instance, id, {
+            profileFields: {
+              cpf: { value: "529.982.247-25", share: true },
+              birthDate: { value: birth(14), share: true },
+              address: { value: address, share: true },
+            },
+          });
+
+          expect(saved.status).toBe(200);
+          expect((await saved.json()).profileFields).toMatchObject({
+            cpf: { value: "52998224725", share: true },
+            birthDate: { value: birth(14), share: true },
+            address: {
+              value: {
+                ...address,
+                cep: "01310100",
+                street: "Avenida Paulista",
+                complement: null,
+              },
+              share: true,
+            },
+          });
+
+          const rejected: PreferencesJson[] = [
+            { cpf: { value: "529.982.247-24", share: true } },
+            { cpf: { value: "111.111.111-11", share: true } },
+            { birthDate: { value: birth(13), share: true } },
+            { birthDate: { value: birth(14, 1), share: true } },
+            { birthDate: { value: "2026-02-30", share: true } },
+            { address: { value: { ...address, state: "XX" }, share: true } },
+          ];
+
+          for (const profileFields of rejected) {
+            const res = await save(instance, id, { profileFields });
+
+            expect(res.status).toBe(422);
+            expect(await res.json()).toEqual({ error: "Invalid preferences" });
+          }
+        });
+
+        it("keeps the other fields when saving the form fields", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          await save(instance, id, {
+            profileFields: {
+              phone: { value: "11 90000-0000", share: true },
+              cpf: { value: "52998224725", share: true },
+            },
+          });
+
+          const res = await save(instance, id, {
+            profileFields: { birthDate: { value: "1990-05-17", share: false } },
+          });
+
+          expect((await res.json()).profileFields).toMatchObject({
+            phone: { value: "11 90000-0000", share: true },
+            cpf: { value: "52998224725", share: true },
+            birthDate: { value: "1990-05-17", share: false },
+            address: { value: null, share: false },
+          });
+        });
+
+        it("rejects invalid input with one error body", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          const invalid: PreferencesJson[] = [
+            {},
+            { unknown: 1 },
+            { mode: "manual" },
+            { hybridThreshold: 49 },
+            { hybridThreshold: "80" },
+            { targetTitles: ["a"] },
+            { targetTitles: "Backend" },
+            { jobPreferences: { locations: [{ city: null, state: "XX" }] } },
+            { jobPreferences: { salaryFloorCents: -5 } },
+            { jobPreferences: { salaryFloorCents: 2_147_483_648 } },
+            { profileFields: { phone: { value: "x".repeat(501), share: true } } },
+            { profileFields: { phone: { value: "1" } } },
+          ];
+
+          for (const json of invalid) {
+            const res = await save(instance, id, json);
+
+            expect(res.status).toBe(422);
+            expect(await res.json()).toEqual({ error: "Invalid preferences" });
+          }
+
+          expect(await (await request(instance, id, "/me/preferences")).json()).toEqual(defaults);
+        });
+
+        it("leaves a malformed body to the framework", async () => {
+          const { instance } = resumesApp();
+
+          const res = await instance.handle(
+            new Request("http://localhost/api/me/preferences", {
+              method: "PUT",
+              headers: {
+                "x-test-session": "talent",
+                "x-test-talent-id": await profile(),
+                origin: webOrigin,
+                "content-type": "application/json",
+              },
+              body: "{",
+            }),
+          );
+
+          expect(res.status).toBe(400);
+        });
+
+        it("isolates preferences between people", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+          const other = await profile("outra.pessoal@example.com", 1);
+
+          await save(instance, id, { mode: "automatic", targetTitles: ["Backend"] });
+
+          expect(await (await request(instance, other, "/me/preferences")).json()).toEqual(
+            defaults,
+          );
+        });
+
+        it("enqueues matching only when the titles change", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          await save(instance, id, { mode: "hybrid" });
+          await save(instance, id, { targetTitles: [] });
+
+          expect(await matchJobs()).toEqual([]);
+
+          await save(instance, id, { targetTitles: ["Backend", "SRE"] });
+
+          expect(await matchJobs()).toEqual([{ subject: id }]);
+
+          await db.delete(backgroundJobs);
+          await save(instance, id, { targetTitles: ["sre", "BACKEND"] });
+
+          expect(await matchJobs()).toEqual([]);
+
+          await save(instance, id, { targetTitles: ["Backend"] });
+
+          expect(await matchJobs()).toEqual([{ subject: id }]);
+        });
+
+        it("still saves when enqueueing matching fails", async () => {
+          const logged = vi.spyOn(console, "error");
+
+          const instance = createApp(
+            webOrigin,
+            {
+              ...repos,
+              background: {
+                ...repos.background,
+                enqueue: async () => {
+                  throw new Error("queue down");
+                },
+              },
+            },
+            appOptions,
+          );
+
+          const id = await profile();
+          const res = await save(instance, id, { targetTitles: ["Backend"] });
+
+          expect(res.status).toBe(200);
+          expect((await res.json()).targetTitles).toEqual(["Backend"]);
+          expect(logged).toHaveBeenCalledWith("title re-match enqueue failed", {
+            name: "Error",
+            message: "queue down",
+          });
+          logged.mockRestore();
+        });
+
+        it("includes preferences in the export", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          await save(instance, id, { mode: "automatic", targetTitles: ["Backend"] });
+
+          const exported = await (await request(instance, id, "/me/export")).json();
+
+          expect(exported.preferences).toMatchObject({
+            mode: "automatic",
+            targetTitles: ["Backend"],
+            profileFields: defaults.profileFields,
+          });
+        });
+      });
+
+      it("deletes the account", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        await upload(instance, id);
+
+        store.failRemove = true;
+
+        const failed = await request(instance, id, "/me", { method: "DELETE" });
+
+        expect(failed.status).toBe(502);
+        expect(await failed.json()).toEqual({ error: "Could not delete stored files" });
+        expect((await request(instance, id, "/me")).status).toBe(200);
+
+        store.failRemove = false;
+
+        const deleted = await request(instance, id, "/me", { method: "DELETE" });
+
+        expect(deleted.status).toBe(204);
+        expect(store.prefixes).toEqual([`resumes/${id}/`]);
+        expect((await request(instance, id, "/me")).status).toBe(403);
+      });
+
+      it("keeps the employee journey of the same person when the talent account is deleted", async () => {
+        const { instance } = resumesApp();
+        const id = await profile();
+        const caseId = (await repos.talent.findById(id))?.caseId;
+
+        if (!caseId) throw new Error("missing case");
+
+        const userId = `talent-employee-${id}`;
+
+        await db.insert(authUser).values({ id: userId, name: "Ana", email: personalEmail });
+
+        const [grant] = await db
+          .insert(employeeAccess)
+          .values({ caseId, email: personalEmail.toUpperCase(), plan: {} })
+          .returning({ grantId: employeeAccess.grantId });
+
+        await db
+          .insert(employeeStates)
+          .values({ caseId, userId, key: "departure-v1", revision: 1, value: {} });
+        await db.insert(authSession).values([
+          {
+            id: `${userId}-employee`,
+            token: `${userId}-employee-token`,
+            userId,
+            employeeCaseId: caseId,
+            employeeGrantId: grant.grantId,
+            expiresAt: new Date(Date.now() + 3_600_000),
+          },
+          {
+            id: `${userId}-talent`,
+            token: `${userId}-talent-token`,
+            userId,
+            talentProfileId: id,
+            expiresAt: new Date(Date.now() + 3_600_000),
+          },
+        ]);
+
+        expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+
+        expect(await db.select().from(authUser).where(eq(authUser.id, userId))).toHaveLength(1);
+        expect(
+          await db.select().from(employeeStates).where(eq(employeeStates.userId, userId)),
+        ).toHaveLength(1);
+        expect(
+          (
+            await db
+              .select({ id: authSession.id })
+              .from(authSession)
+              .where(eq(authSession.userId, userId))
+          ).map((row) => row.id),
+        ).toEqual([`${userId}-employee`]);
+        expect(await repos.talent.findById(id)).toBeUndefined();
+      });
+
+      it("deletes every stored file of the profile, including unrecorded ones", async () => {
+        const root = await mkdtemp(path.join(tmpdir(), "account-delete-"));
+        const storage = diskStorage(root);
+
+        try {
+          const instance = createApp(webOrigin, repos, {
+            ...appOptions,
+            generateStructured: async ({ schema }) => schema.parse(draft),
+            storage,
+          });
+
+          const id = await profile();
+          const other = await profile("outra.pessoal@example.com", 1);
+
+          expect((await upload(instance, id)).status).toBe(200);
+          expect((await upload(instance, other)).status).toBe(200);
+
+          await storage.put(`resumes/${id}/orphan.pdf`, pdf, "application/pdf");
+
+          expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+          expect(await readdir(path.join(root, "resumes"))).toEqual([other]);
+          expect(await readdir(path.join(root, "resumes", other))).toHaveLength(1);
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      });
+
+      it("deletes an account without files even when storage is missing", async () => {
+        const { instance } = resumesApp({ storage: false });
+        const id = await profile();
+
+        expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+      });
+
+      it("refuses to delete files when storage is missing", async () => {
+        const withStorage = resumesApp();
+        const id = await profile();
+
+        await upload(withStorage.instance, id);
+
+        const { instance } = resumesApp({ storage: false });
+        const res = await request(instance, id, "/me", { method: "DELETE" });
+
+        expect(res.status).toBe(503);
+        expect(await res.json()).toEqual({ error: "File storage not configured" });
+        expect((await request(instance, id, "/me")).status).toBe(200);
+      });
+    });
+  });
+
+  describe("job sources", () => {
+    const greenhouseBody = (ids: number[]) =>
+      Response.json({
+        jobs: ids.map((id) => ({
+          id,
+          title: `Engenheira ${id}`,
+          company_name: "Acme Pagamentos",
+          absolute_url: `https://job-boards.greenhouse.io/acme/jobs/${id}`,
+          location: { name: "São Paulo, Brasil" },
+          first_published: "2026-11-02T10:15:00-03:00",
+          content: "&lt;p&gt;Vaga&lt;/p&gt;",
+        })),
+      });
+
+    const acme = { kind: "greenhouse", target: "acme", label: null } satisfies CatalogSource;
+
+    function sourcesApp(
+      catalog: readonly CatalogSource[] | undefined,
+      overrides: Partial<typeof repos> = {},
+    ) {
+      const fetched: string[] = [];
+
+      const instance = createApp(
+        webOrigin,
+        { ...repos, ...overrides },
+        {
+          ...appOptions,
+          catalog,
+          fetchFeedImpl: async (input) => {
+            const target = String(input);
+
+            fetched.push(target);
+
+            return target.includes("broken")
+              ? new Response("missing", { status: 404 })
+              : greenhouseBody([1, 2]);
+          },
+        },
+      );
+
+      const drainNow = async (method = "POST") =>
+        (
+          await instance.handle(
+            new Request("http://localhost/api/background/drain", {
+              method,
+              headers: { authorization: `Bearer ${cronSecret}` },
+            }),
+          )
+        ).json();
+
+      const asTalent = (profileId: string, path: string) =>
+        instance.handle(
+          new Request(`http://localhost/api${path}`, {
+            headers: {
+              "x-test-session": "talent",
+              "x-test-talent-id": profileId,
+              origin: webOrigin,
+            },
+          }),
+        );
+
+      return { fetched, drainNow, asTalent };
+    }
+
+    function queued(kind: string) {
+      return db
+        .select({ subject: backgroundJobs.subject, status: backgroundJobs.status })
+        .from(backgroundJobs)
+        .where(eq(backgroundJobs.kind, kind));
+    }
+
+    function registry() {
+      return db
+        .select({
+          id: jobSources.id,
+          target: jobSources.target,
+          enabled: jobSources.enabled,
+          lastError: jobSources.lastError,
+          updatedAt: jobSources.updatedAt,
+        })
+        .from(jobSources)
+        .orderBy(jobSources.target);
+    }
+
+    function importedJobs() {
+      return db
+        .select({
+          id: jobs.id,
+          sourceKey: jobs.sourceKey,
+          origin: jobs.origin,
+          company: jobs.company,
+          closedAt: jobs.closedAt,
+        })
+        .from(jobs)
+        .where(eq(jobs.source, "greenhouse"))
+        .orderBy(jobs.sourceKey);
+    }
+
+    async function matchingProfile() {
+      const cases: { id: string }[] = await (await call("/offboardings")).json();
+
+      const created = await repos.talent.enable({
+        orgId: defaultOrgId,
+        caseId: cases[0].id,
+        personalEmail: "fontes.pessoal@example.com",
+        sponsoredUntil: "2099-12-31",
+      });
+
+      if (
+        created === "case_not_found" ||
+        created === "already_enabled" ||
+        created === "email_taken"
+      ) {
+        throw new Error(created);
+      }
+
+      await repos.talent.acceptTerms(created.id);
+      await db.insert(resumes).values({
+        profileId: created.id,
+        kind: "base",
+        content: {
+          headline: { id: "h", text: "Engenheira" },
+          summary: { id: "s", text: "Dados" },
+          experiences: [],
+          education: [],
+          skills: [],
+          languages: [],
+          contact: { email: null, phone: null, city: null, links: [] },
+        },
+      });
+
+      return created.id;
+    }
+
+    it("syncs the catalog and imports due sources from the cron", async () => {
+      const app = sourcesApp([acme]);
+
+      expect(await app.drainNow("GET")).toEqual({ processed: 1, failed: 0 });
+      expect(app.fetched).toEqual([
+        "https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true",
+      ]);
+      expect(await importedJobs()).toMatchObject([
+        { sourceKey: "acme:1", origin: "external", company: "Acme Pagamentos", closedAt: null },
+        { sourceKey: "acme:2", origin: "external", company: "Acme Pagamentos", closedAt: null },
+      ]);
+
+      const [source] = await registry();
+
+      expect(source).toMatchObject({ target: "acme", enabled: true, lastError: null });
+      expect(await queued("ingest_jobs")).toEqual([{ subject: source.id, status: "done" }]);
+    });
+
+    it("schedules nothing new and changes nothing with an unchanged or empty catalog", async () => {
+      const empty = sourcesApp([]);
+
+      expect(await empty.drainNow()).toEqual({ processed: 0, failed: 0 });
+      expect(empty.fetched).toEqual([]);
+      expect(await registry()).toEqual([]);
+
+      const app = sourcesApp([acme]);
+
+      await app.drainNow();
+
+      const sources = await registry();
+      const scheduled = await queued("ingest_jobs");
+
+      expect(await app.drainNow()).toEqual({ processed: 0, failed: 0 });
+      expect(app.fetched).toHaveLength(1);
+      expect(await registry()).toEqual(sources);
+      expect(await queued("ingest_jobs")).toEqual(scheduled);
+    });
+
+    it("syncs the reviewed catalog by default", async () => {
+      const app = sourcesApp(undefined);
+
+      expect(await app.drainNow()).toEqual({ processed: 2, failed: 0 });
+      expect(app.fetched.sort()).toEqual([
+        "https://boards-api.greenhouse.io/v1/boards/quintoandar/jobs?content=true",
+        "https://boards-api.greenhouse.io/v1/boards/stone/jobs?content=true",
+      ]);
+      expect((await registry()).map((source) => [source.target, source.enabled])).toEqual([
+        ["quintoandar", true],
+        ["stone", true],
+      ]);
+    });
+
+    it("schedules only due enabled sources before draining", async () => {
+      const due = { ...acme, target: "due" };
+      const fresh = { ...acme, target: "fresh" };
+      const app = sourcesApp([due, fresh]);
+      const sevenHoursAgo = new Date(Date.now() - 7 * 60 * 60_000);
+
+      await repos.sources.syncCatalog([due, fresh], new Date());
+      await db
+        .insert(jobSources)
+        .values({ kind: "greenhouse", target: "disabled", enabled: false });
+      await db
+        .update(jobSources)
+        .set({ lastSyncedAt: sevenHoursAgo })
+        .where(eq(jobSources.target, "due"));
+      await db
+        .update(jobSources)
+        .set({ lastSyncedAt: new Date() })
+        .where(eq(jobSources.target, "fresh"));
+
+      expect(await app.drainNow("GET")).toEqual({ processed: 1, failed: 0 });
+      expect(app.fetched).toEqual([
+        "https://boards-api.greenhouse.io/v1/boards/due/jobs?content=true",
+      ]);
+
+      expect(await app.drainNow()).toEqual({ processed: 0, failed: 0 });
+      expect(app.fetched).toHaveLength(1);
+    });
+
+    it("still drains when scheduling sources fails", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      const app = sourcesApp([acme], {
+        sources: { ...repos.sources, dueIds: () => Promise.reject(new Error("db down")) },
+      });
+
+      await repos.background.enqueue("ingest_jobs", crypto.randomUUID());
+
+      expect(await app.drainNow()).toEqual({ processed: 1, failed: 0 });
+      expect(app.fetched).toEqual([]);
+      expect(logged.mock.calls).toEqual([
+        ["source scheduling failed", { name: "Error", message: "db down" }],
+      ]);
+      logged.mockRestore();
+    });
+
+    it("completes ingest jobs of missing or disabled sources without fetching", async () => {
+      const app = sourcesApp([]);
+
+      const [disabled] = await db
+        .insert(jobSources)
+        .values({ kind: "greenhouse", target: "disabled", enabled: false })
+        .returning({ id: jobSources.id });
+
+      await repos.background.enqueue("ingest_jobs", disabled.id);
+      await repos.background.enqueue("ingest_jobs", crypto.randomUUID());
+
+      expect(await app.drainNow()).toEqual({ processed: 2, failed: 0 });
+      expect(app.fetched).toEqual([]);
+      expect(await queued("ingest_jobs")).toMatchObject([{ status: "done" }, { status: "done" }]);
+    });
+
+    it("records a failed fetch without retrying it", async () => {
+      const app = sourcesApp([{ kind: "lever", target: "broken", label: null }]);
+
+      expect(await app.drainNow()).toEqual({ processed: 1, failed: 0 });
+      expect(app.fetched).toEqual(["https://api.lever.co/v0/postings/broken?mode=json"]);
+      expect(await registry()).toMatchObject([{ target: "broken", lastError: "http_404" }]);
+      expect(await queued("compute_matches")).toEqual([]);
+    });
+
+    it("logs a failed fetch with only its identifying fields", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      const app = sourcesApp([
+        { kind: "lever", target: "broken", label: null },
+        { kind: "greenhouse", target: "acme", label: null },
+      ]);
+
+      await app.drainNow();
+
+      expect(logged.mock.calls).toEqual([
+        [
+          "source sync failed",
+          { kind: "lever", target: "broken", error: "http_error", status: 404 },
+        ],
+      ]);
+      logged.mockRestore();
+    });
+
+    it("logs a failed fetch without a status when it is not an http error", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      const instance = createApp(webOrigin, repos, {
+        ...appOptions,
+        catalog: [acme],
+        fetchFeedImpl: () => Promise.reject(new Error("offline")),
+      });
+
+      await instance.handle(
+        new Request("http://localhost/api/background/drain", {
+          method: "POST",
+          headers: { authorization: `Bearer ${cronSecret}` },
+        }),
+      );
+
+      expect(logged.mock.calls).toEqual([
+        ["source sync failed", { kind: "greenhouse", target: "acme", error: "network" }],
+      ]);
+      logged.mockRestore();
+    });
+
+    it("fans out matching when a sync creates jobs", async () => {
+      const profileId = await matchingProfile();
+      const app = sourcesApp([acme]);
+
+      await app.drainNow();
+
+      expect((await queued("compute_matches")).map((row) => row.subject)).toEqual([profileId]);
+
+      const [source] = await registry();
+
+      await db.delete(backgroundJobs);
+      await repos.background.enqueue("ingest_jobs", source.id);
+      await app.drainNow();
+
+      expect(await queued("ingest_jobs")).toEqual([{ subject: source.id, status: "done" }]);
+      expect(await queued("compute_matches")).toEqual([]);
+    });
+
+    it("fans out nothing when the company subscription is not active", async () => {
+      await matchingProfile();
+
+      const subscription = await repos.billing.getSubscription(defaultOrgId);
+
+      if (!subscription) throw new Error("missing subscription");
+
+      await repos.billing.updateSubscription(defaultOrgId, subscription.id, { status: "canceled" });
+
+      const app = sourcesApp([acme]);
+
+      expect(await app.drainNow()).toEqual({ processed: 1, failed: 0 });
+      expect(await importedJobs()).toHaveLength(2);
+      expect(await queued("compute_matches")).toEqual([]);
+    });
+
+    it("fans out matching only to people whose sponsor is active", async () => {
+      const inactiveSponsor = await matchingProfile();
+
+      await db
+        .insert(organizations)
+        .values({ id: otherOrgId, name: "Org B", slug: "org-b" })
+        .onConflictDoNothing();
+
+      const [otherCase] = await db
+        .insert(offboardingCases)
+        .values({
+          orgId: otherOrgId,
+          name: "Pessoa da Org B",
+          role: "Dev",
+          department: "Eng",
+          deadline: "2026-12-01",
+        })
+        .returning({ id: offboardingCases.id });
+
+      const created = await repos.talent.enable({
+        orgId: otherOrgId,
+        caseId: otherCase.id,
+        personalEmail: "fontes.org-b@example.com",
+        sponsoredUntil: "2099-12-31",
+      });
+
+      if (
+        created === "case_not_found" ||
+        created === "already_enabled" ||
+        created === "email_taken"
+      ) {
+        throw new Error(created);
+      }
+
+      await repos.talent.acceptTerms(created.id);
+      await db.insert(resumes).values({
+        profileId: created.id,
+        kind: "base",
+        content: {
+          headline: { id: "h", text: "Engenheira" },
+          summary: { id: "s", text: "Dados" },
+          experiences: [],
+          education: [],
+          skills: [],
+          languages: [],
+          contact: { email: null, phone: null, city: null, links: [] },
+        },
+      });
+
+      const [plan] = await db.select({ id: plans.id }).from(plans).limit(1);
+
+      await db.insert(subscriptions).values({
+        orgId: otherOrgId,
+        planId: plan.id,
+        currentPeriodStart: "2026-11-01",
+        currentPeriodEnd: "2099-12-01",
+      });
+
+      const subscription = await repos.billing.getSubscription(defaultOrgId);
+
+      if (!subscription) throw new Error("missing subscription");
+
+      await repos.billing.updateSubscription(defaultOrgId, subscription.id, { status: "canceled" });
+
+      await sourcesApp([acme]).drainNow();
+
+      const subjects = (await queued("compute_matches")).map((row) => row.subject);
+
+      expect(subjects).toEqual([created.id]);
+      expect(subjects).not.toContain(inactiveSponsor);
+    });
+
+    it("keeps imported jobs when fanning out matching fails", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      await matchingProfile();
+
+      const app = sourcesApp([acme], {
+        background: {
+          ...repos.background,
+          enqueueMany: (kind, subjects) =>
+            kind === "compute_matches"
+              ? Promise.reject(new Error("queue down"))
+              : repos.background.enqueueMany(kind, subjects),
+        },
+      });
+
+      expect(await app.drainNow()).toEqual({ processed: 1, failed: 0 });
+      expect(await importedJobs()).toHaveLength(2);
+      expect(await queued("compute_matches")).toEqual([]);
+      expect(logged.mock.calls).toEqual([
+        ["source match fan-out failed", { name: "Error", message: "queue down" }],
+      ]);
+      logged.mockRestore();
+    });
+
+    it("disables removed sources and closes their jobs", async () => {
+      const profileId = await matchingProfile();
+
+      await sourcesApp([acme]).drainNow();
+
+      const [first] = await importedJobs();
+
+      await db.insert(applications).values({ profileId, jobId: first.id });
+
+      const app = sourcesApp([]);
+
+      expect(await app.drainNow()).toMatchObject({ failed: 0 });
+      expect(await registry()).toMatchObject([{ target: "acme", enabled: false }]);
+      expect((await importedJobs()).every((job) => job.closedAt instanceof Date)).toBe(true);
+
+      const listed = await app.asTalent(profileId, "/me/applications");
+
+      expect(listed.status).toBe(200);
+      expect(await listed.json()).toMatchObject([{ job: { id: first.id, title: "Engenheira 1" } }]);
+      expect(await (await app.asTalent(profileId, "/me/jobs")).json()).toMatchObject({
+        total: 0,
+      });
+    });
   });
 
   afterAll(async () => {
@@ -189,6 +6107,21 @@ describe.skipIf(!url)("api", () => {
     });
 
     await db.$client.end();
+  });
+
+  it("serves no route for HR job sharing, partner recruiters or job feed admin", async () => {
+    for (const [path, method] of [
+      ["/jobs/share", "POST"],
+      ["/recruiters/jobs", "POST"],
+      ["/recruiter-partners", "GET"],
+      ["/recruiter-partners", "POST"],
+      ["/job-feeds", "GET"],
+      ["/job-feeds", "POST"],
+      [`/job-feeds/${crypto.randomUUID()}`, "PATCH"],
+      [`/job-feeds/${crypto.randomUUID()}`, "DELETE"],
+    ] as const) {
+      expect((await call(path, method)).status).toBe(404);
+    }
   });
 
   it("reports health", async () => {
@@ -217,15 +6150,18 @@ describe.skipIf(!url)("api", () => {
   it.each([
     ["anonymous", 401],
     ["revoked", 403],
+    ["talent", 403],
   ])("denies a %s session before reading protected records", async (session, expected) => {
     const headers = { "x-test-session": session };
     const principal = await app.handle(new Request("http://localhost/api/session", { headers }));
     const cases = await app.handle(new Request("http://localhost/api/offboardings", { headers }));
+    const team = await app.handle(new Request("http://localhost/api/team", { headers }));
 
     const bundled = await app.handle(
       new Request("http://localhost/api/offboardings/with-tasks", { headers }),
     );
 
+    expect(team.status).toBe(expected);
     expect(bundled.status).toBe(expected);
     expect(bundled.headers.get("cache-control")).toBe("no-store");
     expect(principal.status).toBe(expected);
@@ -284,7 +6220,7 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("rejects missing and incorrect machine credentials", async () => {
-    const noSecret = createApp(webOrigin, repos, { auth });
+    const noSecret = createApp(webOrigin, repos, { auth, sendEmail });
     const cronWithoutConfig = await noSecret.handle(cronRequest());
 
     const webhookWithoutCredential = await app.handle(
@@ -313,7 +6249,7 @@ describe.skipIf(!url)("api", () => {
     expect((await app.handle(request)).status).toBe(401);
     expect((await app.handle(slackRequest('{"type":"event_callback"}', "1"))).status).toBe(401);
 
-    const noSecret = createApp(webOrigin, repos, { auth });
+    const noSecret = createApp(webOrigin, repos, { auth, sendEmail });
     expect((await noSecret.handle(slackRequest('{"type":"event_callback"}'))).status).toBe(401);
   });
 
@@ -1549,6 +7485,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     origin: webOrigin,
     secret: randomUUID() + randomUUID(),
     ipAddressHeaders: ["x-test-employee-ip"],
+    talent: repos.talent,
     sendLink: async ({ email, url }) => {
       links.set(email, url);
     },
@@ -1557,7 +7494,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     },
   });
 
-  const app = createApp(webOrigin, repos, { auth: employeeAuth });
+  const app = createApp(webOrigin, repos, { auth: employeeAuth, sendEmail });
 
   type EmployeeSettings = Parameters<typeof repos.employee.saveSettings>[2];
 
@@ -1654,7 +7591,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
   afterAll(() => db.$client.end());
 
   it("does not expose employee access settings through fallback portal authentication", async () => {
-    const fallbackApp = createApp(webOrigin, repos, { auth });
+    const fallbackApp = createApp(webOrigin, repos, { auth, sendEmail });
     const target = webOrigin + "/api/employee-access/" + missingCaseId;
     expect((await fallbackApp.handle(new Request(target))).status).toBe(503);
     expect(
@@ -1976,6 +7913,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     });
 
     const racingApp = createApp(webOrigin, repos, {
+      sendEmail,
       auth: {
         ...employeeAuth,
         async resolveEmployee(headers) {
@@ -2598,6 +8536,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     );
 
     const delayedApp = createApp(webOrigin, repos, {
+      sendEmail,
       auth: {
         ...employeeAuth,
         async resolveEmployee(headers) {
@@ -2679,7 +8618,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     });
     const delivered: string[] = [];
 
-    const { auth: production } = createRuntimeAuth(db, undefined, {
+    const { auth: production } = createRuntimeAuth(db, repos.talent, undefined, {
       env: {
         BETTER_AUTH_URL: "https://offboard.example",
         BETTER_AUTH_SECRET: randomUUID() + randomUUID(),

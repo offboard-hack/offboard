@@ -92,6 +92,13 @@
       "when": 1795740000007,
       "tag": "0012_connect_employee_workflows",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795740000008,
+      "tag": "0013_add_talent_app",
+      "breakpoints": true
     }
   ]
 }

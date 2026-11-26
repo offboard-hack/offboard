@@ -17,6 +17,7 @@
         "BETTER_AUTH_URL",
         "CRON_SECRET",
         "POSTGRES_URL",
+        "PUBLIC_PAGE_ORIGIN",
         "RESEND_API_KEY",
         "RESEND_BASE_URL",
         "ABACATEPAY_API_KEY",
