@@ -22,3 +22,7 @@ export function aiApplyAccess(
     ? ("allowed" as const)
     : ("not_allowed" as const);
 }
+
+export function browserbaseConfig(apiKey: string | undefined, projectId: string | undefined) {
+  return apiKey && projectId ? { apiKey, projectId } : undefined;
+}

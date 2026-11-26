@@ -8,7 +8,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createRepositories } from "../../repositories.js";
 import { drain, type JobHandler } from "./drain.js";
-import type { BackgroundJob, BackgroundRepository } from "./repository.js";
+import type { BackgroundJob, BackgroundRepository, ClaimFilter } from "./repository.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 
@@ -55,7 +55,8 @@ describe.skipIf(!url)("background drain", () => {
   function at(clock: { now: Date }) {
     return {
       ...repository,
-      claim: (limit: number) => repository.claim(limit, clock.now),
+      claim: (limit: number, _now?: Date, filter?: ClaimFilter) =>
+        repository.claim(limit, clock.now, filter),
       retry: (job: Pick<BackgroundJob, "id" | "attempts">, error: string) =>
         repository.retry(job, error, clock.now),
     } satisfies BackgroundRepository;
@@ -221,6 +222,59 @@ describe.skipIf(!url)("background drain", () => {
     expect((await rows()).map((job) => [job.subject, job.status])).toEqual([
       ["a-older", "pending"],
       ["b-mine", "done"],
+    ]);
+  });
+
+  it("drains only the included kinds, or every kind but the excluded ones", async () => {
+    await repository.enqueue("ai_apply", "a-apply", {}, minutesAfter(start, -10));
+    await repository.enqueue("score_resume", "b-resume");
+
+    const seen: string[] = [];
+
+    const record: JobHandler = async (job) => {
+      seen.push(job.kind);
+    };
+
+    const handlers = { ai_apply: record, score_resume: record };
+
+    expect(await drain(repository, handlers, { excludeKinds: ["ai_apply"] })).toEqual({
+      processed: 1,
+      failed: 0,
+    });
+    expect(seen).toEqual(["score_resume"]);
+    expect(await drain(repository, handlers, { kinds: ["ai_apply"], limit: 1 })).toEqual({
+      processed: 1,
+      failed: 0,
+    });
+    expect(seen).toEqual(["score_resume", "ai_apply"]);
+  });
+
+  it("does not count skipped jobs against the limit", async () => {
+    for (const [index, subject] of ["a", "b", "c", "d"].entries()) {
+      await repository.enqueue("ai_apply", subject, {}, minutesAfter(start, index - 10));
+    }
+
+    const seen: string[] = [];
+
+    const result = await drain(
+      repository,
+      {
+        ai_apply: async (job) => {
+          seen.push(job.subject);
+
+          return job.subject === "c" ? undefined : { skipped: true };
+        },
+      },
+      { kinds: ["ai_apply"], limit: 1 },
+    );
+
+    expect(result).toEqual({ processed: 3, failed: 0 });
+    expect(seen).toEqual(["a", "b", "c"]);
+    expect((await rows()).map((job) => [job.subject, job.status])).toEqual([
+      ["a", "done"],
+      ["b", "done"],
+      ["c", "done"],
+      ["d", "pending"],
     ]);
   });
 

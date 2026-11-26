@@ -2,9 +2,10 @@ import type { FormQuestion, ResumeContent } from "@offboard/db/schema";
 import { Elysia, t } from "elysia";
 import { aiApplyAccess } from "../../shared/ai-apply-access.js";
 import type { GenerateStructured } from "../../shared/ai.js";
-import { logFailure } from "../../shared/error-summary.js";
+import { logFailure, logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import type { UsageRepository } from "../../shared/llm-usage.js";
+import type { ObjectStorage } from "../../shared/object-storage.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
 import { confirmedAnswers, libraryEntries, needsCoverLetter } from "./confirm.js";
 import { draftAnswers } from "./draft.js";
@@ -36,12 +37,15 @@ export function aiApplyRoutes(
   deps: {
     allowlist: string[];
     generate: GenerateStructured | undefined;
+    runnerConfigured: boolean;
     takeLlmCall: UsageRepository["takeLlmCall"];
     readForm: (board: string, posting: string) => Promise<FormResult>;
     library: (
       profileId: string,
     ) => Promise<{ question: string; answer: string; sensitive: boolean }[]>;
     saveAnswer: SaveAnswer;
+    enqueueRun: (attemptId: string) => Promise<void>;
+    storage: ObjectStorage | undefined;
   },
 ) {
   const needsDocument = (questions: FormQuestion[]) =>
@@ -94,6 +98,8 @@ export function aiApplyRoutes(
   };
 
   const notFound = { error: "Attempt not found" };
+
+  const noScreenshot = { error: "Screenshot not found" };
 
   return new Elysia()
     .use(talentAccess)
@@ -198,41 +204,22 @@ export function aiApplyRoutes(
         },
       },
     )
-    .get(
-      "/me/ai-applications",
-      async ({ me, status }) => {
-        const open = gate(me);
-
-        if (open.refused) return status(open.refused.code, { error: open.refused.error });
-
-        return { items: await repos.list(me.id) };
+    .get("/me/ai-applications", async ({ me }) => ({ items: await repos.list(me.id) }), {
+      talent: "active",
+      response: {
+        200: t.Object({ items: t.Array(attemptResponse) }),
       },
-      {
-        talent: "active",
-        response: {
-          200: t.Object({ items: t.Array(attemptResponse) }),
-          403: errorResponse,
-          503: errorResponse,
-        },
-      },
-    )
+    })
     .get(
       "/me/ai-applications/:id",
-      async ({ me, params, status }) => {
-        const open = gate(me);
-
-        if (open.refused) return status(open.refused.code, { error: open.refused.error });
-
-        return (await repos.get(me.id, params.id)) ?? status(404, notFound);
-      },
+      async ({ me, params, status }) =>
+        (await repos.get(me.id, params.id)) ?? status(404, notFound),
       {
         talent: "active",
         params: attemptParams,
         response: {
           200: attemptResponse,
-          403: errorResponse,
           404: errorResponse,
-          503: errorResponse,
         },
       },
     )
@@ -242,6 +229,8 @@ export function aiApplyRoutes(
         const open = gate(me);
 
         if (open.refused) return status(open.refused.code, { error: open.refused.error });
+
+        if (!deps.runnerConfigured) return status(503, { error: "AI Apply not configured" });
 
         const found = await repos.attempt(me.id, params.id);
 
@@ -282,6 +271,16 @@ export function aiApplyRoutes(
           return status(409, { error: conflicts[result] });
         }
 
+        const stale = found.attempt.screenshotKey;
+
+        if (stale !== null) {
+          await deps.storage
+            ?.remove([stale])
+            .catch(logFailureCode("AI application screenshot not removed"));
+        }
+
+        await deps.enqueueRun(result.id).catch(logFailure("AI application enqueue failed"));
+
         return result;
       },
       {
@@ -298,13 +297,43 @@ export function aiApplyRoutes(
         },
       },
     )
+    .get(
+      "/me/ai-applications/:id/screenshot",
+      async ({ me, params, status }) => {
+        const key = (await repos.attempt(me.id, params.id))?.attempt.screenshotKey;
+        const bytes = key && deps.storage ? await deps.storage.get(key) : null;
+
+        if (bytes === null || bytes === undefined) return status(404, noScreenshot);
+
+        return new Response(new Uint8Array(bytes), {
+          headers: { "content-type": "image/png", "cache-control": "private, no-store" },
+        });
+      },
+      {
+        talent: "active",
+        params: attemptParams,
+        response: { 404: errorResponse },
+      },
+    )
+    .post(
+      "/me/ai-applications/:id/check",
+      async ({ me, params, body, status }) => {
+        const result = await repos.check(me.id, params.id, body.sent, new Date());
+
+        if (result === "not_found") return status(404, notFound);
+
+        return result === "nothing_to_check" ? status(409, { error: "Nothing to check" }) : result;
+      },
+      {
+        talent: "active",
+        params: attemptParams,
+        body: t.Object({ sent: t.Boolean() }),
+        response: { 200: attemptResponse, 404: errorResponse, 409: errorResponse },
+      },
+    )
     .post(
       "/me/ai-applications/:id/cancel",
       async ({ me, params, status }) => {
-        const open = gate(me);
-
-        if (open.refused) return status(open.refused.code, { error: open.refused.error });
-
         const result = await repos.cancel(me.id, params.id, new Date());
 
         if (result === "not_found") return status(404, notFound);
@@ -316,10 +345,8 @@ export function aiApplyRoutes(
         params: attemptParams,
         response: {
           200: attemptResponse,
-          403: errorResponse,
           404: errorResponse,
           409: errorResponse,
-          503: errorResponse,
         },
       },
     );

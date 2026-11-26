@@ -125,7 +125,7 @@ function lines(text: string, encodable: Set<string>, measure: Measure, limit: nu
   return pack(words, " ", measure, limit);
 }
 
-export async function renderResumePdf(resume: PdfResume) {
+async function renderBlocks(drawn: Block[]) {
   const document = await PDFDocument.create();
   const regular = await document.embedFont(StandardFonts.Helvetica);
   const bold = await document.embedFont(StandardFonts.HelveticaBold);
@@ -133,7 +133,7 @@ export async function renderResumePdf(resume: PdfResume) {
   let page = document.addPage([pageWidth, pageHeight]);
   let cursor = pageHeight - margin;
 
-  for (const block of blocks(resume)) {
+  for (const block of drawn) {
     const font = block.bold ? bold : regular;
     const height = block.size * leading;
     const width = pageWidth - 2 * margin - block.indent;
@@ -158,6 +158,16 @@ export async function renderResumePdf(resume: PdfResume) {
   }
 
   return document.save();
+}
+
+export function renderResumePdf(resume: PdfResume) {
+  return renderBlocks(blocks(resume));
+}
+
+export function renderLetterPdf(name: string, text: string) {
+  const paragraphs = text.split(/\n\s*\n/).filter((paragraph) => paragraph.trim() !== "");
+
+  return renderBlocks([heading(name, 14, 0), ...paragraphs.map((paragraph) => body(paragraph, 8))]);
 }
 
 export function pdfAttachment(bytes: Uint8Array, filename: string, cacheControl: string) {

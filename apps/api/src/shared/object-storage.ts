@@ -1,5 +1,6 @@
 export type ObjectStorage = {
   put(key: string, data: Uint8Array, contentType: string): Promise<void>;
+  get(key: string): Promise<Uint8Array | null>;
   remove(keys: string[]): Promise<void>;
   removePrefix(prefix: string): Promise<void>;
 };
@@ -10,6 +11,7 @@ export type R2BucketLike = {
     value: Uint8Array,
     options: { httpMetadata: { contentType: string } },
   ): Promise<object | null | void>;
+  get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>;
   delete(keys: string | string[]): Promise<void>;
   list(options: { prefix: string; cursor?: string; limit?: number }): Promise<{
     objects: { key: string }[];
@@ -24,6 +26,11 @@ export const r2Storage = (bucket: R2BucketLike) => {
   const storage: ObjectStorage = {
     put: async (key, data, contentType) => {
       await bucket.put(key, data, { httpMetadata: { contentType } });
+    },
+    get: async (key) => {
+      const object = await bucket.get(key);
+
+      return object === null ? null : new Uint8Array(await object.arrayBuffer());
     },
     remove: async (keys) => {
       for (let start = 0; start < keys.length; start += BATCH_SIZE) {

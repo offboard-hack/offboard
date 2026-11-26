@@ -48,6 +48,7 @@ import {
 } from "@offboard/employee";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { status } from "elysia";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.ts";
@@ -123,6 +124,8 @@ const auth: PortalAuth = {
     });
   },
 };
+
+const browserbase = { apiKey: "bb-key", projectId: "bb-project" };
 
 const appOptions = {
   auth,
@@ -856,6 +859,13 @@ describe.skipIf(!url)("api", () => {
         ...appOptions,
         aiApplyAllowlist: ["ANA.PESSOAL@example.com", "outra@example.com"],
         generateStructured: async ({ schema }) => schema.parse({}),
+        browserbase,
+      });
+
+      const withoutBrowser = createApp(webOrigin, repos, {
+        ...appOptions,
+        aiApplyAllowlist: ["ANA.PESSOAL@example.com"],
+        generateStructured: async ({ schema }) => schema.parse({}),
       });
 
       const call = (
@@ -954,6 +964,12 @@ describe.skipIf(!url)("api", () => {
         aiApply: { consented: true, available: true },
       });
 
+      expect(
+        await (await call(withoutBrowser, "talent", "/me", "GET", mine.id)).json(),
+      ).toMatchObject({
+        aiApply: { consented: true, available: false },
+      });
+
       const stored = await consentOf(mine.id);
 
       expect(stored.at).toBeInstanceOf(Date);
@@ -964,6 +980,7 @@ describe.skipIf(!url)("api", () => {
 
       const draft = await seedAttempt(mine.id, "ai-draft", "draft");
       const queued = await seedAttempt(mine.id, "ai-queued", "queued");
+      const running = await seedAttempt(mine.id, "ai-running", "running");
       const submitted = await seedAttempt(mine.id, "ai-submitted", "submitted");
       const others = await seedAttempt(other.id, "ai-other", "draft");
 
@@ -989,7 +1006,7 @@ describe.skipIf(!url)("api", () => {
       });
       expect(await consentOf(mine.id)).toEqual({ at: null, version: null });
 
-      for (const id of [draft, queued]) {
+      for (const id of [draft, queued, running]) {
         expect(await stateOf(id)).toEqual({
           state: "cancelled",
           reason: "consent_withdrawn",
@@ -1071,6 +1088,7 @@ describe.skipIf(!url)("api", () => {
       const instance = createApp(webOrigin, repos, {
         ...appOptions,
         aiApplyAllowlist: [personalEmail],
+        browserbase,
         generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
         fetchGreenhouseImpl: async (input) => {
           urls.push(String(input));
@@ -1138,6 +1156,138 @@ describe.skipIf(!url)("api", () => {
       ).toBe("Resposta final");
     });
 
+    it("runs a confirmed AI application from the scheduled drain", async () => {
+      const [firstCase] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
+
+      const created = await repos.talent.enable({
+        orgId: defaultOrgId,
+        caseId: firstCase.id,
+        personalEmail,
+        sponsoredUntil,
+      });
+
+      if (
+        created === "case_not_found" ||
+        created === "already_enabled" ||
+        created === "email_taken"
+      ) {
+        throw new Error(created);
+      }
+
+      await repos.talent.acceptTerms(created.id);
+      await repos.talent.setAiApplyConsent(created.id, true, new Date());
+
+      await db.insert(resumes).values({
+        profileId: created.id,
+        kind: "base",
+        content: {
+          headline: { id: "h", text: "Engenheira" },
+          summary: { id: "s", text: "Backend" },
+          experiences: [],
+          education: [],
+          skills: [],
+          languages: [],
+          contact: { email: null, phone: null, city: null, links: [] },
+        },
+      });
+
+      const [job] = await db
+        .insert(jobs)
+        .values({
+          origin: "external",
+          source: "greenhouse",
+          sourceKey: "acme:42",
+          title: "Backend",
+          company: "Acme",
+          url: "https://job-boards.greenhouse.io/acme/jobs/42",
+        })
+        .returning({ id: jobs.id });
+
+      const browser: string[] = [];
+      const logged = vi.spyOn(console, "error");
+
+      const instance = createApp(webOrigin, repos, {
+        ...appOptions,
+        aiApplyAllowlist: [personalEmail],
+        browserbase,
+        generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
+        fetchGreenhouseImpl: async () =>
+          new Response(
+            JSON.stringify({
+              questions: [
+                {
+                  label: "Por que a Acme?",
+                  required: true,
+                  fields: [{ name: "question_1", type: "input_text", values: [] }],
+                },
+              ],
+            }),
+          ),
+        fetchBrowserImpl: async (input, init) => {
+          const target = String(input);
+
+          browser.push(`${init?.method ?? "GET"} ${target}`);
+
+          return target === "https://api.browserbase.com/v1/sessions"
+            ? Response.json({ id: "s1", connectUrl: "wss://connect.test/s1" })
+            : new Response(null);
+        },
+      });
+
+      const talentHeaders = {
+        "x-test-session": "talent",
+        "x-test-talent-id": created.id,
+        origin: webOrigin,
+        "content-type": "application/json",
+      };
+
+      const prepared = await instance.handle(
+        new Request(`http://localhost/api/me/jobs/${job.id}/ai-apply`, {
+          method: "POST",
+          headers: talentHeaders,
+        }),
+      );
+
+      const { attempt } = await prepared.json();
+
+      const confirmed = await instance.handle(
+        new Request(`http://localhost/api/me/ai-applications/${attempt.id}/confirm`, {
+          method: "POST",
+          headers: talentHeaders,
+          body: JSON.stringify({ answers: [{ questionId: "question_1", value: "Pagamentos" }] }),
+        }),
+      );
+
+      expect(confirmed.status).toBe(200);
+      expect(
+        (await db.select().from(backgroundJobs)).map((row) => [row.kind, row.subject, row.status]),
+      ).toEqual([["ai_apply", attempt.id, "pending"]]);
+
+      await db.delete(backgroundJobs);
+
+      const drained = await instance.handle(
+        new Request("http://localhost/api/background/drain", {
+          method: "POST",
+          headers: { authorization: `Bearer ${cronSecret}` },
+        }),
+      );
+
+      expect(await drained.json()).toEqual({ processed: 1, failed: 0 });
+      expect(
+        (await db.select().from(aiApplications).where(eq(aiApplications.id, attempt.id)))[0],
+      ).toMatchObject({ state: "assisted", reason: "error" });
+      expect(browser).toEqual([
+        "POST https://api.browserbase.com/v1/sessions",
+        "GET https://connect.test/s1",
+        "POST https://api.browserbase.com/v1/sessions/s1",
+      ]);
+      expect(logged).toHaveBeenCalledWith("AI application run failed", {
+        name: "CdpError",
+        message: "no websocket",
+      });
+      logged.mockRestore();
+    });
+
     it("answers 500 without data and rolls back every library save when a confirm fails", async () => {
       const [firstCase] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
 
@@ -1194,6 +1344,7 @@ describe.skipIf(!url)("api", () => {
       const instance = createApp(webOrigin, repos, {
         ...appOptions,
         aiApplyAllowlist: [personalEmail],
+        browserbase,
         generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
         fetchGreenhouseImpl: async () =>
           new Response(JSON.stringify({ questions: [text("one"), text("two")] })),
@@ -1248,6 +1399,63 @@ describe.skipIf(!url)("api", () => {
       expect(
         (await repos.answers.library(created.id)).questions.filter((item) => item.answer !== null),
       ).toEqual([]);
+    });
+
+    it("hides the message of an error that carries its own code", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      const failures = [
+        Object.assign(new Error("connect ECONNREFUSED 10.0.0.7:5432"), { code: "ECONNREFUSED" }),
+        new DOMException("signal timed out for ana@example.com", "TimeoutError"),
+        new Error("plain secret for ana@example.com"),
+      ];
+
+      try {
+        for (const failure of failures) {
+          const instance = createApp(webOrigin, repos, {
+            ...appOptions,
+            auth: {
+              ...auth,
+              handler: async () => {
+                throw failure;
+              },
+            },
+          });
+
+          const res = await instance.handle(new Request("http://localhost/api/auth/session"));
+
+          expect(res.status).toBe(500);
+          expect(await res.text()).toBe('{"error":"Internal error"}');
+        }
+
+        expect(JSON.stringify(logged.mock.calls)).not.toContain("ana@example.com");
+        expect(JSON.stringify(logged.mock.calls)).not.toContain("10.0.0.7");
+        expect(logged).toHaveBeenCalledWith("unhandled error", {
+          name: "Error",
+          code: "ECONNREFUSED",
+        });
+        expect(logged).toHaveBeenCalledWith("unhandled error", { name: "TimeoutError" });
+        expect(logged).toHaveBeenCalledWith("unhandled error", { name: "Error" });
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("keeps a thrown status response", async () => {
+      const instance = createApp(webOrigin, repos, {
+        ...appOptions,
+        auth: {
+          ...auth,
+          handler: async () => {
+            throw status(409, { error: "Conflict" });
+          },
+        },
+      });
+
+      const res = await instance.handle(new Request("http://localhost/api/auth/session"));
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "Conflict" });
     });
 
     it("keeps Elysia's own answer for a malformed JSON body", async () => {
@@ -1554,6 +1762,40 @@ describe.skipIf(!url)("api", () => {
 
         expect(listed).toHaveLength(1);
         expect(listed[0]).toMatchObject({ status: "sent", closedReason: null });
+      });
+
+      it("refuses a manual application while an AI submission awaits its check", async () => {
+        const headers = await talentProfile(personalEmail, 0);
+        const jobId = await seedJob("pending");
+        const body = await baseResume(headers);
+
+        const [pending] = await db
+          .insert(aiApplications)
+          .values({
+            profileId: headers["x-test-talent-id"],
+            jobId,
+            state: "submitting",
+            form: { questions: [] },
+            draft: [],
+            preparedAt: new Date(),
+          })
+          .returning({ id: aiApplications.id });
+
+        for (const state of ["submitting", "needs_check"] as const) {
+          await db.update(aiApplications).set({ state }).where(eq(aiApplications.id, pending.id));
+
+          const refused = await send(headers, `/me/jobs/${jobId}/apply`, "POST", body);
+
+          expect(refused.status).toBe(409);
+          expect(await refused.json()).toEqual({ error: "AI application pending check" });
+        }
+
+        await db
+          .update(aiApplications)
+          .set({ state: "assisted", reason: "not_sent" })
+          .where(eq(aiApplications.id, pending.id));
+
+        expect((await send(headers, `/me/jobs/${jobId}/apply`, "POST", body)).status).toBe(201);
       });
 
       it("moves an application through the funnel", async () => {
@@ -2408,6 +2650,7 @@ describe.skipIf(!url)("api", () => {
 
             store.prefixes.push(prefix);
           },
+          get: async () => null,
         };
 
         const generate: GenerateStructured = async ({ schema, system, prompt }) => {
@@ -2701,6 +2944,7 @@ describe.skipIf(!url)("api", () => {
                 store.push(...keys);
               },
               removePrefix: async () => undefined,
+              get: async () => null,
             },
           },
         );
@@ -3246,6 +3490,7 @@ describe.skipIf(!url)("api", () => {
               put: async () => undefined,
               remove: async () => undefined,
               removePrefix: async () => undefined,
+              get: async () => null,
             },
             runInBackground: () => {
               throw new Error("should not kick a drain");
@@ -3322,6 +3567,7 @@ describe.skipIf(!url)("api", () => {
               put: async () => undefined,
               remove: async () => undefined,
               removePrefix: async () => undefined,
+              get: async () => null,
             },
           },
         );
@@ -3589,6 +3835,7 @@ describe.skipIf(!url)("api", () => {
               put: async () => undefined,
               remove: async () => undefined,
               removePrefix: async () => undefined,
+              get: async () => null,
             },
             runInBackground: () => {
               kicks += 1;
@@ -5541,7 +5788,7 @@ describe.skipIf(!url)("api", () => {
         const deleted = await request(instance, id, "/me", { method: "DELETE" });
 
         expect(deleted.status).toBe(204);
-        expect(store.prefixes).toEqual([`resumes/${id}/`]);
+        expect(store.prefixes).toEqual([`resumes/${id}/`, `ai-applications/${id}/`]);
         expect((await request(instance, id, "/me")).status).toBe(403);
       });
 
@@ -5617,9 +5864,12 @@ describe.skipIf(!url)("api", () => {
           expect((await upload(instance, other)).status).toBe(200);
 
           await storage.put(`resumes/${id}/orphan.pdf`, pdf, "application/pdf");
+          await storage.put(`ai-applications/${id}/orphan.png`, pdf, "image/png");
+          await storage.put(`ai-applications/${other}/kept.png`, pdf, "image/png");
 
           expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
           expect(await readdir(path.join(root, "resumes"))).toEqual([other]);
+          expect(await readdir(path.join(root, "ai-applications"))).toEqual([other]);
           expect(await readdir(path.join(root, "resumes", other))).toHaveLength(1);
         } finally {
           await rm(root, { recursive: true, force: true });
@@ -5645,6 +5895,38 @@ describe.skipIf(!url)("api", () => {
         expect(res.status).toBe(503);
         expect(await res.json()).toEqual({ error: "File storage not configured" });
         expect((await request(instance, id, "/me")).status).toBe(200);
+      });
+
+      it("refuses to delete when only an AI application screenshot is stored and storage is missing", async () => {
+        const { instance } = resumesApp({ storage: false });
+        const id = await profile();
+
+        const [job] = await db
+          .insert(jobs)
+          .values({
+            origin: "external",
+            source: "greenhouse",
+            sourceKey: "acme:1",
+            title: "Backend",
+            company: "Acme",
+            url: "https://example.com/1",
+          })
+          .returning({ id: jobs.id });
+
+        await db.insert(aiApplications).values({
+          profileId: id,
+          jobId: job.id,
+          state: "assisted",
+          form: { questions: [] },
+          draft: [],
+          preparedAt: new Date(),
+          screenshotKey: `ai-applications/${id}/shot.png`,
+        });
+
+        const res = await request(instance, id, "/me", { method: "DELETE" });
+
+        expect(res.status).toBe(503);
+        expect(await res.json()).toEqual({ error: "File storage not configured" });
       });
     });
   });

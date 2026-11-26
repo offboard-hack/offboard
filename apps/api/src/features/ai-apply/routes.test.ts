@@ -6,6 +6,8 @@ import { normalizeQuestion } from "@offboard/db/question";
 import {
   aiApplications,
   answerQuestions,
+  backgroundJobs,
+  applicationEvents,
   applicationPackages,
   applications,
   defaultOrgId,
@@ -22,9 +24,10 @@ import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Elysia } from "elysia";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRepositories } from "../../repositories.js";
 import type { GenerateStructured } from "../../shared/ai.js";
+import type { ObjectStorage } from "../../shared/object-storage.js";
 import type { PortalAuth } from "../../shared/portal-auth.js";
 import { talentAccess } from "../../shared/talent-access.js";
 import type { SaveAnswer } from "./repository.js";
@@ -100,8 +103,11 @@ type Setup = {
   allowlist?: string[];
   consent?: boolean;
   generate?: GenerateStructured | null;
+  runnerConfigured?: boolean;
   form?: () => Response | Promise<Response>;
   saveAnswer?: SaveAnswer;
+  enqueueRun?: (attemptId: string) => Promise<void>;
+  storage?: ObjectStorage;
 };
 
 describe.skipIf(!url)("ai apply route", () => {
@@ -232,6 +238,7 @@ describe.skipIf(!url)("ai apply route", () => {
         {
           allowlist: setup.allowlist ?? [email.toUpperCase()],
           generate: setup.generate === null ? undefined : setup.generate,
+          runnerConfigured: setup.runnerConfigured ?? true,
           takeLlmCall: setup.takeLlmCall ?? repos.llmUsage.takeLlmCall,
           readForm: (board, posting) => readGreenhouseForm(respond, board, posting),
           library: async (profileId) =>
@@ -241,6 +248,9 @@ describe.skipIf(!url)("ai apply route", () => {
                 : [{ question: item.text, answer: item.answer, sensitive: item.sensitive }],
             ),
           saveAnswer: setup.saveAnswer ?? saveToLibrary,
+          enqueueRun:
+            setup.enqueueRun ?? ((attemptId) => repos.background.enqueue("ai_apply", attemptId)),
+          storage: setup.storage,
         },
       ),
     );
@@ -253,7 +263,12 @@ describe.skipIf(!url)("ai apply route", () => {
         }),
       );
 
-    const call = (profileId: string, path: string, body?: Body, method = "POST") =>
+    const call = (
+      profileId: string,
+      path: string,
+      body?: Body | { sent?: boolean | string },
+      method = "POST",
+    ) =>
       instance.handle(
         new Request(`http://localhost${path}`, {
           method,
@@ -268,6 +283,23 @@ describe.skipIf(!url)("ai apply route", () => {
 
     return { post, fetched, call };
   }
+
+  const memoryStorage = (objects: Record<string, Uint8Array>) => {
+    const reads: string[] = [];
+
+    const storage: ObjectStorage = {
+      put: async () => undefined,
+      remove: async () => undefined,
+      removePrefix: async () => undefined,
+      get: async (key) => {
+        reads.push(key);
+
+        return Object.hasOwn(objects, key) ? objects[key] : null;
+      },
+    };
+
+    return { storage, reads };
+  };
 
   const attempts = (profileId: string) =>
     db.select().from(aiApplications).where(eq(aiApplications.profileId, profileId));
@@ -1011,6 +1043,8 @@ describe.skipIf(!url)("ai apply route", () => {
 
     const confirmPath = (id: string) => `/me/ai-applications/${id}/confirm`;
     const cancelPath = (id: string) => `/me/ai-applications/${id}/cancel`;
+    const checkPath = (id: string) => `/me/ai-applications/${id}/check`;
+    const shotPath = (id: string) => `/me/ai-applications/${id}/screenshot`;
 
     const complete = [
       { questionId: "why", value: "  Gosto de fintechs. " },
@@ -1076,15 +1110,12 @@ describe.skipIf(!url)("ai apply route", () => {
       ).toMatchObject({ state: "draft" });
     });
 
-    it("applies the gate to every attempt route", async () => {
+    it("applies the gate to preparing and confirming only", async () => {
       const { profileId, jobId } = await ready();
       const id = await seed(profileId, jobId, [why]);
 
       const routes: [string, string, Body?][] = [
-        ["GET", "/me/ai-applications"],
-        ["GET", `/me/ai-applications/${id}`],
         ["POST", confirmPath(id), { answers: [{ questionId: "why", value: "x" }] }],
-        ["POST", cancelPath(id)],
       ];
 
       const unlisted = build({ allowlist: [], generate: fakeModel().generate });
@@ -1103,6 +1134,58 @@ describe.skipIf(!url)("ai apply route", () => {
       }
 
       expect((await attempts(profileId))[0]).toMatchObject({ state: "draft", confirmed: null });
+    });
+
+    it("lets a person without access still read and cancel their attempts", async () => {
+      const profileId = await profile();
+      const jobId = await addJob();
+      const evidence = { fields: [], files: ["curriculo.pdf"], finalUrl: null };
+      const shot = `ai-applications/${profileId}/shot.png`;
+      const files = memoryStorage({ [shot]: new Uint8Array([1, 2]) });
+
+      const id = await seed(profileId, jobId, [why], {
+        state: "assisted",
+        evidence,
+        screenshotKey: shot,
+      });
+
+      await repos.talent.setAiApplyConsent(profileId, false, new Date());
+
+      const closed = build({ allowlist: [], generate: null, storage: files.storage });
+
+      const listed = await closed.call(profileId, "/me/ai-applications", undefined, "GET");
+
+      expect(listed.status).toBe(200);
+      expect((await listed.json()).items[0]).toMatchObject({ id, evidence, hasScreenshot: true });
+
+      const one = await closed.call(profileId, `/me/ai-applications/${id}`, undefined, "GET");
+
+      expect(one.status).toBe(200);
+      expect(await one.json()).toMatchObject({ evidence, hasScreenshot: true });
+
+      const image = await closed.call(profileId, shotPath(id), undefined, "GET");
+
+      expect(image.status).toBe(200);
+      expect(new Uint8Array(await image.arrayBuffer())).toEqual(new Uint8Array([1, 2]));
+
+      const draft = await seed(profileId, await addJob("stone:9"), [why]);
+
+      expect((await closed.call(profileId, cancelPath(draft))).status).toBe(200);
+    });
+
+    it("refuses to confirm when Browserbase is not configured", async () => {
+      const { call, profileId, id } = await setup();
+      const body = { answers: [{ questionId: "why", value: "x" }] };
+
+      const bare = build({ generate: fakeModel().generate, runnerConfigured: false });
+      const refused = await bare.call(profileId, confirmPath(id), body);
+
+      expect(refused.status).toBe(503);
+      expect(await refused.json()).toEqual({ error: "AI Apply not configured" });
+      expect((await attempts(profileId))[0]).toMatchObject({ state: "draft", confirmed: null });
+      expect((await call(profileId, `/me/ai-applications/${id}`, undefined, "GET")).status).toBe(
+        200,
+      );
     });
 
     it("confirms once", async () => {
@@ -1128,6 +1211,39 @@ describe.skipIf(!url)("ai apply route", () => {
 
       expect(again.status).toBe(409);
       expect(await again.json()).toEqual({ error: "Already in progress" });
+    });
+
+    it("enqueues the run once the confirm is stored", async () => {
+      const { call, profileId, id } = await setup();
+
+      expect(await db.select().from(backgroundJobs)).toEqual([]);
+
+      const res = await call(profileId, confirmPath(id), { answers: complete });
+
+      expect(res.status).toBe(200);
+      expect(
+        (await db.select().from(backgroundJobs)).map((job) => [job.kind, job.subject, job.status]),
+      ).toEqual([["ai_apply", id, "pending"]]);
+    });
+
+    it("confirms even when the run cannot be enqueued", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      const { call, profileId, id } = await setup(undefined, {
+        enqueueRun: async () => {
+          throw new Error("queue down");
+        },
+      });
+
+      const res = await call(profileId, confirmPath(id), { answers: complete });
+
+      expect(res.status).toBe(200);
+      expect((await attempts(profileId))[0].state).toBe("queued");
+      expect(logged).toHaveBeenCalledWith("AI application enqueue failed", {
+        name: "Error",
+        message: "queue down",
+      });
+      logged.mockRestore();
     });
 
     it("queues the attempt with the cleaned answers", async () => {
@@ -1407,8 +1523,14 @@ describe.skipIf(!url)("ai apply route", () => {
       expect(gone.status).toBe(404);
       expect(await gone.json()).toEqual({ error: "Job not found" });
 
-      for (const state of ["queued", "cancelled", "assisted"] as const) {
-        const spare = await addJob(`stone:${state.length}00`);
+      for (const state of [
+        "queued",
+        "cancelled",
+        "assisted",
+        "needs_check",
+        "submitted",
+      ] as const) {
+        const spare = await addJob(`stone:${state}`);
         const other = await seed(profileId, spare, [why], { state });
 
         const res = await call(profileId, confirmPath(other), { answers });
@@ -1698,6 +1820,344 @@ describe.skipIf(!url)("ai apply route", () => {
       expect(row.finishedAt?.getTime()).toBe(row.preparedAt.getTime());
       expect(row.createdAt?.getTime()).toBe(row.preparedAt.getTime());
       expect(row.updatedAt?.getTime()).toBe(row.preparedAt.getTime());
+    });
+    describe("evidence, screenshots and checks", () => {
+      const evidence = {
+        fields: [{ question: "E-mail", value: "ana@example.com" }],
+        files: ["curriculo.pdf"],
+        finalUrl: "https://job-boards.greenhouse.io/stone/ok",
+      };
+
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+      const key = (profileId: string) => `ai-applications/${profileId}/shot.png`;
+
+      it("shows the evidence and whether a screenshot exists", async () => {
+        const { call, profileId, jobId } = await ready();
+
+        const withShot = await seed(profileId, jobId, [why], {
+          state: "needs_check",
+          evidence,
+          screenshotKey: key(profileId),
+        });
+
+        const one = await (
+          await call(profileId, `/me/ai-applications/${withShot}`, undefined, "GET")
+        ).json();
+
+        expect(one).toMatchObject({ evidence, hasScreenshot: true });
+        expect(JSON.stringify(one)).not.toContain("shot.png");
+
+        const listed = await (
+          await call(profileId, "/me/ai-applications", undefined, "GET")
+        ).json();
+
+        expect(listed.items[0]).toMatchObject({ evidence, hasScreenshot: true });
+
+        const bare = await seed(profileId, await addJob("stone:9"), [why]);
+
+        const none = await (
+          await call(profileId, `/me/ai-applications/${bare}`, undefined, "GET")
+        ).json();
+
+        expect(none).toMatchObject({ evidence: null, hasScreenshot: false });
+      });
+
+      it("serves the screenshot privately to its owner only", async () => {
+        const profileId = await profile();
+        const otherId = await profile("outra@example.com", 1);
+        const jobId = await addJob();
+        const files = memoryStorage({ [key(profileId)]: png, [key(otherId)]: new Uint8Array([1]) });
+        const app = build({ generate: fakeModel().generate, storage: files.storage });
+
+        const id = await seed(profileId, jobId, [why], {
+          state: "needs_check",
+          screenshotKey: key(profileId),
+        });
+
+        const foreign = await seed(otherId, jobId, [why], {
+          state: "needs_check",
+          screenshotKey: key(otherId),
+        });
+
+        const res = await app.call(profileId, shotPath(id), undefined, "GET");
+
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type")).toBe("image/png");
+        expect(res.headers.get("cache-control")).toBe("private, no-store");
+        expect(new Uint8Array(await res.arrayBuffer())).toEqual(png);
+        expect(files.reads).toEqual([key(profileId)]);
+
+        for (const missing of [foreign, "not-a-uuid", "00000000-0000-4000-8000-000000000001"]) {
+          const res = await app.call(profileId, shotPath(missing), undefined, "GET");
+
+          expect(res.status).toBe(404);
+          expect(await res.json()).toEqual({ error: "Screenshot not found" });
+        }
+
+        expect(files.reads).toEqual([key(profileId)]);
+      });
+
+      it("answers 404 when there is no key, no object or no storage", async () => {
+        const profileId = await profile();
+        const jobId = await addJob();
+        const files = memoryStorage({});
+        const app = build({ generate: fakeModel().generate, storage: files.storage });
+        const noKey = await seed(profileId, jobId, [why], { state: "assisted" });
+
+        const gone = await seed(profileId, await addJob("stone:9"), [why], {
+          state: "assisted",
+          screenshotKey: key(profileId),
+        });
+
+        for (const id of [noKey, gone]) {
+          const res = await app.call(profileId, shotPath(id), undefined, "GET");
+
+          expect(res.status).toBe(404);
+          expect(await res.json()).toEqual({ error: "Screenshot not found" });
+        }
+
+        expect(files.reads).toEqual([key(profileId)]);
+
+        const bare = build({ generate: fakeModel().generate });
+        const res = await bare.call(profileId, shotPath(gone), undefined, "GET");
+
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual({ error: "Screenshot not found" });
+      });
+
+      it("records the application when the person says it was sent", async () => {
+        const { call, profileId, jobId, resumeId } = await ready();
+
+        const id = await seed(profileId, jobId, [why], {
+          state: "needs_check",
+          evidence,
+          resumeId,
+        });
+
+        const res = await call(profileId, checkPath(id), { sent: true });
+
+        expect(res.status).toBe(200);
+        expect(await res.json()).toMatchObject({ id, state: "submitted", evidence });
+
+        const [row] = await attempts(profileId);
+
+        const [application] = await db
+          .select()
+          .from(applications)
+          .where(eq(applications.profileId, profileId));
+
+        expect(row).toMatchObject({ state: "submitted", reason: null });
+        expect(row.finishedAt).toBeInstanceOf(Date);
+        expect(application).toMatchObject({ jobId, resumeId, channel: "ai_apply", status: "sent" });
+        expect(
+          await db
+            .select()
+            .from(applicationEvents)
+            .where(eq(applicationEvents.applicationId, application.id)),
+        ).toHaveLength(1);
+
+        const again = await call(profileId, checkPath(id), { sent: true });
+
+        expect(again.status).toBe(409);
+        expect(await again.json()).toEqual({ error: "Nothing to check" });
+        expect(await db.select().from(applications)).toHaveLength(1);
+      });
+
+      it("keeps the existing application when the person had already applied", async () => {
+        const { call, profileId, jobId, resumeId } = await ready();
+        const id = await seed(profileId, jobId, [why], { state: "needs_check" });
+
+        await db.insert(applications).values({ profileId, jobId, resumeId });
+
+        const res = await call(profileId, checkPath(id), { sent: true });
+
+        expect(res.status).toBe(200);
+        expect((await res.json()).state).toBe("submitted");
+        expect(await db.select().from(applications)).toHaveLength(1);
+        expect(await db.select().from(applicationEvents)).toEqual([]);
+      });
+
+      it("closes the attempt as assisted when the person says it was not sent", async () => {
+        const { call, profileId, jobId } = await ready();
+        const id = await seed(profileId, jobId, [why], { state: "needs_check" });
+
+        const res = await call(profileId, checkPath(id), { sent: false });
+
+        expect(res.status).toBe(200);
+        expect(await res.json()).toMatchObject({ state: "assisted", reason: "not_sent" });
+        expect((await attempts(profileId))[0].finishedAt).toBeInstanceOf(Date);
+        expect(await db.select().from(applications)).toEqual([]);
+      });
+
+      it("refuses to check attempts in any other state, foreign attempts and bad bodies", async () => {
+        const { call, profileId, jobId } = await ready();
+        const otherId = await profile("outra@example.com", 1);
+        const foreign = await seed(otherId, jobId, [why], { state: "needs_check" });
+
+        for (const state of [
+          "draft",
+          "queued",
+          "running",
+          "submitting",
+          "rehearsed",
+          "submitted",
+          "assisted",
+          "cancelled",
+        ] as const) {
+          await db.delete(aiApplications).where(eq(aiApplications.profileId, profileId));
+
+          const id = await seed(profileId, jobId, [why], { state });
+          const res = await call(profileId, checkPath(id), { sent: true });
+
+          expect(res.status).toBe(409);
+          expect(await res.json()).toEqual({ error: "Nothing to check" });
+          expect((await attempts(profileId))[0].state).toBe(state);
+        }
+
+        for (const id of [foreign, "not-a-uuid", "00000000-0000-4000-8000-000000000001"]) {
+          const res = await call(profileId, checkPath(id), { sent: true });
+
+          expect(res.status).toBe(404);
+          expect(await res.json()).toEqual({ error: "Attempt not found" });
+        }
+
+        const id = await seed(profileId, await addJob("stone:9"), [why], { state: "needs_check" });
+
+        expect((await call(profileId, checkPath(id), {})).status).toBe(422);
+        expect((await call(profileId, checkPath(id), { sent: "yes" })).status).toBe(422);
+        expect((await attempts(otherId))[0].state).toBe("needs_check");
+        expect(await db.select().from(applications)).toEqual([]);
+      });
+
+      it("lets a person who lost access still resolve a check", async () => {
+        const { profileId, jobId } = await ready();
+        const first = await seed(profileId, jobId, [why], { state: "needs_check" });
+
+        const second = await seed(profileId, await addJob("stone:9"), [why], {
+          state: "needs_check",
+        });
+
+        await repos.talent.setAiApplyConsent(profileId, false, new Date());
+
+        const closed = build({ allowlist: [], generate: null });
+
+        expect((await closed.call(profileId, checkPath(first), { sent: true })).status).toBe(200);
+        expect((await closed.call(profileId, checkPath(second), { sent: false })).status).toBe(200);
+        expect((await attempts(profileId)).map((row) => row.state).sort()).toEqual([
+          "assisted",
+          "submitted",
+        ]);
+      });
+
+      it("confirms a rehearsed attempt again within seven days of the rehearsal", async () => {
+        const events: string[] = [];
+
+        const storage: ObjectStorage = {
+          ...memoryStorage({}).storage,
+          remove: async (keys) => {
+            events.push(`remove ${keys.join(",")}`);
+          },
+        };
+
+        const { call, profileId, jobId } = await ready({
+          storage,
+          enqueueRun: async (attemptId) => {
+            events.push("enqueue");
+            await repos.background.enqueue("ai_apply", attemptId);
+          },
+        });
+
+        const day = 24 * 60 * 60 * 1000;
+
+        const id = await seed(profileId, jobId, [why, pcd, source, mail, cv], {
+          state: "rehearsed",
+          rehearsal: true,
+          preparedAt: new Date(Date.now() - 30 * day),
+          finishedAt: new Date(Date.now() - 6 * day),
+          evidence,
+          screenshotKey: key(profileId),
+        });
+
+        const res = await call(profileId, confirmPath(id), { answers: complete, rehearsal: false });
+
+        expect(res.status).toBe(200);
+        expect(await res.json()).toMatchObject({
+          id,
+          state: "queued",
+          rehearsal: false,
+          evidence: null,
+          hasScreenshot: false,
+        });
+        expect(await attempts(profileId)).toEqual([
+          expect.objectContaining({ evidence: null, screenshotKey: null }),
+        ]);
+        expect(events).toEqual([`remove ${key(profileId)}`, "enqueue"]);
+        expect(await db.select().from(backgroundJobs)).toEqual([
+          expect.objectContaining({ kind: "ai_apply", subject: id }),
+        ]);
+        expect((await library(profileId)).length).toBeGreaterThan(0);
+      });
+
+      it("still queues a re-confirmed rehearsal when its old screenshot cannot be removed", async () => {
+        const logged = vi.spyOn(console, "error");
+
+        const storage: ObjectStorage = {
+          ...memoryStorage({}).storage,
+          remove: async (keys) => {
+            throw Object.assign(new Error(`cannot remove ${keys.join(",")}`), { code: "EIO" });
+          },
+        };
+
+        const { call, profileId, jobId } = await ready({ storage });
+
+        const id = await seed(profileId, jobId, [why, pcd, source, mail, cv], {
+          state: "rehearsed",
+          rehearsal: true,
+          preparedAt: new Date(),
+          finishedAt: new Date(),
+          evidence,
+          screenshotKey: key(profileId),
+        });
+
+        const res = await call(profileId, confirmPath(id), { answers: complete });
+
+        expect(res.status).toBe(200);
+        expect(await res.json()).toMatchObject({ state: "queued", hasScreenshot: false });
+        expect(logged).toHaveBeenCalledWith("AI application screenshot not removed", {
+          name: "Error",
+          code: "EIO",
+        });
+        expect(JSON.stringify(logged.mock.calls)).not.toContain(profileId);
+
+        logged.mockRestore();
+      });
+
+      it("refuses to confirm a rehearsal after seven days, or from needs_check and submitted", async () => {
+        const { call, profileId, jobId } = await ready();
+        const day = 24 * 60 * 60 * 1000;
+        const answers = [{ questionId: "why", value: "ok" }];
+
+        const old = await seed(profileId, jobId, [why], {
+          state: "rehearsed",
+          preparedAt: new Date(),
+          finishedAt: new Date(Date.now() - 7 * day - 1000),
+        });
+
+        const expired = await call(profileId, confirmPath(old), { answers });
+
+        expect(expired.status).toBe(409);
+        expect(await expired.json()).toEqual({ error: "Draft expired" });
+
+        for (const state of ["needs_check", "submitted"] as const) {
+          await db.delete(aiApplications).where(eq(aiApplications.profileId, profileId));
+
+          const id = await seed(profileId, jobId, [why], { state });
+          const res = await call(profileId, confirmPath(id), { answers });
+
+          expect(res.status).toBe(409);
+          expect(await res.json()).toEqual({ error: "Already in progress" });
+        }
+      });
     });
   });
 });

@@ -216,6 +216,7 @@ export function createAccountRepository(db: Database) {
         preparedAt: aiApplications.preparedAt,
         confirmedAt: aiApplications.confirmedAt,
         finishedAt: aiApplications.finishedAt,
+        evidence: aiApplications.evidence,
       })
       .from(aiApplications)
       .innerJoin(jobs, eq(jobs.id, aiApplications.jobId))
@@ -338,12 +339,18 @@ export function createAccountRepository(db: Database) {
   }
 
   async function fileKeys(profileId: string) {
-    const rows = await db
+    const files = await db
       .select({ key: sql<string>`${resumes.sourceFileKey}` })
       .from(resumes)
       .where(and(eq(resumes.profileId, profileId), isNotNull(resumes.sourceFileKey)));
 
-    return rows.map((row) => row.key);
+    const screenshots = await db
+      .select({ key: sql<string>`${aiApplications.screenshotKey}` })
+      .from(aiApplications)
+      .where(and(eq(aiApplications.profileId, profileId), isNotNull(aiApplications.screenshotKey)))
+      .orderBy(asc(aiApplications.createdAt), asc(aiApplications.id));
+
+    return [...files, ...screenshots].map((row) => row.key);
   }
 
   async function deleteProfile(profileId: string) {

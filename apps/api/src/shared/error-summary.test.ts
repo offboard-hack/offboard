@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { errorSummary, logUnhandled } from "./error-summary.js";
+import { errorSummary, logFailureCode, logUnhandled } from "./error-summary.js";
 
 describe("errorSummary", () => {
   it("keeps only the name and message of an error", () => {
@@ -25,13 +25,44 @@ describe("logUnhandled", () => {
       cause: { code: "23514", detail: "Marina Lopes" },
     });
 
+    const own = Object.assign(new Error("connect ECONNREFUSED Marina Lopes"), {
+      code: "ECONNREFUSED",
+    });
+
+    const both = Object.assign(new Error("Marina Lopes"), {
+      code: "ERR_DB",
+      cause: { code: "23505" },
+    });
+
     logUnhandled(failure);
+    logUnhandled(own);
+    logUnhandled(both);
+    logUnhandled(new DOMException("Marina Lopes", "TimeoutError"));
     logUnhandled("Marina Lopes");
 
     expect(log.mock.calls).toEqual([
       ["unhandled error", { name: "Error", code: "23514" }],
+      ["unhandled error", { name: "Error", code: "ECONNREFUSED" }],
+      ["unhandled error", { name: "Error", code: "23505" }],
+      ["unhandled error", { name: "TimeoutError" }],
       ["unhandled error", { name: "Unknown" }],
     ]);
+
+    log.mockRestore();
+  });
+});
+
+describe("logFailureCode", () => {
+  it("logs the context with the name and the database code, never the message", () => {
+    const log = vi.spyOn(console, "error");
+
+    const failure = Object.assign(new Error("update attempts params: Marina Lopes"), {
+      cause: { code: "22001" },
+    });
+
+    expect(logFailureCode("result not saved")(failure)).toBeUndefined();
+
+    expect(log.mock.calls).toEqual([["result not saved", { name: "Error", code: "22001" }]]);
 
     log.mockRestore();
   });

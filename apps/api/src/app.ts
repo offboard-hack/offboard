@@ -1,5 +1,5 @@
 import { cors } from "@elysia/cors";
-import { Elysia, t } from "elysia";
+import { Elysia, ElysiaCustomStatusResponse, t } from "elysia";
 import { actionConfigsRoutes } from "./features/action-configs/routes.js";
 import { fireActions } from "./features/action-configs/actions.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
@@ -37,6 +37,9 @@ import { answersRoutes } from "./features/preferences/answers-routes.js";
 import { readGreenhouseForm } from "./features/ai-apply/greenhouse.js";
 import { createAnswersRepository } from "./features/preferences/answers.js";
 import { aiApplyRoutes } from "./features/ai-apply/routes.js";
+import { createBrowserbase } from "./features/ai-apply/browser/browserbase.js";
+import { openPage } from "./features/ai-apply/browser/cdp.js";
+import { runAiApplication, type RunnerDeps } from "./features/ai-apply/runner.js";
 import { packageRoutes } from "./features/preferences/package-routes.js";
 import { preferencesRoutes } from "./features/preferences/routes.js";
 import type { TrackingConfig } from "./features/offboardings/correios.js";
@@ -65,10 +68,12 @@ type AppOptions = {
   catalog?: readonly CatalogSource[];
   fetchFeedImpl?: typeof fetch;
   fetchGreenhouseImpl?: typeof fetch;
+  fetchBrowserImpl?: typeof fetch;
   storage?: ObjectStorage;
   runInBackground?: (task: () => Promise<void>) => void;
   publicPageOrigin?: string;
   aiApplyAllowlist?: string[];
+  browserbase?: { apiKey: string; projectId: string };
 };
 
 function ownResumePdf(name: string, content: ResumeContent) {
@@ -80,7 +85,13 @@ function ownResumePdf(name: string, content: ResumeContent) {
   });
 }
 
-const unhandledCodes = new Set<string | number>(["UNKNOWN", "INTERNAL_SERVER_ERROR"]);
+const elysiaCodes = new Set<string | number>([
+  "VALIDATION",
+  "PARSE",
+  "NOT_FOUND",
+  "INVALID_COOKIE_SIGNATURE",
+  "INVALID_FILE_TYPE",
+]);
 
 export function createApp(webOrigin: string, repos: Repositories, options: AppOptions) {
   const access = portalAccess(options.auth, webOrigin);
@@ -119,7 +130,21 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       void task().catch(() => undefined);
     });
 
+  const fetchBrowser = options.fetchBrowserImpl ?? fetch;
+
+  const runner = {
+    repo: repos.aiApply,
+    allowlist: options.aiApplyAllowlist ?? [],
+    browserbase: options.browserbase && createBrowserbase(fetchBrowser, options.browserbase),
+    openPage: (connectUrl: string) => openPage(fetchBrowser, connectUrl),
+    storage: options.storage,
+    renderResume: ownResumePdf,
+    budgetMs: 200_000,
+    outcomeMs: 30_000,
+  } satisfies RunnerDeps;
+
   const handlers = {
+    ai_apply: (job) => runAiApplication(runner, job.subject, () => new Date()),
     ingest_jobs: async (job) => {
       const source = await repos.sources.get(job.subject);
 
@@ -257,10 +282,19 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       .catch(logFailure("source scheduling failed"));
   }
 
+  async function beforeDrain() {
+    await repos.aiApply.sweepStale(new Date()).catch(logFailure("AI application sweep failed"));
+    await scheduleSources();
+    await repos.aiApply
+      .queuedIds()
+      .then((ids) => repos.background.enqueueMany("ai_apply", ids))
+      .catch(logFailure("AI application scheduling failed"));
+  }
+
   return new Elysia({ adapter: options.adapter, prefix: "/api" })
     .use(cors({ origin: webOrigin, credentials: false }))
     .onError(({ code, error, status }) => {
-      if (!unhandledCodes.has(code)) return undefined;
+      if (elysiaCodes.has(code) || error instanceof ElysiaCustomStatusResponse) return undefined;
 
       logUnhandled(error);
 
@@ -302,7 +336,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         (profile) => options.sendEmail(welcomeEmail(profile, webOrigin)),
         {
           allowlist: options.aiApplyAllowlist ?? [],
-          configured: options.generateStructured !== undefined,
+          configured: options.generateStructured !== undefined && options.browserbase !== undefined,
         },
       ),
     )
@@ -346,6 +380,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       aiApplyRoutes(repos.aiApply, talent, {
         allowlist: options.aiApplyAllowlist ?? [],
         generate: options.generateStructured,
+        runnerConfigured: options.browserbase !== undefined,
         takeLlmCall: repos.llmUsage.takeLlmCall,
         readForm: (board, posting) => readGreenhouseForm(fetchGreenhouse, board, posting),
         library: async (profileId) =>
@@ -354,6 +389,8 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
               ? []
               : [{ question: item.text, answer: item.answer, sensitive: item.sensitive }],
           ),
+        enqueueRun: (attemptId) => repos.background.enqueue("ai_apply", attemptId),
+        storage: options.storage,
         saveAnswer: async (tx, profileId, label, text, { sensitive }, now) => {
           const answers = createAnswersRepository(tx);
           const questionId = await answers.ensureQuestion(label, now, { sensitive });
@@ -362,7 +399,12 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         },
       }),
     )
-    .use(backgroundRoutes(repos.background, handlers, options.cronSecret, scheduleSources))
+    .use(
+      backgroundRoutes(repos.background, handlers, options.cronSecret, {
+        beforeDrain,
+        isolated: { kind: "ai_apply", budgetMs: 210_000 },
+      }),
+    )
     .use(accountRoutes(repos.account, talent, options.storage))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))

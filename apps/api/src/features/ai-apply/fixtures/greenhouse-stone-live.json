@@ -1,0 +1,568 @@
+{
+  "questions": [
+    {
+      "required": true,
+      "label": "Nome",
+      "fields": [
+        {
+          "name": "first_name",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Sobrenome",
+      "fields": [
+        {
+          "name": "last_name",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "E-mail",
+      "fields": [
+        {
+          "name": "email",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Telefone",
+      "fields": [
+        {
+          "name": "phone",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Candidate Location",
+      "fields": [
+        {
+          "name": "candidate_location",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Currículo/CV",
+      "fields": [
+        {
+          "name": "resume",
+          "type": "input_file",
+          "allowed_filetypes": ["pdf", "doc", "docx", "txt", "rtf"]
+        },
+        {
+          "name": "resume_text",
+          "type": "textarea"
+        }
+      ]
+    },
+    {
+      "required": false,
+      "label": "Carta de apresentação",
+      "fields": [
+        {
+          "name": "cover_letter",
+          "type": "input_file",
+          "allowed_filetypes": ["pdf", "doc", "docx", "txt", "rtf"]
+        },
+        {
+          "name": "cover_letter_text",
+          "type": "textarea"
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Qual é o seu CPF? (Formato: XXX.XXX.XXX-XX)   ",
+      "fields": [
+        {
+          "name": "question_35399730003",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Qual é o seu endereço completo com CEP?      ",
+      "fields": [
+        {
+          "name": "question_35399731003",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Qual é o seu grau de escolaridade?",
+      "fields": [
+        {
+          "name": "question_35399732003",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "value": 173418875003,
+              "label": "Ensino fundamental incompleto"
+            },
+            {
+              "value": 173418876003,
+              "label": "Ensino fundamental completo"
+            },
+            {
+              "value": 173418877003,
+              "label": "Ensino médio incompleto"
+            },
+            {
+              "value": 173418878003,
+              "label": "Ensino médio completo"
+            },
+            {
+              "value": 173418879003,
+              "label": "Curso técnico incompleto"
+            },
+            {
+              "value": 173418880003,
+              "label": "Curso técnico completo"
+            },
+            {
+              "value": 173418881003,
+              "label": "Graduação tecnológica incompleta"
+            },
+            {
+              "value": 173418882003,
+              "label": "Graduação tecnológica completa"
+            },
+            {
+              "value": 173418883003,
+              "label": "Graduação incompleta"
+            },
+            {
+              "value": 173418884003,
+              "label": "Graduação completa"
+            },
+            {
+              "value": 173418885003,
+              "label": "Especialização incompleta"
+            },
+            {
+              "value": 173418886003,
+              "label": "Especialização completa"
+            },
+            {
+              "value": 173418887003,
+              "label": "Mestrado incompleto"
+            },
+            {
+              "value": 173418888003,
+              "label": "Mestrado completo"
+            },
+            {
+              "value": 173418889003,
+              "label": "Doutorado incompleto"
+            },
+            {
+              "value": 173418890003,
+              "label": "Doutorado completo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Você tem disponibilidade para atuar no modelo híbrido, com fácil acesso à região de Pinheiros, onde fica o nosso escritório?           ",
+      "fields": [
+        {
+          "name": "question_35399734003",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "value": 1,
+              "label": "Yes"
+            },
+            {
+              "value": 0,
+              "label": "No"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Qual o melhor horário para você começar o expediente, considerando 8 horas de trabalho por dia?",
+      "fields": [
+        {
+          "name": "question_35399735003",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "value": 173418891003,
+              "label": "Pela manhã (10h00 às 12h00)"
+            },
+            {
+              "value": 173418892003,
+              "label": "Pela tarde (12h30 às 17h30)"
+            },
+            {
+              "value": 173418893003,
+              "label": "Pela noite (A partir das 18h00)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "required": false,
+      "label": "Qual é o seu perfil do Linkedin?",
+      "fields": [
+        {
+          "name": "question_35399736003",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Qual é a sua pretensão salarial, considerando a remuneração total (fixa + variável)?",
+      "fields": [
+        {
+          "name": "question_35399737003",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "value": 173418894003,
+              "label": "Até R$3.000,00"
+            },
+            {
+              "value": 173418895003,
+              "label": "Entre R$3.000,00 - R$4.000,00"
+            },
+            {
+              "value": 173418896003,
+              "label": "Entre R$4.000,00 - R$5.000,00"
+            },
+            {
+              "value": 173418897003,
+              "label": "Entre R$5.000,00 - R$6.000,00"
+            },
+            {
+              "value": 173418898003,
+              "label": "Entre R$6.000,00 - R$7.000,00"
+            },
+            {
+              "value": 173418899003,
+              "label": "Entre R$7.000,00 - R$8.000,00"
+            },
+            {
+              "value": 173418900003,
+              "label": "Entre R$8.000,00 - R$9.000,00"
+            },
+            {
+              "value": 173418901003,
+              "label": "Entre R$9.000,00 - R$10.000,00"
+            },
+            {
+              "value": 173418902003,
+              "label": "Acima de R$10.000,00"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Como você conheceu a nossa empresa?",
+      "fields": [
+        {
+          "name": "question_35399738003[]",
+          "type": "multi_value_multi_select",
+          "values": [
+            {
+              "value": 173418903003,
+              "label": "Amigos, colegas ou familiares"
+            },
+            {
+              "value": 173418904003,
+              "label": "Alguém da Stone entrou em contato comigo"
+            },
+            {
+              "value": 173418905003,
+              "label": "Evento, feira ou conferência de tecnologia"
+            },
+            {
+              "value": 173418906003,
+              "label": "Evento, feira ou conferência universitária"
+            },
+            {
+              "value": 173418907003,
+              "label": "Notícias (jornal, TV, revistas ou sites)"
+            },
+            {
+              "value": 173418908003,
+              "label": "Participei de uma iniciativa do Instituto Stone"
+            },
+            {
+              "value": 173418909003,
+              "label": "Por meio de um parceiro (ex: Brasil Júnior, Na Prática, Fundação Estudar)"
+            },
+            {
+              "value": 173418910003,
+              "label": "Redes sociais"
+            },
+            {
+              "value": 173418911003,
+              "label": "Site de emprego (ex: Indeed, Infojobs, Vagas.com)"
+            },
+            {
+              "value": 173418912003,
+              "label": "Sou/fui cliente Stone"
+            },
+            {
+              "value": 173418913003,
+              "label": "Outro"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Qual motivo te fez querer se juntar ao nosso time?",
+      "fields": [
+        {
+          "name": "question_35399739003[]",
+          "type": "multi_value_multi_select",
+          "values": [
+            {
+              "value": 173418914003,
+              "label": "Atuar em um ambiente inovador"
+            },
+            {
+              "value": 173418915003,
+              "label": "Atuar no segmento financeiro"
+            },
+            {
+              "value": 173418916003,
+              "label": "Autonomia"
+            },
+            {
+              "value": 173418917003,
+              "label": "Contato com pessoas que já trabalham na empresa"
+            },
+            {
+              "value": 173418918003,
+              "label": "Desafios no dia a dia"
+            },
+            {
+              "value": 173418919003,
+              "label": "Identificação cultural"
+            },
+            {
+              "value": 173418920003,
+              "label": "Identificação com o propósito da empresa"
+            },
+            {
+              "value": 173418921003,
+              "label": "Impacto social da empresa"
+            },
+            {
+              "value": 173418922003,
+              "label": "Remuneração e benefícios"
+            },
+            {
+              "value": 173418923003,
+              "label": "Ter trabalhado na Stone antes"
+            },
+            {
+              "value": 173418924003,
+              "label": "Outro"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Você é indicação de alguma pessoa que trabalha com a gente?",
+      "fields": [
+        {
+          "name": "question_35399740003",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "value": 1,
+              "label": "Yes"
+            },
+            {
+              "value": 0,
+              "label": "No"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "required": false,
+      "label": "Se sim, informe o e-mail corporativo da pessoa que te indicou!",
+      "fields": [
+        {
+          "name": "question_35399741003",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "required": false,
+      "label": "Qual seu grau de relação com a pessoa que te indicou?",
+      "fields": [
+        {
+          "name": "question_35399742003",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "value": 173418925003,
+              "label": "Eu e esta pessoa estudamos juntos."
+            },
+            {
+              "value": 173418926003,
+              "label": "Eu já liderei esta pessoa ou esta pessoa já me liderou."
+            },
+            {
+              "value": 173418927003,
+              "label": "Eu já mentorei esta pessoa ou esta pessoa já me mentorou."
+            },
+            {
+              "value": 173418928003,
+              "label": "Já trabalhamos como pares na mesma companhia."
+            },
+            {
+              "value": 173418929003,
+              "label": "Já trabalhamos juntos em projetos."
+            },
+            {
+              "value": 173418930003,
+              "label": "Já fui cliente desta pessoa ou esta pessoa já foi meu cliente."
+            },
+            {
+              "value": 173418931003,
+              "label": "Somos amigos, porém nunca trabalhamos juntos."
+            },
+            {
+              "value": 173418932003,
+              "label": "Somos familiares de 1º ou 2º grau (pais, avós, irmãos, filhos, netos ou cônjuges)."
+            },
+            {
+              "value": 173418933003,
+              "label": "Somos familiares de 3º grau ou mais (tios, sobrinhos, sogros, enteados)."
+            },
+            {
+              "value": 173418934003,
+              "label": "Nenhuma das anteriores."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Você é uma pessoa com deficiência?",
+      "fields": [
+        {
+          "name": "question_35399743003",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "value": 1,
+              "label": "Yes"
+            },
+            {
+              "value": 0,
+              "label": "No"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "required": false,
+      "label": "Se sim, qual o seu tipo de deficiência?",
+      "fields": [
+        {
+          "name": "question_35399744003[]",
+          "type": "multi_value_multi_select",
+          "values": [
+            {
+              "value": 173418935003,
+              "label": "Deficiência Física (ex: paraplegia, amputação, nanismo...)"
+            },
+            {
+              "value": 173418936003,
+              "label": "Deficiência Visual (ex: baixa visão, cegueira...)"
+            },
+            {
+              "value": 173418937003,
+              "label": "Deficiência Auditiva (ex: perda bilateral, surdez...)"
+            },
+            {
+              "value": 173418938003,
+              "label": "Deficiência Intelectual (ex:  Síndrome de Down...)"
+            },
+            {
+              "value": 173418939003,
+              "label": "Deficiência Mental/Psicossocial (ex: Transtorno do Espectro Autista...)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "required": false,
+      "label": "Você precisa de alguma adaptação de acessibilidade para realização das suas funções?",
+      "fields": [
+        {
+          "name": "question_35399745003",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "required": false,
+      "label": "Você necessita de alguma adaptação ou recurso de acessibilidade para participar do processo seletivo?",
+      "fields": [
+        {
+          "name": "question_35399746003",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "required": true,
+      "label": "Consentimento - Diversidade e Inclusão (D&I)",
+      "fields": [
+        {
+          "name": "question_35399747003",
+          "type": "multi_value_single_select",
+          "values": [
+            {
+              "value": 173418940003,
+              "label": "Sim. Eu concordo com a coleta e uso dessas informações para estratégias de D&I"
+            },
+            {
+              "value": 173418941003,
+              "label": "Não. Eu não concordo com a coleta e uso dessas informações para estratégias de D&I"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

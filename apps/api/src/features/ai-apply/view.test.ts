@@ -11,6 +11,8 @@ const row: Parameters<typeof toAttemptView>[0] = {
   rehearsal: true,
   preparedAt: new Date("2026-11-25T10:00:00Z"),
   confirmedAt: null,
+  evidence: null,
+  screenshotKey: null,
 };
 
 const job = { id: "j1", title: "Backend", company: "Acme", url: "https://example.com/j1" };
@@ -28,7 +30,22 @@ describe("toAttemptView", () => {
       rehearsal: true,
       preparedAt: "2026-11-25T10:00:00.000Z",
       confirmedAt: null,
+      evidence: null,
+      hasScreenshot: false,
     });
+  });
+
+  it("exposes the evidence and whether a screenshot exists without leaking its key", () => {
+    const evidence = {
+      fields: [{ question: "E-mail", value: "ana@example.com" }],
+      files: ["curriculo.pdf"],
+      finalUrl: "https://example.com/ok",
+    };
+
+    const view = toAttemptView({ ...row, evidence, screenshotKey: "ai-applications/p/a.png" }, job);
+
+    expect(view).toMatchObject({ evidence, hasScreenshot: true });
+    expect(JSON.stringify(view)).not.toContain("ai-applications/p/a.png");
   });
 
   it("serializes the confirmation time", () => {

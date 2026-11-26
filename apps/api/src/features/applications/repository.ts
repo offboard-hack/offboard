@@ -182,6 +182,31 @@ export function createApplicationsRepository(db: Database) {
       if (!resume) return "resume_not_ready" as const;
 
       const now = new Date();
+
+      await tx
+        .update(aiApplications)
+        .set({ state: "cancelled", reason: "applied_manually", finishedAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(aiApplications.profileId, profileId),
+            eq(aiApplications.jobId, jobId),
+            inArray(aiApplications.state, ["draft", "queued", "running"]),
+          ),
+        );
+
+      const [pending] = await tx
+        .select({ id: aiApplications.id })
+        .from(aiApplications)
+        .where(
+          and(
+            eq(aiApplications.profileId, profileId),
+            eq(aiApplications.jobId, jobId),
+            inArray(aiApplications.state, ["submitting", "needs_check"]),
+          ),
+        );
+
+      if (pending) return "ai_pending" as const;
+
       const publicToken = newPublicToken();
 
       const [created] = await tx
@@ -195,17 +220,6 @@ export function createApplicationsRepository(db: Database) {
       await tx
         .insert(applicationEvents)
         .values({ applicationId: created.id, status: "sent", createdAt: now });
-
-      await tx
-        .update(aiApplications)
-        .set({ state: "cancelled", reason: "applied_manually", finishedAt: now, updatedAt: now })
-        .where(
-          and(
-            eq(aiApplications.profileId, profileId),
-            eq(aiApplications.jobId, jobId),
-            inArray(aiApplications.state, ["draft", "queued"]),
-          ),
-        );
 
       return { applicationId: created.id, jobUrl: job.url, publicToken };
     });

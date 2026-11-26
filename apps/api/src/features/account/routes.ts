@@ -114,6 +114,19 @@ const exportResponse = t.Object({
       preparedAt: t.String(),
       confirmedAt: nullable,
       finishedAt: nullable,
+      evidence: t.Union([
+        t.Object({
+          fields: t.Array(
+            t.Object({
+              question: t.String(),
+              value: t.Union([t.String(), t.Array(t.String()), t.Null()]),
+            }),
+          ),
+          files: t.Array(t.String()),
+          finalUrl: nullable,
+        }),
+        t.Null(),
+      ]),
     }),
   ),
   answers: t.Array(t.Object({ question: t.String(), answer: t.String(), updatedAt: nullable })),
@@ -155,6 +168,7 @@ export function accountRoutes(
         if (storage) {
           try {
             await storage.removePrefix(`resumes/${me.id}/`);
+            await storage.removePrefix(`ai-applications/${me.id}/`);
           } catch {
             return status(502, { error: "Could not delete stored files" });
           }

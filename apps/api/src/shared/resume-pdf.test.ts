@@ -1,6 +1,6 @@
 import { PDFArray, PDFDocument, PDFRawStream, StandardFonts, decodePDFRawStream } from "pdf-lib";
 import { describe, expect, it } from "vitest";
-import { renderResumePdf, type PdfResume } from "./resume-pdf.js";
+import { renderLetterPdf, renderResumePdf, type PdfResume } from "./resume-pdf.js";
 
 const windows1252 = new TextDecoder("windows-1252");
 
@@ -219,5 +219,19 @@ describe("renderResumePdf", () => {
     );
 
     expect(lines[1]).toBe("Olá ? ?? ? José fim");
+  });
+});
+
+describe("renderLetterPdf", () => {
+  it("draws the name and each paragraph of the letter on one page", async () => {
+    const bytes = await renderLetterPdf(
+      "Marina Lopes",
+      "Olá, time.\n\nQuero  trabalhar\ncom vocês.\n \n",
+    );
+
+    expect(windows1252.decode(bytes.slice(0, 5))).toBe("%PDF-");
+    expect(await drawnPages(bytes)).toEqual([
+      ["Marina Lopes", "Olá, time.", "Quero trabalhar com vocês."],
+    ]);
   });
 });

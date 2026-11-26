@@ -9,12 +9,19 @@ export function backgroundRoutes(
   repo: BackgroundRepository,
   handlers: Record<string, JobHandler>,
   cronSecret: string | undefined,
-  beforeDrain?: () => Promise<void>,
+  schedule: { beforeDrain: () => Promise<void>; isolated: { kind: string; budgetMs: number } },
 ) {
   const scheduledDrain = async () => {
-    await beforeDrain?.();
+    await schedule.beforeDrain();
 
-    return drain(repo, handlers);
+    const { kind, budgetMs } = schedule.isolated;
+    const others = await drain(repo, handlers, { excludeKinds: [kind] });
+    const isolated = await drain(repo, handlers, { kinds: [kind], limit: 1, budgetMs });
+
+    return {
+      processed: others.processed + isolated.processed,
+      failed: others.failed + isolated.failed,
+    };
   };
 
   return new Elysia()

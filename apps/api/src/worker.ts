@@ -5,7 +5,7 @@ import { createApp } from "./app.js";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
 import { emailProvider, type CloudflareEmailBinding } from "./features/auth/email.js";
-import { parseAllowlist } from "./shared/ai-apply-access.js";
+import { browserbaseConfig, parseAllowlist } from "./shared/ai-apply-access.js";
 import { createGenerateStructured, gatewayModel } from "./shared/ai.js";
 import { r2Storage, type R2BucketLike } from "./shared/object-storage.js";
 import { createRepositories } from "./repositories.js";
@@ -24,6 +24,8 @@ const runtimeConfig = z.object({
   ABACATEPAY_WEBHOOK_SECRET: z.string().min(1).optional(),
   AI_GATEWAY_API_KEY: z.string().min(1).optional(),
   AI_APPLY_ALLOWLIST: z.string().optional(),
+  BROWSERBASE_API_KEY: z.string().min(1).optional(),
+  BROWSERBASE_PROJECT_ID: z.string().min(1).optional(),
   PUBLIC_PAGE_ORIGIN: z.string().min(1).optional(),
   TRACKING_USER: z.string().min(1).optional(),
   TRACKING_TOKEN: z.string().min(1).optional(),
@@ -92,6 +94,10 @@ export function createWorkerApi(
     storage: bindings.RESUMES && r2Storage(bindings.RESUMES),
     publicPageOrigin: config.data.PUBLIC_PAGE_ORIGIN,
     aiApplyAllowlist: parseAllowlist(config.data.AI_APPLY_ALLOWLIST),
+    browserbase: browserbaseConfig(
+      config.data.BROWSERBASE_API_KEY,
+      config.data.BROWSERBASE_PROJECT_ID,
+    ),
     runInBackground: (task) => {
       const background = run(task).catch(() => undefined);
 

@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import {
+  aiApplications,
   applicationEvents,
   applications,
   defaultOrgId,
@@ -188,6 +189,65 @@ describe.skipIf(!url)("applications repository", () => {
       },
     ]);
     expect(await events(applicationId)).toEqual([{ status: "sent", closedReason: null }]);
+  });
+
+  it("cancels draft, queued and running AI attempts so a running one can no longer submit", async () => {
+    const now = new Date();
+
+    await repos.talent.setAiApplyConsent(profileId, true, now);
+
+    for (const state of ["draft", "queued", "running"] as const) {
+      const jobId = await job(state);
+
+      const [attempt] = await db
+        .insert(aiApplications)
+        .values({
+          profileId,
+          jobId,
+          state,
+          form: { questions: [] },
+          draft: [],
+          preparedAt: now,
+        })
+        .returning({ id: aiApplications.id });
+
+      created.parse(await repository.apply(profileId, jobId, baseId));
+
+      const [after] = await db
+        .select()
+        .from(aiApplications)
+        .where(eq(aiApplications.id, attempt.id));
+
+      expect(after).toMatchObject({ state: "cancelled", reason: "applied_manually" });
+      expect(after.finishedAt).toBeInstanceOf(Date);
+
+      await db.delete(applications).where(eq(applications.jobId, jobId));
+
+      expect(await repos.aiApply.markSubmitting(attempt.id, now)).toBe(false);
+      expect(await repos.aiApply.claimForRun(attempt.id, now)).toBe(false);
+    }
+  });
+
+  it("keeps a submitting AI attempt that a manual application must wait on", async () => {
+    const jobId = await job("pendente");
+
+    const [attempt] = await db
+      .insert(aiApplications)
+      .values({
+        profileId,
+        jobId,
+        state: "submitting",
+        form: { questions: [] },
+        draft: [],
+        preparedAt: new Date(),
+      })
+      .returning({ id: aiApplications.id });
+
+    expect(await repository.apply(profileId, jobId, baseId)).toBe("ai_pending");
+    expect(
+      (await db.select().from(aiApplications).where(eq(aiApplications.id, attempt.id)))[0].state,
+    ).toBe("submitting");
+    expect(await db.select().from(applications)).toEqual([]);
   });
 
   it("gives each application its own public token", async () => {
