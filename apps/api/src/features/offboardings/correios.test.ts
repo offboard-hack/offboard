@@ -7,10 +7,20 @@ describe("trackPackage", () => {
   let config: TrackingConfig;
   let responseBody = "";
   let responseStatus = 200;
+  let lastRequestBody = "";
+  let lastAuthHeader = "";
 
-  const server = createServer((_req, res) => {
-    res.writeHead(responseStatus, { "content-type": "application/json" });
-    res.end(responseBody);
+  const server = createServer((req, res) => {
+    const chunks: Buffer[] = [];
+
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => {
+      lastRequestBody = Buffer.concat(chunks).toString();
+      // WARNING: test server always receives the Authorization header
+      lastAuthHeader = (req.headers.authorization as string) ?? "";
+      res.writeHead(responseStatus, { "content-type": "application/json" });
+      res.end(responseBody);
+    });
   });
 
   beforeAll(async () => {
@@ -23,8 +33,7 @@ describe("trackPackage", () => {
 
     config = {
       baseUrl: `http://127.0.0.1:${addr.port}`,
-      user: "test@example.com",
-      token: "test-token",
+      apiKey: "test-api-key",
     };
   });
 
@@ -34,19 +43,45 @@ describe("trackPackage", () => {
     });
   });
 
-  it("detects a delivered package", async () => {
+  it("sends POST with correct authorization header", async () => {
     responseStatus = 200;
     responseBody = JSON.stringify({
-      codigo: "AB123456789BR",
-      eventos: [
-        {
-          data: "20/11/2026",
-          hora: "10:30",
-          local: "SAO PAULO/SP",
-          status: "Objeto entregue ao destinatário",
-          subStatus: [],
-        },
-      ],
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: {
+        temEventoEntrega: false,
+        eventos: [
+          {
+            descricao: "Objeto em trânsito",
+            dtHrCriado: { date: "2026-11-24 14:06:11.000000", timezone: "America/Sao_Paulo" },
+          },
+        ],
+      },
+    });
+
+    await trackPackage("AB123456789BR", config);
+
+    expect(lastAuthHeader).toBe("Apikey test-api-key");
+    expect(JSON.parse(lastRequestBody)).toEqual({
+      code: "AB123456789BR",
+      carrier: "CARRIER_CORREIOS",
+    });
+  });
+
+  it("detects a delivered package via temEventoEntrega", async () => {
+    responseStatus = 200;
+    responseBody = JSON.stringify({
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: {
+        temEventoEntrega: true,
+        eventos: [
+          {
+            descricao: "Objeto entregue ao destinatário",
+            dtHrCriado: { date: "2026-11-20 10:30:00.000000", timezone: "America/Sao_Paulo" },
+          },
+        ],
+      },
     });
 
     const result = await trackPackage("AB123456789BR", config);
@@ -54,51 +89,48 @@ describe("trackPackage", () => {
     expect(result).toEqual({
       delivered: true,
       lastEvent: "Objeto entregue ao destinatário",
-      lastUpdate: "20/11/2026 10:30",
+      lastUpdate: "2026-11-20 10:30",
     });
-  });
-
-  it("detects entregue in different casing", async () => {
-    responseStatus = 200;
-    responseBody = JSON.stringify({
-      codigo: "CD987654321BR",
-      eventos: [
-        {
-          data: "21/11/2026",
-          hora: "08:00",
-          local: "RIO DE JANEIRO/RJ",
-          status: "Objeto Entregue",
-          subStatus: [],
-        },
-      ],
-    });
-
-    const result = await trackPackage("CD987654321BR", config);
-
-    expect(result.delivered).toBe(true);
   });
 
   it("reports in-transit as not delivered", async () => {
     responseStatus = 200;
     responseBody = JSON.stringify({
-      codigo: "IJ777888999BR",
-      eventos: [
-        {
-          data: "18/11/2026",
-          hora: "16:00",
-          local: "CURITIBA/PR",
-          status: "Objeto em trânsito - por favor aguarde",
-          subStatus: [],
-        },
-      ],
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: {
+        temEventoEntrega: false,
+        eventos: [
+          {
+            descricao: "Objeto em transferência - por favor aguarde",
+            dtHrCriado: { date: "2026-11-24 14:06:11.000000", timezone: "America/Sao_Paulo" },
+          },
+        ],
+      },
     });
 
     const result = await trackPackage("IJ777888999BR", config);
 
     expect(result).toEqual({
       delivered: false,
-      lastEvent: "Objeto em trânsito - por favor aguarde",
-      lastUpdate: "18/11/2026 16:00",
+      lastEvent: "Objeto em transferência - por favor aguarde",
+      lastUpdate: "2026-11-24 14:06",
+    });
+  });
+
+  it("handles TRACKING_STATUS_NOT_FOUND", async () => {
+    responseStatus = 200;
+    responseBody = JSON.stringify({
+      status: "TRACKING_STATUS_NOT_FOUND",
+      carrier: "CARRIER_CORREIOS",
+    });
+
+    const result = await trackPackage("XX000000000BR", config);
+
+    expect(result).toEqual({
+      delivered: false,
+      lastEvent: "no data",
+      lastUpdate: "",
     });
   });
 
@@ -128,24 +160,35 @@ describe("trackPackage", () => {
     });
   });
 
-  it("handles empty eventos array", async () => {
+  it("handles missing dtHrCriado", async () => {
     responseStatus = 200;
-    responseBody = JSON.stringify({ codigo: "ZZ222222222BR", eventos: [] });
+    responseBody = JSON.stringify({
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: {
+        temEventoEntrega: false,
+        eventos: [{ descricao: "Objeto em trânsito" }],
+      },
+    });
 
-    const result = await trackPackage("ZZ222222222BR", config);
+    const result = await trackPackage("MM555555555BR", config);
 
     expect(result).toEqual({
       delivered: false,
-      lastEvent: "no data",
+      lastEvent: "Objeto em trânsito",
       lastUpdate: "",
     });
   });
 
-  it("handles missing eventos", async () => {
+  it("handles empty eventos array", async () => {
     responseStatus = 200;
-    responseBody = JSON.stringify({ codigo: "AA333333333BR" });
+    responseBody = JSON.stringify({
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: { temEventoEntrega: false, eventos: [] },
+    });
 
-    const result = await trackPackage("AA333333333BR", config);
+    const result = await trackPackage("ZZ222222222BR", config);
 
     expect(result).toEqual({
       delivered: false,
@@ -170,8 +213,7 @@ describe("trackPackage", () => {
   it("handles connection refused gracefully", async () => {
     const unreachable: TrackingConfig = {
       baseUrl: "http://127.0.0.1:1",
-      user: "test@example.com",
-      token: "test-token",
+      apiKey: "test-api-key",
     };
 
     const result = await trackPackage("EE777777777BR", unreachable);

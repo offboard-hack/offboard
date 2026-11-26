@@ -279,8 +279,7 @@ describe.skipIf(!url)("api", () => {
 
     trackingConfig = {
       baseUrl: `http://127.0.0.1:${addr.port}`,
-      user: "test@example.com",
-      token: "test-token",
+      apiKey: "test-api-key",
     };
   });
 
@@ -7481,16 +7480,17 @@ describe.skipIf(!url)("api", () => {
 
     trackingStatus = 200;
     trackingBody = JSON.stringify({
-      codigo: "AB123456789BR",
-      eventos: [
-        {
-          data: "18/11/2026",
-          hora: "16:00",
-          local: "SAO PAULO/SP",
-          status: "Objeto em trânsito - por favor aguarde",
-          subStatus: [],
-        },
-      ],
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: {
+        temEventoEntrega: false,
+        eventos: [
+          {
+            descricao: "Objeto em trânsito - por favor aguarde",
+            dtHrCriado: { date: "2026-11-18 16:00:00.000000", timezone: "America/Sao_Paulo" },
+          },
+        ],
+      },
     });
 
     const list = await (await call("/offboardings")).json();
@@ -7509,7 +7509,7 @@ describe.skipIf(!url)("api", () => {
     expect(body.tracking).toEqual({
       delivered: false,
       lastEvent: "Objeto em trânsito - por favor aguarde",
-      lastUpdate: "18/11/2026 16:00",
+      lastUpdate: "2026-11-18 16:00",
     });
   });
 
@@ -7551,16 +7551,17 @@ describe.skipIf(!url)("api", () => {
 
     trackingStatus = 200;
     trackingBody = JSON.stringify({
-      codigo: "CD987654321BR",
-      eventos: [
-        {
-          data: "20/11/2026",
-          hora: "10:30",
-          local: "SAO PAULO/SP",
-          status: "Objeto entregue ao destinatário",
-          subStatus: [],
-        },
-      ],
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: {
+        temEventoEntrega: true,
+        eventos: [
+          {
+            descricao: "Objeto entregue ao destinatário",
+            dtHrCriado: { date: "2026-11-20 10:30:00.000000", timezone: "America/Sao_Paulo" },
+          },
+        ],
+      },
     });
 
     const list = await (await call("/offboardings")).json();
@@ -7598,7 +7599,10 @@ describe.skipIf(!url)("api", () => {
     const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
 
     trackingStatus = 200;
-    trackingBody = JSON.stringify({ codigo: "XX000000000BR" });
+    trackingBody = JSON.stringify({
+      status: "TRACKING_STATUS_NOT_FOUND",
+      carrier: "CARRIER_CORREIOS",
+    });
 
     const res = await trackingApp.handle(cronRequest("POST"));
 
@@ -7613,16 +7617,17 @@ describe.skipIf(!url)("api", () => {
 
     trackingStatus = 200;
     trackingBody = JSON.stringify({
-      codigo: "EF111222333BR",
-      eventos: [
-        {
-          data: "18/11/2026",
-          hora: "16:00",
-          local: "SAO PAULO/SP",
-          status: "Objeto em trânsito - por favor aguarde",
-          subStatus: [],
-        },
-      ],
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: {
+        temEventoEntrega: false,
+        eventos: [
+          {
+            descricao: "Objeto em trânsito - por favor aguarde",
+            dtHrCriado: { date: "2026-11-18 16:00:00.000000", timezone: "America/Sao_Paulo" },
+          },
+        ],
+      },
     });
 
     const list = await (await call("/offboardings")).json();
@@ -7645,16 +7650,17 @@ describe.skipIf(!url)("api", () => {
 
     trackingStatus = 200;
     trackingBody = JSON.stringify({
-      codigo: "GH444555666BR",
-      eventos: [
-        {
-          data: "21/11/2026",
-          hora: "09:00",
-          local: "RIO DE JANEIRO/RJ",
-          status: "Objeto entregue ao destinatário",
-          subStatus: [],
-        },
-      ],
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: {
+        temEventoEntrega: true,
+        eventos: [
+          {
+            descricao: "Objeto entregue ao destinatário",
+            dtHrCriado: { date: "2026-11-21 09:00:00.000000", timezone: "America/Sao_Paulo" },
+          },
+        ],
+      },
     });
 
     const list = await (await call("/offboardings")).json();
@@ -7710,16 +7716,17 @@ describe.skipIf(!url)("api", () => {
 
     trackingStatus = 200;
     trackingBody = JSON.stringify({
-      codigo: "ZZ999999999BR",
-      eventos: [
-        {
-          data: "21/11/2026",
-          hora: "10:00",
-          local: "SAO PAULO/SP",
-          status: "Objeto entregue ao destinatário",
-          subStatus: [],
-        },
-      ],
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: {
+        temEventoEntrega: true,
+        eventos: [
+          {
+            descricao: "Objeto entregue ao destinatário",
+            dtHrCriado: { date: "2026-11-21 10:00:00.000000", timezone: "America/Sao_Paulo" },
+          },
+        ],
+      },
     });
 
     const res = await stubbedApp.handle(cronRequest());

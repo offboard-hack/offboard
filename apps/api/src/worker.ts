@@ -27,8 +27,7 @@ const runtimeConfig = z.object({
   BROWSERBASE_API_KEY: z.string().min(1).optional(),
   BROWSERBASE_PROJECT_ID: z.string().min(1).optional(),
   PUBLIC_PAGE_ORIGIN: z.string().min(1).optional(),
-  TRACKING_USER: z.string().min(1).optional(),
-  TRACKING_TOKEN: z.string().min(1).optional(),
+  TRACKING_API_KEY: z.string().min(1).optional(),
   TRACKING_BASE_URL: z.string().min(1).optional(),
 });
 
@@ -79,14 +78,12 @@ export function createWorkerApi(
     sendEmail: (message) => sender.send(message),
     cronSecret: config.data.CRON_SECRET,
     webhookSecret: config.data.WEBHOOK_SECRET,
-    tracking:
-      config.data.TRACKING_USER && config.data.TRACKING_TOKEN
-        ? {
-            baseUrl: config.data.TRACKING_BASE_URL ?? "https://api.linketrack.com",
-            user: config.data.TRACKING_USER,
-            token: config.data.TRACKING_TOKEN,
-          }
-        : undefined,
+    tracking: config.data.TRACKING_API_KEY
+      ? {
+          baseUrl: config.data.TRACKING_BASE_URL ?? "https://api.wonca.com.br",
+          apiKey: config.data.TRACKING_API_KEY,
+        }
+      : undefined,
     slackSigningSecret: config.data.SLACK_SIGNING_SECRET,
     abacatepay: createAbacatePayGateway(config.data.ABACATEPAY_API_KEY),
     abacatepayWebhookSecret: config.data.ABACATEPAY_WEBHOOK_SECRET,
