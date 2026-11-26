@@ -66,7 +66,7 @@ const draftAnswer = t.Object({
     t.Null(),
   ]),
   inferred: t.Boolean(),
-  status: t.UnionEnum(["filled", "blank", "not_shared", "sensitive"]),
+  status: t.UnionEnum(["filled", "suggested", "blank", "not_shared", "sensitive"]),
 });
 
 const confirmedAnswer = t.Object({ questionId: t.String(), value: answerValue });

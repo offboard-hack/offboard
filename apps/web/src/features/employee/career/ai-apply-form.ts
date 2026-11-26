@@ -24,6 +24,7 @@ const sources = {
 
 const attention = {
   filled: null,
+  suggested: "Sugerida a partir de uma resposta sua em outra vaga. Confira antes de enviar.",
   blank: "A IA não encontrou esta resposta. Complete você.",
   not_shared: "Você escolheu não compartilhar esta resposta. Responda só se quiser.",
   sensitive: "Pergunta sensível. A IA não responde por você.",
