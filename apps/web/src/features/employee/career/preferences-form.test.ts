@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { CareerPreferences } from "@/entities/career";
 import {
+  addressFields,
   addressProblem,
   answerProblem,
+  describedBy,
   isValidCpf,
   profileChanges,
   profileDraft,
@@ -185,5 +187,27 @@ describe("checks the fields like the server does", () => {
   it("limits a saved answer to 2,000 characters", () => {
     expect(answerProblem("Sim")).toBeUndefined();
     expect(answerProblem("x".repeat(2_001))).toBe("Use até 2.000 caracteres.");
+  });
+});
+
+describe("describedBy", () => {
+  it("keeps only the ids that exist", () => {
+    expect(describedBy("a-hint", undefined, "a-error")).toBe("a-hint a-error");
+    expect(describedBy(undefined, undefined)).toBeUndefined();
+  });
+});
+
+describe("addressFields autocomplete", () => {
+  it("maps address inputs to browser autofill tokens", () => {
+    const tokens = Object.fromEntries(
+      addressFields.map((field) => [field.key, field.autoComplete]),
+    );
+
+    expect(tokens).toMatchObject({
+      cep: "postal-code",
+      street: "street-address",
+      city: "address-level2",
+      state: "address-level1",
+    });
   });
 });

@@ -24,6 +24,7 @@ import {
   addressFields,
   addressProblem,
   answerProblem,
+  describedBy,
   type ProfileDraft,
   profileChanges,
   profileDraft,
@@ -32,6 +33,7 @@ import {
   textFields,
   textProblem,
 } from "./preferences-form";
+import { useUnsavedGuard } from "./use-unsaved-guard";
 
 export type PreferencesSection = "perfil" | "vagas" | "respostas" | "dispensadas";
 
@@ -67,6 +69,7 @@ export function Preferences({
             key={item.id}
             to="/colaborador"
             search={{ tela: "preferencias", secao: item.id }}
+            aria-current={section === item.id ? "page" : undefined}
             className={buttonVariants({ variant: section === item.id ? "default" : "outline" })}
           >
             {item.label}
@@ -120,6 +123,9 @@ function ProfileForm({
   );
 
   const addressError = addressProblem(draft.address);
+  const dirty = Object.keys(profileChanges(fields, draft)).length > 0;
+  useUnsavedGuard(dirty);
+  const addressEmpty = addressFields.every(({ key }) => draft.address[key].trim() === "");
   const invalid = [...problems.values()].some(Boolean) || addressError !== undefined;
 
   const setText = (key: TextKey, next: TextDraft) => {
@@ -173,6 +179,7 @@ function ProfileForm({
               label={field.label}
               hint={field.hint}
               value={draft[field.key]}
+              disabled={save.isPending}
               error={checked ? problems.get(field.key) : undefined}
               onChange={(next) => setText(field.key, next)}
             />
@@ -189,8 +196,12 @@ function ProfileForm({
               <Input
                 id={`address-${field.key}`}
                 value={draft.address[field.key]}
+                autoComplete={field.autoComplete}
+                disabled={save.isPending}
                 aria-invalid={checked && addressError !== undefined}
-                aria-describedby="address-error"
+                aria-describedby={describedBy(
+                  checked && addressError !== undefined ? "address-error" : undefined,
+                )}
                 onChange={(event) =>
                   setAddress({ ...draft.address, [field.key]: event.target.value })
                 }
@@ -201,6 +212,7 @@ function ProfileForm({
         <ShareSwitch
           id="address-share"
           checked={draft.address.share}
+          disabled={save.isPending || addressEmpty}
           onChange={(share) => setAddress({ ...draft.address, share })}
         />
         <EmployeeError id="address-error" message={checked ? addressError : undefined} />
@@ -218,6 +230,7 @@ function ProfileForm({
               label={field.label}
               hint={field.hint}
               value={draft[field.key]}
+              disabled={save.isPending}
               error={checked ? problems.get(field.key) : undefined}
               onChange={(next) => setText(field.key, next)}
             />
@@ -257,6 +270,7 @@ function TextRow({
   hint,
   value,
   error,
+  disabled,
   onChange,
 }: {
   id: string;
@@ -264,6 +278,7 @@ function TextRow({
   hint: string | null;
   value: TextDraft;
   error: string | undefined;
+  disabled: boolean;
   onChange: (next: TextDraft) => void;
 }) {
   return (
@@ -273,7 +288,11 @@ function TextRow({
         id={id}
         value={value.value}
         aria-invalid={error !== undefined}
-        aria-describedby={`${id}-hint ${id}-error`}
+        disabled={disabled}
+        aria-describedby={describedBy(
+          hint ? `${id}-hint` : undefined,
+          error ? `${id}-error` : undefined,
+        )}
         onChange={(event) => onChange({ ...value, value: event.target.value })}
       />
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -287,6 +306,7 @@ function TextRow({
         <ShareSwitch
           id={`${id}-share`}
           checked={value.share}
+          disabled={disabled || value.value.trim() === ""}
           onChange={(share) => onChange({ ...value, share })}
         />
       </div>
@@ -298,15 +318,17 @@ function TextRow({
 function ShareSwitch({
   id,
   checked,
+  disabled,
   onChange,
 }: {
   id: string;
   checked: boolean;
+  disabled: boolean;
   onChange: (checked: boolean) => void;
 }) {
   return (
     <div className="flex items-center gap-2">
-      <Switch id={id} size="sm" checked={checked} onCheckedChange={onChange} />
+      <Switch id={id} size="sm" checked={checked} disabled={disabled} onCheckedChange={onChange} />
       <Label htmlFor={id} className="text-xs font-normal text-muted-foreground">
         {shareLabel}
       </Label>
@@ -367,6 +389,7 @@ function AnswerRow({
   const id = `answer-${question.id}`;
   const problem = answerProblem(answer);
   const changed = answer.trim() !== saved;
+  useUnsavedGuard(changed);
 
   return (
     <li className="grid gap-1.5">
@@ -378,7 +401,8 @@ function AnswerRow({
         value={answer}
         rows={2}
         aria-invalid={problem !== undefined}
-        aria-describedby={`${id}-error`}
+        disabled={save.isPending}
+        aria-describedby={describedBy((problem ?? save.error?.message) ? `${id}-error` : undefined)}
         onChange={(event) => setAnswer(event.target.value)}
       />
       <div className="flex flex-wrap gap-2">
