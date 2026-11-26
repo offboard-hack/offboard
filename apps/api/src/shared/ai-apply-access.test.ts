@@ -1,44 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { aiApplyAccess, browserbaseConfig, parseAllowlist } from "./ai-apply-access.js";
+import { aiApplyAccess, browserbaseConfig, onTopPlan, topPlanSlug } from "./ai-apply-access.js";
 
-describe("parseAllowlist", () => {
-  it("lowercases, trims and drops empty entries", () => {
-    expect(parseAllowlist(" Ana@Example.com, ,bia@example.com,,")).toEqual([
-      "ana@example.com",
-      "bia@example.com",
-    ]);
-  });
-
-  it("returns an empty list when unset", () => {
-    expect(parseAllowlist(undefined)).toEqual([]);
-    expect(parseAllowlist("")).toEqual([]);
+describe("onTopPlan", () => {
+  it("needs an active or trialing subscription to the top plan", () => {
+    expect(topPlanSlug).toBe("platinum-premium");
+    expect(onTopPlan({ slug: "platinum-premium", status: "active" })).toBe(true);
+    expect(onTopPlan({ slug: "platinum-premium", status: "trialing" })).toBe(true);
+    expect(onTopPlan({ slug: "platinum-premium", status: "canceled" })).toBe(false);
+    expect(onTopPlan({ slug: "platinum-premium", status: "past_due" })).toBe(false);
+    expect(onTopPlan({ slug: "gold", status: "active" })).toBe(false);
+    expect(onTopPlan(null)).toBe(false);
   });
 });
 
 describe("aiApplyAccess", () => {
-  const consented = {
-    personalEmail: "Ana@Example.com",
-    aiApplyConsentAt: "2026-11-25T00:00:00.000Z",
-  };
+  const consented = { aiApplyConsentAt: "2026-11-25T00:00:00.000Z" };
+  const top = { slug: "platinum-premium", status: "active" };
 
-  it("allows a consenting, allowlisted email regardless of case", () => {
-    expect(aiApplyAccess(consented, ["ana@example.com"])).toBe("allowed");
+  it("allows a consenting person whose company is on the top plan", () => {
+    expect(aiApplyAccess(consented, top)).toBe("allowed");
   });
 
-  it("rejects an empty allowlist or another email", () => {
-    expect(aiApplyAccess(consented, [])).toBe("not_allowed");
-    expect(aiApplyAccess(consented, ["bia@example.com"])).toBe("not_allowed");
-  });
-
-  it("normalizes allowlist entries and ignores empty ones", () => {
-    expect(aiApplyAccess(consented, ["  ANA@example.COM "])).toBe("allowed");
-    expect(aiApplyAccess({ ...consented, personalEmail: " " }, [" ", ""])).toBe("not_allowed");
+  it("rejects another plan, a lapsed subscription or none", () => {
+    expect(aiApplyAccess(consented, { slug: "gold", status: "active" })).toBe("not_allowed");
+    expect(aiApplyAccess(consented, { ...top, status: "canceled" })).toBe("not_allowed");
+    expect(aiApplyAccess(consented, null)).toBe("not_allowed");
   });
 
   it("rejects a missing consent", () => {
-    expect(aiApplyAccess({ ...consented, aiApplyConsentAt: null }, ["ana@example.com"])).toBe(
-      "not_allowed",
-    );
+    expect(aiApplyAccess({ aiApplyConsentAt: null }, top)).toBe("not_allowed");
   });
 });
 

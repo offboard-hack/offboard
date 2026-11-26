@@ -35,7 +35,6 @@ if (apiConfigured) {
   if (process.env.OFFBOARD_AI_CONFIGURED === "anthropic") env.ANTHROPIC_API_KEY = bindings.secret();
 
   if (process.env.OFFBOARD_AI_APPLY_CONFIGURED === "1") {
-    env.AI_APPLY_ALLOWLIST = bindings.secret();
     env.BROWSERBASE_API_KEY = bindings.secret();
     env.BROWSERBASE_PROJECT_ID = bindings.secret();
   }

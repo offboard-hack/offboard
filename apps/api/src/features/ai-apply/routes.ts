@@ -1,6 +1,6 @@
 import type { FormQuestion, ResumeContent } from "@offboard/db/schema";
 import { Elysia, t } from "elysia";
-import { aiApplyAccess } from "../../shared/ai-apply-access.js";
+import { aiApplyAccess, type CompanyPlan } from "../../shared/ai-apply-access.js";
 import type { GenerateStructured } from "../../shared/ai.js";
 import { logFailure, logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
@@ -35,7 +35,7 @@ export function aiApplyRoutes(
   repos: AiApplyRepository,
   talentAccess: TalentAccessPlugin,
   deps: {
-    allowlist: string[];
+    companyPlan: (orgId: string) => Promise<CompanyPlan | null>;
     generate: GenerateStructured | undefined;
     runnerConfigured: boolean;
     takeLlmCall: UsageRepository["takeLlmCall"];
@@ -74,11 +74,8 @@ export function aiApplyRoutes(
     };
   }
 
-  const gate = (me: { email: string; aiApplyConsentAt: string | null }) => {
-    const access = aiApplyAccess(
-      { personalEmail: me.email, aiApplyConsentAt: me.aiApplyConsentAt },
-      deps.allowlist,
-    );
+  const gate = async (me: { orgId: string; aiApplyConsentAt: string | null }) => {
+    const access = aiApplyAccess(me, await deps.companyPlan(me.orgId));
 
     if (access !== "allowed") {
       return {
@@ -107,7 +104,7 @@ export function aiApplyRoutes(
     .post(
       "/me/jobs/:jobId/ai-apply",
       async ({ me, params, status }) => {
-        const open = gate(me);
+        const open = await gate(me);
 
         if (open.refused) return status(open.refused.code, { error: open.refused.error });
 
@@ -227,7 +224,7 @@ export function aiApplyRoutes(
     .post(
       "/me/ai-applications/:id/confirm",
       async ({ me, params, body, status }) => {
-        const open = gate(me);
+        const open = await gate(me);
 
         if (open.refused) return status(open.refused.code, { error: open.refused.error });
 
@@ -301,7 +298,7 @@ export function aiApplyRoutes(
     .post(
       "/me/ai-applications/:id/run",
       async ({ me, params, status }) => {
-        const open = gate(me);
+        const open = await gate(me);
 
         if (open.refused) return status(open.refused.code, { error: open.refused.error });
 

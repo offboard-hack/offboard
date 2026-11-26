@@ -60,6 +60,12 @@ export function createBillingRepository(db: Database) {
     return row ?? null;
   }
 
+  async function companyPlan(orgId: string) {
+    const subscription = await getSubscription(orgId);
+
+    return subscription && { slug: subscription.plan.slug, status: subscription.status };
+  }
+
   async function listInvoices(orgId: string) {
     const rows = await db
       .select(invoiceColumns)
@@ -161,6 +167,7 @@ export function createBillingRepository(db: Database) {
   return {
     listPlans,
     getSubscription,
+    companyPlan,
     listInvoices,
     findOpenInvoice,
     getSubscriptionById,

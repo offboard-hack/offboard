@@ -5,7 +5,6 @@ import { z } from "zod";
 import { createApp } from "./app.js";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
-import { parseAllowlist } from "./shared/ai-apply-access.js";
 import { createGenerateStructured, resolveModel } from "./shared/ai.js";
 import { diskStorage } from "./shared/disk-storage.js";
 
@@ -50,7 +49,6 @@ createApp(origin, repos, {
   generateStructured: aiModel ? createGenerateStructured(aiModel) : undefined,
   storage: process.env.RESUME_STORAGE_DIR ? diskStorage(process.env.RESUME_STORAGE_DIR) : undefined,
   publicPageOrigin: process.env.PUBLIC_PAGE_ORIGIN,
-  aiApplyAllowlist: parseAllowlist(process.env.AI_APPLY_ALLOWLIST),
 }).listen({
   hostname: config.API_HOST,
   reusePort: false,

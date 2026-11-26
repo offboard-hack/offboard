@@ -9,7 +9,9 @@ import {
   defaultOrgId,
   jobs,
   offboardingCases,
+  plans,
   resumes,
+  subscriptions,
   talentPreferences,
   talentProfiles,
 } from "@offboard/db/schema";
@@ -437,7 +439,21 @@ describe.skipIf(!url)("ai apply runner", () => {
     await db.$client.end();
   });
 
+  async function onPlan(
+    slug: string,
+    status: (typeof subscriptions.$inferInsert)["status"] = "active",
+  ) {
+    const [plan] = await db.select({ id: plans.id }).from(plans).where(eq(plans.slug, slug));
+
+    await db
+      .update(subscriptions)
+      .set({ planId: plan.id, status })
+      .where(eq(subscriptions.orgId, defaultOrgId));
+  }
+
   async function profile() {
+    await onPlan("platinum-premium");
+
     const [first] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
 
     const created = await repos.talent.enable({
@@ -542,7 +558,7 @@ describe.skipIf(!url)("ai apply runner", () => {
 
     const deps: RunnerDeps = {
       repo: repos.aiApply,
-      allowlist: [email.toUpperCase()],
+      companyPlan: repos.billing.companyPlan,
       browserbase: bb.browserbase,
       openPage: async (connectUrl) => {
         opened.push(connectUrl);
@@ -1617,9 +1633,19 @@ describe.skipIf(!url)("ai apply runner", () => {
         { state: "cancelled", reason: "consent_withdrawn" },
       ],
       [
-        "removal from the allowlist",
-        async () => undefined,
-        { allowlist: ["outra@example.com"] },
+        "a company that dropped from the top plan",
+        async () => {
+          await onPlan("gold");
+        },
+        {},
+        { state: "cancelled", reason: "not_allowed" },
+      ],
+      [
+        "a canceled top-plan subscription",
+        async () => {
+          await onPlan("platinum-premium", "canceled");
+        },
+        {},
         { state: "cancelled", reason: "not_allowed" },
       ],
       [

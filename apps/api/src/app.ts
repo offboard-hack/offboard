@@ -73,7 +73,6 @@ type AppOptions = {
   storage?: ObjectStorage;
   runInBackground?: (task: () => Promise<void>) => void;
   publicPageOrigin?: string;
-  aiApplyAllowlist?: string[];
   browserbase?: { apiKey: string; projectId: string };
 };
 
@@ -135,7 +134,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
   const runner = {
     repo: repos.aiApply,
-    allowlist: options.aiApplyAllowlist ?? [],
+    companyPlan: repos.billing.companyPlan,
     browserbase: options.browserbase && createBrowserbase(fetchBrowser, options.browserbase),
     openPage: (connectUrl: string) => openPage(fetchBrowser, connectUrl),
     storage: options.storage,
@@ -341,7 +340,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         talent,
         (profile) => options.sendEmail(welcomeEmail(profile, webOrigin)),
         {
-          allowlist: options.aiApplyAllowlist ?? [],
+          companyPlan: repos.billing.companyPlan,
           configured: options.generateStructured !== undefined && options.browserbase !== undefined,
         },
       ),
@@ -384,7 +383,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     )
     .use(
       aiApplyRoutes(repos.aiApply, talent, {
-        allowlist: options.aiApplyAllowlist ?? [],
+        companyPlan: repos.billing.companyPlan,
         generate: options.generateStructured,
         runnerConfigured: options.browserbase !== undefined,
         takeLlmCall: repos.llmUsage.takeLlmCall,

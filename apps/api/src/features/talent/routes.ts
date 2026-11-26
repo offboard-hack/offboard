@@ -4,7 +4,7 @@ import { errorResponse } from "../../shared/http.js";
 import type { Entitlement } from "../../shared/entitlement.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
 import type { TalentProfile } from "../../shared/talent-profile.js";
-import { aiApplyAccess } from "../../shared/ai-apply-access.js";
+import { aiApplyAccess, type CompanyPlan } from "../../shared/ai-apply-access.js";
 import type { TalentRepository } from "./repository.js";
 
 const talentAccessResponse = t.Object({
@@ -38,13 +38,13 @@ function toTalentAccess(profile: TalentProfile) {
   };
 }
 
-type AiApply = { allowlist: string[]; configured: boolean };
+type AiApply = {
+  companyPlan: (orgId: string) => Promise<CompanyPlan | null>;
+  configured: boolean;
+};
 
-function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: AiApply) {
-  const access = aiApplyAccess(
-    { personalEmail: profile.email, aiApplyConsentAt: profile.aiApplyConsentAt },
-    aiApply.allowlist,
-  );
+async function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: AiApply) {
+  const access = aiApplyAccess(profile, await aiApply.companyPlan(profile.orgId));
 
   return {
     id: profile.id,

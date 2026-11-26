@@ -293,6 +293,18 @@ describe.skipIf(!url)("api", () => {
     await seedDatabase(db, testSeedFixtures);
   });
 
+  async function onPlan(
+    slug: string,
+    status: (typeof subscriptions.$inferInsert)["status"] = "active",
+  ) {
+    const [plan] = await db.select({ id: plans.id }).from(plans).where(eq(plans.slug, slug));
+
+    await db
+      .update(subscriptions)
+      .set({ planId: plan.id, status })
+      .where(eq(subscriptions.orgId, defaultOrgId));
+  }
+
   describe("talent access", () => {
     const personalEmail = "ana.pessoal@example.com";
     const sponsoredUntil = "2099-12-31";
@@ -857,16 +869,16 @@ describe.skipIf(!url)("api", () => {
       const mine = await enable(firstCase.id, personalEmail);
       const other = await enable(secondCase.id, "outra@example.com");
 
+      await onPlan("platinum-premium");
+
       const gated = createApp(webOrigin, repos, {
         ...appOptions,
-        aiApplyAllowlist: ["ANA.PESSOAL@example.com", "outra@example.com"],
         generateStructured: async ({ schema }) => schema.parse({}),
         browserbase,
       });
 
       const withoutBrowser = createApp(webOrigin, repos, {
         ...appOptions,
-        aiApplyAllowlist: ["ANA.PESSOAL@example.com"],
         generateStructured: async ({ schema }) => schema.parse({}),
       });
 
@@ -1100,9 +1112,10 @@ describe.skipIf(!url)("api", () => {
 
       const urls: string[] = [];
 
+      await onPlan("platinum-premium");
+
       const instance = createApp(webOrigin, repos, {
         ...appOptions,
-        aiApplyAllowlist: [personalEmail],
         browserbase,
         generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
         fetchGreenhouseImpl: async (input) => {
@@ -1221,9 +1234,10 @@ describe.skipIf(!url)("api", () => {
       const browser: string[] = [];
       const logged = vi.spyOn(console, "error");
 
+      await onPlan("platinum-premium");
+
       const instance = createApp(webOrigin, repos, {
         ...appOptions,
-        aiApplyAllowlist: [personalEmail],
         browserbase,
         generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
         fetchGreenhouseImpl: async () =>
@@ -1353,9 +1367,10 @@ describe.skipIf(!url)("api", () => {
           })
           .returning({ id: jobs.id });
 
+        await onPlan("platinum-premium");
+
         const instance = createApp(webOrigin, repos, {
           ...appOptions,
-          aiApplyAllowlist: [personalEmail],
           browserbase,
           generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
           fetchGreenhouseImpl: async () =>
@@ -1639,9 +1654,10 @@ describe.skipIf(!url)("api", () => {
         fields: [{ name, type: "input_text", values: [] }],
       });
 
+      await onPlan("platinum-premium");
+
       const instance = createApp(webOrigin, repos, {
         ...appOptions,
-        aiApplyAllowlist: [personalEmail],
         browserbase,
         generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
         fetchGreenhouseImpl: async () =>
@@ -9303,6 +9319,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
     afterAll(async () => {
       for (const orgId of orgIds) {
+        await db.delete(subscriptions).where(eq(subscriptions.orgId, orgId));
         await db.delete(talentProfiles).where(eq(talentProfiles.orgId, orgId));
         await db.delete(offboardingCases).where(eq(offboardingCases.orgId, orgId));
         await db.delete(organizations).where(eq(organizations.id, orgId));
@@ -9611,6 +9628,70 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         .where(eq(employeeAccess.caseId, record.id));
 
       expect((await request("/me", "GET", cookie)).status).toBe(200);
+    });
+
+    it("offers AI Apply to a collaborator whose company is on the top plan", async () => {
+      const orgId = await organization();
+      const { email } = await collaboratorCase(orgId);
+      const cookie = await authenticate(email);
+      const grantId = grants.get(cookie) ?? "";
+
+      const [top] = await db
+        .select({ id: plans.id })
+        .from(plans)
+        .where(eq(plans.slug, "platinum-premium"));
+
+      const [gold] = await db.select({ id: plans.id }).from(plans).where(eq(plans.slug, "gold"));
+
+      const [subscription] = await db
+        .insert(subscriptions)
+        .values({
+          orgId,
+          planId: top.id,
+          currentPeriodStart: "2026-11-01",
+          currentPeriodEnd: "2026-12-01",
+        })
+        .returning({ id: subscriptions.id });
+
+      const composed = createApp(webOrigin, repos, {
+        auth: employeeAuth,
+        sendEmail,
+        browserbase: { apiKey: "bb-key", projectId: "bb-project" },
+        generateStructured: async ({ schema }) => schema.parse({ answers: [] }),
+      });
+
+      const send = (path: string, method: string, body?: { accept: boolean }) =>
+        composed.handle(
+          new Request(webOrigin + "/api" + path, {
+            method,
+            headers: {
+              cookie,
+              origin: webOrigin,
+              [employeeGrantHeader]: grantId,
+              "content-type": "application/json",
+            },
+            body: body && JSON.stringify(body),
+          }),
+        );
+
+      expect((await send("/me/ai-apply/consent", "PUT", { accept: true })).status).toBe(200);
+
+      const prepare = () => send(`/me/jobs/${randomUUID()}/ai-apply`, "POST");
+
+      const allowed = await prepare();
+
+      expect(allowed.status).toBe(404);
+      expect(await allowed.json()).toEqual({ error: "Job not found" });
+
+      await db
+        .update(subscriptions)
+        .set({ planId: gold.id })
+        .where(eq(subscriptions.id, subscription.id));
+
+      const refused = await prepare();
+
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toEqual({ error: "AI Apply not available" });
     });
 
     it("keeps member sessions out of the career routes", async () => {

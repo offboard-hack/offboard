@@ -446,6 +446,7 @@ export function createAiApplyRepository(db: Database) {
         attempt: aiApplications,
         job: { sourceKey: jobs.sourceKey, closedAt: jobs.closedAt },
         profile: {
+          orgId: talentProfiles.orgId,
           name: talentProfiles.name,
           email: talentProfiles.personalEmail,
           consentAt: talentProfiles.aiApplyConsentAt,

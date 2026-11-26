@@ -15,7 +15,9 @@ import {
   jobs,
   llmUsage,
   offboardingCases,
+  plans,
   resumes,
+  subscriptions,
   talentAnswers,
   talentPreferences,
   talentProfiles,
@@ -102,7 +104,7 @@ type Body = {
 
 type Setup = {
   takeLlmCall?: () => Promise<true | { retryAt: Date }>;
-  allowlist?: string[];
+  companyPlan?: RunnerDeps["companyPlan"];
   consent?: boolean;
   generate?: GenerateStructured | null;
   runnerConfigured?: boolean;
@@ -125,8 +127,21 @@ describe.skipIf(!url)("ai apply route", () => {
     });
   });
 
+  async function onPlan(
+    slug: string,
+    status: (typeof subscriptions.$inferInsert)["status"] = "active",
+  ) {
+    const [plan] = await db.select({ id: plans.id }).from(plans).where(eq(plans.slug, slug));
+
+    await db
+      .update(subscriptions)
+      .set({ planId: plan.id, status })
+      .where(eq(subscriptions.orgId, defaultOrgId));
+  }
+
   beforeEach(async () => {
     await seedDatabase(db, testSeedFixtures);
+    await onPlan("platinum-premium");
   });
 
   afterAll(async () => {
@@ -239,7 +254,7 @@ describe.skipIf(!url)("ai apply route", () => {
           companyActive: async () => true,
         }),
         {
-          allowlist: setup.allowlist ?? [email.toUpperCase()],
+          companyPlan: setup.companyPlan ?? repos.billing.companyPlan,
           generate: setup.generate === null ? undefined : setup.generate,
           runnerConfigured: setup.runnerConfigured ?? true,
           takeLlmCall: setup.takeLlmCall ?? repos.llmUsage.takeLlmCall,
@@ -336,19 +351,28 @@ describe.skipIf(!url)("ai apply route", () => {
     body.attempt.answers.find((item) => item.questionId === id);
 
   describe("gate", () => {
-    it("refuses people who are not allowlisted or have not consented, and AI that is off", async () => {
+    it("refuses companies off the top plan, people who have not consented, and AI that is off", async () => {
       const profileId = await profile();
       const jobId = await addJob();
+      const open = build({ generate: fakeModel().generate });
 
-      const denied = build({ allowlist: ["outra@example.com"], generate: fakeModel().generate });
-      const unlisted = await denied.post(profileId, jobId);
+      await onPlan("gold");
 
-      expect(unlisted.status).toBe(403);
-      expect(await unlisted.json()).toEqual({ error: "AI Apply not available" });
+      const gold = await open.post(profileId, jobId);
 
+      expect(gold.status).toBe(403);
+      expect(await gold.json()).toEqual({ error: "AI Apply not available" });
+
+      await onPlan("platinum-premium", "canceled");
+
+      const canceled = await open.post(profileId, jobId);
+
+      expect(canceled.status).toBe(403);
+      expect(await canceled.json()).toEqual({ error: "AI Apply not available" });
+
+      await onPlan("platinum-premium", "trialing");
       await repos.talent.setAiApplyConsent(profileId, false, new Date());
 
-      const open = build({ generate: fakeModel().generate });
       const unconsented = await open.post(profileId, jobId);
 
       expect(unconsented.status).toBe(403);
@@ -361,8 +385,19 @@ describe.skipIf(!url)("ai apply route", () => {
 
       expect(unavailable.status).toBe(503);
       expect(await unavailable.json()).toEqual({ error: "AI not configured" });
-      expect([denied.fetched, open.fetched, off.fetched]).toEqual([[], [], []]);
+      expect([open.fetched, off.fetched]).toEqual([[], []]);
       expect(await attempts(profileId)).toEqual([]);
+    });
+
+    it("lets a consenting person of a top-plan company in", async () => {
+      const { post, profileId, jobId } = await ready();
+
+      await onPlan("platinum-premium", "trialing");
+
+      const response = await post(profileId, jobId);
+
+      expect(response.status).toBe(201);
+      expect(await attempts(profileId)).toHaveLength(1);
     });
   });
 
@@ -1129,11 +1164,11 @@ describe.skipIf(!url)("ai apply route", () => {
         ["POST", runPath(id)],
       ];
 
-      const unlisted = build({ allowlist: [], generate: fakeModel().generate });
+      const offPlan = build({ companyPlan: async () => null, generate: fakeModel().generate });
       const off = build({ generate: null });
 
       for (const [method, path, body] of routes) {
-        const denied = await unlisted.call(profileId, path, body, method);
+        const denied = await offPlan.call(profileId, path, body, method);
 
         expect(denied.status).toBe(403);
         expect(await denied.json()).toEqual({ error: "AI Apply not available" });
@@ -1162,7 +1197,11 @@ describe.skipIf(!url)("ai apply route", () => {
 
       await repos.talent.setAiApplyConsent(profileId, false, new Date());
 
-      const closed = build({ allowlist: [], generate: null, storage: files.storage });
+      const closed = build({
+        companyPlan: async () => null,
+        generate: null,
+        storage: files.storage,
+      });
 
       const listed = await closed.call(profileId, "/me/ai-applications", undefined, "GET");
 
@@ -1887,7 +1926,7 @@ describe.skipIf(!url)("ai apply route", () => {
 
         const deps: RunnerDeps = {
           repo: repos.aiApply,
-          allowlist: [email],
+          companyPlan: repos.billing.companyPlan,
           browserbase: {
             createSession: async () => {
               sessions.push("s1");
@@ -2270,7 +2309,7 @@ describe.skipIf(!url)("ai apply route", () => {
 
         await repos.talent.setAiApplyConsent(profileId, false, new Date());
 
-        const closed = build({ allowlist: [], generate: null });
+        const closed = build({ companyPlan: async () => null, generate: null });
 
         expect((await closed.call(profileId, checkPath(first), { sent: true })).status).toBe(200);
         expect((await closed.call(profileId, checkPath(second), { sent: false })).status).toBe(200);
