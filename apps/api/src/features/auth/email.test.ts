@@ -1,7 +1,7 @@
 import { Miniflare } from "miniflare";
 import { expect, it } from "vitest";
 import { createEmailSender, type CloudflareEmailBinding } from "./email.js";
-import { signInCodeEmail, signInEmail } from "./sign-in-email.js";
+import { employeeInviteEmail, signInCodeEmail, signInEmail } from "./sign-in-email.js";
 
 it("requires a native EMAIL binding when Cloudflare is selected", () => {
   expect(() => createEmailSender({ EMAIL_PROVIDER: "cloudflare" })).toThrow(
@@ -69,4 +69,23 @@ it("renders the sign-in code inside the branded template", () => {
   expect(message.html).toContain(">482913</span>");
   expect(message.html).toContain('src="https://offboard.example/apple-touch-icon.png"');
   expect(message.html).toContain("Seu código para entrar");
+});
+
+it("escapes the names HR typed into the employee invite", () => {
+  const message = employeeInviteEmail({
+    email: "pessoa@offboard.example",
+    name: "  <b>Ana</b> Souza",
+    company: 'Acme "S&A"',
+    origin: "https://offboard.example",
+  });
+
+  expect(message).toMatchObject({
+    to: "pessoa@offboard.example",
+    subject: "Seu acesso ao Offboard",
+  });
+  expect(message.text).toContain("Olá, <b>Ana</b>.");
+  expect(message.html).toContain("Olá, &lt;b&gt;Ana&lt;/b&gt;.");
+  expect(message.html).toContain("Acme &quot;S&amp;A&quot; cadastrou este endereço");
+  expect(message.html).not.toContain("<b>Ana");
+  expect(message.html).toContain('href="https://offboard.example/colaborador/entrar"');
 });

@@ -8,12 +8,14 @@ function layout({
   preheader,
   logo,
   body,
+  footer = ignore,
 }: {
   subject: string;
   title: string;
   preheader: string;
   logo: string;
   body: string;
+  footer?: string;
 }) {
   return `<!doctype html>
 <html lang="pt-BR">
@@ -55,7 +57,7 @@ ${body}
               </td>
             </tr>
             <tr>
-              <td style="padding:20px 16px 0;font-size:13px;line-height:20px;color:#5b5069;">${ignore}</td>
+              <td style="padding:20px 16px 0;font-size:13px;line-height:20px;color:#5b5069;">${footer}</td>
             </tr>
           </table>
           <!--[if mso]></td></tr></table><![endif]-->
@@ -142,6 +144,59 @@ export function signInCodeEmail({
                 </table>
                 <p style="margin:16px 0 24px;font-size:14px;line-height:22px;color:#5b5069;">Digite os seis dígitos na tela de login.</p>
 ${notice(`${expires} ${retry}`)}`,
+    }),
+  };
+}
+
+function escapeHtml(text: string) {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+export function employeeInviteEmail({
+  email,
+  name,
+  company,
+  origin,
+}: {
+  email: string;
+  name: string;
+  company: string;
+  origin: string;
+}) {
+  const [firstName] = name.trim().split(/\s+/);
+  const url = `${origin}/colaborador/entrar`;
+  const subject = "Seu acesso ao Offboard";
+  const title = "Sua jornada no Offboard";
+  const greeting = `Olá, ${firstName}.`;
+  const intro = `${company} liberou para você uma área no Offboard para acompanhar o seu desligamento e organizar os próximos passos.`;
+  const how = "Entre com este e-mail e enviaremos um código de acesso na hora.";
+  const footer = `Você recebeu este e-mail porque ${company} cadastrou este endereço no Offboard.`;
+
+  return {
+    to: email,
+    subject,
+    text: `${title}\n\n${greeting}\n\n${intro}\n\n${how}\n\n${url}\n\n${footer}`,
+    html: layout({
+      subject,
+      title,
+      preheader: how,
+      logo: new URL("/apple-touch-icon.png", origin).href,
+      footer: escapeHtml(footer),
+      body: `                <p style="margin:0 0 16px;font-size:16px;line-height:25px;color:#3b304c;">${escapeHtml(greeting)}</p>
+                <p style="margin:0 0 24px;font-size:16px;line-height:25px;color:#3b304c;">${escapeHtml(intro)}</p>
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    <td align="center" bgcolor="#670bd1" style="background-color:#670bd1;border-radius:10px;mso-padding-alt:14px 22px;">
+                      <a href="${url}" style="display:inline-block;padding:14px 22px;border-radius:10px;color:#ffffff;font-size:16px;line-height:22px;font-weight:700;text-decoration:none;mso-padding-alt:0;">Entrar no Offboard</a>
+                    </td>
+                  </tr>
+                </table>
+                <p style="margin:16px 0 24px;font-size:14px;line-height:22px;color:#5b5069;">Se o botão não funcionar, <a href="${url}" style="color:#5a0ab6;text-decoration:underline;">abra a página de acesso</a>.</p>
+${notice(how)}`,
     }),
   };
 }

@@ -23,7 +23,9 @@ import { talentRoutes } from "./features/talent/routes.js";
 import { careerPlanRoutes } from "./features/career-plan/routes.js";
 import { talentAccess } from "./shared/talent-access.js";
 import { companySponsors } from "./shared/entitlement.js";
+import type { InviteEmployee } from "./shared/employee-invite.js";
 import { welcomeEmail, type WelcomeMessage } from "./features/talent/welcome.js";
+import { employeeInviteEmail } from "./features/auth/sign-in-email.js";
 import { resumesRoutes } from "./features/resumes/routes.js";
 import { scoreIsCurrent } from "./features/resumes/repository.js";
 import { scoreResume } from "./features/resumes/score.js";
@@ -113,6 +115,26 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       : repos.actionConfigs.getActionConfigsByPhase;
 
     await fireActions({ getActionConfigsByPhase }, context);
+  };
+
+  const inviteEmployee: InviteEmployee = async (orgId, caseId) => {
+    try {
+      const invitee = await repos.employee.readInvitee(orgId, caseId);
+
+      if (!invitee) return "missing-case";
+
+      if (!invitee.email) return "no-email";
+
+      await options.sendEmail(
+        employeeInviteEmail({ ...invitee, email: invitee.email, origin: webOrigin }),
+      );
+
+      return "sent";
+    } catch {
+      console.error({ event: "employee.invite_failed" });
+
+      return "failed";
+    }
   };
 
   const companyActive = async (orgId: string) =>
@@ -423,6 +445,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         options.auth.resolveEmployee,
         webOrigin,
         dispatchAction,
+        inviteEmployee,
       ),
     )
     .use(
@@ -433,6 +456,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         repos.actionConfigs.readChecklist,
         options.cronSecret,
         options.webhookSecret,
+        inviteEmployee,
         options.tracking,
       ),
     )
