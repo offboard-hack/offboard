@@ -1,39 +1,38 @@
 import { z } from "zod";
 
 const trackingEvent = z.object({
-  data: z.string(),
-  hora: z.string(),
-  local: z.string(),
-  status: z.string(),
-  subStatus: z.array(z.string()).optional(),
+  descricao: z.string(),
+  dtHrCriado: z.object({ date: z.string() }).optional(),
 });
 
 const trackingResponse = z.object({
-  codigo: z.string(),
-  eventos: z.array(trackingEvent).optional(),
+  status: z.string(),
+  payload: z
+    .object({
+      temEventoEntrega: z.boolean().optional(),
+      eventos: z.array(trackingEvent).optional(),
+    })
+    .optional(),
 });
-
-const DELIVERED_PATTERN = /\bentregue\b/i;
 
 export interface TrackingConfig {
   baseUrl: string;
-  user: string;
-  token: string;
+  apiKey: string;
 }
 
 export async function trackPackage(trackingCode: string, config: TrackingConfig) {
-  const params = new URLSearchParams({
-    user: config.user,
-    token: config.token,
-    codigo: trackingCode,
-  });
-
-  const url = `${config.baseUrl}/track/json?${params}`;
-
   let response: Response;
 
   try {
-    response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
+    response = await fetch(`${config.baseUrl}/wonca.labs.v1.LabsService/Track`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Apikey ${config.apiKey}`,
+      },
+      body: JSON.stringify({ code: trackingCode, carrier: "CARRIER_CORREIOS" }),
+      signal: AbortSignal.timeout(8_000),
+    });
   } catch {
     return { delivered: false, lastEvent: "network error", lastUpdate: "" };
   }
@@ -56,17 +55,23 @@ export async function trackPackage(trackingCode: string, config: TrackingConfig)
     return { delivered: false, lastEvent: "invalid response", lastUpdate: "" };
   }
 
-  const eventos = parsed.data.eventos;
+  if (parsed.data.status !== "TRACKING_STATUS_FOUND") {
+    return { delivered: false, lastEvent: "no data", lastUpdate: "" };
+  }
+
+  const payload = parsed.data.payload;
+  const eventos = payload?.eventos;
 
   if (!eventos || eventos.length === 0) {
     return { delivered: false, lastEvent: "no data", lastUpdate: "" };
   }
 
   const latest = eventos[0];
+  const dateStr = latest.dtHrCriado?.date?.slice(0, 16) ?? "";
 
   return {
-    delivered: DELIVERED_PATTERN.test(latest.status),
-    lastEvent: latest.status,
-    lastUpdate: `${latest.data} ${latest.hora}`,
+    delivered: payload?.temEventoEntrega === true,
+    lastEvent: latest.descricao,
+    lastUpdate: dateStr,
   };
 }

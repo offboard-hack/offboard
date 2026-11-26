@@ -31,14 +31,12 @@ createApp(origin, repos, {
   sendEmail: (message) => sender.send(message),
   cronSecret: process.env.CRON_SECRET,
   webhookSecret: process.env.WEBHOOK_SECRET,
-  tracking:
-    process.env.TRACKING_USER && process.env.TRACKING_TOKEN
-      ? {
-          baseUrl: process.env.TRACKING_BASE_URL ?? "https://api.linketrack.com",
-          user: process.env.TRACKING_USER,
-          token: process.env.TRACKING_TOKEN,
-        }
-      : undefined,
+  tracking: process.env.TRACKING_API_KEY
+    ? {
+        baseUrl: process.env.TRACKING_BASE_URL ?? "https://api.wonca.com.br",
+        apiKey: process.env.TRACKING_API_KEY,
+      }
+    : undefined,
   slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
   abacatepay: createAbacatePayGateway(process.env.ABACATEPAY_API_KEY),
   abacatepayWebhookSecret: process.env.ABACATEPAY_WEBHOOK_SECRET,
