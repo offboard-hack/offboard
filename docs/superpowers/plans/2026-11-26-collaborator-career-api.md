@@ -113,6 +113,31 @@
 
 ---
 
+### Task 4: Top plan instead of the allowlist
+
+Samuel, 2026-11-26: AI Apply goes to whoever has the top plan, not an allowlist.
+
+**Files:** `apps/api/src/shared/ai-apply-access.ts` (+ test), the AI Apply gate in `features/ai-apply/routes.ts`, `GET /me` `aiApply.available` in `features/talent/routes.ts`, the runner's run-time gate re-check (`features/ai-apply/runner.ts`), `app.ts`, `worker.ts`, `server.ts`, `vercel.ts`, `apps/web/cloudflare.config.ts` (stop binding `AI_APPLY_ALLOWLIST`), `apps/api/README.md`.
+
+**Interfaces:**
+
+- `topPlanSlug = "platinum-premium"`.
+- `aiApplyAccess(profile: { aiApplyConsentAt: string | null }, plan: { slug: string; status: string } | null)` returns `"allowed"` only when consent is given **and** the profile's org has an `active` or `trialing` subscription to `topPlanSlug`. The plan is read via `@offboard/db/schema` (`subscriptions` joined to `plans` by the profile's `org_id`).
+- The allowlist, `parseAllowlist` and every `AI_APPLY_ALLOWLIST` reference are removed.
+- A run-time re-check failure cancels with reason `not_allowed` (unchanged).
+
+- [ ] Steps: failing tests:
+  - top-plan org plus consent → allowed;
+  - Gold org → 403 `{ error: "AI Apply not available" }`;
+  - canceled top-plan subscription → 403;
+  - no consent → 403;
+  - a collaborator in a top-plan org → allowed;
+  - the runner cancels a queued attempt when the org dropped from the top plan.
+
+  Then implement → gates → commit `feat(api): offer AI Apply to the top plan instead of an allowlist`.
+
+---
+
 ### Delivery
 
 - [ ] Apply 0014 to production (with Samuel's OK), then push `feat/collaborator-career-api` and open a PR against `main`. The body notes: the collaborator session now reaches `/me/*`; profiles are created on first use; migration 0014; run-now and live view; the Anthropic provider.
