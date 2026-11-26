@@ -255,7 +255,7 @@ describe("talentAccess", () => {
     }).handle(new Request("http://localhost/signed-in"));
 
     expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: "Forbidden" });
+    expect(await response.json()).toEqual({ error: "Email already in use" });
     expect(handler).not.toHaveBeenCalled();
   });
 

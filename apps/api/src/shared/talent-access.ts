@@ -42,7 +42,7 @@ export function talentAccess(deps: {
 
           const me = await deps.talent.ensureForCollaborator(collaborator, now());
 
-          if (me === "email_taken") return status(403, { error: "Forbidden" });
+          if (me === "email_taken") return status(403, { error: "Email already in use" });
 
           return { me, entitlement: collaboratorEntitlement };
         }

@@ -2245,6 +2245,45 @@ describe.skipIf(!url)("api", () => {
           await expectHidden("ana-dev");
         });
 
+        it("keeps a collaborator's page public without sponsorship or subscription", async () => {
+          const headers = await publicProfile();
+          const profileId = headers["x-test-talent-id"];
+
+          await publish(headers, "ana-dev");
+
+          const [profile] = await db
+            .update(talentProfiles)
+            .set({ sponsoredUntil: "2000-01-01" })
+            .where(eq(talentProfiles.id, profileId))
+            .returning({ caseId: talentProfiles.caseId });
+
+          const subscription = await repos.billing.getSubscription(defaultOrgId);
+
+          if (!subscription?.id || !profile.caseId) throw new Error("missing fixtures");
+
+          await repos.billing.updateSubscription(defaultOrgId, subscription.id, {
+            status: "canceled",
+          });
+
+          expect((await visit("/public/pages/ana-dev")).status).toBe(404);
+
+          await db.insert(employeeAccess).values({
+            caseId: profile.caseId,
+            orgId: defaultOrgId,
+            email: `colaboradora-${randomUUID()}@example.com`,
+            plan: emptyEmployeePlan,
+          });
+
+          expect((await visit("/public/pages/ana-dev")).status).toBe(200);
+
+          await db
+            .update(employeeAccess)
+            .set({ email: null })
+            .where(eq(employeeAccess.caseId, profile.caseId));
+
+          expect((await visit("/public/pages/ana-dev")).status).toBe(404);
+        });
+
         it("links applications to the page and counts recruiter visits", async () => {
           const headers = await publicProfile();
           const resume = await baseResume(headers);
@@ -6263,6 +6302,32 @@ describe.skipIf(!url)("api", () => {
       expect(await queued("compute_matches")).toEqual([]);
     });
 
+    it("fans out matching to collaborators without sponsorship or subscription", async () => {
+      const profileId = await matchingProfile();
+
+      const [profile] = await db
+        .update(talentProfiles)
+        .set({ sponsoredUntil: "2000-01-01" })
+        .where(eq(talentProfiles.id, profileId))
+        .returning({ caseId: talentProfiles.caseId });
+
+      const subscription = await repos.billing.getSubscription(defaultOrgId);
+
+      if (!subscription?.id || !profile.caseId) throw new Error("missing fixtures");
+
+      await repos.billing.updateSubscription(defaultOrgId, subscription.id, { status: "canceled" });
+      await db.insert(employeeAccess).values({
+        caseId: profile.caseId,
+        orgId: defaultOrgId,
+        email: `colaboradora-${randomUUID()}@example.com`,
+        plan: emptyEmployeePlan,
+      });
+
+      await sourcesApp([acme]).drainNow();
+
+      expect((await queued("compute_matches")).map((row) => row.subject)).toEqual([profileId]);
+    });
+
     it("fans out matching only to people whose sponsor is active", async () => {
       const inactiveSponsor = await matchingProfile();
 
@@ -7793,7 +7858,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       | EmployeeSettings
       | { done: boolean }
       | { code: string; received: boolean }
-      | { shareOutcomeWithHr: boolean },
+      | { shareOutcomeWithHr: boolean }
+      | { email: string; callbackURL: string },
     origin = webOrigin,
     nativeOrigin?: string,
     grantId = cookie ? grants.get(cookie) : undefined,
@@ -8966,14 +9032,6 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         email,
       });
 
-      expect(
-        await repos.employee.saveSettings(orgId, record.id, {
-          email,
-          plan: emptyEmployeePlan,
-          revision: 0,
-        }),
-      ).not.toBe("email-in-use");
-
       return { caseId: record.id, email };
     }
 
@@ -9085,7 +9143,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       expect(secondRow).toMatchObject({ orgId: secondOrg, id: otherMe.id });
     });
 
-    it("keeps a collaborator active on a lapsed profile without accepted terms", async () => {
+    it("keeps a collaborator active and accepted on a lapsed profile HR enabled", async () => {
       const orgId = await organization();
       const { caseId, email } = await collaboratorCase(orgId);
 
@@ -9103,10 +9161,16 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       expect((await request("/me/applications", "GET", cookie)).status).toBe(200);
       expect(await (await request("/me", "GET", cookie)).json()).toMatchObject({
         id: enabled.id,
-        termsAccepted: false,
+        email,
+        termsAccepted: true,
         entitlement: { kind: "sponsored", until: null },
       });
-      expect(await profilesOf(caseId)).toHaveLength(1);
+
+      const rows = await profilesOf(caseId);
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ personalEmail: email, sponsoredUntil: "2020-01-01" });
+      expect(rows[0].firstSignedInAt).not.toBeNull();
     });
 
     it("forbids a collaborator whose email another case's profile holds", async () => {
@@ -9125,6 +9189,67 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
       const cookie = await authenticate(email);
       const response = await request("/me", "GET", cookie);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "Email already in use" });
+      expect(await profilesOf(caseId)).toEqual([]);
+    });
+
+    async function rotate(orgId: string, caseId: string) {
+      const email = `rotated-${randomUUID()}@offboard.example`;
+
+      expect(
+        await repos.employee.saveSettings(orgId, caseId, {
+          email,
+          plan: emptyEmployeePlan,
+          revision: 1,
+        }),
+      ).toBe("saved");
+
+      return email;
+    }
+
+    it("ties the profile to the current grant when HR rotates it", async () => {
+      const orgId = await organization();
+      const { caseId, email: previous } = await collaboratorCase(orgId);
+      const previousCookie = await authenticate(previous);
+      const before = await request("/me", "GET", previousCookie);
+
+      expect(before.status).toBe(200);
+
+      const { id } = z.object({ id: z.uuid() }).parse(await before.json());
+      const current = await rotate(orgId, caseId);
+
+      expect((await request("/me", "GET", previousCookie)).status).toBe(401);
+      expect(await profilesOf(caseId)).toMatchObject([{ id, personalEmail: previous }]);
+
+      const link = await request("/auth/sign-in/magic-link", "POST", undefined, {
+        email: previous,
+        callbackURL: "/app",
+      });
+
+      expect(link.status).toBe(200);
+      expect(links.has(previous)).toBe(false);
+
+      const cookie = await authenticate(current);
+      const me = await request("/me", "GET", cookie);
+
+      expect(me.status).toBe(200);
+      expect(await me.json()).toMatchObject({ id, email: current });
+      expect(await profilesOf(caseId)).toMatchObject([{ id, personalEmail: current }]);
+    });
+
+    it("rejects a session whose grant moved on without creating a profile", async () => {
+      const orgId = await organization();
+      const { caseId, email } = await collaboratorCase(orgId);
+      const cookie = await authenticate(email);
+
+      await db
+        .update(employeeAccess)
+        .set({ email: `moved-${randomUUID()}@offboard.example` })
+        .where(eq(employeeAccess.caseId, caseId));
+
+      const response = await request("/me", "GET", cookie);
+
       expect(response.status).toBe(403);
       expect(await response.json()).toEqual({ error: "Forbidden" });
       expect(await profilesOf(caseId)).toEqual([]);

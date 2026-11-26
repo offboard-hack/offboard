@@ -1,7 +1,14 @@
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
-import { defaultOrgId, offboardingCases, organizations, talentProfiles } from "@offboard/db/schema";
+import {
+  defaultOrgId,
+  employeeAccess,
+  offboardingCases,
+  organizations,
+  talentProfiles,
+} from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
+import { emptyEmployeePlan } from "@offboard/employee";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -191,6 +198,91 @@ describe.skipIf(!url)("talent repository", () => {
     });
     expect(await talent.findForSignIn("pessoa@exemplo.com", missingId)).toBeUndefined();
     expect(await talent.findForSignIn("ninguem@exemplo.com")).toBeUndefined();
+
+    await db.insert(employeeAccess).values({
+      caseId: first.id,
+      orgId: defaultOrgId,
+      email: "colaboradora@exemplo.com",
+      plan: emptyEmployeePlan,
+    });
+
+    expect(await talent.findForSignIn("pessoa@exemplo.com")).toBeUndefined();
+
+    await db.update(employeeAccess).set({ email: null });
+
+    expect(await talent.findForSignIn("pessoa@exemplo.com")).toEqual({
+      id: profile.id,
+      name: first.name,
+    });
+  });
+
+  it("ensures one collaborator profile per case and follows the grant email", async () => {
+    const created = new Date("2026-06-15T02:00:00.000Z");
+    const later = new Date("2026-06-20T12:00:00.000Z");
+    const principal = { caseId: first.id, name: "Colaboradora", email: " Bia@Exemplo.com " };
+
+    const profile = await talent.ensureForCollaborator(principal, created);
+
+    if (profile === "email_taken") throw new Error(profile);
+
+    expect(profile).toMatchObject({
+      orgId: defaultOrgId,
+      caseId: first.id,
+      name: "Colaboradora",
+      email: "bia@exemplo.com",
+      sponsoredUntil: "2026-06-14",
+      termsAcceptedAt: created.toISOString(),
+      firstSignedInAt: created.toISOString(),
+    });
+
+    async function stored() {
+      const [row] = await db
+        .select()
+        .from(talentProfiles)
+        .where(eq(talentProfiles.caseId, first.id));
+
+      return row;
+    }
+
+    expect(await talent.ensureForCollaborator(principal, later)).toEqual(profile);
+    expect((await stored()).updatedAt).toEqual(created);
+
+    await db.update(talentProfiles).set({ firstSignedInAt: null });
+
+    expect(await talent.ensureForCollaborator(principal, later)).toEqual({
+      ...profile,
+      firstSignedInAt: later.toISOString(),
+    });
+
+    await db.update(talentProfiles).set({ termsAcceptedAt: null });
+
+    expect(
+      await talent.ensureForCollaborator({ ...principal, email: "Nova@Exemplo.com" }, later),
+    ).toEqual({
+      ...profile,
+      email: "nova@exemplo.com",
+      termsAcceptedAt: later.toISOString(),
+      firstSignedInAt: later.toISOString(),
+    });
+    expect((await stored()).updatedAt).toEqual(later);
+
+    await enable(second.id, "outra@exemplo.com");
+
+    expect(
+      await talent.ensureForCollaborator({ ...principal, email: "OUTRA@exemplo.com" }, later),
+    ).toBe("email_taken");
+    expect(
+      await talent.ensureForCollaborator(
+        { caseId: missingId, name: "Ninguém", email: "ninguem@exemplo.com" },
+        later,
+      ),
+    ).toBe("email_taken");
+    await expect(
+      talent.ensureForCollaborator(
+        { ...principal, email: `${"a".repeat(300)}@exemplo.com` },
+        later,
+      ),
+    ).rejects.toThrow();
   });
 
   it("isolates talent across organizations", async () => {

@@ -1,5 +1,10 @@
 import type { Database } from "@offboard/db/client";
-import { aiApplications, offboardingCases, talentProfiles } from "@offboard/db/schema";
+import {
+  aiApplications,
+  employeeAccess,
+  offboardingCases,
+  talentProfiles,
+} from "@offboard/db/schema";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { aiApplyConsentVersion } from "../../shared/ai-apply-access.js";
@@ -103,7 +108,13 @@ export function createTalentRepository(db: Database) {
     }
   }
 
-  async function ensureForCollaborator(
+  async function profileOfCase(caseId: string) {
+    const [row] = await db.select().from(talentProfiles).where(eq(talentProfiles.caseId, caseId));
+
+    return row;
+  }
+
+  async function createForCollaborator(
     principal: { caseId: string; name: string; email: string },
     now: Date,
   ) {
@@ -133,12 +144,46 @@ export function createTalentRepository(db: Database) {
       )
       .onConflictDoNothing();
 
-    const [row] = await db
-      .select()
-      .from(talentProfiles)
-      .where(eq(talentProfiles.caseId, principal.caseId));
+    return profileOfCase(principal.caseId);
+  }
 
-    return row ? toProfile(row) : ("email_taken" as const);
+  async function ensureForCollaborator(
+    principal: { caseId: string; name: string; email: string },
+    now: Date,
+  ) {
+    const email = normalizeEmail(principal.email);
+
+    const existing =
+      (await profileOfCase(principal.caseId)) ?? (await createForCollaborator(principal, now));
+
+    if (!existing) return "email_taken" as const;
+
+    if (
+      existing.personalEmail === email &&
+      existing.termsAcceptedAt !== null &&
+      existing.firstSignedInAt !== null
+    ) {
+      return toProfile(existing);
+    }
+
+    try {
+      const [row] = await db
+        .update(talentProfiles)
+        .set({
+          personalEmail: email,
+          termsAcceptedAt: sql`coalesce(${talentProfiles.termsAcceptedAt}, ${sql.param(now, talentProfiles.termsAcceptedAt)})`,
+          firstSignedInAt: sql`coalesce(${talentProfiles.firstSignedInAt}, ${sql.param(now, talentProfiles.firstSignedInAt)})`,
+          updatedAt: now,
+        })
+        .where(eq(talentProfiles.id, existing.id))
+        .returning();
+
+      return toProfile(row);
+    } catch (error) {
+      if (emailViolation.safeParse(error).success) return "email_taken" as const;
+
+      throw error;
+    }
   }
 
   async function updateAccess(
@@ -181,10 +226,12 @@ export function createTalentRepository(db: Database) {
     const [row] = await db
       .select({ id: talentProfiles.id, name: talentProfiles.name })
       .from(talentProfiles)
+      .leftJoin(employeeAccess, eq(employeeAccess.caseId, talentProfiles.caseId))
       .where(
         and(
           sql`lower(${talentProfiles.personalEmail}) = ${normalizeEmail(email)}`,
           id === undefined ? undefined : eq(talentProfiles.id, id),
+          isNull(employeeAccess.email),
         ),
       );
 

@@ -273,6 +273,7 @@ describe.skipIf(!url)("pages repository", () => {
       orgId: defaultOrgId,
       name: "Marina Lopes",
       sponsoredUntil: "2026-12-31",
+      collaborator: false,
       content: content("Base"),
     });
     expect(await repository.publicPage("marina-lopes-2")).toBeUndefined();

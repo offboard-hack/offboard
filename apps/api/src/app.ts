@@ -254,7 +254,10 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
   async function matchNewJob() {
     const profiles = await repos.matches.profilesForMatching(new Date());
-    const sponsors = [...new Set(profiles.map((profile) => profile.orgId))];
+
+    const sponsors = [
+      ...new Set(profiles.flatMap((profile) => (profile.collaborator ? [] : [profile.orgId]))),
+    ];
 
     const active = new Set(
       (
@@ -266,7 +269,9 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
     await repos.background.enqueueMany(
       "compute_matches",
-      profiles.filter((profile) => active.has(profile.orgId)).map((profile) => profile.profileId),
+      profiles
+        .filter((profile) => profile.collaborator || active.has(profile.orgId))
+        .map((profile) => profile.profileId),
     );
   }
 
