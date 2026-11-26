@@ -221,14 +221,17 @@ function SentStep({
     setPending(true);
     setFailure(null);
 
-    const result = await requestLink(email, returnPath);
+    try {
+      const result = await requestLink(email, returnPath);
 
-    setPending(false);
-    setFailure(result);
+      setFailure(result);
 
-    if (!result) {
-      setResent(true);
-      setResendAt(Date.now() + resendCooldownSeconds * 1000);
+      if (!result) {
+        setResent(true);
+        setResendAt(Date.now() + resendCooldownSeconds * 1000);
+      }
+    } finally {
+      setPending(false);
     }
   }
 
