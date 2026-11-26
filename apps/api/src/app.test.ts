@@ -15,6 +15,7 @@ import {
   answerQuestions,
   applicationPackages,
   applications,
+  authRateLimit,
   authSession,
   authUser,
   backgroundJobs,
@@ -9485,6 +9486,55 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       await repos.team.deleteTeamMember(defaultOrgId, member.id);
 
       expect((await signInMember(email, code)).status).toBe(400);
+    });
+
+    it("caps code requests per email across audiences until the window passes", async () => {
+      const email = `capped-${randomUUID()}@offboard.example`;
+      const other = `uncapped-${randomUUID()}@offboard.example`;
+
+      await repos.team.createTeamMember(defaultOrgId, { email, name: "RH", role: "rh" });
+      await repos.team.createTeamMember(defaultOrgId, { email: other, name: "RH", role: "rh" });
+
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        expect((await sendMemberCode(email.toUpperCase())).status).toBe(200);
+      }
+
+      expect((await sendMemberCode(email, { audience: "employee" })).status).toBe(200);
+      codes.delete(email);
+
+      const capped = await sendMemberCode(email);
+      expect(capped.status).toBe(429);
+      expect(capped.headers.get("cache-control")).toBe("no-store");
+      expect(codes.has(email)).toBe(false);
+
+      expect((await sendMemberCode(other)).status).toBe(200);
+      expect(codes.has(other)).toBe(true);
+
+      await db
+        .update(authRateLimit)
+        .set({ lastRequest: Date.now() - 15 * 60 * 1000 })
+        .where(sql`${authRateLimit.key} like 'offboard:code-email:%'`);
+
+      expect((await sendMemberCode(email)).status).toBe(200);
+      expect(codes.has(email)).toBe(true);
+    });
+
+    it("leaves malformed code requests to Better Auth validation", async () => {
+      requests += 1;
+
+      const response = await app.handle(
+        new Request(`${webOrigin}/api/auth/email-otp/send-verification-otp`, {
+          method: "POST",
+          headers: {
+            origin: webOrigin,
+            "content-type": "application/json",
+            "x-test-employee-ip": `203.0.113.${requests % 250}`,
+          },
+          body: "not json",
+        }),
+      );
+
+      expect(response.status).toBe(400);
     });
 
     it("refuses member codes from the native app", async () => {

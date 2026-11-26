@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import type { Database } from "@offboard/db/client";
 import {
   authAccount,
@@ -29,6 +29,8 @@ const verifyPath = "/magic-link/verify";
 const codeRequestPath = "/email-otp/send-verification-otp";
 const codeSignInPath = "/sign-in/email-otp";
 const codeLifetimeSeconds = 10 * 60;
+const codeRequestsPerEmail = 5;
+const codeRequestWindowMs = 15 * 60 * 1000;
 const signInPath = `${authPath}/sign-in/magic-link`;
 
 type Audience = "member" | "talent";
@@ -213,6 +215,35 @@ export function createAuth({
     return scope?.audience === "member"
       ? scope.member && findMember(email, scope.member.id)
       : scope?.grant && findEmployee(email, scope.grant);
+  }
+
+  async function codeRequestsExceeded(request: Request) {
+    const body = otpEmail.safeParse(
+      await request
+        .clone()
+        .json()
+        .catch(() => undefined),
+    );
+
+    if (!body.success) return false;
+
+    const key = `offboard:code-email:${createHmac("sha256", secret).update(body.data.email).digest("hex")}`;
+    const now = Date.now();
+    const expired = sql`${authRateLimit.lastRequest} <= ${now - codeRequestWindowMs}`;
+
+    const [row] = await db
+      .insert(authRateLimit)
+      .values({ id: randomUUID(), key, count: 1, lastRequest: now })
+      .onConflictDoUpdate({
+        target: authRateLimit.key,
+        set: {
+          count: sql`case when ${expired} then 1 else ${authRateLimit.count} + 1 end`,
+          lastRequest: sql`case when ${expired} then ${now} else ${authRateLimit.lastRequest} end`,
+        },
+      })
+      .returning({ count: authRateLimit.count });
+
+    return row.count > codeRequestsPerEmail;
   }
 
   async function finalizeEmployeeSession(
@@ -410,6 +441,13 @@ export function createAuth({
 
       if (native && codeAudience === "member" && codeEndpoints.has(path)) {
         return new Response(null, { status: 403 });
+      }
+
+      if (path === codeRequestPath && (await codeRequestsExceeded(request))) {
+        return Response.json(
+          { code: "TOO_MANY_REQUESTS", message: "Too many requests. Please try again later." },
+          { status: 429, headers: { "cache-control": "no-store" } },
+        );
       }
 
       let authRequest = request;
