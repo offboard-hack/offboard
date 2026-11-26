@@ -85,7 +85,7 @@ export function PlanCard({
           {paymentReceivedNote}
         </p>
       ) : null}
-      {view.pastDueNote ? <p className="text-sm text-destructive">{view.pastDueNote}</p> : null}
+      {view.statusNote ? <p className="text-sm text-destructive">{view.statusNote}</p> : null}
       {view.upgrade === "available" ? (
         <div>
           <Button onClick={onUpgrade} disabled={upgrading}>

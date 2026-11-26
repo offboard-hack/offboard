@@ -34,6 +34,9 @@ export function planPrice(cents: number) {
 
 export const pastDueNote = "Pagamento do Carreira Pro pendente. Verifique seu método de pagamento.";
 
+export const checkoutPendingNote =
+  "Pagamento do Carreira Pro em andamento. A confirmação pode levar alguns minutos.";
+
 export function isProActive(plan: Pick<CareerPlan, "individual">, today: string) {
   const { individual } = plan;
 
@@ -57,6 +60,12 @@ function upgradeState(wanted: boolean, offered: boolean) {
   return offered ? ("available" as const) : ("unavailable" as const);
 }
 
+function statusNote(pastDue: boolean, checkoutPending: boolean) {
+  if (pastDue) return pastDueNote;
+
+  return checkoutPending ? checkoutPendingNote : null;
+}
+
 function proLabel(individual: CareerPlan["individual"], active: boolean) {
   if (!active || !individual) return null;
 
@@ -74,9 +83,14 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
 
   const proActive = isProActive(plan, today);
   const pastDue = individual?.status === "past_due";
+  const checkoutPending = individual?.status === "pending" && !upgrade.offered;
 
   const wantsUpgrade =
-    !proActive && !paid && !pastDue && (aiApply.allowedBy === null || sponsorshipEnding);
+    !proActive &&
+    !paid &&
+    !pastDue &&
+    !checkoutPending &&
+    (aiApply.allowedBy === null || sponsorshipEnding);
 
   return {
     companyPlan: company.name ?? "Sua empresa não tem plano",
@@ -86,7 +100,7 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
         ? null
         : `Patrocinado pela empresa até ${planDate(company.sponsoredUntil)}`,
     paymentNote: paid && !proActive,
-    pastDueNote: pastDue ? pastDueNote : null,
+    statusNote: statusNote(pastDue, checkoutPending && !paid),
     proLine: proLabel(individual, proActive),
     upgrade: upgradeState(wantsUpgrade, upgrade.offered),
     upgradeLabel: `Fazer upgrade · ${planPrice(upgrade.priceCents)}`,

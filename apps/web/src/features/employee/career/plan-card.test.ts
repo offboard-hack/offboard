@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type CareerPlan,
+  checkoutPendingNote,
   isProActive,
   pastDueNote,
   planCardView,
@@ -32,7 +33,7 @@ describe("plan card view", () => {
       sponsorLine: "Patrocinado pela empresa até 10/03/2027",
       proLine: null,
       paymentNote: false,
-      pastDueNote: null,
+      statusNote: null,
       upgrade: "hidden",
       upgradeLabel: "Fazer upgrade · R$ 79/mês",
     });
@@ -91,7 +92,7 @@ describe("plan card view", () => {
     ).toBe("Carreira Pro ativo");
   });
 
-  it("hides the upgrade when the payment was just made but keeps it for a pending checkout", () => {
+  it("hides the upgrade while a checkout is in flight and offers it again once the API allows a retry", () => {
     const pending: CareerPlan = {
       ...base,
       aiApply: { allowedBy: null },
@@ -100,8 +101,19 @@ describe("plan card view", () => {
 
     const none: CareerPlan = { ...base, aiApply: { allowedBy: null } };
 
+    const inFlight: CareerPlan = { ...pending, upgrade: { ...base.upgrade, offered: false } };
+
     expect(planCardView(pending, today, false).upgrade).toBe("available");
     expect(planCardView(none, today, true)).toMatchObject({ upgrade: "hidden", paymentNote: true });
+    expect(planCardView(inFlight, today, false)).toMatchObject({
+      upgrade: "hidden",
+      statusNote: checkoutPendingNote,
+    });
+    expect(planCardView(inFlight, today, true)).toMatchObject({
+      upgrade: "hidden",
+      statusNote: null,
+      paymentNote: true,
+    });
   });
 
   it("keeps Carreira Pro active when the company also sponsors, until the period ends", () => {
@@ -137,7 +149,7 @@ describe("plan card view", () => {
 
     expect(planCardView(plan, today, false)).toMatchObject({
       proLine: null,
-      pastDueNote,
+      statusNote: pastDueNote,
       upgrade: "hidden",
     });
   });
