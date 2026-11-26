@@ -7,6 +7,7 @@ import {
   employeeStates,
   equipment,
   offboardingCases,
+  organizations,
 } from "@offboard/db/schema";
 import {
   emptyEmployeePlan,
@@ -95,6 +96,27 @@ export function createEmployeeRepository(db: Database) {
       : null;
   }
 
+  async function readInvitee(orgId: string, caseId: string) {
+    const [invitee] = await db
+      .select({
+        email: employeeAccess.email,
+        name: offboardingCases.name,
+        company: organizations.name,
+      })
+      .from(offboardingCases)
+      .innerJoin(organizations, eq(organizations.id, offboardingCases.orgId))
+      .leftJoin(
+        employeeAccess,
+        and(
+          eq(offboardingCases.id, employeeAccess.caseId),
+          eq(offboardingCases.orgId, employeeAccess.orgId),
+        ),
+      )
+      .where(and(eq(offboardingCases.orgId, orgId), eq(offboardingCases.id, caseId)));
+
+    return invitee;
+  }
+
   async function saveSettings(
     orgId: string,
     caseId: string,
@@ -124,7 +146,7 @@ export function createEmployeeRepository(db: Database) {
 
           await syncPlanEquipment(tx, orgId, caseId, plan.equipment);
 
-          return "saved";
+          return email ? "email-set" : "saved";
         }
 
         const [current] = await tx
@@ -191,7 +213,7 @@ export function createEmployeeRepository(db: Database) {
         );
         await syncDepartureTasks(tx, orgId, caseId, previousDeparture, currentDeparture);
 
-        return "saved";
+        return changedEmail && email ? "email-set" : "saved";
       });
     } catch (error) {
       if (error instanceof EquipmentAlreadyAssigned) return "equipment-in-use";
@@ -376,6 +398,7 @@ export function createEmployeeRepository(db: Database) {
 
   return {
     readSettings,
+    readInvitee,
     saveSettings,
     withAccess,
     listEquipmentReturns,

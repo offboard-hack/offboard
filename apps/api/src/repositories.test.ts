@@ -892,7 +892,7 @@ describe.skipIf(!url)("multi-tenant isolation", () => {
     expect(await repos.employee.readSettings(orgA, caseB)).toBeNull();
     expect(await repos.employee.readSettings(orgB, caseB)).toMatchObject({ revision: 0 });
     expect(await repos.employee.saveSettings(orgA, caseB, settings)).toBe("missing-case");
-    expect(await repos.employee.saveSettings(orgB, caseB, settings)).toBe("saved");
+    expect(await repos.employee.saveSettings(orgB, caseB, settings)).toBe("email-set");
 
     const [access] = await db.select().from(employeeAccess).where(eq(employeeAccess.caseId, caseB));
     expect(access.orgId).toBe(orgB);

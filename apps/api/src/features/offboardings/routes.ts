@@ -5,6 +5,7 @@ import { errorResponse, uniqueViolation } from "../../shared/http.js";
 import { hasBearer } from "../../shared/machine-auth.js";
 import type { ChecklistLayout } from "../../shared/checklist.js";
 import type { DispatchAction } from "../../shared/action-dispatch.js";
+import type { InviteEmployee } from "../../shared/employee-invite.js";
 import { trackPackage, type TrackingConfig } from "./correios.js";
 import type { OffboardingsRepository } from "./repository.js";
 
@@ -48,6 +49,7 @@ export function offboardingsRoutes(
   readChecklist: (orgId: string) => Promise<{ steps: ChecklistLayout }>,
   cronSecret: string | undefined,
   webhookSecret: string | undefined,
+  inviteEmployee: InviteEmployee,
   tracking?: TrackingConfig,
 ) {
   async function checkTrackedShipments() {
@@ -112,13 +114,15 @@ export function offboardingsRoutes(
     )
     .post(
       "/offboardings",
-      async ({ body, principal, set, status }) => {
+      async ({ body: { invite, ...body }, principal, set, status }) => {
         try {
           const created = await repos.createOffboarding(
             principal.orgId,
             body,
             (await readChecklist(principal.orgId)).steps,
           );
+
+          if (invite) await inviteEmployee(principal.orgId, created.id);
 
           set.status = 201;
 
@@ -139,6 +143,7 @@ export function offboardingsRoutes(
           department: text,
           deadline: t.String({ format: "date" }),
           email: t.String({ format: "email" }),
+          invite: t.Optional(t.Boolean()),
         }),
         response: { 201: caseSummary, 409: errorResponse },
       },

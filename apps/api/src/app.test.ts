@@ -221,7 +221,10 @@ describe.skipIf(!url)("api", () => {
 
   type Payload = {
     name?: string;
-    email?: string;
+    email?: string | null;
+    invite?: boolean;
+    plan?: typeof emptyEmployeePlan;
+    revision?: number;
     role?: string;
     department?: string;
     deadline?: string;
@@ -249,6 +252,7 @@ describe.skipIf(!url)("api", () => {
     path: string,
     method = "GET",
     body?: Payload | Parameters<typeof repos.actionConfigs.saveChecklist>[1],
+    target = app,
   ) {
     const encoded = body === undefined ? undefined : JSON.stringify(body);
     const headers = new Headers({ "content-type": "application/json", origin: webOrigin });
@@ -261,7 +265,7 @@ describe.skipIf(!url)("api", () => {
       return app.handle(slackRequest(encoded ?? ""));
     }
 
-    return app.handle(
+    return target.handle(
       new Request(`http://localhost/api${path}`, { method, headers, body: encoded }),
     );
   }
@@ -7747,6 +7751,106 @@ describe.skipIf(!url)("api", () => {
     expect(res.status).toBe(409);
   });
 
+  describe("employee invite", () => {
+    const person = {
+      name: "Ana Souza",
+      role: "Dev",
+      department: "Eng",
+      deadline: "2026-12-01",
+      email: "ana.convite@example.com",
+    };
+
+    const withEmployees = createApp(webOrigin, repos, {
+      ...appOptions,
+      auth: { ...auth, resolveEmployee: async () => null },
+    });
+
+    function access(path: string, method = "GET", body?: Payload) {
+      return call(`/employee-access/${path}`, method, body, withEmployees);
+    }
+
+    async function importedCase() {
+      const rows = [{ name: "Bia Lima", department: "Ops" }];
+
+      const [created] = z
+        .array(z.object({ id: z.uuid() }))
+        .parse(await (await call("/offboardings/import", "POST", { rows })).json());
+
+      return created.id;
+    }
+
+    it("invites the employee when HR asks for it on create", async () => {
+      const res = await call("/offboardings", "POST", { ...person, invite: true });
+
+      expect(res.status).toBe(201);
+      expect(invitedEmails).toEqual([person.email]);
+      expect(sentTexts[0]).toContain("Olá, Ana.");
+      expect(sentTexts[0]).toContain("Default liberou para você");
+      expect(sentTexts[0]).toContain(`${webOrigin}/colaborador/entrar`);
+    });
+
+    it("does not invite unless HR asks for it", async () => {
+      expect((await call("/offboardings", "POST", person)).status).toBe(201);
+      expect(
+        (await call("/offboardings", "POST", { ...person, email: "b@example.com", invite: false }))
+          .status,
+      ).toBe(201);
+      expect(invitedEmails).toEqual([]);
+    });
+
+    it("keeps the case when the invite cannot be sent", async () => {
+      inviteFailures.remaining = 1;
+
+      const res = await call("/offboardings", "POST", { ...person, invite: true });
+
+      expect(res.status).toBe(201);
+      expect((await call(`/offboardings/${(await res.json()).id}`)).status).toBe(200);
+      expect(invitedEmails).toEqual([]);
+    });
+
+    it("invites whenever HR sets or changes the email", async () => {
+      const target = await importedCase();
+      const plan = emptyEmployeePlan;
+
+      expect(
+        (await access(target, "PUT", { email: "a@example.com", plan, revision: 0 })).status,
+      ).toBe(200);
+      expect(
+        (await access(target, "PUT", { email: "a@example.com", plan, revision: 1 })).status,
+      ).toBe(200);
+      expect(
+        (await access(target, "PUT", { email: "b@example.com", plan, revision: 2 })).status,
+      ).toBe(200);
+      expect((await access(target, "PUT", { email: null, plan, revision: 3 })).status).toBe(200);
+      expect((await access(target, "PUT", { email: null, plan, revision: 0 })).status).toBe(409);
+      expect(invitedEmails).toEqual(["a@example.com", "b@example.com"]);
+
+      inviteFailures.remaining = 1;
+
+      expect(
+        (await access(target, "PUT", { email: "c@example.com", plan, revision: 4 })).status,
+      ).toBe(200);
+      expect(await (await access(target)).json()).toMatchObject({ email: "c@example.com" });
+    });
+
+    it("sends the invite again on request", async () => {
+      const created = await (await call("/offboardings", "POST", person)).json();
+      const target = `${created.id}/invite`;
+
+      const sent = await access(target, "POST");
+
+      expect(sent.status).toBe(200);
+      expect(await sent.json()).toEqual({ sent: true });
+      expect(invitedEmails).toEqual([person.email]);
+
+      inviteFailures.remaining = 1;
+
+      expect((await access(target, "POST")).status).toBe(502);
+      expect((await access(`${await importedCase()}/invite`, "POST")).status).toBe(409);
+      expect((await access(`${missingCaseId}/invite`, "POST")).status).toBe(404);
+    });
+  });
+
   it.each([
     { name: "", role: "Dev", department: "Eng", deadline: "2026-12-01", email: "a@b.com" },
     { name: "Ana", role: "Dev", department: "Eng", deadline: "tomorrow", email: "a@b.com" },
@@ -9843,7 +9947,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     ).toBe("saved");
     expect(
       await repos.employee.saveSettings(defaultOrgId, second.id, { email, plan, revision: 1 }),
-    ).toBe("saved");
+    ).toBe("email-set");
     expect((await signIn(email, priorCode)).status).toBe(400);
 
     await db
@@ -10448,7 +10552,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
           plan: emptyEmployeePlan,
           revision: 1,
         }),
-      ).toBe("saved");
+      ).toBe("email-set");
 
       return email;
     }

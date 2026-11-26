@@ -15,6 +15,7 @@ import type { ChecklistChange } from "./checklist.js";
 import { allReceived } from "./equipment.js";
 import type { PortalAccessPlugin } from "../../shared/access.js";
 import { isEmployeeApp, type EmployeeAuth } from "../../shared/employee-auth.js";
+import type { InviteEmployee } from "../../shared/employee-invite.js";
 import { errorResponse } from "../../shared/http.js";
 import type { EmployeeRepository } from "./repository.js";
 
@@ -40,6 +41,7 @@ export function employeeRoutes(
   resolveEmployee: EmployeeAuth | undefined,
   origin: string,
   dispatchAction: DispatchAction,
+  inviteEmployee: InviteEmployee,
 ) {
   function dispatchChanges(changes: ChecklistChange[]) {
     for (const change of changes) {
@@ -268,11 +270,37 @@ export function employeeRoutes(
         if (result === "changed")
           return status(409, { error: "Employee settings changed", code: "settings-changed" });
 
+        if (result === "email-set") await inviteEmployee(principal.orgId, params.caseId);
+
         return (
           (await repo.readSettings(principal.orgId, params.caseId)) ??
           status(404, { error: "Case not found" })
         );
       },
       { params: caseParams, body: employeeAccessSchema, permit: ["update", "Offboarding"] },
+    )
+    .post(
+      "/employee-access/:caseId/invite",
+      async ({ params, principal, status }) => {
+        const result = await inviteEmployee(principal.orgId, params.caseId);
+
+        if (result === "missing-case") return status(404, { error: "Case not found" });
+
+        if (result === "no-email") return status(409, { error: "Employee email missing" });
+
+        if (result === "failed") return status(502, { error: "Invite not sent" });
+
+        return { sent: true };
+      },
+      {
+        params: caseParams,
+        permit: ["update", "Offboarding"],
+        response: {
+          200: t.Object({ sent: t.Literal(true) }),
+          404: errorResponse,
+          409: errorResponse,
+          502: errorResponse,
+        },
+      },
     );
 }
