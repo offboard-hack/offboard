@@ -13,16 +13,17 @@ import {
 import { eq, like, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { createAuth, createRuntimeAuth } from "./auth.js";
+import { codeAudienceHeader, createAuth, createRuntimeAuth } from "./auth.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const origin = "https://offboard.example";
 
-describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
+describe.skipIf(!databaseUrl)("invite-only sign-in with PostgreSQL", () => {
   if (!databaseUrl) return;
   const db = createClient(databaseUrl);
   const { team: repos, talent, account } = createRepositories(db);
   const delivered = new Map<string, string>();
+  const codes = new Map<string, string>();
 
   const auth = createAuth({
     db,
@@ -34,10 +35,16 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
 
       return Promise.resolve();
     },
+    sendCode({ email, code }) {
+      codes.set(email, code);
+
+      return Promise.resolve();
+    },
   });
 
   beforeEach(async () => {
     delivered.clear();
+    codes.clear();
 
     await db.delete(authRateLimit).where(like(authRateLimit.key, "127.0.0.1|%"));
   });
@@ -48,10 +55,7 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
   function magicLinkRequest(
     email: string,
     baseUrl: string,
-    {
-      headers,
-      callbackURL = "/desligamentos",
-    }: { headers?: HeadersInit; callbackURL?: string } = {},
+    { headers, callbackURL = "/app" }: { headers?: HeadersInit; callbackURL?: string } = {},
   ) {
     const requestHeaders = new Headers(headers);
     requestHeaders.set("content-type", "application/json");
@@ -106,6 +110,30 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     return auth.handler(new Request(url));
   }
 
+  function memberCodeRequest(
+    path: string,
+    body: { email: string; type: "sign-in" } | { email: string; otp?: string },
+  ) {
+    return auth.handler(
+      new Request(`${origin}/api/auth${path}`, {
+        method: "POST",
+        headers: { origin, "content-type": "application/json", [codeAudienceHeader]: "member" },
+        body: JSON.stringify(body),
+      }),
+    );
+  }
+
+  async function memberSession(email: string) {
+    expect(
+      (await memberCodeRequest("/email-otp/send-verification-otp", { email, type: "sign-in" }))
+        .status,
+    ).toBe(200);
+
+    return sessionHeaders(
+      await memberCodeRequest("/sign-in/email-otp", { email, otp: codes.get(email) }),
+    );
+  }
+
   function sessionHeaders(response: Response) {
     const cookie = response.headers
       .getSetCookie()
@@ -118,14 +146,9 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     return new Headers({ cookie: cookie?.split(";")[0] ?? "" });
   }
 
-  it("only sends to invited members and rejects reuse, revoked invitations and revoked sessions", async () => {
+  it("sends app links only to enabled profiles and rejects reuse and revoked sessions", async () => {
     const email = `invite-${randomUUID()}@offboard.example`;
-
-    const member = await repos.createTeamMember(defaultOrgId, {
-      name: "Pessoa convidada",
-      email,
-      role: "rh",
-    });
+    const profile = await enableTalent(email);
 
     expect(
       (await requestLink(email, undefined, { origin: "https://another.example" })).status,
@@ -142,40 +165,19 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     expect(await invited.json()).toEqual(await uninvited.json());
 
     const accepted = await verify(mixedCase);
-    expect(accepted.headers.get("location")).toBe(`${origin}/desligamentos`);
-    const headers = sessionHeaders(accepted);
-    expect(await auth.resolvePrincipal(headers)).toEqual({
-      kind: "authenticated",
-      principal: { ...member, orgId: defaultOrgId },
-    });
+    expect(accepted.headers.get("location")).toBe(`${origin}/app`);
+    const principal = { kind: "talent", profile: { id: profile.id, name: profile.name, email } };
+    expect(await auth.resolvePrincipal(sessionHeaders(accepted))).toEqual(principal);
 
     const reused = await verify(mixedCase);
     expect(reused.headers.get("location")).toMatch(/\/entrar\?error=/);
     expect(reused.headers.getSetCookie()).toHaveLength(0);
 
     expect((await requestLink(email)).status).toBe(200);
-    expect(await repos.deleteTeamMember(defaultOrgId, member.id)).toBe(true);
-    expect(await auth.resolvePrincipal(headers)).toEqual({ kind: "forbidden" });
-
-    const reinstated = await repos.createTeamMember(defaultOrgId, {
-      name: member.name,
-      email,
-      role: "visualizador",
-    });
-
-    expect(await auth.resolvePrincipal(headers)).toEqual({ kind: "forbidden" });
-    const obsolete = await verify(email);
-    expect(obsolete.headers.get("location")).toMatch(/\/entrar\?error=/);
-    expect(obsolete.headers.getSetCookie()).toHaveLength(0);
-
-    expect((await requestLink(email)).status).toBe(200);
     const renewed = await verify(email, true);
     expect(renewed.headers.get("location")).toBe(`${origin}/`);
     const renewedHeaders = sessionHeaders(renewed);
-    expect(await auth.resolvePrincipal(renewedHeaders)).toEqual({
-      kind: "authenticated",
-      principal: { ...reinstated, orgId: defaultOrgId },
-    });
+    expect(await auth.resolvePrincipal(renewedHeaders)).toEqual(principal);
 
     await db.update(authUser).set({ emailVerified: false }).where(eq(authUser.email, email));
     expect(await auth.resolvePrincipal(renewedHeaders)).toEqual({ kind: "forbidden" });
@@ -189,8 +191,8 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
 
     expect(signOut.status).toBe(200);
     expect(await auth.resolvePrincipal(renewedHeaders)).toEqual({ kind: "anonymous" });
-    expect(await repos.deleteTeamMember(defaultOrgId, reinstated.id)).toBe(true);
 
+    expect((await requestLink(email)).status).toBe(200);
     expect((await requestLink(email)).status).toBe(200);
 
     const rateLimited = await requestLink(email, undefined, { "x-forwarded-for": "192.0.2.53" });
@@ -206,15 +208,10 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     expect(malformed.headers.getSetCookie()).toHaveLength(0);
 
     const email = `revoked-${randomUUID()}@offboard.example`;
-
-    const member = await repos.createTeamMember(defaultOrgId, {
-      name: "Pessoa removida",
-      email,
-      role: "rh",
-    });
+    const profile = await enableTalent(email);
 
     expect((await requestLink(email)).status).toBe(200);
-    expect(await repos.deleteTeamMember(defaultOrgId, member.id)).toBe(true);
+    await db.delete(talentProfiles).where(eq(talentProfiles.id, profile.id));
 
     const revoked = await verify(email);
     expect(revoked.headers.get("location")).toMatch(/\/entrar\?error=/);
@@ -228,14 +225,28 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     expect(users).toHaveLength(0);
   });
 
+  it("refuses a pending link for a returning user whose profile changed", async () => {
+    const email = `returning-${randomUUID()}@offboard.example`;
+    const profile = await enableTalent(email);
+
+    expect((await requestLink(email)).status).toBe(200);
+    sessionHeaders(await verify(email));
+
+    expect((await requestLink(email)).status).toBe(200);
+
+    await db
+      .update(talentProfiles)
+      .set({ personalEmail: `moved-${randomUUID()}@offboard.example` })
+      .where(eq(talentProfiles.id, profile.id));
+
+    const refused = await verify(email);
+    expect(refused.headers.get("location")).toMatch(/\/entrar\?error=/);
+    expect(refused.headers.getSetCookie()).toHaveLength(0);
+  });
+
   it("confirms a deferred magic link request before the provider finishes sending", async () => {
     const email = `worker-${randomUUID()}@offboard.example`;
-
-    const member = await repos.createTeamMember(defaultOrgId, {
-      name: "Pessoa de teste",
-      email,
-      role: "rh",
-    });
+    await enableTalent(email);
 
     const background: Promise<void>[] = [];
     const messages: string[] = [];
@@ -319,7 +330,6 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
 
       await Promise.allSettled(background);
       await new Promise<void>((resolve) => server.close(() => resolve()));
-      await repos.deleteTeamMember(defaultOrgId, member.id);
     }
   });
 
@@ -346,12 +356,7 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     const email = `unverified-${randomUUID()}@offboard.example`;
     const trigger = `unverify_${randomUUID().replaceAll("-", "")}`;
 
-    const member = await repos.createTeamMember(defaultOrgId, {
-      name: "Pessoa sem verificação",
-      email,
-      role: "rh",
-    });
-
+    await enableTalent(email);
     await db.insert(authUser).values({ id: `user-${trigger}`, name: "Pessoa", email });
     await db.execute(
       sql.raw(
@@ -375,7 +380,6 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
       await db.execute(sql.raw(`DROP TRIGGER ${trigger} ON auth_user`));
       await db.execute(sql.raw(`DROP FUNCTION ${trigger}()`));
       await db.delete(authUser).where(eq(authUser.email, email));
-      await repos.deleteTeamMember(defaultOrgId, member.id);
     }
   });
 
@@ -390,15 +394,17 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
 
     const profile = await enableTalent(email);
 
-    expect((await requestLink(email)).status).toBe(200);
-    const portal = await verify(email);
-    expect(portal.headers.get("location")).toBe(`${origin}/desligamentos`);
+    expect((await requestLink(email, "/desligamentos")).status).toBe(404);
+    expect(delivered.size).toBe(0);
 
-    expect((await requestLink(email, "/app")).status).toBe(200);
+    const portal = await memberSession(email);
+
+    expect((await requestLink(email)).status).toBe(200);
+    expect(delivered.get(email)).toContain(`token=t.${profile.id}.`);
     const app = await verify(email);
     expect(app.headers.get("location")).toBe(`${origin}/app`);
 
-    expect(await auth.resolvePrincipal(sessionHeaders(portal))).toEqual({
+    expect(await auth.resolvePrincipal(portal)).toEqual({
       kind: "authenticated",
       principal: { ...member, orgId: defaultOrgId },
     });
@@ -411,7 +417,7 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     expect(await repos.deleteTeamMember(defaultOrgId, member.id)).toBe(true);
   });
 
-  it("does not send app links to unknown or member-only emails", async () => {
+  it("sends no link to unknown or member-only emails and refuses portal links", async () => {
     const memberEmail = `member-only-${randomUUID()}@offboard.example`;
     const talentEmail = `talent-only-${randomUUID()}@offboard.example`;
 
@@ -423,19 +429,15 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
 
     await enableTalent(talentEmail);
 
-    const unknown = await requestLink(`unknown-${randomUUID()}@offboard.example`, "/app");
-    const memberOnly = await requestLink(memberEmail, "/app");
-    const talentOnly = await requestLink(talentEmail);
+    const unknown = await requestLink(`unknown-${randomUUID()}@offboard.example`);
+    const memberOnly = await requestLink(memberEmail);
+    const portal = await requestLink(talentEmail, "/desligamentos");
     const outsideApp = await requestLink(talentEmail, "/apple");
 
-    expect([unknown.status, memberOnly.status, talentOnly.status, outsideApp.status]).toEqual([
-      200, 200, 200, 200,
+    expect([unknown.status, memberOnly.status, portal.status, outsideApp.status]).toEqual([
+      200, 200, 404, 404,
     ]);
-
-    const body = await unknown.json();
-    expect(await memberOnly.json()).toEqual(body);
-    expect(await talentOnly.json()).toEqual(body);
-    expect(await outsideApp.json()).toEqual(body);
+    expect(await memberOnly.json()).toEqual(await unknown.json());
 
     const unreadable = await auth.handler(
       new Request(`${origin}/api/auth/sign-in/magic-link`, {
@@ -445,7 +447,7 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
       }),
     );
 
-    expect(unreadable.status).toBe(400);
+    expect(unreadable.status).toBe(404);
     expect(delivered.size).toBe(0);
     expect(await repos.deleteTeamMember(defaultOrgId, member.id)).toBe(true);
   });
@@ -516,10 +518,9 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
 
     const profile = await enableTalent(email);
 
-    expect((await requestLink(email)).status).toBe(200);
-    const portal = sessionHeaders(await verify(email));
+    const portal = await memberSession(email);
 
-    expect((await requestLink(email, "/app")).status).toBe(200);
+    expect((await requestLink(email)).status).toBe(200);
     const app = sessionHeaders(await verify(email));
 
     expect(await account.deleteProfile(profile.id)).toBe(true);
@@ -530,8 +531,7 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
     });
     expect(await auth.resolvePrincipal(app)).toEqual({ kind: "anonymous" });
 
-    expect((await requestLink(email)).status).toBe(200);
-    expect(await auth.resolvePrincipal(sessionHeaders(await verify(email)))).toEqual({
+    expect(await auth.resolvePrincipal(await memberSession(email))).toEqual({
       kind: "authenticated",
       principal: { ...member, orgId: defaultOrgId },
     });
@@ -580,36 +580,27 @@ describe.skipIf(!databaseUrl)("invite-only magic links with PostgreSQL", () => {
       expect(runtime.origin).toBe("https://preview.offboard.example");
 
       const email = `runtime-${randomUUID()}@offboard.example`;
+      await enableTalent(email);
 
-      const member = await repos.createTeamMember(defaultOrgId, {
-        name: "Pessoa de teste",
-        email,
-        role: "rh",
-      });
+      const sent = await runtime.auth.handler(magicLinkRequest(email, runtime.origin));
+      expect(sent.status).toBe(200);
 
-      try {
-        const sent = await runtime.auth.handler(magicLinkRequest(email, runtime.origin));
-        expect(sent.status).toBe(200);
+      const message = z
+        .object({ to: z.string(), subject: z.string(), text: z.string(), html: z.string() })
+        .parse(JSON.parse(messages[0]));
 
-        const message = z
-          .object({ to: z.string(), subject: z.string(), text: z.string(), html: z.string() })
-          .parse(JSON.parse(messages[0]));
+      const link = z.url().parse(message.text.split("\n\n")[2]);
+      const { origin: linkOrigin, pathname } = new URL(link);
+      const href = `href="${link.replaceAll("&", "&amp;")}"`;
 
-        const link = z.url().parse(message.text.split("\n\n")[2]);
-        const { origin: linkOrigin, pathname } = new URL(link);
-        const href = `href="${link.replaceAll("&", "&amp;")}"`;
+      expect(message.to).toBe(email);
+      expect(message.subject).toBe("Seu link de acesso ao Offboard");
+      expect(linkOrigin + pathname).toBe(`${runtime.origin}/api/auth/magic-link/verify`);
+      expect(message.html.match(/href="[^"]+"/g)).toEqual([href, href]);
+      expect(message.html).toContain(`src="${runtime.origin}/apple-touch-icon.png"`);
 
-        expect(message.to).toBe(email);
-        expect(message.subject).toBe("Seu link de acesso ao Offboard");
-        expect(linkOrigin + pathname).toBe(`${runtime.origin}/api/auth/magic-link/verify`);
-        expect(message.html.match(/href="[^"]+"/g)).toEqual([href, href]);
-        expect(message.html).toContain(`src="${runtime.origin}/apple-touch-icon.png"`);
-
-        const rejected = await runtime.auth.handler(magicLinkRequest(email, runtime.origin));
-        expect(rejected.status).toBe(500);
-      } finally {
-        await repos.deleteTeamMember(defaultOrgId, member.id);
-      }
+      const rejected = await runtime.auth.handler(magicLinkRequest(email, runtime.origin));
+      expect(rejected.status).toBe(500);
 
       vi.stubEnv("BETTER_AUTH_URL", "https://portal.offboard.example/");
       expect(createRuntimeAuth(db, talent).origin).toBe("https://portal.offboard.example");

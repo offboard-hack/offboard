@@ -8932,19 +8932,9 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
     await repos.team.createTeamMember(defaultOrgId, { email: admin, name: "RH", role: "admin" });
 
-    expect(
-      (await request("/auth/sign-in/magic-link", "POST", undefined, { email: admin })).status,
-    ).toBe(200);
-    const link = links.get(admin);
+    expect((await sendMemberCode(admin)).status).toBe(200);
 
-    if (!link) throw new Error("No HR link delivered");
-
-    const verified = await app.handle(new Request(link));
-
-    const hrCookie = verified.headers
-      .getSetCookie()
-      .find((value) => value.includes("session_token="))
-      ?.split(";")[0];
+    const hrCookie = sessionCookie(await signInMember(admin, deliveredCode(admin)));
 
     expect(hrCookie).toBeTruthy();
     expect((await request("/employee/session", "GET", hrCookie)).status).toBe(401);
@@ -9347,63 +9337,63 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     });
   });
 
+  function memberRequest(
+    path: string,
+    body: { email: string; type: "sign-in" } | { email: string; otp: string },
+    { audience = "member", native = false }: { audience?: string; native?: boolean } = {},
+  ) {
+    requests += 1;
+
+    const headers = new Headers({
+      "x-test-employee-ip": `198.51.100.${requests % 250}`,
+      "content-type": "application/json",
+      [codeAudienceHeader]: audience,
+    });
+
+    if (native) headers.set("expo-origin", "offboard://");
+    else headers.set("origin", webOrigin);
+
+    return app.handle(
+      new Request(`${webOrigin}/api/auth${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      }),
+    );
+  }
+
+  function sendMemberCode(email: string, options?: { audience?: string; native?: boolean }) {
+    return memberRequest("/email-otp/send-verification-otp", { email, type: "sign-in" }, options);
+  }
+
+  function signInMember(
+    email: string,
+    otp: string,
+    options?: { audience?: string; native?: boolean },
+  ) {
+    return memberRequest("/sign-in/email-otp", { email, otp }, options);
+  }
+
+  function sessionCookie(response: Response) {
+    return (
+      response.headers
+        .getSetCookie()
+        .find((value) => value.includes("session_token="))
+        ?.split(";")[0] ?? ""
+    );
+  }
+
+  function deliveredCode(email: string) {
+    const code = codes.get(email);
+
+    if (!code) throw new Error("No code delivered");
+
+    codes.delete(email);
+
+    return code;
+  }
+
   describe("HR sign-in with a code", () => {
-    function memberRequest(
-      path: string,
-      body: { email: string; type: "sign-in" } | { email: string; otp: string },
-      { audience = "member", native = false }: { audience?: string; native?: boolean } = {},
-    ) {
-      requests += 1;
-
-      const headers = new Headers({
-        "x-test-employee-ip": `198.51.100.${requests % 250}`,
-        "content-type": "application/json",
-        [codeAudienceHeader]: audience,
-      });
-
-      if (native) headers.set("expo-origin", "offboard://");
-      else headers.set("origin", webOrigin);
-
-      return app.handle(
-        new Request(`${webOrigin}/api/auth${path}`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-        }),
-      );
-    }
-
-    function sendMemberCode(email: string, options?: { audience?: string; native?: boolean }) {
-      return memberRequest("/email-otp/send-verification-otp", { email, type: "sign-in" }, options);
-    }
-
-    function signInMember(
-      email: string,
-      otp: string,
-      options?: { audience?: string; native?: boolean },
-    ) {
-      return memberRequest("/sign-in/email-otp", { email, otp }, options);
-    }
-
-    function sessionCookie(response: Response) {
-      return (
-        response.headers
-          .getSetCookie()
-          .find((value) => value.includes("session_token="))
-          ?.split(";")[0] ?? ""
-      );
-    }
-
-    function deliveredCode(email: string) {
-      const code = codes.get(email);
-
-      if (!code) throw new Error("No code delivered");
-
-      codes.delete(email);
-
-      return code;
-    }
-
     it("signs a team member into the portal and never into the employee journey", async () => {
       const email = `member-${randomUUID()}@offboard.example`;
 
@@ -9425,6 +9415,9 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       expect(session.status).toBe(200);
       expect(await session.json()).toMatchObject({ id: member.id, email });
       expect((await request("/employee/session", "GET", cookie)).status).toBe(401);
+
+      await repos.team.deleteTeamMember(defaultOrgId, member.id);
+      expect((await request("/session", "GET", cookie)).status).toBe(403);
     });
 
     it("sends nothing to unknown emails and rejects any code for them", async () => {

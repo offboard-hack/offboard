@@ -33,12 +33,6 @@ const codeRequestsPerEmail = 5;
 const codeRequestWindowMs = 15 * 60 * 1000;
 const signInPath = `${authPath}/sign-in/magic-link`;
 
-type Audience = "member" | "talent";
-
-const audienceScope = new AsyncLocalStorage<Audience>();
-const audiences = { m: "member", t: "talent" } as const;
-const tokenPrefixes = { member: "m", talent: "t" } as const;
-
 const browserEndpoints = new Set([
   `GET ${authPath}${verifyPath}`,
   `POST ${authPath}/sign-in/magic-link`,
@@ -77,8 +71,8 @@ const authSecret = z.string().min(32);
 const linkToken = z
   .string()
   .transform((token) => token.split("."))
-  .pipe(z.tuple([z.enum(["m", "t"]), z.uuid(), z.string().min(1)]))
-  .transform(([prefix, id]) => ({ audience: audiences[prefix], id }));
+  .pipe(z.tuple([z.literal("t"), z.uuid(), z.string().min(1)]))
+  .transform(([, id]) => id);
 
 const callbackQuery = z.object({ token: linkToken });
 const callbackContext = z.object({ query: callbackQuery });
@@ -101,15 +95,13 @@ type TalentDirectory = {
   markSignedIn(id: string): Promise<void>;
 };
 
-async function requestAudience(request: Request, pathname: string) {
-  if (pathname !== signInPath) return "member";
-
+async function isAppSignIn(request: Request) {
   const body = await request
     .clone()
     .json()
     .catch(() => undefined);
 
-  return appCallback.safeParse(body).success ? "talent" : "member";
+  return appCallback.safeParse(body).success;
 }
 
 export function createAuth({
@@ -154,11 +146,6 @@ export function createAuth({
 
     return member;
   }
-
-  const invitees = {
-    member: findMember,
-    talent: (email: string, id?: string) => talent.findForSignIn(email, id),
-  };
 
   const normalizedEmployeeEmail = sql<string>`lower(${employeeAccess.email})`;
 
@@ -329,8 +316,8 @@ export function createAuth({
               return { data: { name, image: null } };
             }
 
-            const { audience, id } = callbackContext.parse(context).query.token;
-            const invitee = await invitees[audience](user.email, id);
+            const profileId = callbackContext.parse(context).query.token;
+            const invitee = await talent.findForSignIn(user.email, profileId);
 
             return invitee ? { data: { name: invitee.name } } : false;
           },
@@ -353,7 +340,7 @@ export function createAuth({
               };
             }
 
-            const { audience, id } = callbackContext.parse(context).query.token;
+            const profileId = callbackContext.parse(context).query.token;
 
             const [user] = await db
               .select({ email: authUser.email })
@@ -362,14 +349,9 @@ export function createAuth({
 
             if (!user) return false;
 
-            const invitee = await invitees[audience](user.email, id);
+            const invitee = await talent.findForSignIn(user.email, profileId);
 
-            if (!invitee) return false;
-
-            return {
-              data:
-                audience === "member" ? { memberId: invitee.id } : { talentProfileId: invitee.id },
-            };
+            return invitee ? { data: { talentProfileId: invitee.id } } : false;
           },
           async after(session) {
             const created = talentSession.safeParse(session);
@@ -405,15 +387,14 @@ export function createAuth({
         expiresIn: signInLinkMinutes * 60,
         storeToken: "hashed",
         async generateToken(email) {
-          const audience = audienceScope.getStore() === "talent" ? "talent" : "member";
-          const invitee = await invitees[audience](email);
+          const invitee = await talent.findForSignIn(email);
 
-          return `${tokenPrefixes[audience]}.${invitee?.id ?? "uninvited"}.${randomBytes(32).toString("base64url")}`;
+          return `t.${invitee?.id ?? "uninvited"}.${randomBytes(32).toString("base64url")}`;
         },
         async sendMagicLink({ email, token, url }) {
           const link = linkToken.safeParse(token);
 
-          if (link.success && (await invitees[link.data.audience](email, link.data.id))) {
+          if (link.success && (await talent.findForSignIn(email, link.data))) {
             await sendLink({ email, url });
           }
         },
@@ -471,25 +452,26 @@ export function createAuth({
         authRequest = new Request(url, request);
       }
 
-      const audience = await requestAudience(request, url.pathname);
+      if (url.pathname === signInPath && !(await isAppSignIn(request))) {
+        return new Response(null, { status: 404 });
+      }
+
       const scope: CodeScope = { audience: codeAudience, grant: null, member: undefined };
 
-      const response = await audienceScope.run(audience, () =>
-        codeScope.run(scope, async () => {
-          const result = await auth.handler(authRequest);
+      const response = await codeScope.run(scope, async () => {
+        const result = await auth.handler(authRequest);
 
-          if (
-            path === codeSignInPath &&
-            result.ok &&
-            scope.grant &&
-            !(await finalizeEmployeeSession(scope.grant))
-          ) {
-            return Response.json({ code: "INVALID_OTP", message: "Invalid OTP" }, { status: 400 });
-          }
+        if (
+          path === codeSignInPath &&
+          result.ok &&
+          scope.grant &&
+          !(await finalizeEmployeeSession(scope.grant))
+        ) {
+          return Response.json({ code: "INVALID_OTP", message: "Invalid OTP" }, { status: 400 });
+        }
 
-          return result;
-        }),
-      );
+        return result;
+      });
 
       const headers = new Headers(response.headers);
       headers.set("cache-control", "no-store");
