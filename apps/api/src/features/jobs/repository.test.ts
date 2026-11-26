@@ -149,10 +149,7 @@ describe.skipIf(!url)("jobs repository", () => {
         { profileId: otherProfileId, jobId: otherApplied.id },
       ]);
 
-      const result = await repository.listForTalent(profileId, {
-        page: 1,
-        pageSize: 10,
-      });
+      const result = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
 
       expect(result.total).toBe(6);
       expect(result.items.map((job) => job.title)).toEqual([
@@ -180,10 +177,7 @@ describe.skipIf(!url)("jobs repository", () => {
         false,
       ]);
 
-      const other = await repository.listForTalent(otherProfileId, {
-        page: 1,
-        pageSize: 10,
-      });
+      const other = await repository.listForTalent(otherProfileId, { page: 1, pageSize: 10 });
 
       expect(other.items.map((job) => job.title).slice(0, 1)).toEqual(["newest"]);
       expect(other.items[0].applied).toBe(true);
@@ -196,16 +190,10 @@ describe.skipIf(!url)("jobs repository", () => {
         description: "Vaga <b>backend</b>\n\nRemoto",
         postedAt: new Date("2026-05-01T00:00:00Z"),
       });
-      await insert("acme", {
-        source: "greenhouse",
-        postedAt: new Date("2026-04-01T00:00:00Z"),
-      });
+      await insert("acme", { source: "greenhouse", postedAt: new Date("2026-04-01T00:00:00Z") });
       await insert("acme:43", { postedAt: new Date("2026-03-01T00:00:00Z") });
 
-      const result = await repository.listForTalent(profileId, {
-        page: 1,
-        pageSize: 10,
-      });
+      const result = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
 
       expect(
         result.items.map(({ title, aiApplyCapable, description }) => ({
@@ -214,11 +202,7 @@ describe.skipIf(!url)("jobs repository", () => {
           description,
         })),
       ).toEqual([
-        {
-          title: "acme:42",
-          aiApplyCapable: true,
-          description: "Vaga <b>backend</b>\n\nRemoto",
-        },
+        { title: "acme:42", aiApplyCapable: true, description: "Vaga <b>backend</b>\n\nRemoto" },
         { title: "acme", aiApplyCapable: false, description: "" },
         { title: "acme:43", aiApplyCapable: false, description: "" },
       ]);
@@ -241,15 +225,9 @@ describe.skipIf(!url)("jobs repository", () => {
 
       expect(row.micro.endsWith("456")).toBe(true);
 
-      const result = await repository.listForTalent(profileId, {
-        page: 1,
-        pageSize: 10,
-      });
+      const result = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
 
-      expect(result.items[0].match).toEqual({
-        score: 70,
-        reasons: ["motivo job"],
-      });
+      expect(result.items[0].match).toEqual({ score: 70, reasons: ["motivo job"] });
     });
 
     it("falls back to the created time when the résumé was never updated", async () => {
@@ -269,10 +247,7 @@ describe.skipIf(!url)("jobs repository", () => {
         .set({ resumeUpdatedAt: row.createdAt ?? new Date(0) })
         .where(eq(jobMatches.profileId, profileId));
 
-      const result = await repository.listForTalent(profileId, {
-        page: 1,
-        pageSize: 10,
-      });
+      const result = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
 
       expect(result.items[0].match?.score).toBe(70);
     });
@@ -282,23 +257,14 @@ describe.skipIf(!url)("jobs repository", () => {
       await match(profileId, "job", 70);
       await db.delete(resumes).where(eq(resumes.profileId, profileId));
 
-      const result = await repository.listForTalent(profileId, {
-        page: 1,
-        pageSize: 10,
-      });
+      const result = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
 
       expect(result.items[0].match).toBeNull();
     });
 
     it("filters by work model and paginates", async () => {
-      await insert("old", {
-        postedAt: new Date("2026-01-01T00:00:00Z"),
-        workModel: "remote",
-      });
-      await insert("new", {
-        postedAt: new Date("2026-03-01T00:00:00Z"),
-        workModel: "hybrid",
-      });
+      await insert("old", { postedAt: new Date("2026-01-01T00:00:00Z"), workModel: "remote" });
+      await insert("new", { postedAt: new Date("2026-03-01T00:00:00Z"), workModel: "hybrid" });
       await insert("undated", { workModel: "remote" });
 
       const remote = await repository.listForTalent(profileId, {
@@ -310,10 +276,7 @@ describe.skipIf(!url)("jobs repository", () => {
       expect(remote.total).toBe(2);
       expect(remote.items.map((job) => job.title)).toEqual(["old", "undated"]);
 
-      const second = await repository.listForTalent(profileId, {
-        page: 2,
-        pageSize: 1,
-      });
+      const second = await repository.listForTalent(profileId, { page: 2, pageSize: 1 });
 
       expect(second.total).toBe(3);
       expect(second.items.map((job) => job.title)).toEqual(["old"]);
@@ -376,45 +339,25 @@ describe.skipIf(!url)("jobs repository", () => {
     });
 
     it("reports whether matches are being computed for this profile", async () => {
-      const idle = await repository.listForTalent(profileId, {
-        page: 1,
-        pageSize: 10,
-      });
+      const idle = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
 
       expect(idle.matching).toBe(false);
 
       await db.insert(backgroundJobs).values([
-        {
-          kind: "compute_matches",
-          subject: otherProfileId,
-          runAfter: new Date(),
-        },
-        {
-          kind: "compute_matches",
-          subject: profileId,
-          status: "done",
-          runAfter: new Date(),
-        },
+        { kind: "compute_matches", subject: otherProfileId, runAfter: new Date() },
+        { kind: "compute_matches", subject: profileId, status: "done", runAfter: new Date() },
         { kind: "score_resume", subject: profileId, runAfter: new Date() },
       ]);
 
-      const other = await repository.listForTalent(profileId, {
-        page: 1,
-        pageSize: 10,
-      });
+      const other = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
 
       expect(other.matching).toBe(false);
 
-      await db.insert(backgroundJobs).values({
-        kind: "compute_matches",
-        subject: profileId,
-        runAfter: new Date(),
-      });
+      await db
+        .insert(backgroundJobs)
+        .values({ kind: "compute_matches", subject: profileId, runAfter: new Date() });
 
-      const pending = await repository.listForTalent(profileId, {
-        page: 1,
-        pageSize: 10,
-      });
+      const pending = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
 
       expect(pending.matching).toBe(true);
 
@@ -423,10 +366,7 @@ describe.skipIf(!url)("jobs repository", () => {
         .set({ status: "running" })
         .where(eq(backgroundJobs.subject, profileId));
 
-      const running = await repository.listForTalent(profileId, {
-        page: 1,
-        pageSize: 10,
-      });
+      const running = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
 
       expect(running.matching).toBe(true);
 
@@ -447,10 +387,7 @@ describe.skipIf(!url)("jobs repository", () => {
       }
 
       async function fits() {
-        const result = await repository.listForTalent(profileId, {
-          page: 1,
-          pageSize: 50,
-        });
+        const result = await repository.listForTalent(profileId, { page: 1, pageSize: 50 });
 
         return Object.fromEntries(result.items.map((job) => [job.title, job.fitsPreferences]));
       }
@@ -465,26 +402,14 @@ describe.skipIf(!url)("jobs repository", () => {
       }
 
       it("hides rejected jobs", async () => {
-        await insert("keep", {
-          workModel: "remote",
-          postedAt: new Date("2026-03-01T00:00:00Z"),
-        });
-        await insert("drop", {
-          workModel: "remote",
-          postedAt: new Date("2026-02-01T00:00:00Z"),
-        });
-        await insert("other", {
-          workModel: "hybrid",
-          postedAt: new Date("2026-01-01T00:00:00Z"),
-        });
+        await insert("keep", { workModel: "remote", postedAt: new Date("2026-03-01T00:00:00Z") });
+        await insert("drop", { workModel: "remote", postedAt: new Date("2026-02-01T00:00:00Z") });
+        await insert("other", { workModel: "hybrid", postedAt: new Date("2026-01-01T00:00:00Z") });
         await match(profileId, "drop", 99);
         await reject("drop");
         await reject("other", otherProfileId);
 
-        const listed = await repository.listForTalent(profileId, {
-          page: 1,
-          pageSize: 10,
-        });
+        const listed = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
 
         expect(listed.total).toBe(2);
         expect(listed.items.map((job) => job.title)).toEqual(["keep", "other"]);
@@ -498,10 +423,7 @@ describe.skipIf(!url)("jobs repository", () => {
         expect(remote.total).toBe(1);
         expect(remote.items.map((job) => job.title)).toEqual(["keep"]);
 
-        const paged = await repository.listForTalent(profileId, {
-          page: 2,
-          pageSize: 1,
-        });
+        const paged = await repository.listForTalent(profileId, { page: 2, pageSize: 1 });
 
         expect(paged.total).toBe(2);
         expect(paged.items.map((job) => job.title)).toEqual(["other"]);
@@ -509,14 +431,8 @@ describe.skipIf(!url)("jobs repository", () => {
       });
 
       it("keeps the existing order and fits everything without preferences", async () => {
-        await insert("a", {
-          postedAt: new Date("2026-01-01T00:00:00Z"),
-          workModel: "onsite",
-        });
-        await insert("b", {
-          postedAt: new Date("2026-02-01T00:00:00Z"),
-          company: "Zed",
-        });
+        await insert("a", { postedAt: new Date("2026-01-01T00:00:00Z"), workModel: "onsite" });
+        await insert("b", { postedAt: new Date("2026-02-01T00:00:00Z"), company: "Zed" });
         await insert("c");
         await match(profileId, "a", 50);
 
@@ -559,16 +475,8 @@ describe.skipIf(!url)("jobs repository", () => {
       });
 
       it("matches locations by state and city, with remote, relocate and unknown fitting", async () => {
-        await insert("sp-city", {
-          workModel: "onsite",
-          state: "sp",
-          city: " São Paulo ",
-        });
-        await insert("sp-other", {
-          workModel: "onsite",
-          state: "SP",
-          city: "Campinas",
-        });
+        await insert("sp-city", { workModel: "onsite", state: "sp", city: " São Paulo " });
+        await insert("sp-other", { workModel: "onsite", state: "SP", city: "Campinas" });
         await insert("sp-nocity", { workModel: "onsite", state: "SP" });
         await insert("rj", { workModel: "onsite", state: "RJ", city: "Rio" });
         await insert("rj-remote", { workModel: "remote", state: "RJ" });
@@ -584,22 +492,15 @@ describe.skipIf(!url)("jobs repository", () => {
           nowhere: true,
         });
 
-        await db.update(talentPreferences).set({
-          jobPreferences: { locations: [{ city: null, state: "sp" }] },
-        });
+        await db
+          .update(talentPreferences)
+          .set({ jobPreferences: { locations: [{ city: null, state: "sp" }] } });
 
-        expect(await fits()).toMatchObject({
-          "sp-other": true,
-          "sp-nocity": true,
-          rj: false,
-        });
+        expect(await fits()).toMatchObject({ "sp-other": true, "sp-nocity": true, rj: false });
 
-        await db.update(talentPreferences).set({
-          jobPreferences: {
-            locations: [{ city: null, state: "SP" }],
-            relocate: true,
-          },
-        });
+        await db
+          .update(talentPreferences)
+          .set({ jobPreferences: { locations: [{ city: null, state: "SP" }], relocate: true } });
 
         expect(await fits()).toMatchObject({ rj: true });
       });
@@ -608,20 +509,13 @@ describe.skipIf(!url)("jobs repository", () => {
         await insert("odd", { workModel: null, state: "RJ" });
         await prefer({ locations: [{ state: "SP", city: null }] });
 
-        const result = await repository.listForTalent(profileId, {
-          page: 1,
-          pageSize: 10,
-        });
+        const result = await repository.listForTalent(profileId, { page: 1, pageSize: 10 });
 
         expect(result.items.map((job) => job.fitsPreferences)).toEqual([false]);
       });
 
       it("ignores a stored location without a city", async () => {
-        await insert("sp", {
-          workModel: "onsite",
-          state: "SP",
-          city: "Campinas",
-        });
+        await insert("sp", { workModel: "onsite", state: "SP", city: "Campinas" });
         await insert("rj", { workModel: "onsite", state: "RJ" });
         await db.execute(
           sql`insert into talent_preferences (profile_id, job_preferences) values (${profileId}, '{"locations":[{"state":"SP"}]}'::jsonb)`,
@@ -642,19 +536,11 @@ describe.skipIf(!url)("jobs repository", () => {
       it("applies the salary floor and lets unknown salaries fit", async () => {
         await insert("high", { salaryMaxCents: 1_000_000 });
         await insert("exact", { salaryMaxCents: 500_000 });
-        await insert("low", {
-          salaryMaxCents: 100_000,
-          salaryMinCents: 50_000,
-        });
+        await insert("low", { salaryMaxCents: 100_000, salaryMinCents: 50_000 });
         await insert("unknown");
         await prefer({ salaryFloorCents: 500_000 });
 
-        expect(await fits()).toEqual({
-          high: true,
-          exact: true,
-          low: false,
-          unknown: true,
-        });
+        expect(await fits()).toEqual({ high: true, exact: true, low: false, unknown: true });
       });
 
       it("lists with the largest salary floor the column can hold", async () => {
@@ -666,14 +552,8 @@ describe.skipIf(!url)("jobs repository", () => {
       });
 
       it("keeps fitting jobs first across pages", async () => {
-        await insert("n1", {
-          company: "Bad",
-          postedAt: new Date("2026-05-01T00:00:00Z"),
-        });
-        await insert("n2", {
-          company: "Bad",
-          postedAt: new Date("2026-04-01T00:00:00Z"),
-        });
+        await insert("n1", { company: "Bad", postedAt: new Date("2026-05-01T00:00:00Z") });
+        await insert("n2", { company: "Bad", postedAt: new Date("2026-04-01T00:00:00Z") });
         await insert("f1", { postedAt: new Date("2026-02-01T00:00:00Z") });
         await insert("f2", { postedAt: new Date("2026-01-01T00:00:00Z") });
         await prefer({ excludedCompanies: ["bad"] });

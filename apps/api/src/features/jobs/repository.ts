@@ -14,7 +14,7 @@ import { toPreferences } from "../../shared/talent-preferences.js";
 
 type WorkModel = "remote" | "hybrid" | "onsite";
 
-export const compatibleScore = 50;
+const compatibleScore = 50;
 
 export type JobView = {
   id: string;

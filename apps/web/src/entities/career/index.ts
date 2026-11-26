@@ -79,10 +79,7 @@ export function careerProfileQuery(account: EmployeeAccount) {
     retry: retryEmployeeRead,
     queryFn: async ({ signal }) =>
       settle(
-        await client().get({
-          headers: employeeAccessHeaders(account),
-          fetch: { signal },
-        }),
+        await client().get({ headers: employeeAccessHeaders(account), fetch: { signal } }),
         "Não foi possível abrir sua carreira.",
       ),
   });
@@ -238,12 +235,8 @@ export function aiAttemptQuery(account: EmployeeAccount, id: string) {
 
 export function refreshAfterScore(queryClient: QueryClient, account: EmployeeAccount) {
   return Promise.all([
-    queryClient.invalidateQueries({
-      queryKey: resumeSuggestionsQuery(account).queryKey,
-    }),
-    queryClient.invalidateQueries({
-      queryKey: [...careerKey(account), "jobs"],
-    }),
+    queryClient.invalidateQueries({ queryKey: resumeSuggestionsQuery(account).queryKey }),
+    queryClient.invalidateQueries({ queryKey: [...careerKey(account), "jobs"] }),
   ]);
 }
 
@@ -260,12 +253,8 @@ export function useResumeUpload(account: EmployeeAccount) {
       queryClient.setQueryData(careerResumeQuery(account).queryKey, resume);
 
       return Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: resumeSuggestionsQuery(account).queryKey,
-        }),
-        queryClient.invalidateQueries({
-          queryKey: [...careerKey(account), "jobs"],
-        }),
+        queryClient.invalidateQueries({ queryKey: resumeSuggestionsQuery(account).queryKey }),
+        queryClient.invalidateQueries({ queryKey: [...careerKey(account), "jobs"] }),
       ]);
     },
   });
@@ -296,9 +285,7 @@ export function useSuggestionAction(account: EmployeeAccount) {
     onSuccess(resume) {
       if (resume) queryClient.setQueryData(careerResumeQuery(account).queryKey, resume);
 
-      return queryClient.invalidateQueries({
-        queryKey: resumeSuggestionsQuery(account).queryKey,
-      });
+      return queryClient.invalidateQueries({ queryKey: resumeSuggestionsQuery(account).queryKey });
     },
   });
 }
@@ -316,15 +303,9 @@ export function useMarkApplied(account: EmployeeAccount) {
       ),
     onSuccess: () =>
       Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: [...careerKey(account), "jobs"],
-        }),
-        queryClient.invalidateQueries({
-          queryKey: careerApplicationsQuery(account).queryKey,
-        }),
-        queryClient.invalidateQueries({
-          queryKey: aiAttemptsQuery(account).queryKey,
-        }),
+        queryClient.invalidateQueries({ queryKey: [...careerKey(account), "jobs"] }),
+        queryClient.invalidateQueries({ queryKey: careerApplicationsQuery(account).queryKey }),
+        queryClient.invalidateQueries({ queryKey: aiAttemptsQuery(account).queryKey }),
       ]),
   });
 }
@@ -370,9 +351,7 @@ export function useAiDraft(account: EmployeeAccount) {
     async mutationFn(jobId: string) {
       const result = await client()
         .jobs({ jobId })
-        ["ai-apply"].post(undefined, {
-          headers: employeeAccessHeaders(account),
-        });
+        ["ai-apply"].post(undefined, { headers: employeeAccessHeaders(account) });
 
       if (result.status === 404) throw new NotAiApplicable();
 
@@ -408,9 +387,7 @@ export function useCoverLetter(account: EmployeeAccount) {
       settle(
         await client()
           .jobs({ jobId })
-          ["cover-letter"].post(undefined, {
-            headers: employeeAccessHeaders(account),
-          }),
+          ["cover-letter"].post(undefined, { headers: employeeAccessHeaders(account) }),
         "Não foi possível escrever a carta.",
       ),
   });
@@ -446,12 +423,8 @@ export function useAiRun(account: EmployeeAccount) {
     },
     onSettled: () =>
       Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: aiAttemptsQuery(account).queryKey,
-        }),
-        queryClient.invalidateQueries({
-          queryKey: careerApplicationsQuery(account).queryKey,
-        }),
+        queryClient.invalidateQueries({ queryKey: aiAttemptsQuery(account).queryKey }),
+        queryClient.invalidateQueries({ queryKey: careerApplicationsQuery(account).queryKey }),
       ]),
   });
 }
@@ -501,16 +474,9 @@ export function useAiCheck(account: EmployeeAccount) {
       queryClient.setQueryData(aiAttemptQuery(account, attempt.id).queryKey, attempt);
 
       return Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: aiAttemptsQuery(account).queryKey,
-          exact: true,
-        }),
-        queryClient.invalidateQueries({
-          queryKey: careerApplicationsQuery(account).queryKey,
-        }),
-        queryClient.invalidateQueries({
-          queryKey: [...careerKey(account), "jobs"],
-        }),
+        queryClient.invalidateQueries({ queryKey: aiAttemptsQuery(account).queryKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: careerApplicationsQuery(account).queryKey }),
+        queryClient.invalidateQueries({ queryKey: [...careerKey(account), "jobs"] }),
       ]);
     },
   });

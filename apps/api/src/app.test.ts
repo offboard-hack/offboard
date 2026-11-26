@@ -141,9 +141,7 @@ const appOptions = {
 };
 
 function leakyError(prompt: string) {
-  return Object.assign(new Error("gateway down"), {
-    requestBodyValues: { prompt },
-  });
+  return Object.assign(new Error("gateway down"), { requestBodyValues: { prompt } });
 }
 
 async function drawnText(bytes: Uint8Array) {
@@ -232,10 +230,7 @@ describe.skipIf(!url)("api", () => {
     body?: Payload | Parameters<typeof repos.actionConfigs.saveChecklist>[1],
   ) {
     const encoded = body === undefined ? undefined : JSON.stringify(body);
-    const headers = new Headers({
-      "content-type": "application/json",
-      origin: webOrigin,
-    });
+    const headers = new Headers({ "content-type": "application/json", origin: webOrigin });
 
     if (path.startsWith("/webhooks/inbound/")) {
       headers.set("authorization", `Bearer ${webhookSecret}`);
@@ -246,11 +241,7 @@ describe.skipIf(!url)("api", () => {
     }
 
     return app.handle(
-      new Request(`http://localhost/api${path}`, {
-        method,
-        headers,
-        body: encoded,
-      }),
+      new Request(`http://localhost/api${path}`, { method, headers, body: encoded }),
     );
   }
 
@@ -350,11 +341,7 @@ describe.skipIf(!url)("api", () => {
       const created = await asSession("rh", path, "POST", body);
 
       expect(created.status).toBe(201);
-      expect(await created.json()).toEqual({
-        personalEmail,
-        sponsoredUntil,
-        signedIn: false,
-      });
+      expect(await created.json()).toEqual({ personalEmail, sponsoredUntil, signedIn: false });
       expect(invitedEmails).toEqual([personalEmail]);
       expect(sentTexts.at(-1)).toContain(`${webOrigin}/app/entrar`);
 
@@ -368,11 +355,7 @@ describe.skipIf(!url)("api", () => {
       const read = await asSession("visualizador", path);
 
       expect(read.status).toBe(200);
-      expect(await read.json()).toEqual({
-        personalEmail,
-        sponsoredUntil,
-        signedIn: false,
-      });
+      expect(await read.json()).toEqual({ personalEmail, sponsoredUntil, signedIn: false });
     });
 
     it("enables talent access without inviting a person who signs in as a collaborator", async () => {
@@ -387,12 +370,7 @@ describe.skipIf(!url)("api", () => {
           email: "bia@example.com",
           plan: emptyEmployeePlan,
         },
-        {
-          caseId: second.id,
-          orgId: defaultOrgId,
-          email: null,
-          plan: emptyEmployeePlan,
-        },
+        { caseId: second.id, orgId: defaultOrgId, email: null, plan: emptyEmployeePlan },
       ]);
 
       const granted = await asSession("rh", `/offboardings/${first.id}/talent-access`, "POST", {
@@ -465,9 +443,7 @@ describe.skipIf(!url)("api", () => {
         throw new Error(created);
       }
 
-      const changed = await asSession("rh", path, "PATCH", {
-        personalEmail: "novo@example.com",
-      });
+      const changed = await asSession("rh", path, "PATCH", { personalEmail: "novo@example.com" });
 
       expect(changed.status).toBe(200);
       expect(await changed.json()).toEqual({
@@ -477,25 +453,19 @@ describe.skipIf(!url)("api", () => {
       });
       expect(invitedEmails).toEqual(["novo@example.com"]);
 
-      const sameEmail = await asSession("rh", path, "PATCH", {
-        personalEmail: "NOVO@example.com",
-      });
+      const sameEmail = await asSession("rh", path, "PATCH", { personalEmail: "NOVO@example.com" });
 
       expect(sameEmail.status).toBe(200);
       expect(invitedEmails).toEqual(["novo@example.com", "novo@example.com"]);
 
       await repos.talent.markSignedIn(created.id);
 
-      const locked = await asSession("rh", path, "PATCH", {
-        personalEmail: "outro@example.com",
-      });
+      const locked = await asSession("rh", path, "PATCH", { personalEmail: "outro@example.com" });
 
       expect(locked.status).toBe(409);
       expect(invitedEmails).toEqual(["novo@example.com", "novo@example.com"]);
 
-      const extended = await asSession("rh", path, "PATCH", {
-        sponsoredUntil: "2100-01-31",
-      });
+      const extended = await asSession("rh", path, "PATCH", { sponsoredUntil: "2100-01-31" });
 
       expect(extended.status).toBe(200);
       expect(invitedEmails).toEqual(["novo@example.com", "novo@example.com"]);
@@ -511,10 +481,7 @@ describe.skipIf(!url)("api", () => {
 
       inviteFailures.remaining = 1;
 
-      const failed = await asSession("rh", path, "POST", {
-        personalEmail,
-        sponsoredUntil,
-      });
+      const failed = await asSession("rh", path, "POST", { personalEmail, sponsoredUntil });
 
       expect(failed.status).toBe(500);
       expect(invitedEmails).toEqual([]);
@@ -652,12 +619,9 @@ describe.skipIf(!url)("api", () => {
       const ownPeople = [own.id, ...(await sponsoredBy(defaultOrgId, 4))];
       const otherPeople = [other.id, ...(await sponsoredBy(otherOrgId, 3))];
 
-      await db.insert(applications).values(
-        [...ownPeople, ...otherPeople].map((profileId) => ({
-          profileId,
-          jobId: job.id,
-        })),
-      );
+      await db
+        .insert(applications)
+        .values([...ownPeople, ...otherPeople].map((profileId) => ({ profileId, jobId: job.id })));
 
       const ownAggregates = await asSession("rh", "/talent/aggregates");
 
@@ -799,15 +763,11 @@ describe.skipIf(!url)("api", () => {
 
       if (!subscription) throw new Error("missing subscription");
 
-      await repos.billing.updateSubscription(defaultOrgId, subscription.id, {
-        status: "canceled",
-      });
+      await repos.billing.updateSubscription(defaultOrgId, subscription.id, { status: "canceled" });
 
       const lapsed = await asSession("talent", "/me", "GET", undefined, talentHeaders);
 
-      expect(await lapsed.json()).toMatchObject({
-        entitlement: { kind: "lapsed", until: null },
-      });
+      expect(await lapsed.json()).toMatchObject({ entitlement: { kind: "lapsed", until: null } });
     });
 
     it("grants the aggregates permission to admin and rh only", () => {
@@ -847,11 +807,7 @@ describe.skipIf(!url)("api", () => {
       const asMine = { "x-test-talent-id": mine.id };
 
       expect(
-        (
-          await asSession("rh", "/me/consent", "PUT", {
-            shareOutcomeWithHr: true,
-          })
-        ).status,
+        (await asSession("rh", "/me/consent", "PUT", { shareOutcomeWithHr: true })).status,
       ).toBe(403);
       expect((await repos.talent.findById(mine.id))?.shareOutcomeWithHr).toBe(false);
 
@@ -864,10 +820,7 @@ describe.skipIf(!url)("api", () => {
       );
 
       expect(early.status).toBe(200);
-      expect(await early.json()).toMatchObject({
-        termsAccepted: false,
-        shareOutcomeWithHr: true,
-      });
+      expect(await early.json()).toMatchObject({ termsAccepted: false, shareOutcomeWithHr: true });
 
       const shared = await asSession(
         "talent",
@@ -878,10 +831,7 @@ describe.skipIf(!url)("api", () => {
       );
 
       expect(shared.status).toBe(200);
-      expect(await shared.json()).toMatchObject({
-        id: mine.id,
-        shareOutcomeWithHr: true,
-      });
+      expect(await shared.json()).toMatchObject({ id: mine.id, shareOutcomeWithHr: true });
       expect(
         await (await asSession("talent", "/me", "GET", undefined, asMine)).json(),
       ).toMatchObject({ shareOutcomeWithHr: true });
@@ -895,9 +845,7 @@ describe.skipIf(!url)("api", () => {
         asMine,
       );
 
-      expect(await withdrawn.json()).toMatchObject({
-        shareOutcomeWithHr: false,
-      });
+      expect(await withdrawn.json()).toMatchObject({ shareOutcomeWithHr: false });
 
       await repos.talent.setConsent(mine.id, true, new Date());
 
@@ -905,9 +853,7 @@ describe.skipIf(!url)("api", () => {
 
       if (!subscription) throw new Error("missing subscription");
 
-      await repos.billing.updateSubscription(defaultOrgId, subscription.id, {
-        status: "canceled",
-      });
+      await repos.billing.updateSubscription(defaultOrgId, subscription.id, { status: "canceled" });
 
       const lapsed = await asSession(
         "talent",
@@ -1095,9 +1041,7 @@ describe.skipIf(!url)("api", () => {
 
       await db
         .update(aiApplications)
-        .set({
-          liveUrl: "https://www.browserbase.com/devtools-fullscreen/inspector.html",
-        })
+        .set({ liveUrl: "https://www.browserbase.com/devtools-fullscreen/inspector.html" })
         .where(eq(aiApplications.id, running));
 
       await put(gated, "talent", other.id, true);
@@ -1410,9 +1354,7 @@ describe.skipIf(!url)("api", () => {
         new Request(`http://localhost/api/me/ai-applications/${attempt.id}/confirm`, {
           method: "POST",
           headers: talentHeaders,
-          body: JSON.stringify({
-            answers: [{ questionId: "question_1", value: "Pagamentos" }],
-          }),
+          body: JSON.stringify({ answers: [{ questionId: "question_1", value: "Pagamentos" }] }),
         }),
       );
 
@@ -1440,9 +1382,7 @@ describe.skipIf(!url)("api", () => {
         "GET https://connect.test/s1",
         "POST https://api.browserbase.com/v1/sessions/s1",
       ]);
-      expect(logged).toHaveBeenCalledWith("Browserbase live view failed", {
-        name: "SyntaxError",
-      });
+      expect(logged).toHaveBeenCalledWith("Browserbase live view failed", { name: "SyntaxError" });
       expect(logged).toHaveBeenCalledWith("AI application run failed", {
         name: "CdpError",
         message: "no websocket",
@@ -1558,12 +1498,7 @@ describe.skipIf(!url)("api", () => {
             }),
           );
 
-        return {
-          instance,
-          id,
-          call,
-          run: () => call(`/me/ai-applications/${id}/run`, "POST"),
-        };
+        return { instance, id, call, run: () => call(`/me/ai-applications/${id}/run`, "POST") };
       }
 
       const jobsOf = async (id: string) =>
@@ -1596,17 +1531,11 @@ describe.skipIf(!url)("api", () => {
           browser.push(`${init?.method ?? "GET"} ${target}`);
 
           if (target === "https://api.browserbase.com/v1/sessions") {
-            return Response.json({
-              id: "s1",
-              connectUrl: "wss://connect.test/s1",
-            });
+            return Response.json({ id: "s1", connectUrl: "wss://connect.test/s1" });
           }
 
           if (target.endsWith("/sessions/s1/debug")) {
-            return Response.json({
-              debuggerFullscreenUrl: live,
-              wsUrl: "wss://connect.test/s1",
-            });
+            return Response.json({ debuggerFullscreenUrl: live, wsUrl: "wss://connect.test/s1" });
           }
 
           if (target === "https://connect.test/s1") {
@@ -1663,10 +1592,7 @@ describe.skipIf(!url)("api", () => {
             signals.emit("session");
             await once(signals, "proceed");
 
-            return Response.json({
-              id: "s1",
-              connectUrl: "wss://connect.test/s1",
-            });
+            return Response.json({ id: "s1", connectUrl: "wss://connect.test/s1" });
           }
 
           return new Response(null);
@@ -1684,10 +1610,7 @@ describe.skipIf(!url)("api", () => {
         const response = await setup.run();
 
         expect(response.status).toBe(202);
-        expect(await response.json()).toMatchObject({
-          id: setup.id,
-          state: "running",
-        });
+        expect(await response.json()).toMatchObject({ id: setup.id, state: "running" });
 
         signals.emit("proceed");
 
@@ -1721,10 +1644,7 @@ describe.skipIf(!url)("api", () => {
         const response = await setup.run();
 
         expect(response.status).toBe(202);
-        expect(await response.json()).toMatchObject({
-          id: setup.id,
-          state: "queued",
-        });
+        expect(await response.json()).toMatchObject({ id: setup.id, state: "queued" });
         expect(browser).toEqual([]);
         expect(await jobsOf(setup.id)).toEqual(["running"]);
       });
@@ -1856,10 +1776,7 @@ describe.skipIf(!url)("api", () => {
       }
 
       const [row] = await db
-        .select({
-          state: aiApplications.state,
-          confirmed: aiApplications.confirmed,
-        })
+        .select({ state: aiApplications.state, confirmed: aiApplications.confirmed })
         .from(aiApplications)
         .where(eq(aiApplications.id, attempt.id));
 
@@ -1873,9 +1790,7 @@ describe.skipIf(!url)("api", () => {
       const logged = vi.spyOn(console, "error");
 
       const failures = [
-        Object.assign(new Error("connect ECONNREFUSED 10.0.0.7:5432"), {
-          code: "ECONNREFUSED",
-        }),
+        Object.assign(new Error("connect ECONNREFUSED 10.0.0.7:5432"), { code: "ECONNREFUSED" }),
         new DOMException("signal timed out for ana@example.com", "TimeoutError"),
         new Error("plain secret for ana@example.com"),
       ];
@@ -1904,12 +1819,8 @@ describe.skipIf(!url)("api", () => {
           name: "Error",
           code: "ECONNREFUSED",
         });
-        expect(logged).toHaveBeenCalledWith("unhandled error", {
-          name: "TimeoutError",
-        });
-        expect(logged).toHaveBeenCalledWith("unhandled error", {
-          name: "Error",
-        });
+        expect(logged).toHaveBeenCalledWith("unhandled error", { name: "TimeoutError" });
+        expect(logged).toHaveBeenCalledWith("unhandled error", { name: "Error" });
       } finally {
         logged.mockRestore();
       }
@@ -2046,11 +1957,7 @@ describe.skipIf(!url)("api", () => {
 
         const compatible = await asSession("talent", "/me/jobs", "GET", undefined, talentHeaders);
 
-        expect(await compatible.json()).toMatchObject({
-          items: [],
-          total: 0,
-          matching: false,
-        });
+        expect(await compatible.json()).toMatchObject({ items: [], total: 0, matching: false });
 
         const listed = await asSession(
           "talent",
@@ -2059,6 +1966,7 @@ describe.skipIf(!url)("api", () => {
           undefined,
           talentHeaders,
         );
+
         const body = await listed.json();
 
         expect(listed.status).toBe(200);
@@ -2218,9 +2126,7 @@ describe.skipIf(!url)("api", () => {
         });
 
         expect(notReady.status).toBe(422);
-        expect(await notReady.json()).toEqual({
-          error: "Résumé not ready for this job",
-        });
+        expect(await notReady.json()).toEqual({ error: "Résumé not ready for this job" });
         expect((await send(headers, `/me/jobs/${jobId}/apply`, "POST")).status).toBe(422);
 
         const applied = await send(headers, `/me/jobs/${jobId}/apply`, "POST", body);
@@ -2252,21 +2158,14 @@ describe.skipIf(!url)("api", () => {
         expect(unknown.status).toBe(404);
         expect((await send(headers, "/me/jobs/not-a-uuid/apply", "POST", body)).status).toBe(422);
         expect(
-          (
-            await send(headers, `/me/jobs/${jobId}/apply`, "POST", {
-              resumeId: "not-a-uuid",
-            })
-          ).status,
+          (await send(headers, `/me/jobs/${jobId}/apply`, "POST", { resumeId: "not-a-uuid" }))
+            .status,
         ).toBe(422);
 
         const listed = await (await send(headers, "/me/applications")).json();
 
         expect(listed).toHaveLength(1);
-        expect(listed[0]).toMatchObject({
-          status: "sent",
-          closedReason: null,
-          channel: "manual",
-        });
+        expect(listed[0]).toMatchObject({ status: "sent", closedReason: null, channel: "manual" });
       });
 
       it("refuses a manual application while an AI submission awaits its check", async () => {
@@ -2292,9 +2191,7 @@ describe.skipIf(!url)("api", () => {
           const refused = await send(headers, `/me/jobs/${jobId}/apply`, "POST", body);
 
           expect(refused.status).toBe(409);
-          expect(await refused.json()).toEqual({
-            error: "AI application pending check",
-          });
+          expect(await refused.json()).toEqual({ error: "AI application pending check" });
         }
 
         await db
@@ -2315,25 +2212,17 @@ describe.skipIf(!url)("api", () => {
         const reviewed = await patch({ status: "in_review" });
 
         expect(reviewed.status).toBe(200);
-        expect(await reviewed.json()).toMatchObject({
-          id,
-          status: "in_review",
-        });
+        expect(await reviewed.json()).toMatchObject({ id, status: "in_review" });
 
         const backwards = await patch({ status: "sent" });
 
         expect(backwards.status).toBe(409);
-        expect(await backwards.json()).toEqual({
-          error: "Invalid status transition",
-        });
+        expect(await backwards.json()).toEqual({ error: "Invalid status transition" });
         expect((await patch({ status: "offer" })).status).toBe(200);
 
         const closed = await patch({ status: "closed", closedReason: "hired" });
 
-        expect(await closed.json()).toMatchObject({
-          status: "closed",
-          closedReason: "hired",
-        });
+        expect(await closed.json()).toMatchObject({ status: "closed", closedReason: "hired" });
         expect((await patch({ status: "closed", closedReason: "rejected" })).status).toBe(409);
         expect((await patch({ status: "moon" })).status).toBe(422);
 
@@ -2345,11 +2234,7 @@ describe.skipIf(!url)("api", () => {
         });
 
         expect(
-          (
-            await send(headers, "/me/applications/not-a-uuid", "PATCH", {
-              status: "offer",
-            })
-          ).status,
+          (await send(headers, "/me/applications/not-a-uuid", "PATCH", { status: "offer" })).status,
         ).toBe(422);
       });
 
@@ -2428,9 +2313,7 @@ describe.skipIf(!url)("api", () => {
         });
 
         expect(onClosed.status).toBe(409);
-        expect(await onClosed.json()).toEqual({
-          error: "Application is closed",
-        });
+        expect(await onClosed.json()).toEqual({ error: "Application is closed" });
 
         const removed = await send(headers, `/me/interviews/${interview.id}`, "DELETE");
 
@@ -2454,9 +2337,7 @@ describe.skipIf(!url)("api", () => {
         });
 
         expect(patched.status).toBe(404);
-        expect(await patched.json()).toEqual({
-          error: "Application not found",
-        });
+        expect(await patched.json()).toEqual({ error: "Application not found" });
 
         expect(await (await send(owner, "/me/applications")).json()).toMatchObject([
           { status: "sent" },
@@ -2494,11 +2375,7 @@ describe.skipIf(!url)("api", () => {
         const headers = await talentProfile(personalEmail, 0);
         const id = await applyTo(headers, await seedJob("invalid"));
         const path = `/me/applications/${id}/interviews`;
-        const valid = {
-          startsAt: "2026-03-10T17:00:00Z",
-          mode: "video",
-          with: "Maria",
-        };
+        const valid = { startsAt: "2026-03-10T17:00:00Z", mode: "video", with: "Maria" };
 
         const bodies = [
           { ...valid, startsAt: "2026-11-26T23:59:60Z" },
@@ -2574,11 +2451,7 @@ describe.skipIf(!url)("api", () => {
         const city = "Campinas";
         const contactEmail = "ana.contato@example.com";
 
-        type PagePatch = {
-          enabled?: boolean;
-          slug?: string;
-          resumeId?: string | null;
-        };
+        type PagePatch = { enabled?: boolean; slug?: string; resumeId?: string | null };
 
         async function publicProfile(email = personalEmail, caseIndex = 0) {
           const headers = await talentProfile(email, caseIndex);
@@ -2590,12 +2463,7 @@ describe.skipIf(!url)("api", () => {
             education: [],
             skills: [],
             languages: [],
-            contact: {
-              email: contactEmail,
-              phone,
-              city,
-              links: ["https://ana.dev"],
-            },
+            contact: { email: contactEmail, phone, city, links: ["https://ana.dev"] },
           });
 
           return headers;
@@ -2631,10 +2499,7 @@ describe.skipIf(!url)("api", () => {
         }
 
         async function publish(headers: Record<string, string>, slug: string) {
-          const response = await pageRequest(headers, "/me/page", "PATCH", {
-            enabled: true,
-            slug,
-          });
+          const response = await pageRequest(headers, "/me/page", "PATCH", { enabled: true, slug });
 
           expect(response.status).toBe(200);
         }
@@ -2644,16 +2509,13 @@ describe.skipIf(!url)("api", () => {
         }
 
         function weekOf(response: Response) {
-          return response.json().then((page) =>
-            z
-              .object({
-                week: z.object({
-                  visits: z.number(),
-                  recruiterVisits: z.number(),
-                }),
-              })
-              .parse(page),
-          );
+          return response
+            .json()
+            .then((page) =>
+              z
+                .object({ week: z.object({ visits: z.number(), recruiterVisits: z.number() }) })
+                .parse(page),
+            );
         }
 
         it("publishes the page and counts visits", async () => {
@@ -2725,18 +2587,13 @@ describe.skipIf(!url)("api", () => {
             ).status,
           ).toBe(200);
           expect(
-            (
-              await visit("/public/pages/ana-dev", "talent", {
-                "x-test-talent-id": profileId,
-              })
-            ).status,
+            (await visit("/public/pages/ana-dev", "talent", { "x-test-talent-id": profileId }))
+              .status,
           ).toBe(200);
 
           const settings = await pageRequest(headers, "/me/page");
 
-          expect(await weekOf(settings)).toMatchObject({
-            week: { visits: 4, recruiterVisits: 0 },
-          });
+          expect(await weekOf(settings)).toMatchObject({ week: { visits: 4, recruiterVisits: 0 } });
         });
 
         it("hides unpublishable pages without counting", async () => {
@@ -3002,10 +2859,7 @@ describe.skipIf(!url)("api", () => {
           const chosen = await patch({ resumeId });
 
           expect(chosen.status).toBe(200);
-          expect(await chosen.json()).toMatchObject({
-            resumeId,
-            enabled: false,
-          });
+          expect(await chosen.json()).toMatchObject({ resumeId, enabled: false });
 
           const cleared = await patch({ resumeId: null });
 
@@ -3043,10 +2897,7 @@ describe.skipIf(!url)("api", () => {
 
           const sessionDown = createApp(webOrigin, repos, {
             ...appOptions,
-            auth: {
-              ...auth,
-              resolvePrincipal: () => Promise.reject(new Error("session down")),
-            },
+            auth: { ...auth, resolvePrincipal: () => Promise.reject(new Error("session down")) },
           });
 
           const viewed = await sessionDown.handle(
@@ -3077,9 +2928,7 @@ describe.skipIf(!url)("api", () => {
 
           expect(unrecorded.status).toBe(200);
           expect(unrecorded.headers.get("cache-control")).toBe("private, max-age=60");
-          expect(await unrecorded.json()).toMatchObject({
-            headline: "Engenheira",
-          });
+          expect(await unrecorded.json()).toMatchObject({ headline: "Engenheira" });
           expect(await counters()).toMatchObject([{ visits: 1, recruiterVisits: 0 }]);
           expect(logged.mock.calls).toEqual([
             ["public page viewer lookup failed", { name: "Error", message: "session down" }],
@@ -3099,10 +2948,7 @@ describe.skipIf(!url)("api", () => {
             webOrigin,
             {
               ...repos,
-              pages: {
-                ...repos.pages,
-                urlFor: () => Promise.reject(new Error("links down")),
-              },
+              pages: { ...repos.pages, urlFor: () => Promise.reject(new Error("links down")) },
             },
             appOptions,
           );
@@ -3127,10 +2973,7 @@ describe.skipIf(!url)("api", () => {
         it("falls back to the portal origin for an empty page origin", async () => {
           const headers = await publicProfile();
 
-          const instance = createApp(webOrigin, repos, {
-            ...appOptions,
-            publicPageOrigin: "",
-          });
+          const instance = createApp(webOrigin, repos, { ...appOptions, publicPageOrigin: "" });
 
           const saved = await pageRequest(
             headers,
@@ -3140,9 +2983,7 @@ describe.skipIf(!url)("api", () => {
             instance,
           );
 
-          expect(await saved.json()).toMatchObject({
-            url: `${webOrigin}/p/ana-dev`,
-          });
+          expect(await saved.json()).toMatchObject({ url: `${webOrigin}/p/ana-dev` });
         });
 
         it("builds page URLs on the configured origin", async () => {
@@ -3161,9 +3002,7 @@ describe.skipIf(!url)("api", () => {
             instance,
           );
 
-          expect(await saved.json()).toMatchObject({
-            url: "https://cv.example.com/p/ana-dev",
-          });
+          expect(await saved.json()).toMatchObject({ url: "https://cv.example.com/p/ana-dev" });
 
           const applied = await pageRequest(
             headers,
@@ -3188,13 +3027,7 @@ describe.skipIf(!url)("api", () => {
         headline: { text: "Engenheira de Software" },
         summary: { text: "Dez anos de experiência" },
         experiences: [
-          {
-            company: "Acme",
-            role: "Dev",
-            start: "2019",
-            end: null,
-            bullets: [{ text: "Fez X" }],
-          },
+          { company: "Acme", role: "Dev", start: "2019", end: null, bullets: [{ text: "Fez X" }] },
         ],
         education: [],
         skills: [{ name: "TypeScript" }],
@@ -3228,33 +3061,16 @@ describe.skipIf(!url)("api", () => {
       const jobsInPrompt = z.array(z.object({ id: z.string(), title: z.string() }));
 
       function resumesApp(
-        options: {
-          generate?: GenerateStructured | null;
-          storage?: boolean;
-          draft?: object;
-        } = {},
+        options: { generate?: GenerateStructured | null; storage?: boolean; draft?: object } = {},
       ) {
-        const store: Store = {
-          puts: [],
-          removed: [],
-          prefixes: [],
-          failRemove: false,
-        };
+        const store: Store = { puts: [], removed: [], prefixes: [], failRemove: false };
 
-        const scoring: Scoring = {
-          output: { score: 0, suggestions: [] },
-          calls: 0,
-        };
+        const scoring: Scoring = { output: { score: 0, suggestions: [] }, calls: 0 };
 
         const matching: Matching = { scores: {}, batches: [] };
 
         const tailoring: Tailoring = {
-          output: {
-            rewrites: [],
-            experienceOrder: [],
-            bulletOrder: [],
-            skillIds: [],
-          },
+          output: { rewrites: [], experienceOrder: [], bulletOrder: [], skillIds: [] },
         };
 
         const cover: Cover = { letter: "Tenho experiência com backend." };
@@ -3368,17 +3184,7 @@ describe.skipIf(!url)("api", () => {
           throw new Error("background queue did not settle");
         }
 
-        return {
-          instance,
-          store,
-          scoring,
-          matching,
-          tailoring,
-          cover,
-          calls,
-          kicks,
-          settle,
-        };
+        return { instance, store, scoring, matching, tailoring, cover, calls, kicks, settle };
       }
 
       async function profile(email = personalEmail, caseIndex = 0) {
@@ -3408,12 +3214,7 @@ describe.skipIf(!url)("api", () => {
         instance: ReturnType<typeof resumesApp>["instance"],
         talentId: string,
         path: string,
-        init: {
-          method?: string;
-          body?: BodyInit;
-          json?: unknown;
-          session?: string;
-        } = {},
+        init: { method?: string; body?: BodyInit; json?: unknown; session?: string } = {},
       ) {
         const headers = new Headers({
           "x-test-session": init.session ?? "talent",
@@ -3442,10 +3243,7 @@ describe.skipIf(!url)("api", () => {
 
         form.set("file", new File([new Uint8Array(bytes)], name, { type: "application/pdf" }));
 
-        return request(instance, talentId, "/me/resume/upload", {
-          method: "POST",
-          body: form,
-        });
+        return request(instance, talentId, "/me/resume/upload", { method: "POST", body: form });
       }
 
       function docx() {
@@ -3546,9 +3344,7 @@ describe.skipIf(!url)("api", () => {
         const res = await upload(failing.instance, id);
 
         expect(res.status).toBe(502);
-        expect(await res.json()).toEqual({
-          error: "Could not read the résumé",
-        });
+        expect(await res.json()).toEqual({ error: "Could not read the résumé" });
         expect(failing.store.removed).toEqual([failing.store.puts[0].key]);
         expect(logged.mock.calls).toEqual([
           ["résumé extraction failed", { name: "Error", message: "gateway down" }],
@@ -3610,9 +3406,7 @@ describe.skipIf(!url)("api", () => {
           const res = await upload(instance, id);
 
           expect(res.status).toBe(503);
-          expect(await res.json()).toEqual({
-            error: "Résumé upload not configured",
-          });
+          expect(await res.json()).toEqual({ error: "Résumé upload not configured" });
           expect(store.puts).toEqual([]);
         }
       });
@@ -3625,12 +3419,8 @@ describe.skipIf(!url)("api", () => {
           error: "Résumé not found",
         });
         expect(
-          (
-            await request(instance, id, "/me/resume", {
-              method: "PATCH",
-              json: { content: {} },
-            })
-          ).status,
+          (await request(instance, id, "/me/resume", { method: "PATCH", json: { content: {} } }))
+            .status,
         ).toBe(422);
 
         const emptyContent = {
@@ -3703,9 +3493,7 @@ describe.skipIf(!url)("api", () => {
         });
 
         expect(invalid.status).toBe(422);
-        expect(await invalid.json()).toEqual({
-          error: "Invalid résumé content",
-        });
+        expect(await invalid.json()).toEqual({ error: "Invalid résumé content" });
       });
 
       it("validates edits structurally and against the content limits", async () => {
@@ -3720,26 +3508,20 @@ describe.skipIf(!url)("api", () => {
         });
 
         expect(structural.status).toBe(422);
-        expect(await structural.json()).toEqual({
-          error: "Invalid résumé content",
-        });
+        expect(await structural.json()).toEqual({ error: "Invalid résumé content" });
 
         const tooMany = await request(instance, id, "/me/resume", {
           method: "PATCH",
           json: {
             content: {
               ...created.content,
-              skills: Array.from({ length: 51 }, (_, index) => ({
-                name: `Skill ${index}`,
-              })),
+              skills: Array.from({ length: 51 }, (_, index) => ({ name: `Skill ${index}` })),
             },
           },
         });
 
         expect(tooMany.status).toBe(422);
-        expect(await tooMany.json()).toEqual({
-          error: "Invalid résumé content",
-        });
+        expect(await tooMany.json()).toEqual({ error: "Invalid résumé content" });
 
         const failing = createApp(
           webOrigin,
@@ -3952,12 +3734,7 @@ describe.skipIf(!url)("api", () => {
               experiences: [
                 {
                   ...created.content.experiences[0],
-                  bullets: [
-                    {
-                      ...created.content.experiences[0].bullets[0],
-                      text: "Fez Y",
-                    },
-                  ],
+                  bullets: [{ ...created.content.experiences[0].bullets[0], text: "Fez Y" }],
                 },
               ],
             },
@@ -3981,9 +3758,7 @@ describe.skipIf(!url)("api", () => {
         );
 
         expect(stale.status).toBe(409);
-        expect(await stale.json()).toEqual({
-          error: "Résumé changed since this suggestion",
-        });
+        expect(await stale.json()).toEqual({ error: "Résumé changed since this suggestion" });
         expect(await (await request(instance, id, "/me/resume")).json()).toEqual(
           await edited.json(),
         );
@@ -4035,11 +3810,7 @@ describe.skipIf(!url)("api", () => {
         }
 
         expect(
-          (
-            await request(instance, other, "/me/resume/suggestions", {
-              session: "admin",
-            })
-          ).status,
+          (await request(instance, other, "/me/resume/suggestions", { session: "admin" })).status,
         ).toBe(403);
       });
 
@@ -4057,11 +3828,7 @@ describe.skipIf(!url)("api", () => {
         const [job] = await scoreJobs();
 
         expect(app.scoring.calls).toBe(0);
-        expect(job).toMatchObject({
-          status: "pending",
-          attempts: 0,
-          lastError: null,
-        });
+        expect(job).toMatchObject({ status: "pending", attempts: 0, lastError: null });
         expect(job.runAfter.getTime()).toBeGreaterThan(Date.now());
         expect((await (await request(app.instance, id, "/me/resume")).json()).score).toBeNull();
       });
@@ -4078,18 +3845,10 @@ describe.skipIf(!url)("api", () => {
         await unconfigured.settle();
 
         expect(await scoreJobs()).toMatchObject([
-          {
-            status: "pending",
-            attempts: 1,
-            lastError: "Error: AI not configured",
-          },
+          { status: "pending", attempts: 1, lastError: "Error: AI not configured" },
         ]);
         expect(await matchJobs()).toMatchObject([
-          {
-            status: "pending",
-            attempts: 1,
-            lastError: "Error: AI not configured",
-          },
+          { status: "pending", attempts: 1, lastError: "Error: AI not configured" },
         ]);
         expect(await db.select().from(llmUsage).where(eq(llmUsage.profileId, id))).toEqual([]);
       });
@@ -4644,10 +4403,7 @@ describe.skipIf(!url)("api", () => {
               matchScore: 88,
               content: {
                 ...base.content,
-                headline: {
-                  ...base.content.headline,
-                  text: "Engenheira Backend",
-                },
+                headline: { ...base.content.headline, text: "Engenheira Backend" },
               },
               application: null,
               updatedAt: expect.any(String),
@@ -4666,10 +4422,7 @@ describe.skipIf(!url)("api", () => {
           const marked = await ready(versionId);
 
           expect(marked.status).toBe(200);
-          expect(await marked.json()).toMatchObject({
-            id: versionId,
-            status: "ready",
-          });
+          expect(await marked.json()).toMatchObject({ id: versionId, status: "ready" });
 
           const edited = await call(`/me/resumes/${versionId}`, {
             method: "PATCH",
@@ -4699,18 +4452,10 @@ describe.skipIf(!url)("api", () => {
             status: "draft",
             matchScore: 88,
           });
-          expect(added).toEqual({
-            id: expect.any(String),
-            text: "Escreveu testes",
-          });
+          expect(added).toEqual({ id: expect.any(String), text: "Escreveu testes" });
           expect(editedBody.diff).toEqual([
             headlineDiff,
-            {
-              nodeId: added.id,
-              kind: "bullet",
-              before: "",
-              after: "Escreveu testes",
-            },
+            { nodeId: added.id, kind: "bullet", before: "", after: "Escreveu testes" },
           ]);
           expect((await ready(versionId)).status).toBe(200);
           expect(await db.select().from(backgroundJobs)).toEqual(queued);
@@ -4725,11 +4470,7 @@ describe.skipIf(!url)("api", () => {
             expect.objectContaining({
               id: versionId,
               status: "ready",
-              application: {
-                id: applicationId,
-                status: "sent",
-                appliedAt: expect.any(String),
-              },
+              application: { id: applicationId, status: "sent", appliedAt: expect.any(String) },
             }),
           ]);
 
@@ -4739,9 +4480,7 @@ describe.skipIf(!url)("api", () => {
           });
 
           expect(locked.status).toBe(409);
-          expect(await locked.json()).toEqual({
-            error: "Already applied with this version",
-          });
+          expect(await locked.json()).toEqual({ error: "Already applied with this version" });
         });
 
         it("refuses to tailor for a job already applied to without spending AI calls", async () => {
@@ -4798,9 +4537,7 @@ describe.skipIf(!url)("api", () => {
 
           expect(sent).toEqual([201]);
           expect(raced.status).toBe(409);
-          expect(await raced.json()).toEqual({
-            error: "Already applied with this version",
-          });
+          expect(await raced.json()).toEqual({ error: "Already applied with this version" });
           expect(await tailoredRows(id)).toEqual([stored]);
         });
 
@@ -4826,9 +4563,7 @@ describe.skipIf(!url)("api", () => {
             const refused = await apply(jobId, resumeId);
 
             expect(refused.status).toBe(422);
-            expect(await refused.json()).toEqual({
-              error: "Résumé not ready for this job",
-            });
+            expect(await refused.json()).toEqual({ error: "Résumé not ready for this job" });
           }
 
           expect(await db.select().from(applications)).toEqual([]);
@@ -4852,9 +4587,7 @@ describe.skipIf(!url)("api", () => {
           const capped = await tailor(jobId);
 
           expect(capped.status).toBe(429);
-          expect(await capped.json()).toEqual({
-            error: "Daily AI limit reached",
-          });
+          expect(await capped.json()).toEqual({ error: "Daily AI limit reached" });
           expect(app.calls.map((modelCall) => modelCall.kind)).toEqual(["tailor"]);
           expect(await usage(id)).toEqual([{ calls: 30 }]);
           expect(await tailoredRows(id)).toEqual([]);
@@ -4896,9 +4629,7 @@ describe.skipIf(!url)("api", () => {
           const noBase = await tailor(crypto.randomUUID(), bare);
 
           expect(noBase.status).toBe(409);
-          expect(await noBase.json()).toEqual({
-            error: "Upload a résumé first",
-          });
+          expect(await noBase.json()).toEqual({ error: "Upload a résumé first" });
 
           for (const missing of [crypto.randomUUID(), closedId]) {
             const notFound = await request(
@@ -4946,9 +4677,7 @@ describe.skipIf(!url)("api", () => {
           const tailorFailed = await tailor(jobId);
 
           expect(tailorFailed.status).toBe(502);
-          expect(await tailorFailed.json()).toEqual({
-            error: "Could not tailor the résumé",
-          });
+          expect(await tailorFailed.json()).toEqual({ error: "Could not tailor the résumé" });
           expect(await usage(id)).toEqual([{ calls: before.calls + 1 }]);
 
           app.tailoring.fail = false;
@@ -4957,9 +4686,7 @@ describe.skipIf(!url)("api", () => {
           const matchFailed = await tailor(jobId);
 
           expect(matchFailed.status).toBe(502);
-          expect(await matchFailed.json()).toEqual({
-            error: "Could not tailor the résumé",
-          });
+          expect(await matchFailed.json()).toEqual({ error: "Could not tailor the résumé" });
           expect(await usage(id)).toEqual([{ calls: before.calls + 3 }]);
           expect(app.calls.map((modelCall) => modelCall.kind)).toEqual([
             "tailor",
@@ -5025,11 +4752,7 @@ describe.skipIf(!url)("api", () => {
 
             expect(res.status).toBe(200);
             expect(body).toEqual({
-              job: {
-                title: "Backend",
-                company: "Acme",
-                url: "https://jobs.example.com/pacote",
-              },
+              job: { title: "Backend", company: "Acme", url: "https://jobs.example.com/pacote" },
               resume: { id: base.id, kind: "base" },
               coverLetter: null,
               profile: [
@@ -5106,10 +4829,7 @@ describe.skipIf(!url)("api", () => {
             const partial = await (await call(`/me/jobs/${jobId}/package`)).json();
 
             expect(partial.profile).toEqual([
-              {
-                field: "address",
-                value: "Rua A, 5 - Centro, Campinas - SP, CEP 01310-100",
-              },
+              { field: "address", value: "Rua A, 5 - Centro, Campinas - SP, CEP 01310-100" },
             ]);
             expect(JSON.stringify(partial)).not.toContain("529");
           });
@@ -5120,33 +4840,22 @@ describe.skipIf(!url)("api", () => {
 
             app.cover.letter = "Primeira carta.";
 
-            const first = await call(`/me/jobs/${jobId}/cover-letter`, {
-              method: "POST",
-            });
+            const first = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
 
             expect(first.status).toBe(200);
-            expect(await first.json()).toEqual({
-              coverLetter: "Primeira carta.",
-            });
+            expect(await first.json()).toEqual({ coverLetter: "Primeira carta." });
 
             const [created] = await packageRows(id);
 
-            expect(created).toMatchObject({
-              jobId,
-              coverLetter: "Primeira carta.",
-            });
+            expect(created).toMatchObject({ jobId, coverLetter: "Primeira carta." });
             expect(created.createdAt).toEqual(created.updatedAt);
             expect(await usage(id)).toEqual([{ calls: expect.any(Number) }]);
 
             app.cover.letter = "Segunda carta.";
 
-            const second = await call(`/me/jobs/${jobId}/cover-letter`, {
-              method: "POST",
-            });
+            const second = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
 
-            expect(await second.json()).toEqual({
-              coverLetter: "Segunda carta.",
-            });
+            expect(await second.json()).toEqual({ coverLetter: "Segunda carta." });
 
             const [replaced] = await packageRows(id);
 
@@ -5169,23 +4878,17 @@ describe.skipIf(!url)("api", () => {
 
             app.cover.letter = "Aumentei vendas em 40%.";
 
-            const res = await call(`/me/jobs/${jobId}/cover-letter`, {
-              method: "POST",
-            });
+            const res = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
 
             expect(res.status).toBe(502);
-            expect(await res.json()).toEqual({
-              error: "Could not write the cover letter",
-            });
+            expect(await res.json()).toEqual({ error: "Could not write the cover letter" });
             expect(await packageRows(id)).toEqual([]);
 
             app.cover.letter = "Segunda tentativa";
             await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
             app.cover.letter = "Aumentei vendas em 40%.";
 
-            const kept = await call(`/me/jobs/${jobId}/cover-letter`, {
-              method: "POST",
-            });
+            const kept = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
 
             expect(kept.status).toBe(502);
             expect((await packageRows(id)).map((row) => row.coverLetter)).toEqual([
@@ -5212,23 +4915,15 @@ describe.skipIf(!url)("api", () => {
 
             app.cover.letter = "Quero trabalhar na 99.";
 
-            expect(
-              (
-                await call(`/me/jobs/${job.id}/cover-letter`, {
-                  method: "POST",
-                })
-              ).status,
-            ).toBe(200);
+            expect((await call(`/me/jobs/${job.id}/cover-letter`, { method: "POST" })).status).toBe(
+              200,
+            );
 
             app.cover.letter = "Quero atender 500 pessoas.";
 
-            expect(
-              (
-                await call(`/me/jobs/${job.id}/cover-letter`, {
-                  method: "POST",
-                })
-              ).status,
-            ).toBe(502);
+            expect((await call(`/me/jobs/${job.id}/cover-letter`, { method: "POST" })).status).toBe(
+              502,
+            );
           });
 
           it("uses the ready tailored version and otherwise the base résumé", async () => {
@@ -5275,10 +4970,7 @@ describe.skipIf(!url)("api", () => {
 
             const theirs = await other.call(`/me/jobs/${jobId}/package`);
 
-            expect(await theirs.json()).toMatchObject({
-              coverLetter: null,
-              profile: [],
-            });
+            expect(await theirs.json()).toMatchObject({ coverLetter: null, profile: [] });
             expect(
               JSON.stringify(await other.call(`/me/jobs/${jobId}/package`).then((r) => r.json())),
             ).not.toContain("primeira pessoa");
@@ -5294,14 +4986,10 @@ describe.skipIf(!url)("api", () => {
             await db.update(llmUsage).set({ calls: 30 }).where(eq(llmUsage.profileId, id));
             app.calls.length = 0;
 
-            const res = await call(`/me/jobs/${jobId}/cover-letter`, {
-              method: "POST",
-            });
+            const res = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
 
             expect(res.status).toBe(429);
-            expect(await res.json()).toEqual({
-              error: "Daily AI limit reached",
-            });
+            expect(await res.json()).toEqual({ error: "Daily AI limit reached" });
             expect(letterCalls(app.calls)).toBe(0);
             expect(await usage(id)).toEqual([{ calls: 30 }]);
             expect(await packageRows(id)).toEqual([]);
@@ -5317,9 +5005,7 @@ describe.skipIf(!url)("api", () => {
 
             app.calls.length = 0;
 
-            const res = await call(`/me/jobs/${jobId}/cover-letter`, {
-              method: "POST",
-            });
+            const res = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
 
             expect(res.status).toBe(409);
             expect(await res.json()).toEqual({ error: "Already applied" });
@@ -5364,9 +5050,7 @@ describe.skipIf(!url)("api", () => {
               expect(await res.json()).toEqual({ error: "Job not found" });
             }
 
-            const letter = await call(`/me/jobs/${stored}/cover-letter`, {
-              method: "POST",
-            });
+            const letter = await call(`/me/jobs/${stored}/cover-letter`, { method: "POST" });
 
             expect(letter.status).toBe(404);
           });
@@ -5378,14 +5062,10 @@ describe.skipIf(!url)("api", () => {
 
             app.cover.fail = true;
 
-            const res = await call(`/me/jobs/${jobId}/cover-letter`, {
-              method: "POST",
-            });
+            const res = await call(`/me/jobs/${jobId}/cover-letter`, { method: "POST" });
 
             expect(res.status).toBe(502);
-            expect(await res.json()).toEqual({
-              error: "Could not write the cover letter",
-            });
+            expect(await res.json()).toEqual({ error: "Could not write the cover letter" });
             expect(await packageRows(id)).toEqual([]);
             expect(logged.mock.calls).toEqual([
               ["cover letter failed", { name: "Error", message: "gateway down" }],
@@ -5406,9 +5086,7 @@ describe.skipIf(!url)("api", () => {
                 ["cover-letter", "POST"],
                 ["package", "GET"],
               ]) {
-                const res = await call(`/me/jobs/${missing}/${path}`, {
-                  method,
-                });
+                const res = await call(`/me/jobs/${missing}/${path}`, { method });
 
                 expect(res.status).toBe(404);
                 expect(await res.json()).toEqual({ error: "Job not found" });
@@ -5425,17 +5103,12 @@ describe.skipIf(!url)("api", () => {
             });
 
             expect(noBase.status).toBe(409);
-            expect(await noBase.json()).toEqual({
-              error: "Upload a résumé first",
-            });
+            expect(await noBase.json()).toEqual({ error: "Upload a résumé first" });
             expect(await usage(bare)).toEqual(bareSpent);
 
             const bareView = await request(app.instance, bare, `/me/jobs/${jobId}/package`);
 
-            expect(await bareView.json()).toMatchObject({
-              resume: null,
-              coverLetter: null,
-            });
+            expect(await bareView.json()).toMatchObject({ resume: null, coverLetter: null });
 
             const before = await usage(id);
 
@@ -5495,55 +5168,35 @@ describe.skipIf(!url)("api", () => {
             const read = await call(`/me/resumes/${missing}`);
 
             expect(read.status).toBe(404);
-            expect(await read.json()).toEqual({
-              error: "Résumé version not found",
-            });
+            expect(await read.json()).toEqual({ error: "Résumé version not found" });
             expect((await edit(missing, { content: base.content })).status).toBe(404);
             expect((await ready(missing)).status).toBe(404);
           }
 
           for (const path of ["/me/resumes/not-a-uuid", "/me/resumes/not-a-uuid/ready"]) {
             expect(
-              (
-                await call(path, {
-                  method: path.endsWith("ready") ? "POST" : "GET",
-                })
-              ).status,
+              (await call(path, { method: path.endsWith("ready") ? "POST" : "GET" })).status,
             ).toBe(422);
           }
 
           const invalid = await edit(version.id, {
-            content: {
-              ...version.content,
-              headline: { text: "x".repeat(2_001) },
-            },
+            content: { ...version.content, headline: { text: "x".repeat(2_001) } },
           });
 
           expect(invalid.status).toBe(422);
-          expect(await invalid.json()).toEqual({
-            error: "Invalid résumé content",
-          });
+          expect(await invalid.json()).toEqual({ error: "Invalid résumé content" });
 
-          const malformed = await edit(version.id, {
-            content: { headline: 1 },
-          });
+          const malformed = await edit(version.id, { content: { headline: 1 } });
 
           expect(malformed.status).toBe(422);
-          expect(await malformed.json()).toEqual({
-            error: "Invalid résumé content",
-          });
+          expect(await malformed.json()).toEqual({ error: "Invalid résumé content" });
 
           const duplicated = await edit(version.id, {
-            content: {
-              ...version.content,
-              summary: { ...version.content.headline },
-            },
+            content: { ...version.content, summary: { ...version.content.headline } },
           });
 
           expect(duplicated.status).toBe(422);
-          expect(await duplicated.json()).toEqual({
-            error: "Duplicate node ids",
-          });
+          expect(await duplicated.json()).toEqual({ error: "Duplicate node ids" });
           expect(await tailoredRows(id)).toEqual([
             expect.objectContaining({ content: version.content }),
           ]);
@@ -5744,10 +5397,7 @@ describe.skipIf(!url)("api", () => {
         expect(body.applications).toEqual([
           expect.objectContaining({
             job: expect.objectContaining({ title: "Frontend" }),
-            resume: {
-              kind: "tailored",
-              job: { title: "Frontend", company: "Globex" },
-            },
+            resume: { kind: "tailored", job: { title: "Frontend", company: "Globex" } },
           }),
           expect.objectContaining({
             job: expect.objectContaining({ title: "Backend" }),
@@ -5757,11 +5407,7 @@ describe.skipIf(!url)("api", () => {
         expect(JSON.stringify(body)).not.toContain(version.id);
         expect(body.matches).toEqual([
           {
-            job: {
-              title: "Backend",
-              company: "Acme",
-              url: "https://jobs.example.com/export-job",
-            },
+            job: { title: "Backend", company: "Acme", url: "https://jobs.example.com/export-job" },
             score: 81,
             reasons: ["Stack em comum"],
             computedAt: "2026-02-01T00:00:00.000Z",
@@ -5770,10 +5416,7 @@ describe.skipIf(!url)("api", () => {
         expect(body.page).toEqual({
           slug: "export-page",
           enabled: true,
-          resume: {
-            kind: "tailored",
-            job: { title: "Frontend", company: "Globex" },
-          },
+          resume: { kind: "tailored", job: { title: "Frontend", company: "Globex" } },
           createdAt: "2026-03-01T00:00:00.000Z",
           updatedAt: "2026-03-02T00:00:00.000Z",
         });
@@ -5787,10 +5430,7 @@ describe.skipIf(!url)("api", () => {
       it("answers 404 when the profile disappears during export", async () => {
         const instance = createApp(
           webOrigin,
-          {
-            ...repos,
-            account: { ...repos.account, exportData: async () => undefined },
-          },
+          { ...repos, account: { ...repos.account, exportData: async () => undefined } },
           appOptions,
         );
 
@@ -5805,23 +5445,14 @@ describe.skipIf(!url)("api", () => {
           instance: ReturnType<typeof resumesApp>["instance"],
           id: string,
           jobId: string,
-          json: { reason?: string | number; note?: string | number | null } = {
-            reason: "salary",
-          },
-        ) =>
-          request(instance, id, `/me/jobs/${jobId}/reject`, {
-            method: "POST",
-            json,
-          });
+          json: { reason?: string | number; note?: string | number | null } = { reason: "salary" },
+        ) => request(instance, id, `/me/jobs/${jobId}/reject`, { method: "POST", json });
 
         const unreject = (
           instance: ReturnType<typeof resumesApp>["instance"],
           id: string,
           jobId: string,
-        ) =>
-          request(instance, id, `/me/jobs/${jobId}/reject`, {
-            method: "DELETE",
-          });
+        ) => request(instance, id, `/me/jobs/${jobId}/reject`, { method: "DELETE" });
 
         async function openJob(title: string, values: Partial<typeof jobs.$inferInsert> = {}) {
           const [row] = await db
@@ -5861,13 +5492,7 @@ describe.skipIf(!url)("api", () => {
             const json = method === "POST" ? { reason: "other" } : undefined;
 
             expect(
-              (
-                await request(instance, id, path, {
-                  method,
-                  json,
-                  session: "admin",
-                })
-              ).status,
+              (await request(instance, id, path, { method, json, session: "admin" })).status,
             ).toBe(403);
             expect(
               (
@@ -5888,9 +5513,7 @@ describe.skipIf(!url)("api", () => {
           const id = await profile();
           const other = await profile("outra.pessoal@example.com", 1);
           await openJob("Fica", { postedAt: new Date("2026-02-01T00:00:00Z") });
-          const drop = await openJob("Some", {
-            postedAt: new Date("2026-01-01T00:00:00Z"),
-          });
+          const drop = await openJob("Some", { postedAt: new Date("2026-01-01T00:00:00Z") });
 
           expect(await listed(instance, id)).toEqual(["Fica", "Some"]);
 
@@ -5985,19 +5608,13 @@ describe.skipIf(!url)("api", () => {
           const id = await profile();
           const jobId = await openJob("Vaga");
 
-          await reject(instance, id, jobId, {
-            reason: "salary",
-            note: `  paga\u0000 pouco  `,
-          });
+          await reject(instance, id, jobId, { reason: "salary", note: `  paga\u0000 pouco  ` });
 
           const [first] = await db.select().from(jobRejections);
 
           expect(first).toMatchObject({ reason: "salary", note: "paga pouco" });
 
-          await reject(instance, id, jobId, {
-            reason: "location",
-            note: "x".repeat(500),
-          });
+          await reject(instance, id, jobId, { reason: "location", note: "x".repeat(500) });
 
           const [second] = await db.select().from(jobRejections);
 
@@ -6098,17 +5715,11 @@ describe.skipIf(!url)("api", () => {
           const { instance } = resumesApp();
           const id = await profile();
 
-          await openJob("Longe", {
-            company: "Bad",
-            postedAt: new Date("2026-03-01T00:00:00Z"),
-          });
-          await openJob("Perto", {
-            postedAt: new Date("2026-01-01T00:00:00Z"),
-          });
-          await db.insert(talentPreferences).values({
-            profileId: id,
-            jobPreferences: { excludedCompanies: ["bad"] },
-          });
+          await openJob("Longe", { company: "Bad", postedAt: new Date("2026-03-01T00:00:00Z") });
+          await openJob("Perto", { postedAt: new Date("2026-01-01T00:00:00Z") });
+          await db
+            .insert(talentPreferences)
+            .values({ profileId: id, jobPreferences: { excludedCompanies: ["bad"] } });
 
           const body = await (await request(instance, id, "/me/jobs?view=all")).json();
 
@@ -6135,11 +5746,7 @@ describe.skipIf(!url)("api", () => {
           id: string,
           questionId: string,
           json: AnswerJson,
-        ) =>
-          request(instance, id, `/me/answers/${questionId}`, {
-            method: "PUT",
-            json,
-          });
+        ) => request(instance, id, `/me/answers/${questionId}`, { method: "PUT", json });
 
         it("requires an active talent session", async () => {
           const { instance } = resumesApp();
@@ -6174,26 +5781,19 @@ describe.skipIf(!url)("api", () => {
           const id = await profile();
           const [{ id: questionId }] = (await (await answers(instance, id)).json()).questions;
 
-          const saved = await put(instance, id, questionId, {
-            answer: "  R$ 9.000  ",
-          });
+          const saved = await put(instance, id, questionId, { answer: "  R$ 9.000  " });
           const body = await saved.json();
 
           expect(saved.status).toBe(200);
           expect(body.unanswered).toBe(9);
-          expect(body.questions[0]).toMatchObject({
-            id: questionId,
-            answer: "R$ 9.000",
-          });
+          expect(body.questions[0]).toMatchObject({ id: questionId, answer: "R$ 9.000" });
           expect(await (await answers(instance, id)).json()).toEqual(body);
 
           const replaced = await (await put(instance, id, questionId, { answer: "Outra" })).json();
 
           expect(replaced.questions[0].answer).toBe("Outra");
 
-          const cleared = await put(instance, id, questionId, {
-            answer: "   ",
-          });
+          const cleared = await put(instance, id, questionId, { answer: "   " });
 
           expect(cleared.status).toBe(200);
           expect((await cleared.json()).unanswered).toBe(10);
@@ -6208,18 +5808,12 @@ describe.skipIf(!url)("api", () => {
             200,
           );
 
-          const res = await put(instance, id, questionId, {
-            answer: "a".repeat(2001),
-          });
+          const res = await put(instance, id, questionId, { answer: "a".repeat(2001) });
 
           expect(res.status).toBe(422);
           expect(await res.json()).toEqual({ error: "Invalid answer" });
           expect(
-            (
-              await put(instance, id, questionId, {
-                answer: ` ${"a".repeat(2000)} `,
-              })
-            ).status,
+            (await put(instance, id, questionId, { answer: ` ${"a".repeat(2000)} ` })).status,
           ).toBe(200);
         });
 
@@ -6295,11 +5889,7 @@ describe.skipIf(!url)("api", () => {
           const exported = await (await request(instance, id, "/me/export")).json();
 
           expect(exported.answers).toEqual([
-            {
-              question: text,
-              answer: "Resposta",
-              updatedAt: expect.any(String),
-            },
+            { question: text, answer: "Resposta", updatedAt: expect.any(String) },
           ]);
         });
       });
@@ -6359,11 +5949,7 @@ describe.skipIf(!url)("api", () => {
           const id = await profile();
 
           expect(
-            (
-              await request(instance, id, "/me/preferences", {
-                session: "admin",
-              })
-            ).status,
+            (await request(instance, id, "/me/preferences", { session: "admin" })).status,
           ).toBe(403);
           expect((await save(instance, id, { mode: "hybrid" })).status).toBe(200);
           expect(
@@ -6383,17 +5969,10 @@ describe.skipIf(!url)("api", () => {
           const { instance } = resumesApp();
           const id = await profile();
 
-          const first = await save(instance, id, {
-            mode: "hybrid",
-            hybridThreshold: 90,
-          });
+          const first = await save(instance, id, { mode: "hybrid", hybridThreshold: 90 });
 
           expect(first.status).toBe(200);
-          expect(await first.json()).toEqual({
-            ...defaults,
-            mode: "hybrid",
-            hybridThreshold: 90,
-          });
+          expect(await first.json()).toEqual({ ...defaults, mode: "hybrid", hybridThreshold: 90 });
 
           const second = await save(instance, id, {
             jobPreferences: {
@@ -6413,10 +5992,7 @@ describe.skipIf(!url)("api", () => {
             locations: [{ city: "Campinas", state: "SP" }],
             excludedCompanies: ["Acme"],
           });
-          expect(body.profileFields.phone).toEqual({
-            value: "11 90000-0000",
-            share: true,
-          });
+          expect(body.profileFields.phone).toEqual({ value: "11 90000-0000", share: true });
           expect(await (await request(instance, id, "/me/preferences")).json()).toEqual(body);
         });
 
@@ -6526,9 +6102,7 @@ describe.skipIf(!url)("api", () => {
             { jobPreferences: { locations: [{ city: null, state: "XX" }] } },
             { jobPreferences: { salaryFloorCents: -5 } },
             { jobPreferences: { salaryFloorCents: 2_147_483_648 } },
-            {
-              profileFields: { phone: { value: "x".repeat(501), share: true } },
-            },
+            { profileFields: { phone: { value: "x".repeat(501), share: true } } },
             { profileFields: { phone: { value: "1" } } },
           ];
 
@@ -6566,10 +6140,7 @@ describe.skipIf(!url)("api", () => {
           const id = await profile();
           const other = await profile("outra.pessoal@example.com", 1);
 
-          await save(instance, id, {
-            mode: "automatic",
-            targetTitles: ["Backend"],
-          });
+          await save(instance, id, { mode: "automatic", targetTitles: ["Backend"] });
 
           expect(await (await request(instance, other, "/me/preferences")).json()).toEqual(
             defaults,
@@ -6632,10 +6203,7 @@ describe.skipIf(!url)("api", () => {
           const { instance } = resumesApp();
           const id = await profile();
 
-          await save(instance, id, {
-            mode: "automatic",
-            targetTitles: ["Backend"],
-          });
+          await save(instance, id, { mode: "automatic", targetTitles: ["Backend"] });
 
           const exported = await (await request(instance, id, "/me/export")).json();
 
@@ -6658,16 +6226,12 @@ describe.skipIf(!url)("api", () => {
         const failed = await request(instance, id, "/me", { method: "DELETE" });
 
         expect(failed.status).toBe(502);
-        expect(await failed.json()).toEqual({
-          error: "Could not delete stored files",
-        });
+        expect(await failed.json()).toEqual({ error: "Could not delete stored files" });
         expect((await request(instance, id, "/me")).status).toBe(200);
 
         store.failRemove = false;
 
-        const deleted = await request(instance, id, "/me", {
-          method: "DELETE",
-        });
+        const deleted = await request(instance, id, "/me", { method: "DELETE" });
 
         expect(deleted.status).toBe(204);
         expect(store.prefixes).toEqual([`resumes/${id}/`, `ai-applications/${id}/`]);
@@ -6690,13 +6254,9 @@ describe.skipIf(!url)("api", () => {
           .values({ caseId, email: personalEmail.toUpperCase(), plan: {} })
           .returning({ grantId: employeeAccess.grantId });
 
-        await db.insert(employeeStates).values({
-          caseId,
-          userId,
-          key: "departure-v1",
-          revision: 1,
-          value: {},
-        });
+        await db
+          .insert(employeeStates)
+          .values({ caseId, userId, key: "departure-v1", revision: 1, value: {} });
         await db.insert(authSession).values([
           {
             id: `${userId}-employee`,
@@ -6779,9 +6339,7 @@ describe.skipIf(!url)("api", () => {
         const res = await request(instance, id, "/me", { method: "DELETE" });
 
         expect(res.status).toBe(503);
-        expect(await res.json()).toEqual({
-          error: "File storage not configured",
-        });
+        expect(await res.json()).toEqual({ error: "File storage not configured" });
         expect((await request(instance, id, "/me")).status).toBe(200);
       });
 
@@ -6814,9 +6372,7 @@ describe.skipIf(!url)("api", () => {
         const res = await request(instance, id, "/me", { method: "DELETE" });
 
         expect(res.status).toBe(503);
-        expect(await res.json()).toEqual({
-          error: "File storage not configured",
-        });
+        expect(await res.json()).toEqual({ error: "File storage not configured" });
       });
     });
   });
@@ -6835,11 +6391,7 @@ describe.skipIf(!url)("api", () => {
         })),
       });
 
-    const acme = {
-      kind: "greenhouse",
-      target: "acme",
-      label: null,
-    } satisfies CatalogSource;
+    const acme = { kind: "greenhouse", target: "acme", label: null } satisfies CatalogSource;
 
     function sourcesApp(
       catalog: readonly CatalogSource[] | undefined,
@@ -6891,10 +6443,7 @@ describe.skipIf(!url)("api", () => {
 
     function queued(kind: string) {
       return db
-        .select({
-          subject: backgroundJobs.subject,
-          status: backgroundJobs.status,
-        })
+        .select({ subject: backgroundJobs.subject, status: backgroundJobs.status })
         .from(backgroundJobs)
         .where(eq(backgroundJobs.kind, kind));
     }
@@ -6970,27 +6519,13 @@ describe.skipIf(!url)("api", () => {
         "https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true",
       ]);
       expect(await importedJobs()).toMatchObject([
-        {
-          sourceKey: "acme:1",
-          origin: "external",
-          company: "Acme Pagamentos",
-          closedAt: null,
-        },
-        {
-          sourceKey: "acme:2",
-          origin: "external",
-          company: "Acme Pagamentos",
-          closedAt: null,
-        },
+        { sourceKey: "acme:1", origin: "external", company: "Acme Pagamentos", closedAt: null },
+        { sourceKey: "acme:2", origin: "external", company: "Acme Pagamentos", closedAt: null },
       ]);
 
       const [source] = await registry();
 
-      expect(source).toMatchObject({
-        target: "acme",
-        enabled: true,
-        lastError: null,
-      });
+      expect(source).toMatchObject({ target: "acme", enabled: true, lastError: null });
       expect(await queued("ingest_jobs")).toEqual([{ subject: source.id, status: "done" }]);
     });
 
@@ -7060,10 +6595,7 @@ describe.skipIf(!url)("api", () => {
       const logged = vi.spyOn(console, "error");
 
       const app = sourcesApp([acme], {
-        sources: {
-          ...repos.sources,
-          dueIds: () => Promise.reject(new Error("db down")),
-        },
+        sources: { ...repos.sources, dueIds: () => Promise.reject(new Error("db down")) },
       });
 
       await repos.background.enqueue("ingest_jobs", crypto.randomUUID());
@@ -7167,9 +6699,7 @@ describe.skipIf(!url)("api", () => {
 
       if (!subscription) throw new Error("missing subscription");
 
-      await repos.billing.updateSubscription(defaultOrgId, subscription.id, {
-        status: "canceled",
-      });
+      await repos.billing.updateSubscription(defaultOrgId, subscription.id, { status: "canceled" });
 
       const app = sourcesApp([acme]);
 
@@ -7191,9 +6721,7 @@ describe.skipIf(!url)("api", () => {
 
       if (!subscription?.id || !profile.caseId) throw new Error("missing fixtures");
 
-      await repos.billing.updateSubscription(defaultOrgId, subscription.id, {
-        status: "canceled",
-      });
+      await repos.billing.updateSubscription(defaultOrgId, subscription.id, { status: "canceled" });
       await db.insert(employeeAccess).values({
         caseId: profile.caseId,
         orgId: defaultOrgId,
@@ -7268,9 +6796,7 @@ describe.skipIf(!url)("api", () => {
 
       if (!subscription) throw new Error("missing subscription");
 
-      await repos.billing.updateSubscription(defaultOrgId, subscription.id, {
-        status: "canceled",
-      });
+      await repos.billing.updateSubscription(defaultOrgId, subscription.id, { status: "canceled" });
 
       await sourcesApp([acme]).drainNow();
 
@@ -7386,9 +6912,7 @@ describe.skipIf(!url)("api", () => {
     const team = await app.handle(new Request("http://localhost/api/team", { headers }));
 
     const bundled = await app.handle(
-      new Request("http://localhost/api/offboardings/with-tasks", {
-        headers,
-      }),
+      new Request("http://localhost/api/offboardings/with-tasks", { headers }),
     );
 
     expect(team.status).toBe(expected);
@@ -7441,15 +6965,8 @@ describe.skipIf(!url)("api", () => {
     const response = await app.handle(
       new Request("http://localhost/api/team", {
         method: "POST",
-        headers: {
-          origin: "https://another.example",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          name: "Test",
-          email: "test@example.com",
-          role: "rh",
-        }),
+        headers: { origin: "https://another.example", "content-type": "application/json" },
+        body: JSON.stringify({ name: "Test", email: "test@example.com", role: "rh" }),
       }),
     );
 
@@ -7579,12 +7096,7 @@ describe.skipIf(!url)("api", () => {
     const { email: _, ...expected } = body;
 
     expect(res.status).toBe(201);
-    expect(created).toEqual({
-      id: expect.any(String),
-      ...expected,
-      completed: 0,
-      total: 17,
-    });
+    expect(created).toEqual({ id: expect.any(String), ...expected, completed: 0, total: 17 });
     expect((await call(`/offboardings/${created.id}`)).status).toBe(200);
   });
 
@@ -7598,29 +7110,14 @@ describe.skipIf(!url)("api", () => {
     };
 
     await call("/offboardings", "POST", body);
-    const res = await call("/offboardings", "POST", {
-      ...body,
-      name: "Another",
-    });
+    const res = await call("/offboardings", "POST", { ...body, name: "Another" });
 
     expect(res.status).toBe(409);
   });
 
   it.each([
-    {
-      name: "",
-      role: "Dev",
-      department: "Eng",
-      deadline: "2026-12-01",
-      email: "a@b.com",
-    },
-    {
-      name: "Ana",
-      role: "Dev",
-      department: "Eng",
-      deadline: "tomorrow",
-      email: "a@b.com",
-    },
+    { name: "", role: "Dev", department: "Eng", deadline: "2026-12-01", email: "a@b.com" },
+    { name: "Ana", role: "Dev", department: "Eng", deadline: "tomorrow", email: "a@b.com" },
     { name: "Ana" },
     { name: "Ana", role: "Dev", department: "Eng", deadline: "2026-12-01" },
   ])("rejects an invalid offboarding %j", async (body) => {
@@ -7651,14 +7148,7 @@ describe.skipIf(!url)("api", () => {
       phase: "second-week",
       title: "Entregar itens",
       deadlineOffset: 2,
-      rules: [
-        {
-          id: "area",
-          field: "department",
-          operator: "equals",
-          value: "Operacoes",
-        },
-      ],
+      rules: [{ id: "area", field: "department", operator: "equals", value: "Operacoes" }],
     } as const;
 
     const internalStep = {
@@ -7666,14 +7156,7 @@ describe.skipIf(!url)("api", () => {
       team: "TI",
       phase: "pre",
       title: "Verificar acessos",
-      rules: [
-        {
-          id: "cargo",
-          field: "role",
-          operator: "notEquals",
-          value: "estagiario",
-        },
-      ],
+      rules: [{ id: "cargo", field: "role", operator: "notEquals", value: "estagiario" }],
     } as const;
 
     const known = await repos.actionConfigs.createActionConfig(defaultOrgId, {
@@ -7716,10 +7199,7 @@ describe.skipIf(!url)("api", () => {
         (config: { actionId: string }) => config.actionId === "email:onboarding-return",
       );
 
-      expect(change).toMatchObject({
-        revision: 1,
-        steps: [employeeStep, internalStep],
-      });
+      expect(change).toMatchObject({ revision: 1, steps: [employeeStep, internalStep] });
       expect(action).toMatchObject({ enabled: true, phase: "second-week" });
       expect(change.actionRows.map((config: { id: string }) => config.id)).toEqual(
         expect.arrayContaining([unrelated.id, unknownKind.id]),
@@ -7780,10 +7260,7 @@ describe.skipIf(!url)("api", () => {
           {
             ...body.steps[1],
             slack: { channel: "#equipe", message: "Mensagem" },
-            webhook: {
-              url: "https://offboard.example/tarefa",
-              method: "POST" as const,
-            },
+            webhook: { url: "https://offboard.example/tarefa", method: "POST" as const },
           },
         ],
         knownRowIds: [action.id, unknownKind.id],
@@ -7824,9 +7301,7 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("rejects an invalid import", async () => {
-    const res = await call("/offboardings/import", "POST", {
-      rows: [{ name: "Bia" }],
-    });
+    const res = await call("/offboardings/import", "POST", { rows: [{ name: "Bia" }] });
 
     expect(res.status).toBe(422);
   });
@@ -7835,9 +7310,7 @@ describe.skipIf(!url)("api", () => {
     const list = await (await call("/offboardings")).json();
     const detail = await (await call(`/offboardings/${list[0].id}`)).json();
     const target = detail.tasks.find((item: { status: string }) => item.status !== "in_progress");
-    const res = await call(`/tasks/${target?.id}/status`, "PATCH", {
-      status: "in_progress",
-    });
+    const res = await call(`/tasks/${target?.id}/status`, "PATCH", { status: "in_progress" });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -7847,21 +7320,15 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("returns 404 for an unknown task", async () => {
-    const res = await call(`/tasks/${missingTaskId}/status`, "PATCH", {
-      status: "done",
-    });
+    const res = await call(`/tasks/${missingTaskId}/status`, "PATCH", { status: "done" });
 
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "Task not found" });
   });
 
   it("rejects an invalid task status or id", async () => {
-    const badStatus = await call(`/tasks/${missingTaskId}/status`, "PATCH", {
-      status: "blocked",
-    });
-    const badId = await call("/tasks/not-a-uuid/status", "PATCH", {
-      status: "done",
-    });
+    const badStatus = await call(`/tasks/${missingTaskId}/status`, "PATCH", { status: "blocked" });
+    const badId = await call("/tasks/not-a-uuid/status", "PATCH", { status: "done" });
 
     expect(badStatus.status).toBe(422);
     expect(badId.status).toBe(422);
@@ -7878,11 +7345,7 @@ describe.skipIf(!url)("api", () => {
 
     const res = await call(`/subtasks/${sub.id}/toggle`, "PATCH");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      id: sub.id,
-      title: "Calcular multa FGTS",
-      done: true,
-    });
+    expect(await res.json()).toEqual({ id: sub.id, title: "Calcular multa FGTS", done: true });
   });
 
   it("returns 404 for an unknown subtask toggle", async () => {
@@ -7904,35 +7367,22 @@ describe.skipIf(!url)("api", () => {
 
     expect(res.status).toBe(200);
     expect(list.length).toBeGreaterThan(0);
-    expect(list[0]).toEqual({
-      name: expect.any(String),
-      status: expect.any(String),
-    });
+    expect(list[0]).toEqual({ name: expect.any(String), status: expect.any(String) });
   });
 
   it("creates an integration via upsert", async () => {
-    const res = await call("/integrations/Test%20System", "PUT", {
-      status: "connected",
-    });
+    const res = await call("/integrations/Test%20System", "PUT", { status: "connected" });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      name: "Test System",
-      status: "connected",
-    });
+    expect(await res.json()).toEqual({ name: "Test System", status: "connected" });
   });
 
   it("updates an existing integration status", async () => {
     await call("/integrations/Test%20Toggle", "PUT", { status: "connected" });
-    const res = await call("/integrations/Test%20Toggle", "PUT", {
-      status: "disconnected",
-    });
+    const res = await call("/integrations/Test%20Toggle", "PUT", { status: "disconnected" });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      name: "Test Toggle",
-      status: "disconnected",
-    });
+    expect(await res.json()).toEqual({ name: "Test Toggle", status: "disconnected" });
   });
 
   it("lists equipment with the person name", async () => {
@@ -7954,18 +7404,14 @@ describe.skipIf(!url)("api", () => {
 
   it("updates an equipment status", async () => {
     const [{ person: _person, ...first }] = await (await call("/equipment")).json();
-    const res = await call(`/equipment/${first.id}`, "PUT", {
-      status: "received",
-    });
+    const res = await call(`/equipment/${first.id}`, "PUT", { status: "received" });
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ...first, status: "received" });
   });
 
   it("returns 404 when updating unknown equipment", async () => {
-    const res = await call(`/equipment/${missingTaskId}`, "PUT", {
-      status: "received",
-    });
+    const res = await call(`/equipment/${missingTaskId}`, "PUT", { status: "received" });
 
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "Equipment not found" });
@@ -7988,9 +7434,7 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("rejects an invalid equipment status", async () => {
-    const res = await call(`/equipment/${missingTaskId}`, "PUT", {
-      status: "invalid",
-    });
+    const res = await call(`/equipment/${missingTaskId}`, "PUT", { status: "invalid" });
 
     expect(res.status).toBe(422);
   });
@@ -8047,12 +7491,7 @@ describe.skipIf(!url)("api", () => {
   it("submits and resubmits a survey for a case", async () => {
     const [first] = await (await call("/offboardings")).json();
     await db.$client.query("DELETE FROM exit_surveys");
-    const payload = {
-      caseId: first.id,
-      npsScore: 10,
-      responses: { ok: true },
-      topics: ["A"],
-    };
+    const payload = { caseId: first.id, npsScore: 10, responses: { ok: true }, topics: ["A"] };
 
     const created = await app.handle(
       new Request("http://localhost/api/exit-surveys", {
@@ -8071,10 +7510,7 @@ describe.skipIf(!url)("api", () => {
     );
 
     expect(created.status).toBe(201);
-    expect(await created.json()).toMatchObject({
-      caseId: first.id,
-      npsScore: 10,
-    });
+    expect(await created.json()).toMatchObject({ caseId: first.id, npsScore: 10 });
     expect(again.status).toBe(201);
     expect(await (await call("/exit-surveys")).json()).toHaveLength(1);
   });
@@ -8089,18 +7525,8 @@ describe.skipIf(!url)("api", () => {
         }),
       );
 
-    const unknown = await post({
-      caseId: missingCaseId,
-      npsScore: 5,
-      responses: {},
-      topics: [],
-    });
-    const invalid = await post({
-      caseId: missingCaseId,
-      npsScore: 11,
-      responses: {},
-      topics: [],
-    });
+    const unknown = await post({ caseId: missingCaseId, npsScore: 5, responses: {}, topics: [] });
+    const invalid = await post({ caseId: missingCaseId, npsScore: 11, responses: {}, topics: [] });
 
     expect(unknown.status).toBe(404);
     expect(invalid.status).toBe(422);
@@ -8135,9 +7561,7 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("rejects an invalid integration status", async () => {
-    const res = await call("/integrations/Whatever", "PUT", {
-      status: "invalid",
-    });
+    const res = await call("/integrations/Whatever", "PUT", { status: "invalid" });
 
     expect(res.status).toBe(422);
   });
@@ -8175,24 +7599,15 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("rejects a duplicate action_id", async () => {
-    await call("/action-configs", "POST", {
-      actionId: "dup::test",
-      phase: "d0",
-    });
-    const res = await call("/action-configs", "POST", {
-      actionId: "dup::test",
-      phase: "d0",
-    });
+    await call("/action-configs", "POST", { actionId: "dup::test", phase: "d0" });
+    const res = await call("/action-configs", "POST", { actionId: "dup::test", phase: "d0" });
 
     expect(res.status).toBe(409);
   });
 
   it("updates an action config", async () => {
     const created = await (
-      await call("/action-configs", "POST", {
-        actionId: "upd::test",
-        phase: "d0",
-      })
+      await call("/action-configs", "POST", { actionId: "upd::test", phase: "d0" })
     ).json();
 
     const res = await call(`/action-configs/${created.id}`, "PUT", {
@@ -8201,27 +7616,18 @@ describe.skipIf(!url)("api", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
-      id: created.id,
-      enabled: false,
-      phase: "pre",
-    });
+    expect(await res.json()).toMatchObject({ id: created.id, enabled: false, phase: "pre" });
   });
 
   it("returns 404 when updating unknown config", async () => {
-    const res = await call(`/action-configs/${missingCaseId}`, "PUT", {
-      enabled: false,
-    });
+    const res = await call(`/action-configs/${missingCaseId}`, "PUT", { enabled: false });
 
     expect(res.status).toBe(404);
   });
 
   it("deletes an action config", async () => {
     const created = await (
-      await call("/action-configs", "POST", {
-        actionId: "del::test",
-        phase: "d0",
-      })
+      await call("/action-configs", "POST", { actionId: "del::test", phase: "d0" })
     ).json();
 
     const res = await call(`/action-configs/${created.id}`, "DELETE");
@@ -8240,24 +7646,9 @@ describe.skipIf(!url)("api", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([
-      {
-        id: expect.any(String),
-        name: "Beatriz Castro",
-        email: expect.any(String),
-        role: "admin",
-      },
-      {
-        id: expect.any(String),
-        name: "Camila Rocha",
-        email: expect.any(String),
-        role: "rh",
-      },
-      {
-        id: expect.any(String),
-        name: "Diego Alves",
-        email: expect.any(String),
-        role: "gestor",
-      },
+      { id: expect.any(String), name: "Beatriz Castro", email: expect.any(String), role: "admin" },
+      { id: expect.any(String), name: "Camila Rocha", email: expect.any(String), role: "rh" },
+      { id: expect.any(String), name: "Diego Alves", email: expect.any(String), role: "gestor" },
     ]);
   });
 
@@ -8288,20 +7679,9 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("rejects invalid team member payloads", async () => {
-    const badEmail = await call("/team", "POST", {
-      name: "A",
-      email: "nope",
-      role: "rh",
-    });
-    const badRole = await call("/team", "POST", {
-      name: "A",
-      email: "a@b.com",
-      role: "root",
-    });
-    const noName = await call("/team", "POST", {
-      email: "a@b.com",
-      role: "rh",
-    });
+    const badEmail = await call("/team", "POST", { name: "A", email: "nope", role: "rh" });
+    const badRole = await call("/team", "POST", { name: "A", email: "a@b.com", role: "root" });
+    const noName = await call("/team", "POST", { email: "a@b.com", role: "rh" });
 
     expect(badEmail.status).toBe(422);
     expect(badRole.status).toBe(422);
@@ -8368,9 +7748,7 @@ describe.skipIf(!url)("api", () => {
 
   it("rejects invalid action config", async () => {
     const noAction = await call("/action-configs", "POST", { phase: "d0" });
-    const noPhase = await call("/action-configs", "POST", {
-      actionId: "test::x",
-    });
+    const noPhase = await call("/action-configs", "POST", { actionId: "test::x" });
 
     expect(noAction.status).toBe(422);
     expect(noPhase.status).toBe(422);
@@ -8516,10 +7894,7 @@ describe.skipIf(!url)("api", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      accepted: false,
-      reason: "event ignored",
-    });
+    expect(await res.json()).toEqual({ accepted: false, reason: "event ignored" });
   });
 
   it("returns 404 for inbound webhook on unknown task", async () => {
@@ -8567,19 +7942,14 @@ describe.skipIf(!url)("api", () => {
         t.status === "todo" && t.title === "Enviar desligamento ao eSocial",
     );
 
-    const res = await call(`/tasks/${todo.id}/status`, "PATCH", {
-      status: "done",
-    });
+    const res = await call(`/tasks/${todo.id}/status`, "PATCH", { status: "done" });
 
     expect(res.status).toBe(200);
     expect((await res.json()).status).toBe("done");
   });
 
   it("returns tracking info for a task with tracking code", async () => {
-    const trackingApp = createApp(webOrigin, repos, {
-      ...appOptions,
-      tracking: trackingConfig,
-    });
+    const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
 
     trackingStatus = 200;
     trackingBody = JSON.stringify({
@@ -8590,10 +7960,7 @@ describe.skipIf(!url)("api", () => {
         eventos: [
           {
             descricao: "Objeto em trânsito - por favor aguarde",
-            dtHrCriado: {
-              date: "2026-11-18 16:00:00.000000",
-              timezone: "America/Sao_Paulo",
-            },
+            dtHrCriado: { date: "2026-11-18 16:00:00.000000", timezone: "America/Sao_Paulo" },
           },
         ],
       },
@@ -8640,10 +8007,7 @@ describe.skipIf(!url)("api", () => {
     const res = await app.handle(new Request(`http://localhost/api/tasks/${task.id}/tracking`));
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      trackingCode: "XX000000000BR",
-      tracking: null,
-    });
+    expect(await res.json()).toEqual({ trackingCode: "XX000000000BR", tracking: null });
   });
 
   it("returns 404 for tracking on unknown task", async () => {
@@ -8656,10 +8020,7 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("checks tracked shipments via GET and marks delivered tasks done", async () => {
-    const trackingApp = createApp(webOrigin, repos, {
-      ...appOptions,
-      tracking: trackingConfig,
-    });
+    const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
 
     trackingStatus = 200;
     trackingBody = JSON.stringify({
@@ -8670,10 +8031,7 @@ describe.skipIf(!url)("api", () => {
         eventos: [
           {
             descricao: "Objeto entregue ao destinatário",
-            dtHrCriado: {
-              date: "2026-11-20 10:30:00.000000",
-              timezone: "America/Sao_Paulo",
-            },
+            dtHrCriado: { date: "2026-11-20 10:30:00.000000", timezone: "America/Sao_Paulo" },
           },
         ],
       },
@@ -8711,10 +8069,7 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("checks tracked shipments via POST", async () => {
-    const trackingApp = createApp(webOrigin, repos, {
-      ...appOptions,
-      tracking: trackingConfig,
-    });
+    const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
 
     trackingStatus = 200;
     trackingBody = JSON.stringify({
@@ -8731,10 +8086,7 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("does not mark non-delivered tracked tasks as done", async () => {
-    const trackingApp = createApp(webOrigin, repos, {
-      ...appOptions,
-      tracking: trackingConfig,
-    });
+    const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
 
     trackingStatus = 200;
     trackingBody = JSON.stringify({
@@ -8745,10 +8097,7 @@ describe.skipIf(!url)("api", () => {
         eventos: [
           {
             descricao: "Objeto em trânsito - por favor aguarde",
-            dtHrCriado: {
-              date: "2026-11-18 16:00:00.000000",
-              timezone: "America/Sao_Paulo",
-            },
+            dtHrCriado: { date: "2026-11-18 16:00:00.000000", timezone: "America/Sao_Paulo" },
           },
         ],
       },
@@ -8770,10 +8119,7 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("fires actions for delivered tasks with a phase", async () => {
-    const trackingApp = createApp(webOrigin, repos, {
-      ...appOptions,
-      tracking: trackingConfig,
-    });
+    const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
 
     trackingStatus = 200;
     trackingBody = JSON.stringify({
@@ -8784,10 +8130,7 @@ describe.skipIf(!url)("api", () => {
         eventos: [
           {
             descricao: "Objeto entregue ao destinatário",
-            dtHrCriado: {
-              date: "2026-11-21 09:00:00.000000",
-              timezone: "America/Sao_Paulo",
-            },
+            dtHrCriado: { date: "2026-11-21 09:00:00.000000", timezone: "America/Sao_Paulo" },
           },
         ],
       },
@@ -8853,10 +8196,7 @@ describe.skipIf(!url)("api", () => {
         eventos: [
           {
             descricao: "Objeto entregue ao destinatário",
-            dtHrCriado: {
-              date: "2026-11-21 10:00:00.000000",
-              timezone: "America/Sao_Paulo",
-            },
+            dtHrCriado: { date: "2026-11-21 10:00:00.000000", timezone: "America/Sao_Paulo" },
           },
         ],
       },
@@ -8939,9 +8279,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     grantId = cookie ? grants.get(cookie) : undefined,
   ) {
     requests += 1;
-    const headers = new Headers({
-      "x-test-employee-ip": `192.0.2.${requests}`,
-    });
+    const headers = new Headers({ "x-test-employee-ip": `192.0.2.${requests}` });
 
     if (nativeOrigin) headers.set("expo-origin", nativeOrigin);
     else headers.set("origin", origin);
@@ -9025,15 +8363,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         await fallbackApp.handle(
           new Request(target, {
             method: "PUT",
-            headers: {
-              origin: webOrigin,
-              "content-type": "application/json",
-            },
-            body: JSON.stringify({
-              email: null,
-              plan: emptyEmployeePlan,
-              revision: 0,
-            }),
+            headers: { origin: webOrigin, "content-type": "application/json" },
+            body: JSON.stringify({ email: null, plan: emptyEmployeePlan, revision: 0 }),
           }),
         )
       ).status,
@@ -9054,12 +8385,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
     const record = await repos.offboardings.createOffboarding(defaultOrgId, person, [
       ...layout,
-      {
-        id: "form",
-        title: "Conferir dados",
-        team: "Pessoa desligada",
-        phase: "d0",
-      },
+      { id: "form", title: "Conferir dados", team: "Pessoa desligada", phase: "d0" },
     ]);
 
     const foreign = await repos.offboardings.createOffboarding(
@@ -9094,11 +8420,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     };
 
     expect(
-      await repos.employee.saveSettings(defaultOrgId, record.id, {
-        email,
-        plan,
-        revision: 1,
-      }),
+      await repos.employee.saveSettings(defaultOrgId, record.id, { email, plan, revision: 1 }),
     ).toBe("saved");
 
     const hr = createApp(webOrigin, repos, {
@@ -9127,9 +8449,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
     const inventory = "/equipment-returns/" + record.id;
     expect((await portal("/equipment-returns")).status).toBe(200);
-    expect(await (await portal(inventory + "/address")).json()).toEqual({
-      address: null,
-    });
+    expect(await (await portal(inventory + "/address")).json()).toEqual({ address: null });
     expect((await portal("/equipment-returns/" + missingCaseId + "/address")).status).toBe(404);
     expect(await (await portal(inventory)).json()).toMatchObject([
       { code: "QA-1", received: false, schedule: null },
@@ -9183,13 +8503,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       expect(await repos.employee.updateReceipt(orgId, record.id, "QA-1", true)).toBeNull();
       expect(await repos.offboardings.applyChecklist(orgId, record.id, layout)).toBeNull();
       expect(
-        (
-          await portal("/employee-access/" + foreign.id, "PUT", {
-            email: null,
-            plan,
-            revision: 1,
-          })
-        ).status,
+        (await portal("/employee-access/" + foreign.id, "PUT", { email: null, plan, revision: 1 }))
+          .status,
       ).toBe(409);
     } finally {
       await db.delete(checklistModels).where(eq(checklistModels.orgId, orgId));
@@ -9209,21 +8524,13 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         })
       ).status,
     ).toBe(200);
-    const staleConsent: EmployeeState = {
-      key: "consent",
-      revision: 0,
-      value: { accepted: false },
-    };
+    const staleConsent: EmployeeState = { key: "consent", revision: 0, value: { accepted: false } };
     expect((await request("/employee/state", "PUT", cookie, staleConsent)).status).toBe(409);
 
     const journey = await (await request("/employee/journey", "GET", cookie)).json();
     expect(journey.checklist).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          id: manual.id,
-          action: "check",
-          status: "todo",
-        }),
+        expect.objectContaining({ id: manual.id, action: "check", status: "todo" }),
         expect.objectContaining({ id: confirm.id, action: "equipment" }),
         expect.objectContaining({ action: "feedback" }),
       ]),
@@ -9283,12 +8590,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       403,
     );
     expect(
-      (
-        await request(inventory + "/receipt", "PATCH", cookie, {
-          code: "QA-1",
-          received: true,
-        })
-      ).status,
+      (await request(inventory + "/receipt", "PATCH", cookie, { code: "QA-1", received: true }))
+        .status,
     ).toBe(403);
 
     const receipt = (code: string, received: boolean) =>
@@ -9309,9 +8612,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       ["QA-1", true],
       ["QA-2", true],
     ] as const) {
-      expect(await (await receipt(code, received)).json()).toEqual({
-        received,
-      });
+      expect(await (await receipt(code, received)).json()).toEqual({ received });
     }
 
     const closed = await (await request("/employee/journey", "GET", cookie)).json();
@@ -9328,16 +8629,11 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     const changeBooking = {
       ...departure,
       revision: 1,
-      value: {
-        ...departure.value,
-        booking: { ...booking, day: "2027-03-02" },
-      },
+      value: { ...departure.value, booking: { ...booking, day: "2027-03-02" } },
     };
 
     expect((await request("/employee/state", "PUT", cookie, changeBooking)).status).toBe(422);
-    expect(await (await receipt("QA-2", false)).json()).toEqual({
-      received: false,
-    });
+    expect(await (await receipt("QA-2", false)).json()).toEqual({ received: false });
     expect((await request("/employee/state", "PUT", cookie, changeBooking)).status).toBe(200);
     expect(
       (await repos.offboardings.getOffboarding(defaultOrgId, record.id))?.tasks.find(
@@ -9357,11 +8653,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       )?.status,
     ).toBe("done");
     expect(
-      await repos.employee.saveSettings(defaultOrgId, record.id, {
-        email,
-        plan,
-        revision: 3,
-      }),
+      await repos.employee.saveSettings(defaultOrgId, record.id, { email, plan, revision: 3 }),
     ).toBe("saved");
     expect(
       (await repos.offboardings.getOffboarding(defaultOrgId, record.id))?.tasks.find(
@@ -9375,11 +8667,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       value: {
         ...departure.value,
         feedback: null,
-        booking: {
-          method: "office",
-          day: "2027-03-02",
-          slot: "afternoon",
-        } as const,
+        booking: { method: "office", day: "2027-03-02", slot: "afternoon" } as const,
       },
     };
 
@@ -9426,9 +8714,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         (task) => task.id === confirm.id,
       )?.status,
     ).toBe("todo");
-    expect(await (await portal(inventory + "/address")).json()).toEqual({
-      address: null,
-    });
+    expect(await (await portal(inventory + "/address")).json()).toEqual({ address: null });
   });
 
   it("separates employee sessions from HR and shares confirmed, revisioned progress only with the owner", async () => {
@@ -9462,11 +8748,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       name: "RH com o mesmo e-mail",
       role: "admin",
     });
-    await repos.employee.saveSettings(defaultOrgId, first.id, {
-      email,
-      plan,
-      revision: 1,
-    });
+    await repos.employee.saveSettings(defaultOrgId, first.id, { email, plan, revision: 1 });
     await repos.employee.saveSettings(defaultOrgId, second.id, {
       email: secondEmail,
       plan: emptyEmployeePlan,
@@ -9497,10 +8779,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     const journeyBeforeConsent = await request("/employee/journey", "GET", cookie);
     expect(journeyBeforeConsent.status).toBe(200);
     expect(journeyBeforeConsent.headers.get("cache-control")).toBe("private, no-store");
-    expect(await journeyBeforeConsent.json()).toMatchObject({
-      deadline: first.deadline,
-      plan,
-    });
+    expect(await journeyBeforeConsent.json()).toMatchObject({ deadline: first.deadline, plan });
 
     const initialConsent = await request("/employee/state/consent", "GET", cookie);
     expect(await initialConsent.json()).toEqual({
@@ -9529,11 +8808,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
     expect((await request("/employee/state", "PUT", cookie, blockedDeparture)).status).toBe(403);
 
-    const consent = {
-      key: "consent",
-      revision: 0,
-      value: { accepted: true },
-    } as const;
+    const consent = { key: "consent", revision: 0, value: { accepted: true } } as const;
     expect(
       (await request("/employee/state", "PUT", cookie, consent, "https://foreign.example")).status,
     ).toBe(403);
@@ -9569,10 +8844,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
     const firstJourney = await request("/employee/journey", "GET", cookie);
     expect(firstJourney.headers.get("cache-control")).toBe("private, no-store");
-    expect(await firstJourney.json()).toMatchObject({
-      deadline: first.deadline,
-      plan,
-    });
+    expect(await firstJourney.json()).toMatchObject({ deadline: first.deadline, plan });
     expect(await (await request("/employee/journey", "GET", secondCookie)).json()).toMatchObject({
       plan: emptyEmployeePlan,
     });
@@ -9602,11 +8874,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
           ...current,
           value: {
             ...current.value,
-            booking: {
-              method: "office",
-              day: booking.day,
-              slot: booking.slot,
-            },
+            booking: { method: "office", day: booking.day, slot: booking.slot },
           },
         })
       ).status,
@@ -9632,18 +8900,12 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     const draft = { ...current, value: { ...current.value, booking } };
     const saved = await request("/employee/state", "PUT", cookie, draft);
     expect(saved.status).toBe(200);
-    expect(await saved.json()).toMatchObject({
-      revision: 1,
-      value: { booking },
-    });
+    expect(await saved.json()).toMatchObject({ revision: 1, value: { booking } });
     expect((await request("/employee/state", "PUT", cookie, draft)).status).toBe(200);
 
     const different = {
       ...draft,
-      value: {
-        ...draft.value,
-        booking: { ...booking, slot: "afternoon" as const },
-      },
+      value: { ...draft.value, booking: { ...booking, slot: "afternoon" as const } },
     };
 
     expect((await request("/employee/state", "PUT", cookie, different)).status).toBe(409);
@@ -9651,28 +8913,16 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       await (await request("/employee/state/departure-v1", "GET", secondCookie)).json(),
     ).toMatchObject({ revision: 0, value: { booking: null } });
 
-    const next = {
-      ...draft,
-      revision: 1,
-      value: { ...draft.value, booking: null },
-    };
+    const next = { ...draft, revision: 1, value: { ...draft.value, booking: null } };
     expect(await (await request("/employee/state", "PUT", cookie, next)).json()).toMatchObject({
       revision: 2,
       value: { booking: null },
     });
     expect((await request("/employee/state", "PUT", cookie, different)).status).toBe(409);
 
-    await repos.employee.saveSettings(defaultOrgId, first.id, {
-      email: null,
-      plan,
-      revision: 2,
-    });
+    await repos.employee.saveSettings(defaultOrgId, first.id, { email: null, plan, revision: 2 });
     expect((await request("/employee/session", "GET", cookie)).status).toBe(401);
-    await repos.employee.saveSettings(defaultOrgId, first.id, {
-      email,
-      plan,
-      revision: 3,
-    });
+    await repos.employee.saveSettings(defaultOrgId, first.id, { email, plan, revision: 3 });
     expect((await request("/employee/session", "GET", cookie)).status).toBe(401);
     expect((await request("/employee/session", "GET", secondCookie)).status).toBe(200);
   });
@@ -9697,11 +8947,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       email: `other-${randomUUID()}@offboard.example`,
     });
 
-    await repos.team.createTeamMember(defaultOrgId, {
-      email: admin,
-      name: "RH",
-      role: "admin",
-    });
+    await repos.team.createTeamMember(defaultOrgId, { email: admin, name: "RH", role: "admin" });
 
     expect((await sendMemberCode(admin)).status).toBe(200);
 
@@ -9714,12 +8960,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
     const plan = {
       ...emptyEmployeePlan,
-      exam: {
-        day: "2027-01-26",
-        time: "10:00",
-        clinic: "Clínica",
-        address: "Rua da Clínica",
-      },
+      exam: { day: "2027-01-26", time: "10:00", clinic: "Clínica", address: "Rua da Clínica" },
     };
 
     expect(await (await request(target, "GET", hrCookie)).json()).toEqual({
@@ -9745,14 +8986,9 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     });
     expect((await request(target, "PUT", hrCookie, { email, plan, revision: 1 })).status).toBe(409);
     const firstVersion = { email, plan, revision: 2 };
-    expect(
-      (
-        await request(target, "PUT", hrCookie, {
-          ...firstVersion,
-          email: null,
-        })
-      ).status,
-    ).toBe(200);
+    expect((await request(target, "PUT", hrCookie, { ...firstVersion, email: null })).status).toBe(
+      200,
+    );
     const conflict = await request(target, "PUT", hrCookie, firstVersion);
     expect(conflict.status).toBe(409);
     expect(await conflict.json()).toMatchObject({ code: "settings-changed" });
@@ -9760,14 +8996,9 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       email: null,
       revision: 3,
     });
-    expect(
-      (
-        await request(target, "PUT", hrCookie, {
-          ...firstVersion,
-          revision: 3,
-        })
-      ).status,
-    ).toBe(200);
+    expect((await request(target, "PUT", hrCookie, { ...firstVersion, revision: 3 })).status).toBe(
+      200,
+    );
     expect(
       (
         await request(`/employee-access/${second.id}`, "PUT", hrCookie, {
@@ -9788,11 +9019,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     expect(await emailInUse.json()).toMatchObject({ code: "email-in-use" });
 
     await expect(
-      repos.employee.saveSettings(defaultOrgId, "invalid-case-id", {
-        email,
-        plan,
-        revision: 0,
-      }),
+      repos.employee.saveSettings(defaultOrgId, "invalid-case-id", { email, plan, revision: 0 }),
     ).rejects.toThrow();
 
     const otpRequest = { email, type: "sign-in" } as const;
@@ -9850,22 +9077,12 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     const initial: EmployeeState = {
       key: "departure-v1",
       revision: 0,
-      value: {
-        handoffCompleted: [],
-        examAttended: true,
-        feedback: null,
-        booking: null,
-      },
+      value: { handoffCompleted: [], examAttended: true, feedback: null, booking: null },
     };
 
     expect((await request("/employee/state", "PUT", cookie, initial)).status).toBe(200);
     expect(
-      (
-        await request("/employee/state", "PUT", cookie, {
-          ...initial,
-          revision: 1,
-        })
-      ).status,
+      (await request("/employee/state", "PUT", cookie, { ...initial, revision: 1 })).status,
     ).toBe(200);
 
     expect((await request(target, "PUT", hrCookie, { email, plan, revision: 4 })).status).toBe(200);
@@ -9874,18 +9091,10 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     await db.delete(employeeAccess).where(eq(employeeAccess.caseId, first.id));
     expect((await request("/employee/session", "GET", cookie)).status).toBe(401);
     expect(
-      await repos.employee.saveSettings(defaultOrgId, first.id, {
-        email,
-        plan,
-        revision: 1,
-      }),
+      await repos.employee.saveSettings(defaultOrgId, first.id, { email, plan, revision: 1 }),
     ).toBe("changed");
     expect(
-      await repos.employee.saveSettings(defaultOrgId, missingCaseId, {
-        email,
-        plan,
-        revision: 1,
-      }),
+      await repos.employee.saveSettings(defaultOrgId, missingCaseId, { email, plan, revision: 1 }),
     ).toBe("missing-case");
   });
 
@@ -9986,11 +9195,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     const plan = emptyEmployeePlan;
 
     expect(
-      await repos.employee.saveSettings(defaultOrgId, first.id, {
-        email,
-        plan,
-        revision: 0,
-      }),
+      await repos.employee.saveSettings(defaultOrgId, first.id, { email, plan, revision: 0 }),
     ).toBe("changed");
     expect((await sendCode(email)).status).toBe(200);
     const priorCode = codes.get(email);
@@ -9998,18 +9203,10 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     if (!priorCode) throw new Error("No code delivered");
 
     expect(
-      await repos.employee.saveSettings(defaultOrgId, first.id, {
-        email: null,
-        plan,
-        revision: 1,
-      }),
+      await repos.employee.saveSettings(defaultOrgId, first.id, { email: null, plan, revision: 1 }),
     ).toBe("saved");
     expect(
-      await repos.employee.saveSettings(defaultOrgId, second.id, {
-        email,
-        plan,
-        revision: 1,
-      }),
+      await repos.employee.saveSettings(defaultOrgId, second.id, { email, plan, revision: 1 }),
     ).toBe("saved");
     expect((await signIn(email, priorCode)).status).toBe(400);
 
@@ -10081,11 +9278,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     const plan = emptyEmployeePlan;
 
     const cookie = await authenticate(email);
-    const consent: EmployeeState = {
-      key: "consent",
-      revision: 0,
-      value: { accepted: true },
-    };
+    const consent: EmployeeState = { key: "consent", revision: 0, value: { accepted: true } };
     expect((await request("/employee/state", "PUT", cookie, consent)).status).toBe(200);
 
     const atGuard: (() => void)[] = [];
@@ -10122,24 +9315,16 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
     const pending = [
       delayedApp.handle(
-        new Request(webOrigin + "/api/employee/journey", {
-          headers: boundHeaders,
-        }),
+        new Request(webOrigin + "/api/employee/journey", { headers: boundHeaders }),
       ),
       delayedApp.handle(
-        new Request(webOrigin + "/api/employee/state/consent", {
-          headers: boundHeaders,
-        }),
+        new Request(webOrigin + "/api/employee/state/consent", { headers: boundHeaders }),
       ),
       delayedApp.handle(
         new Request(webOrigin + "/api/employee/state", {
           method: "PUT",
           headers: boundHeaders,
-          body: JSON.stringify({
-            ...consent,
-            revision: 1,
-            value: { accepted: false },
-          }),
+          body: JSON.stringify({ ...consent, revision: 1, value: { accepted: false } }),
         }),
       ),
     ];
@@ -10160,11 +9345,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     expect((await Promise.all(pending)).map((response) => response.status)).toEqual([
       401, 401, 401,
     ]);
-    await repos.employee.saveSettings(defaultOrgId, record.id, {
-      email,
-      plan,
-      revision: 2,
-    });
+    await repos.employee.saveSettings(defaultOrgId, record.id, { email, plan, revision: 2 });
     const freshCookie = await authenticate(email);
     expect(await (await request("/employee/state/consent", "GET", freshCookie)).json()).toEqual({
       key: "consent",
@@ -10275,11 +9456,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         email,
       });
 
-      await repos.team.createTeamMember(defaultOrgId, {
-        email,
-        name: "RH",
-        role: "admin",
-      });
+      await repos.team.createTeamMember(defaultOrgId, { email, name: "RH", role: "admin" });
       await repos.employee.saveSettings(defaultOrgId, record.id, {
         email,
         plan: emptyEmployeePlan,
@@ -10294,9 +9471,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
       expect((await sendMemberCode(email)).status).toBe(200);
       const memberCode = deliveredCode(email);
-      const asEmployee = await signInMember(email, memberCode, {
-        audience: "employee",
-      });
+      const asEmployee = await signInMember(email, memberCode, { audience: "employee" });
       expect(asEmployee.status).toBe(400);
       expect(sessionCookie(asEmployee)).toBe("");
 
@@ -10327,16 +9502,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       const email = `capped-${randomUUID()}@offboard.example`;
       const other = `uncapped-${randomUUID()}@offboard.example`;
 
-      await repos.team.createTeamMember(defaultOrgId, {
-        email,
-        name: "RH",
-        role: "rh",
-      });
-      await repos.team.createTeamMember(defaultOrgId, {
-        email: other,
-        name: "RH",
-        role: "rh",
-      });
+      await repos.team.createTeamMember(defaultOrgId, { email, name: "RH", role: "rh" });
+      await repos.team.createTeamMember(defaultOrgId, { email: other, name: "RH", role: "rh" });
 
       for (let attempt = 0; attempt < 4; attempt += 1) {
         expect((await sendMemberCode(email.toUpperCase())).status).toBe(200);
@@ -10383,11 +9550,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     it("refuses member codes from the native app", async () => {
       const email = `native-${randomUUID()}@offboard.example`;
 
-      await repos.team.createTeamMember(defaultOrgId, {
-        email,
-        name: "RH",
-        role: "rh",
-      });
+      await repos.team.createTeamMember(defaultOrgId, { email, name: "RH", role: "rh" });
 
       expect((await sendMemberCode(email, { native: true })).status).toBe(403);
       expect(codes.has(email)).toBe(false);
@@ -10535,14 +9698,9 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       expect(listed.status).toBe(200);
       expect(await listed.json()).toEqual([]);
 
-      const consent = await request("/me/consent", "PUT", cookie, {
-        shareOutcomeWithHr: true,
-      });
+      const consent = await request("/me/consent", "PUT", cookie, { shareOutcomeWithHr: true });
       expect(consent.status).toBe(200);
-      expect(await consent.json()).toMatchObject({
-        id: row.id,
-        shareOutcomeWithHr: true,
-      });
+      expect(await consent.json()).toMatchObject({ id: row.id, shareOutcomeWithHr: true });
       expect(await profilesOf(caseId)).toHaveLength(1);
 
       expect((await request("/offboardings", "GET", cookie)).status).toBe(403);
@@ -10579,26 +9737,18 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       const firstCookie = await authenticate(first.email);
       const secondCookie = await authenticate(second.email);
 
-      const shared = await request("/me/consent", "PUT", firstCookie, {
-        shareOutcomeWithHr: true,
-      });
+      const shared = await request("/me/consent", "PUT", firstCookie, { shareOutcomeWithHr: true });
       expect(shared.status).toBe(200);
 
       const other = await request("/me", "GET", secondCookie);
       expect(other.status).toBe(200);
       const otherMe = await other.json();
-      expect(otherMe).toMatchObject({
-        email: second.email,
-        shareOutcomeWithHr: false,
-      });
+      expect(otherMe).toMatchObject({ email: second.email, shareOutcomeWithHr: false });
       expect(otherMe.id).not.toBe((await shared.json()).id);
 
       const [firstRow] = await profilesOf(first.caseId);
       const [secondRow] = await profilesOf(second.caseId);
-      expect(firstRow).toMatchObject({
-        orgId: firstOrg,
-        shareOutcomeWithHr: true,
-      });
+      expect(firstRow).toMatchObject({ orgId: firstOrg, shareOutcomeWithHr: true });
       expect(secondRow).toMatchObject({ orgId: secondOrg, id: otherMe.id });
     });
 
@@ -10628,10 +9778,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       const rows = await profilesOf(caseId);
 
       expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({
-        personalEmail: email,
-        sponsoredUntil: "2020-01-01",
-      });
+      expect(rows[0]).toMatchObject({ personalEmail: email, sponsoredUntil: "2020-01-01" });
       expect(rows[0].firstSignedInAt).not.toBeNull();
     });
 
@@ -10652,9 +9799,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       const cookie = await authenticate(email);
       const response = await request("/me", "GET", cookie);
       expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({
-        error: "Email already in use",
-      });
+      expect(await response.json()).toEqual({ error: "Email already in use" });
       expect(await profilesOf(caseId)).toEqual([]);
     });
 
@@ -10841,9 +9986,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       const refused = await prepare();
 
       expect(refused.status).toBe(403);
-      expect(await refused.json()).toEqual({
-        error: "AI Apply not available",
-      });
+      expect(await refused.json()).toEqual({ error: "AI Apply not available" });
     });
 
     it("keeps member sessions out of the career routes", async () => {
@@ -10858,11 +10001,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
       const response = await composed.handle(
         new Request(webOrigin + "/api/me", {
-          headers: {
-            cookie,
-            "x-test-session": "admin",
-            "x-test-org-id": orgId,
-          },
+          headers: { cookie, "x-test-session": "admin", "x-test-org-id": orgId },
         }),
       );
 
@@ -10872,12 +10011,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
   });
 
   describe("signup", () => {
-    type Signup = {
-      orgName?: string;
-      slug?: string;
-      adminName?: string;
-      adminEmail?: string;
-    };
+    type Signup = { orgName?: string; slug?: string; adminName?: string; adminEmail?: string };
 
     function signup(body: Signup) {
       return app.handle(
@@ -10900,10 +10034,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       });
 
       expect(response.status).toBe(201);
-      expect(await response.json()).toEqual({
-        orgId: expect.any(String),
-        slug,
-      });
+      expect(await response.json()).toEqual({ orgId: expect.any(String), slug });
     });
 
     it("rejects a duplicate slug and an existing email", async () => {
@@ -10926,10 +10057,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       });
 
       expect(slugTaken.status).toBe(409);
-      expect(await slugTaken.json()).toEqual({
-        error: "Slug already in use",
-        code: "slug-taken",
-      });
+      expect(await slugTaken.json()).toEqual({ error: "Slug already in use", code: "slug-taken" });
       expect(emailTaken.status).toBe(409);
       expect(await emailTaken.json()).toEqual({
         error: "Email already in use",
@@ -10946,10 +10074,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       });
 
       expect(response.status).toBe(409);
-      expect(await response.json()).toEqual({
-        error: "Slug already in use",
-        code: "slug-taken",
-      });
+      expect(await response.json()).toEqual({ error: "Slug already in use", code: "slug-taken" });
     });
 
     it("rejects an invalid slug and missing fields", async () => {
