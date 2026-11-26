@@ -20,6 +20,7 @@ import {
   jobDraft,
   jobProblems,
   type PlaceDraft,
+  newPlace,
   workModelOptions,
 } from "./job-preferences-form";
 
@@ -48,6 +49,7 @@ function JobForm({ account, stored }: { account: EmployeeAccount; stored: Career
   const problems = jobProblems(draft);
   const invalid = Object.values(problems).some(Boolean);
   const shown = (message: string | undefined) => (checked ? message : undefined);
+  const chosenModels = new Set(draft.workModels);
 
   const change = (next: Partial<JobDraft>) => {
     setUnchanged(false);
@@ -112,7 +114,7 @@ function JobForm({ account, stored }: { account: EmployeeAccount; stored: Career
             {workModelOptions.map((option) => (
               <label key={option.value} className="flex min-h-9 items-center gap-2 text-sm">
                 <Checkbox
-                  checked={draft.workModels.includes(option.value)}
+                  checked={chosenModels.has(option.value)}
                   onCheckedChange={(on) =>
                     change({
                       workModels: on
@@ -130,7 +132,7 @@ function JobForm({ account, stored }: { account: EmployeeAccount; stored: Career
         <fieldset className="grid gap-2">
           <legend className="text-sm font-medium">Locais</legend>
           {draft.places.map((place, index) => (
-            <div key={index} className="grid grid-cols-[5rem_1fr_auto] items-end gap-2">
+            <div key={place.id} className="grid grid-cols-[5rem_1fr_auto] items-end gap-2">
               <div className="grid gap-1.5">
                 <Label htmlFor={`place-state-${index}`}>UF</Label>
                 <Input
@@ -161,7 +163,7 @@ function JobForm({ account, stored }: { account: EmployeeAccount; stored: Career
             type="button"
             variant="outline"
             className="w-fit"
-            onClick={() => change({ places: [...draft.places, { state: "", city: "" }] })}
+            onClick={() => change({ places: [...draft.places, newPlace()] })}
           >
             Adicionar local
           </Button>

@@ -1,4 +1,5 @@
 import type { CareerPreferences } from "@/entities/career";
+import { createLocalId } from "@/shared/lib/create-local-id";
 import { states } from "./preferences-form";
 
 type Stored = Pick<CareerPreferences, "targetTitles" | "jobPreferences">;
@@ -7,7 +8,7 @@ type JobPreferences = CareerPreferences["jobPreferences"];
 
 export type WorkModel = JobPreferences["workModels"][number];
 
-export type PlaceDraft = { state: string; city: string };
+export type PlaceDraft = { id: string; state: string; city: string };
 
 export type JobDraft = {
   titles: string;
@@ -30,6 +31,8 @@ export const workModelOptions = [
 ] as const satisfies { value: WorkModel; label: string }[];
 
 const maxCents = 2_147_483_647;
+
+const knownStates = new Set(states);
 
 const lines = (text: string) =>
   text
@@ -82,13 +85,19 @@ const storedPlaces = (places: PlaceDraft[]) =>
     return state === "" && city === "" ? [] : [{ city: city === "" ? null : city, state }];
   });
 
-export function jobDraft(stored: Stored) {
+export const newPlace = (makeId = createLocalId) => ({ id: makeId(), state: "", city: "" });
+
+export function jobDraft(stored: Stored, makeId = createLocalId) {
   const { jobPreferences: preferences } = stored;
 
   return {
     titles: stored.targetTitles.join("\n"),
     workModels: [...preferences.workModels],
-    places: preferences.locations.map((place) => ({ state: place.state, city: place.city ?? "" })),
+    places: preferences.locations.map((place) => ({
+      id: makeId(),
+      state: place.state,
+      city: place.city ?? "",
+    })),
     relocate: preferences.relocate,
     salaryFloor: preferences.salaryFloorCents === null ? "" : reais(preferences.salaryFloorCents),
     excluded: preferences.excludedCompanies.join("\n"),
@@ -110,7 +119,7 @@ export function jobProblems(draft: JobDraft) {
     places:
       places.length > 20
         ? "Use até 20 locais."
-        : places.some((place) => !states.includes(place.state))
+        : places.some((place) => !knownStates.has(place.state))
           ? "Use a sigla do estado, como RS."
           : places.some((place) => (place.city ?? "").length > 100)
             ? "O nome da cidade está longo demais."

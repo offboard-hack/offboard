@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { jobChanges, jobDraft, jobProblems, salaryCents } from "./job-preferences-form";
+import { jobChanges, jobDraft, jobProblems, newPlace, salaryCents } from "./job-preferences-form";
+
+const counter = () => {
+  let next = 0;
+
+  return () => `p${(next += 1)}`;
+};
 
 const empty = {
   targetTitles: [],
@@ -30,12 +36,12 @@ const stored = {
 
 describe("drafts the job preferences", () => {
   it("shows lists one per line and the salary in reais", () => {
-    expect(jobDraft(stored)).toEqual({
+    expect(jobDraft(stored, counter())).toEqual({
       titles: "Engenheiro de Software\nPlatform Engineer",
       workModels: ["hybrid", "remote"],
       places: [
-        { state: "RS", city: "Porto Alegre" },
-        { state: "SC", city: "" },
+        { id: "p1", state: "RS", city: "Porto Alegre" },
+        { id: "p2", state: "SC", city: "" },
       ],
       relocate: false,
       salaryFloor: "12.500,50",
@@ -80,8 +86,8 @@ describe("sends only what changed", () => {
       titles: "Platform Engineer\n\n  SRE \nsre",
       workModels: ["onsite" as const, "remote" as const],
       places: [
-        { state: "rs", city: " Campo Bom " },
-        { state: " ", city: "" },
+        { id: "a", state: "rs", city: " Campo Bom " },
+        { ...newPlace(() => "b"), state: " " },
       ],
       relocate: true,
       salaryFloor: "",
@@ -98,6 +104,12 @@ describe("sends only what changed", () => {
         excludedCompanies: ["Acme", "Beta"],
       },
     });
+  });
+
+  it("gives every place a fresh id", () => {
+    expect(newPlace()).toMatchObject({ state: "", city: "" });
+    expect(newPlace().id).not.toBe(newPlace().id);
+    expect(jobDraft(stored).places[0].id).toMatch(/^[0-9a-f]{32}$/);
   });
 
   it("sends the titles alone when only they changed", () => {
@@ -118,7 +130,11 @@ describe("checks the fields like the server does", () => {
     const many = (count: number, text: string) =>
       Array.from({ length: count }, (_, index) => `${text} ${index}`).join("\n");
 
-    const places = Array.from({ length: 21 }, () => ({ state: "SP", city: "" }));
+    const places = Array.from({ length: 21 }, (_, index) => ({
+      id: String(index),
+      state: "SP",
+      city: "",
+    }));
 
     expect(
       jobProblems({
@@ -141,7 +157,7 @@ describe("checks the fields like the server does", () => {
       jobProblems({
         ...jobDraft(empty),
         titles: "X",
-        places: [{ state: "XX", city: "" }],
+        places: [{ id: "x", state: "XX", city: "" }],
         excluded: "E".repeat(201),
       }),
     ).toEqual({
@@ -151,7 +167,8 @@ describe("checks the fields like the server does", () => {
       excluded: "O nome da empresa está longo demais.",
     });
     expect(
-      jobProblems({ ...jobDraft(empty), places: [{ state: "SP", city: "C".repeat(101) }] }).places,
+      jobProblems({ ...jobDraft(empty), places: [{ id: "c", state: "SP", city: "C".repeat(101) }] })
+        .places,
     ).toBe("O nome da cidade está longo demais.");
     expect(jobProblems({ ...jobDraft(empty), titles: "T".repeat(101) }).titles).toBe(
       "Cada cargo deve ter de 2 a 100 caracteres.",
