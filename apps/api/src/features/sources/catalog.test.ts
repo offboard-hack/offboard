@@ -1,11 +1,21 @@
 import { expect, it } from "vitest";
 import { catalogSources } from "./catalog.js";
 
-it("lists the reviewed boards with Brazilian jobs", () => {
-  expect(catalogSources).toEqual([
-    { kind: "greenhouse", target: "stone", label: "Stone" },
-    { kind: "greenhouse", target: "quintoandar", label: "QuintoAndar" },
-  ]);
+it("keeps the original boards and a broad list of reviewed ones", () => {
+  expect(catalogSources).toContainEqual({ kind: "greenhouse", target: "stone", label: "Stone" });
+  expect(catalogSources).toContainEqual({
+    kind: "greenhouse",
+    target: "quintoandar",
+    label: "QuintoAndar",
+  });
+  expect(catalogSources.length).toBeGreaterThanOrEqual(40);
+});
+
+it("lists boards sorted by company", () => {
+  const labels = catalogSources.map((source) => source.label ?? source.target);
+  const sorted = [...labels].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
+
+  expect(labels).toEqual(sorted);
 });
 
 it("keeps every catalog entry unique and storable", () => {
