@@ -58,6 +58,7 @@ export const suggestionResponse = t.Object({
   suggestedText: t.String(),
   rationale: t.String(),
   estimatedGain: t.Number(),
+  extraGainWithFacts: t.Number(),
 });
 
 export const versionResponse = t.Object({

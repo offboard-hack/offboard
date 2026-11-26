@@ -166,6 +166,12 @@ function Suggestions({ account }: { account: EmployeeAccount }) {
                 {suggestion.originalText}
               </p>
               <p className="text-sm wrap-anywhere">{suggestion.suggestedText}</p>
+              {suggestion.extraGainWithFacts > 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Mais +{suggestion.extraGainWithFacts} se você incluir os dados reais pedidos
+                  acima.
+                </p>
+              ) : null}
               <div className="flex flex-wrap gap-2">
                 <Button
                   disabled={action.isPending}

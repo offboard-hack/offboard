@@ -822,13 +822,15 @@ export const resumeSuggestions = pgTable(
     suggestedText: text("suggested_text").notNull(),
     rationale: text("rationale").notNull(),
     estimatedGain: integer("estimated_gain").notNull(),
+    extraGainWithFacts: integer("extra_gain_with_facts").notNull().default(0),
     status: resumeSuggestionStatusEnum("status").notNull().default("open"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
     index("resume_suggestions_resume_idx").on(table.resumeId),
-    check("resume_suggestions_gain", sql`${table.estimatedGain} between 1 and 20`),
+    check("resume_suggestions_gain", sql`${table.estimatedGain} between 0 and 20`),
+    check("resume_suggestions_extra_gain", sql`${table.extraGainWithFacts} between 0 and 20`),
   ],
 );
 

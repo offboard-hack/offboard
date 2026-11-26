@@ -500,7 +500,7 @@ it.skipIf(!url)("stores jobs, suggestions and usage", async () => {
     };
 
     await expect(
-      db.insert(resumeSuggestions).values({ ...row, estimatedGain: 0 }),
+      db.insert(resumeSuggestions).values({ ...row, estimatedGain: -1 }),
     ).rejects.toMatchObject({ cause: { code: "23514" } });
     await expect(
       db.insert(resumeSuggestions).values({ ...row, estimatedGain: 21 }),
