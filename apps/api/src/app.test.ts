@@ -5502,6 +5502,7 @@ describe.skipIf(!url)("api", () => {
             status: "ready",
             content: expect.any(Object),
             score: 64,
+            scoreBreakdown: breakdown(64),
             scoredAt: expect.any(String),
             updatedAt: expect.any(String),
             job: null,
@@ -5511,6 +5512,7 @@ describe.skipIf(!url)("api", () => {
                 originalText: "Fez X",
                 suggestedText: "Fez X com impacto",
                 rationale: "Mostra o impacto",
+                criterion: "results",
                 estimatedGain: 5,
                 status: "open",
                 createdAt: expect.any(String),
@@ -5522,6 +5524,7 @@ describe.skipIf(!url)("api", () => {
             status: "ready",
             content: created.content,
             score: null,
+            scoreBreakdown: null,
             scoredAt: null,
             updatedAt: expect.any(String),
             job: {

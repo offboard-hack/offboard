@@ -193,6 +193,7 @@ describe.skipIf(!url)("account repository", () => {
         status: "ready",
         content,
         score: null,
+        scoreBreakdown: null,
         scoredAt: null,
         updatedAt: expect.any(String),
         suggestions: [],
@@ -249,13 +250,18 @@ describe.skipIf(!url)("account repository", () => {
 
     await db
       .update(resumes)
-      .set({ score: 77, scoredAt: new Date("2026-11-20T10:00:00Z") })
+      .set({
+        score: 77,
+        scoreBreakdown: { results: { points: 12, max: 20, reason: "Três números." } },
+        scoredAt: new Date("2026-11-20T10:00:00Z"),
+      })
       .where(eq(resumes.id, resume.id));
 
     const suggestion = {
       targetNodeId: "headline",
       originalText: "Engenheira",
       rationale: "Mostra senioridade.",
+      criterion: "keywords",
       estimatedGain: 5,
     };
 
@@ -283,6 +289,7 @@ describe.skipIf(!url)("account repository", () => {
     const exportedSuggestion = {
       originalText: "Engenheira",
       rationale: "Mostra senioridade.",
+      criterion: "keywords",
       estimatedGain: 5,
     };
 
@@ -292,6 +299,7 @@ describe.skipIf(!url)("account repository", () => {
         status: "ready",
         content,
         score: 77,
+        scoreBreakdown: { results: { points: 12, max: 20, reason: "Três números." } },
         scoredAt: "2026-11-20T10:00:00.000Z",
         updatedAt: expect.any(String),
         job: null,
@@ -369,6 +377,7 @@ describe.skipIf(!url)("account repository", () => {
         status: "ready",
         content: tailoredContent,
         score: null,
+        scoreBreakdown: null,
         scoredAt: null,
         updatedAt: expect.any(String),
         job: { title: "Vaga tailored", company: "Acme", url: "https://jobs.example.com/tailored" },

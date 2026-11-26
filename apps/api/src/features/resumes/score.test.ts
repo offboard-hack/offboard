@@ -433,6 +433,7 @@ describe("scoreResume", () => {
       expect(system).toContain(`- ${criterion} (0 to ${resumeCriteria[criterion].max}): `);
     }
 
+    expect(requests[0]?.timeoutMs).toBe(120_000);
     expect(system).toContain("exactly as written");
     expect(system).toContain("maximum minus the points you gave it");
     expect(system).toContain("extraGainWithFacts");

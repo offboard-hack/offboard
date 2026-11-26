@@ -39,6 +39,7 @@ export type ScoringContext = { previous: ResumeScoreBreakdown | null; history: P
 const maxSuggestions = 5;
 const promptLimit = 60_000;
 const historyLimit = 8_000;
+const scoringTimeoutMs = 120_000;
 
 const scoreSchema = z.object({
   criteria: criteriaSchema,
@@ -195,6 +196,7 @@ export async function scoreResume(
   const output = await generate({
     schema: scoreSchema,
     system,
+    timeoutMs: scoringTimeoutMs,
     prompt: `Score this résumé and suggest rewrites.\n\n<resume>\n${serialize(content)}\n</resume>${previousBlock(context.previous)}${historyBlock(nodes, context.history)}`,
   });
 

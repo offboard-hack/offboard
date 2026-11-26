@@ -81,6 +81,21 @@ describe("createGenerateStructured", () => {
     timeout.mockRestore();
   });
 
+  it("lets a call ask for a longer bound", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+
+    await createGenerateStructured(jsonModel('{"title":"x"}'))({
+      schema: z.object({ title: z.string() }),
+      system: "s",
+      prompt: "p",
+      timeoutMs: 120_000,
+    });
+
+    expect(timeout).toHaveBeenCalledWith(120_000);
+
+    timeout.mockRestore();
+  });
+
   it("retries a failed call once", async () => {
     let attempts = 0;
 
