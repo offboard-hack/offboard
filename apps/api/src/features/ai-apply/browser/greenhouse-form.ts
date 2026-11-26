@@ -1,4 +1,4 @@
-import type { ConfirmedAnswer, FormQuestion } from "@offboard/db/schema";
+import type { ConfirmedAnswer, FormField, FormQuestion } from "@offboard/db/schema";
 import { z } from "zod";
 import type { Page } from "./cdp.js";
 
@@ -37,6 +37,7 @@ const locationControl = "candidate-location";
 const letterField = "cover_letter_text";
 const letterReveal = '[data-testid="cover_letter-text"]';
 const submitButton = '#application-form button[type="submit"]';
+const demographicPrefix = "demographic:";
 
 const countries = { BR: { search: "Bra", names: ["brasil", "brazil"], code: "+55" } };
 
@@ -78,7 +79,7 @@ const visibility = `const shown = (element) => { const box = element.getBounding
 
 const readyExpression = `(() => { const form = document.querySelector("#application-form"); return form ? Object.keys(form).some((key) => key.startsWith("__react")) : document.readyState === "complete"; })()`;
 
-const formPageExpression = `(() => { const context = window.__remixContext ?? window.__reactRouterContext; const data = Object.values(context?.state?.loaderData ?? {}).find((entry) => Array.isArray(entry?.jobPost?.questions)); const form = document.querySelector("#application-form"); return { href: location.href, form: form !== null, password: document.querySelector('input[type="password"]') !== null, title: document.title, notices: [...document.querySelectorAll('[class*="flash"], h1, h2')].slice(0, 20).map((item) => (item.textContent ?? "").trim()), questions: data ? data.jobPost.questions : null, required: form ? [...form.querySelectorAll('[aria-required="true"], [required]')].map((item) => ({ id: item.id ?? "", name: item.getAttribute("name") ?? "", labelledBy: item.getAttribute("aria-labelledby") ?? "" })) : [] }; })()`;
+const formPageExpression = `(() => { const context = window.__remixContext ?? window.__reactRouterContext; const data = Object.values(context?.state?.loaderData ?? {}).find((entry) => Array.isArray(entry?.jobPost?.questions)); const form = document.querySelector("#application-form"); return { href: location.href, form: form !== null, password: document.querySelector('input[type="password"]') !== null, title: document.title, notices: [...document.querySelectorAll('[class*="flash"], h1, h2')].slice(0, 20).map((item) => (item.textContent ?? "").trim()), questions: data ? data.jobPost.questions : null, demographics: data ? (data.jobPost.demographic_questions?.questions ?? []) : null, required: form ? [...form.querySelectorAll('[aria-required="true"], [required]')].map((item) => ({ id: item.id ?? "", name: item.getAttribute("name") ?? "", labelledBy: item.getAttribute("aria-labelledby") ?? "" })) : [] }; })()`;
 
 const locationStatesExpression = `(() => { const form = document.querySelector("#application-form"); const key = form && Object.keys(form).find((name) => name.startsWith("__reactFiber")); const states = []; for (let fiber = key ? form[key] : null, depth = 0; fiber && depth < 100; fiber = fiber.return, depth += 1) { for (const node of [fiber, fiber.alternate]) { for (let hook = node?.memoizedState, index = 0; hook && typeof hook === "object" && index < 100; hook = hook.next, index += 1) { const state = hook.memoizedState; if (state && typeof state === "object" && "latitude" in state && "longitude" in state) states.push({ location: String(state.location ?? ""), latitude: String(state.latitude ?? ""), longitude: String(state.longitude ?? "") }); } } } return states.slice(0, 10); })()`;
 
@@ -100,6 +101,12 @@ const liveQuestion = z.object({
   ),
 });
 
+const liveDemographic = z.object({
+  id: z.union([z.string(), z.number()]),
+  required: z.boolean(),
+  answer_options: z.array(z.object({ id: z.union([z.string(), z.number()]) })).nullish(),
+});
+
 const formPage = z.object({
   href: z.string(),
   form: z.boolean(),
@@ -107,6 +114,7 @@ const formPage = z.object({
   title: z.string(),
   notices: z.array(z.string()),
   questions: z.array(liveQuestion).nullable().catch(null),
+  demographics: z.array(liveDemographic).nullish().catch(null),
   required: z.array(z.object({ id: z.string(), name: z.string(), labelledBy: z.string() })),
 });
 
@@ -134,6 +142,9 @@ const menuOptions = z.array(z.object({ id: z.string(), text: z.string() }));
 
 const liveNames = (name: string) =>
   name === "candidate_location" ? ["location", "latitude", "longitude"] : [name];
+
+const controlOf = (name: string) =>
+  name.startsWith(demographicPrefix) ? name.slice(demographicPrefix.length) : name;
 
 const controlName = (control: FormPage["required"][number]) => {
   if (control.name.endsWith("[]")) return control.name;
@@ -173,20 +184,31 @@ export const liveFormFrom = (page: FormPage) => {
     ),
   );
 
-  const known = new Set(fields.map((field) => field.name));
+  const demographics = (page.demographics ?? []).map((item) => ({
+    name: `${demographicPrefix}${item.id}`,
+    required: item.required,
+    options: (item.answer_options ?? []).map((option) => String(option.id)),
+  }));
+
+  const known = new Set([...fields, ...demographics].map((field) => field.name));
+  const controls = new Set(demographics.map((field) => controlOf(field.name)));
 
   const extra = [
     ...new Set(
       page.required.flatMap((control) => {
         const name = controlName(control);
 
-        return name === undefined || known.has(name) ? [] : [name];
+        return name === undefined || known.has(name) || controls.has(name) ? [] : [name];
       }),
     ),
   ];
 
   return {
-    fields: [...fields, ...extra.map((name) => ({ name, required: true, options: [] }))],
+    fields: [
+      ...fields,
+      ...demographics,
+      ...extra.map((name) => ({ name, required: true, options: [] })),
+    ],
     ready: true,
     closed: false,
     loginRequired: false,
@@ -364,7 +386,7 @@ type Choice = {
   field: string;
   search: string;
   pick(text: string): boolean;
-  shows(text: string): boolean;
+  shows?(text: string): boolean;
 };
 
 const choose = async (page: Page, id: string, choice: Choice) => {
@@ -396,18 +418,56 @@ const choose = async (page: Page, id: string, choice: Choice) => {
 
   await page.click(byId(match.id));
 
+  if (choice.shows === undefined) return;
+
   const shown = await shownIn(page, id);
 
   return shown !== null && choice.shows(shown) ? undefined : fail("form_changed", choice.field);
 };
 
-const chooseLabel = (page: Page, id: string, label: string) =>
+const chooseLabel = (page: Page, id: string, label: string, field = id) =>
   choose(page, id, {
-    field: id,
+    field,
     search: label,
     pick: (text) => sameText(label, text),
     shows: (text) => sameText(label, text),
   });
+
+const chipsIn = (page: Page, id: string) =>
+  page.evaluate(
+    `[...(${found(byId(id))}?.closest(".select__control")?.querySelectorAll(".select__multi-value__label") ?? [])].map((chip) => chip.textContent ?? "")`,
+    z.array(z.string()),
+  );
+
+const labelOf = (field: FormField, value: string) =>
+  field.options.find((option) => option.value === value)?.label;
+
+const chooseLabels = async (page: Page, field: FormField, values: string[]) => {
+  const id = controlOf(field.name);
+  const labels = values.map((value) => labelOf(field, value));
+
+  for (const label of labels) {
+    if (label === undefined) return fail("form_changed", field.name);
+
+    const failure = await choose(page, id, {
+      field: field.name,
+      search: label,
+      pick: (text) => sameText(label, text),
+    });
+
+    if (failure !== undefined) return failure;
+  }
+
+  await page.press("Escape");
+
+  const shown = await chipsIn(page, id);
+
+  const same =
+    shown.length === labels.length &&
+    labels.every((label) => shown.some((text) => label !== undefined && sameText(label, text)));
+
+  return same ? undefined : fail("form_changed", field.name);
+};
 
 const fillPhone = async (page: Page, number: string, country: FillInput["phoneCountry"]) => {
   const { search, names, code } = countries[country];
@@ -518,6 +578,10 @@ const fillAnswer = (page: Page, question: FormQuestion, value: Answer, input: Fi
   const many = [value].flat();
   const single = Array.isArray(value) ? undefined : value;
 
+  const demographic = first.name.startsWith(demographicPrefix);
+
+  if (demographic && first.type === "multi_select") return chooseLabels(page, first, many);
+
   if (first.type === "multi_select") return tick(page, first.name, many);
 
   if (single === undefined) return fail("form_changed", first.name);
@@ -528,11 +592,11 @@ const fillAnswer = (page: Page, question: FormQuestion, value: Answer, input: Fi
 
   if (first.type !== "single_select") return typeInto(page, first.name, single);
 
-  const label = first.options.find((option) => option.value === single)?.label;
+  const label = labelOf(first, single);
 
   return label === undefined
     ? fail("form_changed", first.name)
-    : chooseLabel(page, first.name, label);
+    : chooseLabel(page, controlOf(first.name), label, first.name);
 };
 
 const accountFields = new Set(["first_name", "last_name", "email"]);
@@ -575,6 +639,12 @@ const untouched = async (page: Page, question: FormQuestion) => {
   const [first] = question.fields;
 
   if (first === undefined || filledByDriver(question)) return true;
+
+  if (first.name.startsWith(demographicPrefix)) {
+    const id = controlOf(first.name);
+
+    return (await shownIn(page, id)) === null && (await chipsIn(page, id)).length === 0;
+  }
 
   if (first.type === "multi_select") return (await tickedIn(page, first.name)).length === 0;
 
