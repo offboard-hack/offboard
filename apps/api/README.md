@@ -50,7 +50,7 @@ AI Apply is offered only to people who consented and whose company has an
 active or trialing `platinum-premium` subscription.
 For a disposable development database, `npm run seed -w @offboard/db` loads
 sample cases and replaces the team roster. Add a team row for an email
-address you control before requesting a link.
+address you control before requesting a sign-in code.
 
 Set the auth variables below, then run `npm run dev` to start the API and
 the portal. To run only the API, use `npm run dev -w @offboard/api`. The
