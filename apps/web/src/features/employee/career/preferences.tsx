@@ -17,6 +17,7 @@ import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { Switch } from "@/shared/ui/shadcn/switch";
 import { Textarea } from "@/shared/ui/shadcn/textarea";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "../ui";
+import { RejectionsSection } from "./dismiss-job";
 import { JobPreferencesSection } from "./job-preferences";
 import {
   type AddressDraft,
@@ -32,12 +33,13 @@ import {
   textProblem,
 } from "./preferences-form";
 
-export type PreferencesSection = "perfil" | "vagas" | "respostas";
+export type PreferencesSection = "perfil" | "vagas" | "respostas" | "dispensadas";
 
 const sections = [
   { id: "perfil", label: "Perfil" },
   { id: "vagas", label: "Vagas que procuro" },
   { id: "respostas", label: "Respostas salvas" },
+  { id: "dispensadas", label: "Vagas dispensadas" },
 ] as const satisfies { id: PreferencesSection; label: string }[];
 
 const shareLabel = "Usar nas candidaturas";
@@ -74,6 +76,7 @@ export function Preferences({
       {section === "perfil" ? <ProfileSection account={account} /> : null}
       {section === "vagas" ? <JobPreferencesSection account={account} /> : null}
       {section === "respostas" ? <AnswersSection account={account} /> : null}
+      {section === "dispensadas" ? <RejectionsSection account={account} /> : null}
     </div>
   );
 }

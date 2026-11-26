@@ -48,6 +48,10 @@ export type JobPreferencesInput = {
 
 export type AnswerLibrary = Treaty.Data<Me["answers"]["get"]>;
 
+export type JobRejections = Treaty.Data<Me["rejections"]["get"]>;
+
+export type RejectionReason = JobRejections["items"][number]["reason"];
+
 export type ConfirmAnswers = Parameters<
   ReturnType<Me["ai-applications"]>["confirm"]["post"]
 >[0]["answers"];
@@ -626,5 +630,66 @@ export function useSaveAnswer(account: EmployeeAccount) {
     onSuccess(library) {
       queryClient.setQueryData(answerLibraryQuery(account).queryKey, library);
     },
+  });
+}
+
+export function rejectionsQuery(account: EmployeeAccount) {
+  return queryOptions({
+    queryKey: [...careerKey(account), "rejections"],
+    staleTime: freshness,
+    retry: retryEmployeeRead,
+    queryFn: async ({ signal }) =>
+      settle(
+        await client().rejections.get({
+          headers: employeeAccessHeaders(account),
+          fetch: { signal },
+        }),
+        "Não foi possível abrir as vagas dispensadas.",
+      ),
+  });
+}
+
+function refreshAfterRejection(queryClient: QueryClient, account: EmployeeAccount) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: [...careerKey(account), "jobs"] }),
+    queryClient.invalidateQueries({ queryKey: rejectionsQuery(account).queryKey }),
+  ]);
+}
+
+export function useRejectJob(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      jobId,
+      reason,
+      note,
+    }: {
+      jobId: string;
+      reason: RejectionReason;
+      note: string | null;
+    }) =>
+      settleEmpty(
+        await client()
+          .jobs({ jobId })
+          .reject.post({ reason, note }, { headers: employeeAccessHeaders(account) }),
+        "Não foi possível dispensar a vaga.",
+      ),
+    onSuccess: () => refreshAfterRejection(queryClient, account),
+  });
+}
+
+export function useUndoRejection(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (jobId: string) =>
+      settleEmpty(
+        await client()
+          .jobs({ jobId })
+          .reject.delete(undefined, { headers: employeeAccessHeaders(account) }),
+        "Não foi possível trazer a vaga de volta.",
+      ),
+    onSuccess: () => refreshAfterRejection(queryClient, account),
   });
 }
