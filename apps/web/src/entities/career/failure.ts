@@ -5,6 +5,10 @@ const failureBody = z.object({ value: z.object({ error: z.string() }) });
 const reasons = new Map([
   ["AI Apply not available", "Disponível no plano Platinum Premium da sua empresa."],
   ["Email already in use", "Este e-mail já está ligado a outra conta de carreira."],
+  [
+    "Daily AI application limit reached",
+    "Você atingiu o limite de 10 candidaturas com IA hoje. Tente amanhã.",
+  ],
   ["Access lapsed", "Seu acesso à carreira terminou."],
   ["Upload a résumé first", "Envie seu currículo antes de continuar."],
   ["Already applied", "Você já se candidatou a esta vaga."],

@@ -8,6 +8,12 @@ describe("careerFailure", () => {
     );
   });
 
+  it("explains the daily AI application limit", () => {
+    expect(
+      careerFailure(429, { status: 429, value: { error: "Daily AI application limit reached" } }),
+    ).toBe("Você atingiu o limite de 10 candidaturas com IA hoje. Tente amanhã.");
+  });
+
   it("falls back to the status when the reason is unknown", () => {
     expect(careerFailure(429, { status: 429, value: { error: "Something else" } })).toBe(
       "Limite diário de uso da IA atingido. Tente de novo amanhã.",
