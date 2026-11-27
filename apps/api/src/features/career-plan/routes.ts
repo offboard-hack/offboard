@@ -76,6 +76,7 @@ type CareerCheckout = {
 type CopayBenefits = {
   findAssignmentByProfile(profileId: string): Promise<{
     assignedPlanId: string;
+    effectivePlanId: string;
     copaySubscriptionId: string | null;
   } | null>;
   getCopayProduct(
@@ -83,6 +84,7 @@ type CopayBenefits = {
     toPlanId: string,
   ): Promise<{ abacatePayProductId: string } | null>;
   planPriceMap(): Promise<Map<string, number>>;
+  planNameMap(): Promise<Map<string, string>>;
   listCopayTargets(
     fromPlanId: string,
   ): Promise<{ planId: string; name: string; upgradeCents: number }[]>;
@@ -102,18 +104,33 @@ export function careerPlanRoutes(
 
     if (!assignment) return null;
 
+    const active = assignment.copaySubscriptionId !== null;
+
+    if (active) {
+      const prices = await benefits.planPriceMap();
+      const names = await benefits.planNameMap();
+      const effectivePrice = prices.get(assignment.effectivePlanId) ?? 0;
+      const assignedPrice = prices.get(assignment.assignedPlanId) ?? 0;
+
+      return {
+        offered: false,
+        targetPlanId: assignment.effectivePlanId,
+        targetPlanName: names.get(assignment.effectivePlanId) ?? "",
+        priceCents: effectivePrice - assignedPrice,
+        active: true,
+      };
+    }
+
     const [target] = await benefits.listCopayTargets(assignment.assignedPlanId);
 
     if (!target) return null;
 
-    const active = assignment.copaySubscriptionId !== null;
-
     return {
-      offered: gateway.configured && !active,
+      offered: gateway.configured,
       targetPlanId: target.planId,
       targetPlanName: target.name,
       priceCents: target.upgradeCents,
-      active,
+      active: false,
     };
   }
 

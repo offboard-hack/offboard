@@ -122,6 +122,12 @@ export function createBenefitRepository(db: Database) {
     return new Map(rows.map((row) => [row.id, row.price]));
   }
 
+  async function planNameMap() {
+    const rows = await db.select({ id: plans.id, name: plans.name }).from(plans);
+
+    return new Map(rows.map((row) => [row.id, row.name]));
+  }
+
   async function profileInOrg(orgId: string, profileId: string) {
     const [row] = await db
       .select({ id: talentProfiles.id })
@@ -334,6 +340,7 @@ export function createBenefitRepository(db: Database) {
     getEffectiveBenefit,
     upsertAssignment,
     planPriceMap,
+    planNameMap,
   };
 }
 
