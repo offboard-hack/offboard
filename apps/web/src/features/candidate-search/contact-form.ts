@@ -29,9 +29,15 @@ export function contactProblems(draft: ContactDraft) {
   return problems;
 }
 
-export type ContactBody = { name: string; email: string; message: string; company?: string };
+export type ContactBody = {
+  name: string;
+  email: string;
+  message: string;
+  company?: string;
+  captcha?: string;
+};
 
-export function contactBody(draft: ContactDraft) {
+export function contactBody(draft: ContactDraft, captcha: string | null) {
   const body: ContactBody = {
     name: draft.name.trim(),
     email: draft.email.trim(),
@@ -42,16 +48,28 @@ export function contactBody(draft: ContactDraft) {
 
   if (company) body.company = company;
 
+  if (captcha) body.captcha = captcha;
+
   return body;
 }
 
 const failures = new Map([
+  [403, "Não conseguimos confirmar que você não é um robô. Tente de novo."],
   [404, "Esta pessoa saiu da busca de candidatos."],
   [429, "Limite de mensagens de hoje atingido. Tente de novo amanhã."],
 ]);
 
 export function contactFailure(status: number) {
-  return failures.get(status) ?? "Não foi possível enviar a mensagem. Tente de novo.";
+  return failures.get(status) ?? "Não foi possível enviar o link de confirmação. Tente de novo.";
+}
+
+const confirmFailures = new Map([
+  [404, "Este link expirou ou já foi usado. Escreva de novo pela busca de candidatos."],
+  [429, "Esta pessoa já recebeu o máximo de mensagens de hoje. Tente de novo amanhã."],
+]);
+
+export function confirmFailure(status: number) {
+  return confirmFailures.get(status) ?? "Não foi possível enviar a mensagem. Tente de novo.";
 }
 
 export function firstName(name: string) {

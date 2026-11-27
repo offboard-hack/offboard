@@ -1257,3 +1257,17 @@ export const demoSearchUsage = pgTable(
   },
   (table) => [primaryKey({ columns: [table.bucket, table.day] })],
 );
+
+export const candidateContactRequests = pgTable("candidate_contact_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  resumeId: uuid("resume_id")
+    .notNull()
+    .references(() => resumes.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 120 }).notNull(),
+  email: varchar("email", { length: 255 }).notNull(),
+  company: varchar("company", { length: 120 }),
+  message: text("message").notNull(),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  confirmedAt: timestamp("confirmed_at"),
+});

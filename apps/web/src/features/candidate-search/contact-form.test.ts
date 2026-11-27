@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  confirmFailure,
   contactBody,
   contactFailure,
   contactProblems,
@@ -17,12 +18,13 @@ const valid = {
 describe("candidate contact form", () => {
   it("accepts a complete message and trims it", () => {
     expect(contactProblems(valid)).toEqual({});
-    expect(contactBody(valid)).toEqual({
+    expect(contactBody(valid, null)).toEqual({
       name: "Rita",
       email: "rita@empresa.example",
       message: "Temos uma vaga que combina com você.",
     });
-    expect(contactBody({ ...valid, company: " Empresa X " }).company).toBe("Empresa X");
+    expect(contactBody({ ...valid, company: " Empresa X " }, null).company).toBe("Empresa X");
+    expect(contactBody(valid, "token").captcha).toBe("token");
   });
 
   it("names every missing or oversized field", () => {
@@ -46,9 +48,15 @@ describe("candidate contact form", () => {
   });
 
   it("explains failures and greets by first name", () => {
+    expect(contactFailure(403)).toMatch(/robô/);
     expect(contactFailure(404)).toMatch(/saiu da busca/);
     expect(contactFailure(429)).toMatch(/Limite/);
-    expect(contactFailure(502)).toBe("Não foi possível enviar a mensagem. Tente de novo.");
+    expect(contactFailure(502)).toBe(
+      "Não foi possível enviar o link de confirmação. Tente de novo.",
+    );
+    expect(confirmFailure(404)).toMatch(/expirou ou já foi usado/);
+    expect(confirmFailure(429)).toMatch(/máximo de mensagens/);
+    expect(confirmFailure(502)).toBe("Não foi possível enviar a mensagem. Tente de novo.");
     expect(firstName("  Marina Lopes ")).toBe("Marina");
   });
 });
