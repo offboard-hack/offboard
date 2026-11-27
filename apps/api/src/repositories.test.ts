@@ -799,12 +799,24 @@ describe.skipIf(!url)("multi-tenant isolation", () => {
       label: "Cultura",
       value: 1,
     });
+    expect(await repos.exitSurveys.listComments(orgB)).toEqual([]);
     expect(await repos.exitSurveys.submitSurvey(orgA, caseB, 5, {}, [])).toBeNull();
     expect(await repos.exitSurveys.submitSurvey(orgB, caseB, 8, {}, [])).toMatchObject({
       npsScore: 8,
     });
     const [row] = await db.select().from(exitSurveys).where(eq(exitSurveys.caseId, caseB));
     expect(row.orgId).toBe(orgB);
+    await repos.exitSurveys.submitSurvey(
+      orgB,
+      caseB,
+      8,
+      { comment: "Org B", anonymous: false },
+      [],
+    );
+    expect(await repos.exitSurveys.listComments(orgB)).toMatchObject([{ comment: "Org B" }]);
+    expect(await repos.exitSurveys.listComments(orgA)).not.toContainEqual(
+      expect.objectContaining({ comment: "Org B" }),
+    );
   });
 
   it("scopes integrations to the organization", async () => {

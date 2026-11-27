@@ -33,3 +33,28 @@ export function placementSummary(placements: {
     copy: "Total baseado em relatos voluntários com autorização.",
   };
 }
+
+const commentMonths = [
+  "jan",
+  "fev",
+  "mar",
+  "abr",
+  "mai",
+  "jun",
+  "jul",
+  "ago",
+  "set",
+  "out",
+  "nov",
+  "dez",
+];
+
+export function commentMonthLabel(month: string) {
+  const [year, number] = month.split("-");
+
+  return `${commentMonths[Number(number) - 1]} de ${year}`;
+}
+
+export function commentAuthorLabel(author: { name: string; department: string } | null) {
+  return author ? `${author.name} · ${author.department}` : "Anônimo";
+}
