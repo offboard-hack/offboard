@@ -194,8 +194,8 @@
     {
       "idx": 27,
       "version": "7",
-      "when": 1795786003747,
-      "tag": "0027_add_unassigned_equipment",
+      "when": 1795790000000,
+      "tag": "0027_add_copay_checkout_at",
       "breakpoints": true
     }
   ]
