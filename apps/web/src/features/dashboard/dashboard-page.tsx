@@ -112,7 +112,7 @@ export function DashboardPage({
   const caseSeries = [
     { name: "Em atraso", count: breakdown.overdue, fill: "var(--chart-2)" },
     { name: "No prazo", count: breakdown.onTrack, fill: "var(--chart-1)" },
-    { name: "Concluídos", count: breakdown.complete, fill: "var(--chart-3)" },
+    { name: "Concluídos", count: breakdown.complete, fill: "oklch(0.596 0.145 163.225)" },
   ];
 
   const progressSeries = [
