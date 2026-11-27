@@ -23,6 +23,8 @@ export default defineConfig({
         "src/features/employee/career/job-preferences-form.ts",
         "src/features/employee/career/rejections.ts",
         "src/features/employee/career/diversity-form.ts",
+        "src/features/employee/career/interview-form.ts",
+        "src/features/employee/agenda.ts",
         "src/features/employee/career/resume-onboarding.ts",
         "src/features/employee/rights.ts",
         "src/features/candidate-search/format.ts",
