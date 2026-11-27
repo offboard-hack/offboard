@@ -17,7 +17,11 @@ import { catalogSources, type CatalogSource } from "./features/sources/catalog.j
 import { fetchFeed } from "./features/sources/sources.js";
 import { exitSurveysRoutes } from "./features/exit-surveys/routes.js";
 import { insightsRoutes } from "./features/insights/routes.js";
-import { integrationsRoutes, slackTokenReader } from "./features/integrations/routes.js";
+import {
+  emailIntegration,
+  integrationsRoutes,
+  slackTokenReader,
+} from "./features/integrations/routes.js";
 import { organizationsRoutes } from "./features/organizations/routes.js";
 import { jobsRoutes } from "./features/jobs/routes.js";
 import { offboardingsRoutes } from "./features/offboardings/routes.js";
@@ -137,10 +141,15 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       ? (orgId: string) => repos.actionConfigs.getActionConfigsByStep(orgId, stepId)
       : repos.actionConfigs.getActionConfigsByPhase;
 
-    await fireActions({ getActionConfigsByPhase }, context, {
-      apiUrl: slackApiUrl,
-      readToken: readSlackToken,
-    });
+    await fireActions(
+      { getActionConfigsByPhase },
+      context,
+      {
+        apiUrl: slackApiUrl,
+        readToken: readSlackToken,
+      },
+      (orgId) => repos.integrations.isConnected(orgId, emailIntegration),
+    );
   };
 
   const inviteEmployee: InviteEmployee = async (orgId, caseId) => {
