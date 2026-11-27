@@ -3176,6 +3176,7 @@ describe.skipIf(!url)("api", () => {
           storage?: boolean;
           draft?: object;
           embed?: Embed;
+          embedProfile?: Embed;
         } = {},
       ) {
         const store: Store = { puts: [], removed: [], prefixes: [], failRemove: false };
@@ -3274,6 +3275,7 @@ describe.skipIf(!url)("api", () => {
           generateStructured:
             options.generate === null ? undefined : (options.generate ?? generate),
           embed: options.embed,
+          embedProfile: options.embedProfile,
           storage: options.storage === false ? undefined : storage,
           runInBackground: (task) => {
             background.push(task);
@@ -4576,6 +4578,121 @@ describe.skipIf(!url)("api", () => {
         await app.settle();
 
         expect(app.matching.batches.flat().slice(50)).toEqual(["Perto"]);
+      });
+
+      async function profileEmbedding(profileId: string) {
+        const [row] = await db
+          .select({ embedding: resumes.profileEmbedding, hash: resumes.profileEmbeddedHash })
+          .from(resumes)
+          .where(and(eq(resumes.profileId, profileId), eq(resumes.kind, "base")));
+
+        return row;
+      }
+
+      it("embeds the whole profile for people search when the résumé is created or edited", async () => {
+        const embedder = fakeEmbed();
+        const app = resumesApp({ embedProfile: embedder.embed });
+        const id = await profile();
+
+        const created = await (await upload(app.instance, id)).json();
+
+        await app.settle();
+
+        const first = await profileEmbedding(id);
+
+        expect(first.embedding).toHaveLength(1024);
+        expect(first.hash).toMatch(/^[0-9a-f]{64}$/);
+        expect(embedder.calls).toEqual([
+          [
+            "Engenheira de Software\nDez anos de experiência\nDev · Acme · 2019 – atual\nFez X\nTypeScript",
+          ],
+        ]);
+
+        await repos.background.enqueue("embed_profile", created.id);
+        await app.settle();
+
+        expect(embedder.calls).toHaveLength(1);
+
+        const edited = await request(app.instance, id, "/me/resume", {
+          method: "PATCH",
+          json: {
+            content: {
+              ...created.content,
+              languages: [{ name: "Inglês", level: "Fluente" }],
+              contact: { ...created.content.contact, email: "maria@example.com", city: "Recife" },
+            },
+          },
+        });
+
+        expect(edited.status).toBe(200);
+
+        await app.settle();
+
+        expect(embedder.calls).toHaveLength(2);
+        expect(embedder.calls[1][0]).toContain("Inglês (Fluente)\nRecife");
+        expect(embedder.calls[1][0]).not.toContain("maria@example.com");
+        expect((await profileEmbedding(id)).hash).not.toBe(first.hash);
+      });
+
+      it("backfills profiles without a search embedding and skips what it cannot embed", async () => {
+        const embedder = fakeEmbed();
+        const app = resumesApp({ embedProfile: embedder.embed });
+        const id = await profile();
+        const created = await (await upload(app.instance, id)).json();
+
+        await db.delete(backgroundJobs).where(eq(backgroundJobs.kind, "embed_profile"));
+        await app.settle();
+
+        expect((await profileEmbedding(id)).embedding).toHaveLength(1024);
+        expect(embedder.calls.length).toBeGreaterThan(0);
+
+        const calls = embedder.calls.length;
+
+        await repos.background.enqueue("embed_profile", crypto.randomUUID());
+        await app.settle();
+
+        expect(embedder.calls).toHaveLength(calls);
+
+        const disabled = resumesApp();
+
+        await db
+          .update(resumes)
+          .set({ profileEmbedding: null, profileEmbeddedHash: null })
+          .where(eq(resumes.id, created.id));
+        await repos.background.enqueue("embed_profile", created.id);
+        await disabled.settle();
+
+        expect(await profileEmbedding(id)).toEqual({ embedding: null, hash: null });
+      });
+
+      it("logs a failed profile backfill without stopping the drain", async () => {
+        const logged = vi.spyOn(console, "error");
+
+        const failing = createApp(
+          webOrigin,
+          {
+            ...repos,
+            resumes: {
+              ...repos.resumes,
+              withoutProfileEmbedding: () => Promise.reject(new Error("db down")),
+            },
+          },
+          { ...appOptions, embedProfile: fakeEmbed().embed },
+        );
+
+        const drained = await failing.handle(
+          new Request("http://localhost/api/background/drain", {
+            method: "POST",
+            headers: { authorization: `Bearer ${cronSecret}` },
+          }),
+        );
+
+        expect(drained.status).toBe(200);
+        expect(logged.mock.calls).toContainEqual([
+          "profile embedding backfill failed",
+          { name: "Error", message: "db down" },
+        ]);
+        logged.mockRestore();
       });
 
       it("embeds the résumé again once its version changes", async () => {

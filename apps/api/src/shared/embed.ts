@@ -48,6 +48,39 @@ export function resumeEmbeddingText(content: ResumeContent, titles: string[]) {
     .join("\n");
 }
 
+function period(start: string | null, end: string | null) {
+  return [start, end].filter((part) => part !== null && part !== "").join(" – ");
+}
+
+function line(parts: (string | null)[]) {
+  return parts.filter((part) => part !== null && part !== "").join(" · ");
+}
+
+export function profileEmbeddingText(content: ResumeContent) {
+  return [
+    content.headline.text,
+    content.summary.text,
+    ...content.experiences.flatMap((experience) => [
+      line([
+        experience.role,
+        experience.company,
+        period(experience.start, experience.end ?? "atual"),
+      ]),
+      ...experience.bullets.map((bullet) => bullet.text),
+    ]),
+    ...content.education.map((education) =>
+      line([education.degree, education.institution, period(education.start, education.end)]),
+    ),
+    content.skills.map((skill) => skill.name).join(", "),
+    content.languages
+      .map((language) => (language.level ? `${language.name} (${language.level})` : language.name))
+      .join(", "),
+    content.contact.city ?? "",
+  ]
+    .filter((part) => part !== "")
+    .join("\n");
+}
+
 const vectors = z.object({ data: z.array(z.array(z.number()).length(dimensions)) });
 
 export function workersAiEmbed(ai: WorkersAi) {

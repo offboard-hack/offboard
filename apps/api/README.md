@@ -46,6 +46,11 @@ employee_case_id) <> 1;` returns 0, or the widened audience check fails.
 For the AI Apply live view, apply `0014_add_ai_application_live_url` to
 production before deploying, since every attempt read selects
 `ai_applications.live_url`.
+For people search, apply `0019_add_resume_profile_embeddings` to production
+before deploying, since every résumé insert names
+`resumes.profile_embedding`. Drizzle skips a migration whose journal `when`
+is not later than the last applied one, and `0018` carries a future timestamp,
+so keep new journal entries after `1795740000013`.
 AI Apply is offered only to people who consented and whose company has an
 active or trialing `platinum-premium` subscription.
 For a disposable development database, `npm run seed -w @offboard/db` loads
