@@ -343,6 +343,13 @@ describe("plan card benefit view", () => {
     });
   });
 
+  it("names the company plan on the sponsor line when a benefit is also active", () => {
+    expect(planCardView(benefitBase, today, false)).toMatchObject({
+      benefitLine: "Gold · Patrocinado pela empresa até 15/06/2027",
+      sponsorLine: "Plano Gold · Patrocinado pela empresa até 10/03/2027",
+    });
+  });
+
   it("shows expiry warning when benefit expires within 30 days", () => {
     const view = planCardView(withValidUntil("2026-12-20"), today, false);
 
