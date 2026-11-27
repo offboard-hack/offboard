@@ -133,9 +133,9 @@ describe.skipIf(!url)("ai apply repository", () => {
     const confirmation = { confirmed: [], rehearsal: false, entries: [], profile: {} };
     const save = { answer: async () => undefined, profile: async () => undefined };
 
-    expect(await repos.aiApply.confirm(created.id, stale.id, confirmation, new Date(), save)).toBe(
-      "expired",
-    );
+    expect(
+      await repos.aiApply.confirm(created.id, stale.id, confirmation, new Date(), save, 10),
+    ).toBe("expired");
 
     await db
       .update(aiApplications)
@@ -144,9 +144,9 @@ describe.skipIf(!url)("ai apply repository", () => {
 
     await db.insert(applications).values({ profileId: created.id, jobId: job.id });
 
-    expect(await repos.aiApply.confirm(created.id, stale.id, confirmation, new Date(), save)).toBe(
-      "applied",
-    );
+    expect(
+      await repos.aiApply.confirm(created.id, stale.id, confirmation, new Date(), save, 10),
+    ).toBe("applied");
   });
 
   async function seedAttempt(
@@ -613,6 +613,7 @@ describe.skipIf(!url)("ai apply repository", () => {
               { confirmed: [], rehearsal: true, entries: [], profile: {} },
               now,
               { answer: async () => undefined, profile: async () => undefined },
+              10,
             );
           },
         ],
@@ -665,6 +666,7 @@ describe.skipIf(!url)("ai apply repository", () => {
         },
         now,
         save,
+        10,
       );
 
       expect(result).toMatchObject({ id, state: "queued", rehearsal: false, hasScreenshot: false });
@@ -690,11 +692,11 @@ describe.skipIf(!url)("ai apply repository", () => {
 
       const recording = { answer: async () => undefined, profile: record };
 
-      await repos.aiApply.confirm(profileId, id, { ...confirmation, profile }, now, recording);
+      await repos.aiApply.confirm(profileId, id, { ...confirmation, profile }, now, recording, 10);
 
       expect(saved).toEqual([[profileId, profile, now]]);
 
-      await repos.aiApply.confirm(profileId, id, { ...confirmation, profile }, now, recording);
+      await repos.aiApply.confirm(profileId, id, { ...confirmation, profile }, now, recording, 10);
 
       expect(saved).toHaveLength(1);
     });
@@ -716,6 +718,7 @@ describe.skipIf(!url)("ai apply repository", () => {
           { ...confirmation, profile: { city: "Santos" } },
           now,
           failing,
+          10,
         ),
       ).rejects.toThrow("profile write failed");
       expect((await stateOf(id)).state).toBe("rehearsed");
@@ -724,7 +727,9 @@ describe.skipIf(!url)("ai apply repository", () => {
     it("counts the seven days from the end of the rehearsal", async () => {
       const { id, profileId } = await rehearsed(new Date(now.getTime() - 7 * day));
 
-      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save)).toBe("expired");
+      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save, 10)).toBe(
+        "expired",
+      );
       expect((await stateOf(id)).state).toBe("rehearsed");
 
       await db
@@ -732,7 +737,9 @@ describe.skipIf(!url)("ai apply repository", () => {
         .set({ preparedAt: new Date(now.getTime() - 30 * day), finishedAt: null })
         .where(eq(aiApplications.id, id));
 
-      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save)).toBe("expired");
+      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save, 10)).toBe(
+        "expired",
+      );
     });
 
     it("limits real sends per São Paulo day, from 03:00 UTC", async () => {
@@ -770,7 +777,14 @@ describe.skipIf(!url)("ai apply repository", () => {
       await sent(dayStart, 9);
 
       expect(
-        await repos.aiApply.confirm(profileId, id, { ...confirmation, rehearsal: true }, now, save),
+        await repos.aiApply.confirm(
+          profileId,
+          id,
+          { ...confirmation, rehearsal: true },
+          now,
+          save,
+          10,
+        ),
       ).toMatchObject({ state: "queued", rehearsal: true });
 
       await db
@@ -780,7 +794,7 @@ describe.skipIf(!url)("ai apply repository", () => {
 
       await sent(new Date(dayStart.getTime() + day - 1), 1);
 
-      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save)).toBe(
+      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save, 10)).toBe(
         "daily_limit",
       );
       expect((await stateOf(id)).state).toBe("rehearsed");
@@ -791,8 +805,44 @@ describe.skipIf(!url)("ai apply repository", () => {
           confirmation,
           new Date(dayStart.getTime() + day),
           save,
+          10,
         ),
       ).toMatchObject({ state: "queued", rehearsal: false });
+    });
+
+    it("respects a lower daily limit from the plan tier", async () => {
+      const { id, profileId } = await rehearsed(new Date(now.getTime() - day));
+      const dayStart = new Date("2026-11-25T03:00:00.000Z");
+
+      await Promise.all(
+        Array.from({ length: 3 }, async (_, index) => {
+          const [job] = await db
+            .insert(jobs)
+            .values({
+              origin: "external",
+              source: "greenhouse",
+              sourceKey: `gold:${dayStart.getTime()}${index}`,
+              title: "Backend",
+              company: "Acme",
+              url: `https://example.com/gold-${index}`,
+            })
+            .returning({ id: jobs.id });
+
+          await db.insert(aiApplications).values({
+            profileId,
+            jobId: job.id,
+            state: "submitted",
+            form: { questions: [] },
+            draft: [],
+            preparedAt: dayStart,
+            confirmedAt: dayStart,
+          });
+        }),
+      );
+
+      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save, 3)).toBe(
+        "daily_limit",
+      );
     });
 
     it("refuses a rehearsed attempt of someone who already applied", async () => {
@@ -800,7 +850,9 @@ describe.skipIf(!url)("ai apply repository", () => {
 
       await db.insert(applications).values({ profileId, jobId });
 
-      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save)).toBe("applied");
+      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save, 10)).toBe(
+        "applied",
+      );
     });
 
     it("reports an attempt that another one already holds for the job", async () => {
@@ -815,7 +867,7 @@ describe.skipIf(!url)("ai apply repository", () => {
         preparedAt: now,
       });
 
-      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save)).toBe(
+      expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save, 10)).toBe(
         "in_progress",
       );
       expect((await stateOf(id)).state).toBe("rehearsed");
@@ -828,7 +880,7 @@ describe.skipIf(!url)("ai apply repository", () => {
 
         await db.update(aiApplications).set({ state }).where(eq(aiApplications.id, id));
 
-        expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save)).toBe(
+        expect(await repos.aiApply.confirm(profileId, id, confirmation, now, save, 10)).toBe(
           "in_progress",
         );
         expect((await stateOf(id)).state).toBe(state);
