@@ -7,6 +7,8 @@ import {
   rejectJobs,
   saveAnswers,
 } from "./steps-career.js";
+import { payBenefitCopay } from "./steps-copay.js";
+import { rehearseAiApply } from "./steps-rehearsal.js";
 import {
   configureActions,
   connectIntegrations,
@@ -256,6 +258,19 @@ async function addPersonScenario(ctx: Context) {
   }
 }
 
+async function benefitCopayScenario(ctx: Context) {
+  const admin = await auroraAdmin(ctx);
+
+  await setBenefitPolicy(ctx, admin, { ...benefitPolicy, rules: [...benefitPolicy.rules] });
+
+  const person = await addPerson(ctx, admin, people.marina);
+  const collaborator = await signInCollaborator(ctx, person);
+  const profileId = await openCareer(ctx, collaborator);
+
+  await readBenefit(ctx, admin, person.name);
+  await payBenefitCopay(ctx, collaborator, profileId);
+}
+
 async function companyPaymentScenario(ctx: Context) {
   await ctx.seedCatalog();
 
@@ -300,6 +315,17 @@ async function answersScenario(ctx: Context) {
 
   await saveAnswers(ctx, collaborator);
   await rejectJobs(ctx, collaborator);
+}
+
+async function aiApplyRehearsalScenario(ctx: Context) {
+  const admin = await auroraAdmin(ctx);
+  const person = await addPerson(ctx, admin, people.helena);
+  const collaborator = await signInCollaborator(ctx, person);
+  const profileId = await openCareer(ctx, collaborator);
+
+  await ensureResume(ctx, collaborator, helenaResume);
+  await upgradeCareerPro(ctx, collaborator, profileId);
+  await rehearseAiApply(ctx, collaborator);
 }
 
 async function benefitsManualScenario(ctx: Context) {
@@ -355,11 +381,13 @@ async function offboardingScenario(ctx: Context) {
 async function allScenario(ctx: Context) {
   await orgsScenario(ctx);
   await addPersonScenario(ctx);
+  await benefitCopayScenario(ctx);
   await companyPaymentScenario(ctx);
   await benefitsManualScenario(ctx);
   await careerScenario(ctx);
   await applicationsScenario(ctx);
   await answersScenario(ctx);
+  await aiApplyRehearsalScenario(ctx);
   await equipmentScenario(ctx);
   await integrationsScenario(ctx);
   await checklistActionsScenario(ctx);
@@ -375,6 +403,8 @@ export const scenarios = {
   applications: applicationsScenario,
   answers: answersScenario,
   "benefits-manual": benefitsManualScenario,
+  "benefit-copay": benefitCopayScenario,
+  "ai-apply-rehearsal": aiApplyRehearsalScenario,
   equipment: equipmentScenario,
   integrations: integrationsScenario,
   "checklist-actions": checklistActionsScenario,

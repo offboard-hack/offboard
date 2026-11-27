@@ -200,7 +200,7 @@ export async function sendWebhook(
   );
 }
 
-function paymentKeys(ctx: Context) {
+export function paymentKeys(ctx: Context) {
   const apiKey = ctx.env.ABACATEPAY_API_KEY;
   const secret = ctx.env.ABACATEPAY_WEBHOOK_SECRET;
 

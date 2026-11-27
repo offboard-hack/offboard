@@ -300,8 +300,8 @@ export async function rejectJobs(ctx: Context, collaborator: Collaborator) {
   );
 }
 
-function aiConfigured(ctx: Context) {
-  return Boolean(ctx.env.AI_GATEWAY_API_KEY || ctx.env.ANTHROPIC_API_KEY);
+export function aiConfigured(env: Context["env"]) {
+  return Boolean(env.AI_GATEWAY_API_KEY || env.ANTHROPIC_API_KEY);
 }
 
 const scored = z.object({ score: z.number().nullable() });
@@ -348,7 +348,7 @@ export async function improveWithAi(
   pollMs = 500,
   timeoutMs = 90_000,
 ) {
-  if (!aiConfigured(ctx)) {
+  if (!aiConfigured(ctx.env)) {
     ctx.log("skipped: AI not configured");
 
     return "skipped" as const;
@@ -417,7 +417,7 @@ const attempt = z.object({ attempt: z.object({ state: z.string() }) });
 const refusal = z.object({ error: z.string() }).nullable();
 
 export async function draftAiApply(ctx: Context, collaborator: Collaborator, title: string) {
-  if (!aiConfigured(ctx)) {
+  if (!aiConfigured(ctx.env)) {
     ctx.log("skipped: AI not configured");
 
     return "skipped" as const;
