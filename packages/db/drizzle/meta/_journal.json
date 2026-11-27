@@ -183,6 +183,13 @@
       "when": 1795751957797,
       "tag": "0025_add_backoffice_staff_session",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795782946114,
+      "tag": "0026_add_candidate_contact_requests",
+      "breakpoints": true
     }
   ]
 }

@@ -9,6 +9,7 @@ import { Input } from "@/shared/ui/shadcn/input";
 import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { ContactDialog } from "./contact-dialog";
 import { examples, initials, period, resultSummary, searchFailure } from "./format";
+import { SearchHeader } from "./search-header";
 
 type Search = ReturnType<typeof getApiClient>["api"]["candidates"]["search"]["get"];
 
@@ -137,13 +138,7 @@ export function CandidateSearchPage({
 
   return (
     <main className="min-h-svh bg-background">
-      <header className="border-b">
-        <div className="mx-auto flex h-16 max-w-6xl items-center px-5">
-          <a href="/">
-            <img src="/offboard-logo.svg" alt="Offboard" className="h-8 w-auto" />
-          </a>
-        </div>
-      </header>
+      <SearchHeader />
       <section className="mx-auto grid max-w-6xl gap-8 px-5 py-12 md:py-16">
         <div className="mx-auto grid max-w-2xl gap-3 text-center">
           <h1 className="text-[clamp(2rem,4vw,3rem)] leading-tight font-bold tracking-tight text-balance">

@@ -73,14 +73,15 @@ export function ContactDialog({ id, name }: { id: string; name: string }) {
           <DialogHeader>
             <DialogTitle>Falar com {person}</DialogTitle>
             <DialogDescription>
-              Enviamos sua mensagem por e-mail. Se {person} tiver interesse, responde direto para
-              você. O e-mail de {person} não é mostrado.
+              Para confirmar que o e-mail é seu, mandamos um link para ele. A mensagem só chega a{" "}
+              {person} depois que você abrir o link. O e-mail de {person} não é mostrado.
             </DialogDescription>
           </DialogHeader>
           {send.isSuccess ? (
             <DialogBody>
               <p role="status" className="text-sm">
-                Mensagem enviada. Se tiver interesse, {person} responde no seu e-mail.
+                Confira seu e-mail. Abra o link que mandamos para {draft.email.trim()} em até 24
+                horas para enviar a mensagem a {person}.
               </p>
             </DialogBody>
           ) : (

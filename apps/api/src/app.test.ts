@@ -19,6 +19,7 @@ import {
   authSession,
   authUser,
   backgroundJobs,
+  candidateContactRequests,
   demoSearchUsage,
   benefitAssignments,
   benefitPolicies,
@@ -65,7 +66,7 @@ import type { TrackingConfig } from "./features/offboardings/correios.ts";
 import { codeAudienceHeader, createAuth, createRuntimeAuth } from "./features/auth/auth.js";
 import { catalogSources, type CatalogSource } from "./features/sources/catalog.js";
 import type { GenerateStructured } from "./shared/ai.js";
-import type { Embed } from "./shared/embed.js";
+import { type Embed, textHash } from "./shared/embed.js";
 import { diskStorage } from "./shared/disk-storage.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
 import { zipSync } from "fflate";
@@ -4774,7 +4775,7 @@ describe.skipIf(!url)("api", () => {
         expect(await capped.json()).toEqual({ error: "Too many searches" });
       });
 
-      it("emails an opted-in candidate without exposing their address", async () => {
+      it("emails an opted-in candidate once the sender confirms their address", async () => {
         const app = resumesApp({ embedProfile: fakeEmbed().embed });
         const visible = await profile();
         const hidden = await profile("outra.pessoal@example.com", 1);
@@ -4784,33 +4785,65 @@ describe.skipIf(!url)("api", () => {
         await repos.talent.setSearchable(visible, true, new Date());
         await db.delete(demoSearchUsage);
 
-        const contact = (id: string, body: Record<string, string>) =>
+        const post = (path: string, body: Record<string, string>) =>
           app.instance.handle(
-            new Request(`http://localhost/api/candidates/${id}/contact`, {
+            new Request(`http://localhost/api${path}`, {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify(body),
             }),
           );
 
+        const contact = (id: string, body: Record<string, string>) =>
+          post(`/candidates/${id}/contact`, body);
+
+        const confirm = (token: string) => post("/candidates/contact/confirm", { token });
+
+        const lastToken = () => {
+          const match = /confirmar\?token=([\w-]+)/.exec(sentTexts.at(-1) ?? "");
+
+          return match?.[1] ?? "";
+        };
+
         const message = {
-          name: "Rita Recrutadora",
+          name: "  Rita Recrutadora ",
           email: "rita@empresa.example",
-          company: "Empresa X",
+          company: " Empresa X ",
           message: "  Temos uma vaga de backend sênior remota e seu perfil combina muito.  ",
         };
 
-        const sent = await contact(shown.id, message);
+        const requested = await contact(shown.id, message);
 
-        expect(sent.status).toBe(204);
+        expect(requested.status).toBe(202);
+        expect(invitedEmails.at(-1)).toBe("rita@empresa.example");
+        expect(sentTexts.at(-1)).toContain("A mensagem só é enviada depois que você confirmar");
+        expect(sentTexts.at(-1)).not.toContain("Temos uma vaga");
+
+        const token = lastToken();
+
+        expect(token).toMatch(/^[\w-]{43}$/);
+
+        const confirmed = await confirm(token);
+
+        expect(confirmed.status).toBe(204);
         expect(invitedEmails.at(-1)).toBe(personalEmail);
         expect(sentTexts.at(-1)).toContain("Rita Recrutadora (Empresa X) encontrou seu currículo");
         expect(sentTexts.at(-1)).toContain("\n\nTemos uma vaga de backend sênior remota");
         expect(sentTexts.at(-1)).toContain("responda direto para rita@empresa.example");
 
+        const used = await confirm(token);
+
+        expect(used.status).toBe(404);
+        expect(await used.json()).toEqual({ error: "Link expired or already used" });
+        expect((await confirm("x".repeat(43))).status).toBe(404);
+        expect((await confirm("short")).status).toBe(422);
+
         const { company: _company, ...withoutCompany } = message;
 
-        expect((await contact(shown.id, withoutCompany)).status).toBe(204);
+        expect(
+          (await contact(shown.id, { ...withoutCompany, email: "Outra@Empresa.example" })).status,
+        ).toBe(202);
+        expect((await confirm(lastToken())).status).toBe(204);
         expect(sentTexts.at(-1)).toContain("Rita Recrutadora encontrou seu currículo");
 
         expect((await contact(kept.id, message)).status).toBe(404);
@@ -4818,37 +4851,93 @@ describe.skipIf(!url)("api", () => {
         expect((await contact(shown.id, { ...message, message: "oi" })).status).toBe(422);
 
         await db.delete(demoSearchUsage);
+        await contact(shown.id, message);
+
+        const expiring = lastToken();
+
+        await db
+          .update(candidateContactRequests)
+          .set({ createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000) })
+          .where(eq(candidateContactRequests.tokenHash, await textHash(expiring)));
+
+        expect((await confirm(expiring)).status).toBe(404);
+
+        await contact(shown.id, { ...message, email: "terceira@empresa.example" });
+
+        const optedOut = lastToken();
+
+        await repos.talent.setSearchable(visible, false, new Date());
+
+        expect((await confirm(optedOut)).status).toBe(404);
+
+        await repos.talent.setSearchable(visible, true, new Date());
+        await db.delete(demoSearchUsage);
 
         const logged = vi.spyOn(console, "error");
 
         inviteFailures.remaining = 1;
 
-        const failed = await contact(shown.id, message);
+        const unconfirmed = await contact(shown.id, message);
+
+        expect(unconfirmed.status).toBe(502);
+        expect(await unconfirmed.json()).toEqual({ error: "Could not send the confirmation" });
+
+        await contact(shown.id, message);
+
+        const retried = lastToken();
+
+        inviteFailures.remaining = 1;
+
+        const failed = await confirm(retried);
 
         expect(failed.status).toBe(502);
         expect(await failed.json()).toEqual({ error: "Could not send the message" });
+        expect(logged.mock.calls).toContainEqual([
+          "candidate contact confirmation failed",
+          { name: "Error", message: "invite failed" },
+        ]);
         expect(logged.mock.calls).toContainEqual([
           "candidate contact email failed",
           { name: "Error", message: "invite failed" },
         ]);
         logged.mockRestore();
 
+        expect((await confirm(retried)).status).toBe(204);
+
         await db.delete(demoSearchUsage);
+        await contact(shown.id, message);
+
+        const busy = lastToken();
+
         await db.insert(demoSearchUsage).values({
           bucket: `contact:to:${shown.id}`,
           day: new Date().toISOString().slice(0, 10),
           searches: 5,
         });
 
+        const full = await confirm(busy);
+
+        expect(full.status).toBe(429);
+        expect(await full.json()).toEqual({ error: "Too many messages" });
+        await db.delete(demoSearchUsage);
+
+        expect((await confirm(busy)).status).toBe(204);
+
+        await db.delete(demoSearchUsage);
+
+        for (let index = 0; index < 3; index += 1) {
+          expect((await contact(shown.id, message)).status).toBe(202);
+        }
+
         expect((await contact(shown.id, message)).status).toBe(429);
 
         await db.delete(demoSearchUsage);
 
         for (let index = 0; index < 5; index += 1) {
-          await contact(kept.id, message);
+          await contact(kept.id, { ...message, email: `p${index}@empresa.example` });
         }
 
-        const capped = await contact(shown.id, message);
+        const capped = await contact(shown.id, { ...message, email: "nova@empresa.example" });
 
         expect(capped.status).toBe(429);
         expect(await capped.json()).toEqual({ error: "Too many messages" });

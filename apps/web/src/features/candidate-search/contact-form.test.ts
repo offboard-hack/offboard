@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  confirmFailure,
   contactBody,
   contactFailure,
   contactProblems,
@@ -48,7 +49,12 @@ describe("candidate contact form", () => {
   it("explains failures and greets by first name", () => {
     expect(contactFailure(404)).toMatch(/saiu da busca/);
     expect(contactFailure(429)).toMatch(/Limite/);
-    expect(contactFailure(502)).toBe("Não foi possível enviar a mensagem. Tente de novo.");
+    expect(contactFailure(502)).toBe(
+      "Não foi possível enviar o link de confirmação. Tente de novo.",
+    );
+    expect(confirmFailure(404)).toMatch(/expirou ou já foi usado/);
+    expect(confirmFailure(429)).toMatch(/máximo de mensagens/);
+    expect(confirmFailure(502)).toBe("Não foi possível enviar a mensagem. Tente de novo.");
     expect(firstName("  Marina Lopes ")).toBe("Marina");
   });
 });

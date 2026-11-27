@@ -27,6 +27,7 @@ import { Route as PortalPainelRouteImport } from './routes/_portal.painel'
 import { Route as PortalPlanosEGastosRouteImport } from './routes/_portal.planos-e-gastos'
 import { Route as PortalResultadosEFeedbackRouteImport } from './routes/_portal.resultados-e-feedback'
 import { Route as PortalSemAcessoRouteImport } from './routes/_portal.sem-acesso'
+import { Route as BuscaCandidatoConfirmarRouteImport } from './routes/busca-candidato_.confirmar'
 import { Route as ColaboradorEntrarRouteImport } from './routes/colaborador_.entrar'
 import { Route as PortalDesligamentosCaseIdRouteImport } from './routes/_portal.desligamentos_.$caseId'
 import { Route as PortalDesligamentosImportarRouteImport } from './routes/_portal.desligamentos_.importar'
@@ -123,6 +124,11 @@ const PortalSemAcessoRoute = PortalSemAcessoRouteImport.update({
   path: '/sem-acesso',
   getParentRoute: () => PortalRoute,
 } as any)
+const BuscaCandidatoConfirmarRoute = BuscaCandidatoConfirmarRouteImport.update({
+  id: '/busca-candidato_/confirmar',
+  path: '/busca-candidato/confirmar',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ColaboradorEntrarRoute = ColaboradorEntrarRouteImport.update({
   id: '/colaborador_/entrar',
   path: '/colaborador/entrar',
@@ -159,6 +165,7 @@ export interface FileRoutesByFullPath {
   '/planos-e-gastos': typeof PortalPlanosEGastosRoute
   '/resultados-e-feedback': typeof PortalResultadosEFeedbackRoute
   '/sem-acesso': typeof PortalSemAcessoRoute
+  '/busca-candidato/confirmar': typeof BuscaCandidatoConfirmarRoute
   '/colaborador/entrar': typeof ColaboradorEntrarRoute
   '/desligamentos/$caseId': typeof PortalDesligamentosCaseIdRoute
   '/desligamentos/importar': typeof PortalDesligamentosImportarRoute
@@ -181,6 +188,7 @@ export interface FileRoutesByTo {
   '/planos-e-gastos': typeof PortalPlanosEGastosRoute
   '/resultados-e-feedback': typeof PortalResultadosEFeedbackRoute
   '/sem-acesso': typeof PortalSemAcessoRoute
+  '/busca-candidato/confirmar': typeof BuscaCandidatoConfirmarRoute
   '/colaborador/entrar': typeof ColaboradorEntrarRoute
   '/desligamentos/$caseId': typeof PortalDesligamentosCaseIdRoute
   '/desligamentos/importar': typeof PortalDesligamentosImportarRoute
@@ -205,6 +213,7 @@ export interface FileRoutesById {
   '/_portal/planos-e-gastos': typeof PortalPlanosEGastosRoute
   '/_portal/resultados-e-feedback': typeof PortalResultadosEFeedbackRoute
   '/_portal/sem-acesso': typeof PortalSemAcessoRoute
+  '/busca-candidato_/confirmar': typeof BuscaCandidatoConfirmarRoute
   '/colaborador_/entrar': typeof ColaboradorEntrarRoute
   '/_portal/desligamentos_/$caseId': typeof PortalDesligamentosCaseIdRoute
   '/_portal/desligamentos_/importar': typeof PortalDesligamentosImportarRoute
@@ -229,6 +238,7 @@ export interface FileRouteTypes {
     | '/planos-e-gastos'
     | '/resultados-e-feedback'
     | '/sem-acesso'
+    | '/busca-candidato/confirmar'
     | '/colaborador/entrar'
     | '/desligamentos/$caseId'
     | '/desligamentos/importar'
@@ -251,6 +261,7 @@ export interface FileRouteTypes {
     | '/planos-e-gastos'
     | '/resultados-e-feedback'
     | '/sem-acesso'
+    | '/busca-candidato/confirmar'
     | '/colaborador/entrar'
     | '/desligamentos/$caseId'
     | '/desligamentos/importar'
@@ -274,6 +285,7 @@ export interface FileRouteTypes {
     | '/_portal/planos-e-gastos'
     | '/_portal/resultados-e-feedback'
     | '/_portal/sem-acesso'
+    | '/busca-candidato_/confirmar'
     | '/colaborador_/entrar'
     | '/_portal/desligamentos_/$caseId'
     | '/_portal/desligamentos_/importar'
@@ -287,6 +299,7 @@ export interface RootRouteChildren {
   ColaboradorRoute: typeof ColaboradorRoute
   EntrarRoute: typeof EntrarRoute
   RecolocacaoRoute: typeof RecolocacaoRoute
+  BuscaCandidatoConfirmarRoute: typeof BuscaCandidatoConfirmarRoute
   ColaboradorEntrarRoute: typeof ColaboradorEntrarRoute
 }
 
@@ -418,6 +431,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PortalSemAcessoRouteImport
       parentRoute: typeof PortalRoute
     }
+    '/busca-candidato_/confirmar': {
+      id: '/busca-candidato_/confirmar'
+      path: '/busca-candidato/confirmar'
+      fullPath: '/busca-candidato/confirmar'
+      preLoaderRoute: typeof BuscaCandidatoConfirmarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/colaborador_/entrar': {
       id: '/colaborador_/entrar'
       path: '/colaborador/entrar'
@@ -485,6 +505,7 @@ const rootRouteChildren: RootRouteChildren = {
   ColaboradorRoute: ColaboradorRoute,
   EntrarRoute: EntrarRoute,
   RecolocacaoRoute: RecolocacaoRoute,
+  BuscaCandidatoConfirmarRoute: BuscaCandidatoConfirmarRoute,
   ColaboradorEntrarRoute: ColaboradorEntrarRoute,
 }
 export const routeTree = rootRouteImport
