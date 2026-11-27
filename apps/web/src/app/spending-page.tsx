@@ -53,7 +53,10 @@ export function SpendingPage() {
           ))}
         </TabsList>
         <TabsContent value="plano">
-          <PlansTab />
+          <PlansTab
+            paid={search.plano === "ok"}
+            onSettled={() => void navigate({ search: { aba: search.aba }, replace: true })}
+          />
         </TabsContent>
         <TabsContent value="beneficios">
           <BenefitsTab />

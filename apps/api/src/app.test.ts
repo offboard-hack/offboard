@@ -54,7 +54,7 @@ import {
   employeeStateSchema,
   type EmployeeState,
 } from "@offboard/employee";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { status } from "elysia";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -235,7 +235,9 @@ describe.skipIf(!url)("api", () => {
     department?: string;
     deadline?: string;
     status?: string;
-    rows?: { name: string; department?: string }[];
+    rows?:
+      | { name: string; department?: string }[]
+      | { person: string; item: string; tag: string; returnMethod: string }[];
     actionId?: string;
     enabled?: boolean;
     shareOutcomeWithHr?: boolean | string;
@@ -9058,6 +9060,100 @@ describe.skipIf(!url)("api", () => {
 
       expect(add.status).toBe(403);
       expect(remove.status).toBe(403);
+    });
+  });
+
+  describe("equipment import", () => {
+    async function freshCase(name: string, email?: string) {
+      const [created] = await db
+        .insert(offboardingCases)
+        .values({
+          orgId: defaultOrgId,
+          name,
+          role: "Analista",
+          department: "Produto",
+          deadline: "2027-03-01",
+        })
+        .returning({ id: offboardingCases.id });
+
+      if (email) {
+        await db
+          .insert(employeeAccess)
+          .values({ caseId: created!.id, orgId: defaultOrgId, email, plan: emptyEmployeePlan });
+      }
+
+      return created!.id;
+    }
+
+    function importRows(
+      rows: { person: string; item: string; tag: string; returnMethod: string }[],
+    ) {
+      return call("/equipment/import", "POST", { rows });
+    }
+
+    const notebook = { item: "Notebook", returnMethod: "pickup" };
+
+    it("adds every row, matching people by name or e-mail", async () => {
+      const byName = await freshCase("Importada Por Nome");
+      const byEmail = await freshCase("Importada Por Email", "importada@example.com");
+
+      const res = await importRows([
+        { ...notebook, person: "importada por nome", tag: "IMP-001" },
+        { ...notebook, person: "IMPORTADA@example.com", tag: "IMP-002", returnMethod: "in_person" },
+      ]);
+
+      expect(res.status).toBe(201);
+      expect(await res.json()).toEqual({ created: 2 });
+
+      const rows = await db
+        .select({
+          caseId: equipment.caseId,
+          tag: equipment.tag,
+          fromEmployeePlan: equipment.fromEmployeePlan,
+        })
+        .from(equipment)
+        .where(inArray(equipment.tag, ["IMP-001", "IMP-002"]))
+        .orderBy(asc(equipment.tag));
+
+      expect(rows).toEqual([
+        { caseId: byName, tag: "IMP-001", fromEmployeePlan: false },
+        { caseId: byEmail, tag: "IMP-002", fromEmployeePlan: false },
+      ]);
+    });
+
+    it("saves nothing when any row has a problem", async () => {
+      await freshCase("Importada Sem Problema");
+
+      const res = await importRows([
+        { ...notebook, person: "Importada Sem Problema", tag: "IMP-010" },
+        { ...notebook, person: "Pessoa Inexistente", tag: "IMP-011" },
+      ]);
+
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({ problems: [{ record: 2, problem: "unknown-person" }] });
+      expect(
+        await db.select({ id: equipment.id }).from(equipment).where(eq(equipment.tag, "IMP-010")),
+      ).toEqual([]);
+    });
+
+    it("rejects an empty file", async () => {
+      expect((await importRows([])).status).toBe(422);
+    });
+
+    it("lets visualizador not import", async () => {
+      const res = await app.handle(
+        new Request("http://localhost/api/equipment/import", {
+          method: "POST",
+          headers: {
+            "x-test-session": "visualizador",
+            origin: webOrigin,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ rows: [{ ...notebook, person: "X", tag: "IMP-020" }] }),
+        }),
+      );
+
+      expect(res.status).toBe(403);
     });
   });
 

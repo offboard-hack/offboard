@@ -158,6 +158,8 @@ function resolveStatus(statusMap: Map<string, ConnectionStatus>, key: string) {
 }
 
 function deriveConnection(item: Integration, statusMap: Map<string, ConnectionStatus>) {
+  if (item.comingSoon) return "disconnected";
+
   if (item.providers) {
     const statuses = item.providers.map((p) => resolveStatus(statusMap, `${item.name}::${p.name}`));
 

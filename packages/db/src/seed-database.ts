@@ -115,6 +115,40 @@ export const testSeedFixtures = {
   rejections: noRejections,
 };
 
+type Executor = Pick<Database, "insert">;
+
+async function upsertPlans(executor: Executor) {
+  for (const plan of seedPlans) {
+    await executor
+      .insert(plans)
+      .values(plan)
+      .onConflictDoUpdate({
+        target: plans.slug,
+        set: {
+          name: plan.name,
+          monthlyPriceCents: plan.monthlyPriceCents,
+          maxEmployees: plan.maxEmployees,
+          features: plan.features,
+          perPersonPriceCents: plan.perPersonPriceCents,
+          aiApplyDailyLimit: plan.aiApplyDailyLimit,
+          aiApplyPriority: plan.aiApplyPriority,
+          detailedScore: plan.detailedScore,
+          updatedAt: new Date(),
+        },
+      });
+  }
+}
+
+export async function seedCatalog(db: Database) {
+  await db.transaction(async (tx) => {
+    await upsertPlans(tx);
+
+    await tx.insert(jobSources).values(seedJobSources).onConflictDoNothing();
+
+    await tx.insert(jobs).values(seedJobs).onConflictDoNothing();
+  });
+}
+
 export async function seedDatabase(
   db: Database,
   fixtures = {
@@ -511,25 +545,7 @@ export async function seedDatabase(
 
     await tx.insert(actionConfigs).values(seedActionConfigs);
 
-    for (const plan of seedPlans) {
-      await tx
-        .insert(plans)
-        .values(plan)
-        .onConflictDoUpdate({
-          target: plans.slug,
-          set: {
-            name: plan.name,
-            monthlyPriceCents: plan.monthlyPriceCents,
-            maxEmployees: plan.maxEmployees,
-            features: plan.features,
-            perPersonPriceCents: plan.perPersonPriceCents,
-            aiApplyDailyLimit: plan.aiApplyDailyLimit,
-            aiApplyPriority: plan.aiApplyPriority,
-            detailedScore: plan.detailedScore,
-            updatedAt: new Date(),
-          },
-        });
-    }
+    await upsertPlans(tx);
 
     const { planSlug, invoices: seedInvoices, ...subscription } = seedSubscription;
     const [plan] = await tx.select({ id: plans.id }).from(plans).where(eq(plans.slug, planSlug));
