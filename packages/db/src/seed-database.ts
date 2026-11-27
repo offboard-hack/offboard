@@ -230,6 +230,7 @@ export async function seedDatabase(
             phase: seedTask.phase ?? null,
             description: seedTask.description ?? null,
             dueDate: seedTask.dueDate ?? null,
+            dueTime: seedTask.dueTime ?? null,
             trackingCode: seedTask.trackingCode ?? null,
             position: i,
           })

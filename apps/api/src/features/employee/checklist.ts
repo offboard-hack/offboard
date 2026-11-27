@@ -26,6 +26,7 @@ export async function readChecklist(tx: Transaction, orgId: string, caseId: stri
       title: tasks.title,
       description: tasks.description,
       dueDate: tasks.dueDate,
+      dueTime: sql<string | null>`to_char(${tasks.dueTime}, 'HH24:MI')`,
       status: tasks.status,
       stepId: tasks.checklistStepId,
     })

@@ -9,6 +9,7 @@ const checklist = [
     title: "Devolver crachá",
     description: "Na recepção",
     dueDate: "2026-12-03",
+    dueTime: "08:15",
     status: "done",
     action: "check",
   },
@@ -17,6 +18,7 @@ const checklist = [
     title: "Assinar termo",
     description: null,
     dueDate: "2026-12-03",
+    dueTime: null,
     status: "todo",
     action: "check",
   },
@@ -25,6 +27,7 @@ const checklist = [
     title: "Sem data",
     description: null,
     dueDate: null,
+    dueTime: null,
     status: "todo",
     action: "check",
   },
@@ -52,7 +55,7 @@ describe("builds the agenda", () => {
   it("keeps only dated tasks and places interviews in the Brasília day", () => {
     expect(items.map(({ id, day, time }) => [id, day, time])).toEqual([
       ["task-t2", "2026-12-03", ""],
-      ["task-t1", "2026-12-03", ""],
+      ["task-t1", "2026-12-03", "08:15"],
       ["interview-i1", "2026-12-03", "10:30"],
       ["interview-i2", "2026-12-03", "17:00"],
       ["interview-i3", "2026-12-03", "23:30"],

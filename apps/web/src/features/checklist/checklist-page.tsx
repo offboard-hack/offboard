@@ -325,6 +325,7 @@ function completeStepSettings(step: ChecklistStep) {
   return {
     title: step.title,
     deadlineOffset: step.deadlineOffset ?? null,
+    deadlineTime: step.deadlineTime ?? null,
     rules: step.rules ?? [],
     email: step.email ?? null,
     slack: step.slack ?? null,

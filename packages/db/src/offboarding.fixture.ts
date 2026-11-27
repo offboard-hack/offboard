@@ -9,6 +9,7 @@ export type SeedTask = {
   phase?: string | null;
   description?: string;
   dueDate?: string;
+  dueTime?: string;
   trackingCode?: string;
   subtasks?: SeedSubtask[];
 };
@@ -163,12 +164,16 @@ export const baseSeedCases: readonly SeedCase[] = [
         title: "Confirmar itens e agendar a coleta",
         status: "done",
         phase: "first-week",
+        dueDate: "2026-11-13",
+        dueTime: "15:00",
       },
       {
         team: "Pessoa desligada",
         title: "Fazer o exame demissional",
         status: "todo",
         phase: "first-week",
+        dueDate: "2026-11-13",
+        dueTime: "09:30",
       },
       {
         team: "Pessoa desligada",

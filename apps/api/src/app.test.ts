@@ -9025,6 +9025,7 @@ describe.skipIf(!url)("api", () => {
       phase: "second-week",
       title: "Entregar itens",
       deadlineOffset: 2,
+      deadlineTime: "08:00",
       rules: [{ id: "area", field: "department", operator: "equals", value: "Operacoes" }],
     } as const;
 
@@ -9033,6 +9034,7 @@ describe.skipIf(!url)("api", () => {
       team: "TI",
       phase: "pre",
       title: "Verificar acessos",
+      deadlineTime: "10:00",
       rules: [{ id: "cargo", field: "role", operator: "notEquals", value: "estagiario" }],
     } as const;
 
@@ -9104,6 +9106,16 @@ describe.skipIf(!url)("api", () => {
       ).toMatchObject([
         { title: "Verificar acessos", dueDate: null },
         { title: "Entregar itens", dueDate: "2027-02-02" },
+      ]);
+      expect(
+        await db
+          .select({ title: tasks.title, dueTime: tasks.dueTime })
+          .from(tasks)
+          .where(eq(tasks.caseId, created.id))
+          .orderBy(asc(tasks.position)),
+      ).toEqual([
+        { title: "Verificar acessos", dueTime: null },
+        { title: "Entregar itens", dueTime: "08:00:00" },
       ]);
 
       const imported = await (
@@ -11218,7 +11230,14 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
     const record = await repos.offboardings.createOffboarding(defaultOrgId, person, [
       ...layout,
-      { id: "form", title: "Conferir dados", team: "Pessoa desligada", phase: "d0" },
+      {
+        id: "form",
+        title: "Conferir dados",
+        team: "Pessoa desligada",
+        phase: "d0",
+        deadlineOffset: 1,
+        deadlineTime: "09:30",
+      },
     ]);
 
     const foreign = await repos.offboardings.createOffboarding(
@@ -11366,8 +11385,14 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     const journey = await (await request("/employee/journey", "GET", cookie)).json();
     expect(journey.checklist).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: manual.id, action: "check", status: "todo" }),
-        expect.objectContaining({ id: confirm.id, action: "equipment" }),
+        expect.objectContaining({
+          id: manual.id,
+          action: "check",
+          status: "todo",
+          dueDate: "2027-03-04",
+          dueTime: "09:30",
+        }),
+        expect.objectContaining({ id: confirm.id, action: "equipment", dueTime: null }),
         expect.objectContaining({ action: "feedback" }),
       ]),
     );
