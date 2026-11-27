@@ -21,7 +21,7 @@ export function PortalLayout({
   navigation,
   fullWidth,
   accountMenu,
-  workspaceName = "Aurora Tecnologia",
+  workspaceName,
   focusOnSearch = false,
   sidebarDescription,
   onMainMount,
@@ -30,7 +30,7 @@ export function PortalLayout({
   navigation: ReactNode;
   fullWidth: boolean;
   accountMenu: ReactNode;
-  workspaceName?: string;
+  workspaceName: string;
   focusOnSearch?: boolean;
   sidebarDescription?: string;
   onMainMount?: () => () => void;

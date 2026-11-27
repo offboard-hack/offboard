@@ -19,6 +19,7 @@ const staffPrincipal = {
   email: "staff@offboard.xyz",
   role: "admin" as const,
   orgId: "00000000-0000-0000-0000-000000000001",
+  orgName: "Default",
 };
 
 function appFor(access: PortalAccess, db: Database) {

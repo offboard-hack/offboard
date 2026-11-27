@@ -30,6 +30,7 @@ const noopAuth: PortalAuth = {
         email: "system@offboard.app",
         role: "admin",
         orgId: defaultOrgId,
+        orgName: "Offboard",
       },
     }),
 };
