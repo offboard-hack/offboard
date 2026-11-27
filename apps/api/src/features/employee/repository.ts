@@ -30,7 +30,9 @@ import type { EmployeePrincipal } from "../../shared/employee-auth.js";
 
 import {
   readChecklist,
+  readTrackingCode,
   setChecklistTask,
+  setTrackingCode,
   setWorkflowTasks,
   syncDepartureTasks,
   type ChecklistChange,
@@ -58,8 +60,10 @@ type EmployeeData = {
     plan: z.infer<typeof employeePlanSchema>;
     equipment: Awaited<ReturnType<typeof readEquipment>>;
     checklist: Awaited<ReturnType<typeof readChecklist>>;
+    trackingCode: string | null;
   }>;
   setChecklistTask(taskId: string, done: boolean): ReturnType<typeof setChecklistTask>;
+  setTrackingCode(code: string): ReturnType<typeof setTrackingCode>;
   syncDeparture(previous: Departure, next: Departure): Promise<ChecklistChange[]>;
   readState(key: EmployeeState["key"]): ReturnType<typeof readState>;
   saveState(next: EmployeeState): ReturnType<typeof saveState>;
@@ -292,12 +296,17 @@ export function createEmployeeRepository(db: Database) {
       return operation({
         async readJourney() {
           const plan = employeePlanSchema.parse(journey.plan);
-          const equipment = await readEquipment(tx, orgId, principal.caseId, plan.equipment);
-          const checklist = await readChecklist(tx, orgId, principal.caseId);
 
-          return { ...journey, plan, equipment, checklist };
+          const [equipment, checklist, trackingCode] = await Promise.all([
+            readEquipment(tx, orgId, principal.caseId, plan.equipment),
+            readChecklist(tx, orgId, principal.caseId),
+            readTrackingCode(tx, orgId, principal.caseId),
+          ]);
+
+          return { ...journey, plan, equipment, checklist, trackingCode };
         },
         setChecklistTask: (id, done) => setChecklistTask(tx, orgId, principal.caseId, id, done),
+        setTrackingCode: (code) => setTrackingCode(tx, orgId, principal.caseId, code),
         async syncDeparture(previous, next) {
           if (JSON.stringify(previous.booking) !== JSON.stringify(next.booking)) {
             await syncEquipmentSchedule(
