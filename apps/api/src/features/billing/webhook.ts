@@ -150,6 +150,40 @@ async function applyTalentEvent(
   await repos.updateTalentSubscription(talent.profileId, patch, event.id ?? deliveryId, new Date());
 }
 
+type CompanyTarget = {
+  status: string;
+  checkoutId: string | null;
+  providerSubscriptionId: string | null;
+};
+
+function issuedCheckout(event: SubscriptionEvent) {
+  return { providerSubscriptionId: event.data.subscription.id, checkoutUrl: null };
+}
+
+function bindsCheckout(name: string, subscription: CompanyTarget) {
+  return (
+    name === "subscription.completed" ||
+    name === "subscription.trial_started" ||
+    (name === "subscription.renewed" && subscription.providerSubscriptionId === null)
+  );
+}
+
+function isStaleCompanyEvent(name: string, event: SubscriptionEvent, subscription: CompanyTarget) {
+  if (bindsCheckout(name, subscription)) {
+    const paid = event.data.checkout?.id;
+
+    return subscription.status === "pending"
+      ? subscription.checkoutId === null || subscription.checkoutId !== paid
+      : subscription.checkoutId !== null && subscription.checkoutId !== paid;
+  }
+
+  return (
+    replaceableEvents.has(name) &&
+    subscription.providerSubscriptionId !== null &&
+    subscription.providerSubscriptionId !== event.data.subscription.id
+  );
+}
+
 async function openInvoice(
   repos: BillingRepository,
   orgId: string,
@@ -191,10 +225,19 @@ export async function applyWebhookEvent(
 
   const { orgId } = subscription;
 
+  if (isStaleCompanyEvent(name, event, subscription)) {
+    console.error("company webhook ignored", { event: name });
+
+    return;
+  }
+
   const amount = event.data.subscription.amount;
 
   if (name === "subscription.trial_started") {
-    await repos.updateSubscription(orgId, subscription.id, { status: "trialing" });
+    await repos.updateSubscription(orgId, subscription.id, {
+      status: "trialing",
+      ...issuedCheckout(event),
+    });
   }
 
   if (name === "subscription.cancelled") {
@@ -214,6 +257,7 @@ export async function applyWebhookEvent(
       status: "active",
       currentPeriodStart: today,
       currentPeriodEnd: addOneMonth(today),
+      ...(bindsCheckout(name, subscription) && issuedCheckout(event)),
     });
   }
 

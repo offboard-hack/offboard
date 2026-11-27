@@ -7,6 +7,7 @@
   ],
   "scripts": {
     "dev": "turbo dev",
+    "scenario": "npm run scenario -w @offboard/api --",
     "build": "turbo build",
     "lint": "turbo boundaries && oxlint && turbo lint",
     "test": "npm test --workspaces --if-present",

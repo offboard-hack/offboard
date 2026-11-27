@@ -5,12 +5,13 @@ import {
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 import {
   invoicesQuery,
   plansQuery,
   subscriptionQuery,
   useCheckout,
+  useSubscribe,
   type InvoiceRow,
   type PlanRow,
 } from "@/entities/billing";
@@ -21,6 +22,7 @@ import { classProps } from "../../shared/lib/class-props";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
 import { portalStyles } from "../../shared/ui/surface.styles";
+import { paymentPendingLabel, planPollInterval, pollDeadline, planView } from "./plan-view";
 
 const styles = {
   label: "text-sm text-muted-foreground",
@@ -61,7 +63,7 @@ function formatDate(date: string) {
   return dateFormat.format(new Date(`${date}T00:00:00Z`));
 }
 
-const planColumns: TableColumn<PlanRow>[] = [
+const baseColumns: TableColumn<PlanRow>[] = [
   {
     id: "name",
     accessorFn: ({ name }) => name,
@@ -87,11 +89,49 @@ const planColumns: TableColumn<PlanRow>[] = [
   },
 ];
 
-export function PlansTab() {
+function planColumns(
+  canSubscribe: boolean,
+  disabled: boolean,
+  onSubscribe: (slug: string) => void,
+) {
+  if (!canSubscribe) return baseColumns;
+
+  const subscribeColumn: TableColumn<PlanRow> = {
+    id: "subscribe",
+    header: "Assinatura",
+    cell: ({ row }) => (
+      <Button size="sm" disabled={disabled} onClick={() => onSubscribe(row.original.slug)}>
+        Assinar
+      </Button>
+    ),
+  };
+
+  return [...baseColumns, subscribeColumn];
+}
+
+export function PlansTab({ paid, onSettled }: { paid: boolean; onSettled: () => void }) {
+  const [openedAt] = useState(() => Date.now());
+
   const { data: plans } = useSuspenseQuery(plansQuery);
-  const { data: subscription } = useSuspenseQuery(subscriptionQuery);
+
+  const { data: subscription } = useSuspenseQuery({
+    ...subscriptionQuery,
+    refetchInterval: (query) => {
+      const remaining = pollDeadline(query.state.data, paid, Date.now() - openedAt);
+
+      if (remaining === 0) queueMicrotask(onSettled);
+
+      return remaining ? planPollInterval : false;
+    },
+  });
+
   const { data: invoices } = useSuspenseQuery(invoicesQuery);
+
   const checkout = useCheckout();
+  const subscribe = useSubscribe();
+
+  const view = planView(subscription, paid);
+  const standing = view.standing;
 
   const pending = invoices.filter((invoice) => invoice.status === "pending");
   const pendingTotal = pending.reduce((total, invoice) => total + invoice.amountCents, 0);
@@ -104,19 +144,19 @@ export function PlansTab() {
         metrics={[
           {
             label: "Plano atual",
-            value: subscription?.plan.name ?? "Sem plano",
+            value: standing?.plan.name ?? "Sem plano",
             icon: CreditCardIcon,
             tone: "primary",
           },
           {
             label: "Capacidade do plano",
-            value: subscription?.plan.maxEmployees ?? 0,
+            value: standing?.plan.maxEmployees ?? 0,
             icon: UserGroupIcon,
             tone: "success",
           },
           {
             label: "Valor mensal",
-            value: formatCents(subscription?.plan.monthlyPriceCents ?? 0),
+            value: formatCents(standing?.plan.monthlyPriceCents ?? 0),
             icon: Calendar03Icon,
             tone: "warning",
           },
@@ -128,6 +168,25 @@ export function PlansTab() {
           },
         ]}
       />
+      {view.paymentNote && (
+        <p role="status" {...classProps(styles.label)}>
+          {view.paymentNote}
+        </p>
+      )}
+      {view.paymentPending && (
+        <div {...classProps(styles.serviceHeader)}>
+          <Badge variant="status-warning" {...classProps(styles.badge)}>
+            {paymentPendingLabel}
+          </Badge>
+          <Button
+            size="sm"
+            disabled={checkout.isPending || checkout.isSuccess}
+            onClick={() => checkout.mutate()}
+          >
+            Pagar
+          </Button>
+        </div>
+      )}
       <div {...classProps(styles.billingGrid)}>
         <section className="min-w-0" aria-labelledby="plans-title">
           <DataTable
@@ -138,7 +197,11 @@ export function PlansTab() {
             }
             data={plans}
             scrollLabel="Tabela de planos"
-            columns={planColumns}
+            columns={planColumns(
+              view.canSubscribe,
+              subscribe.isPending || subscribe.isSuccess,
+              subscribe.mutate,
+            )}
             labelledBy="plans-title"
             getRowId={(plan) => plan.id}
             tableStyle="min-w-lg"
@@ -181,7 +244,7 @@ export function PlansTab() {
                     {(invoice.status === "pending" || invoice.status === "failed") && (
                       <Button
                         size="sm"
-                        disabled={checkout.isPending}
+                        disabled={checkout.isPending || checkout.isSuccess}
                         onClick={() => checkout.mutate()}
                       >
                         Pagar
@@ -199,6 +262,12 @@ export function PlansTab() {
           Não foi possível gerar o pagamento. Tente novamente.
         </p>
       )}
+      {subscribe.isError && (
+        <p role="alert" {...classProps(styles.label, "text-destructive")}>
+          Não foi possível iniciar a assinatura. Tente novamente.
+        </p>
+      )}
+      {view.changeNote && <p {...classProps(styles.label)}>{view.changeNote}</p>}
       {nextDue && <p {...classProps(styles.label)}>Próximo vencimento em {formatDate(nextDue)}.</p>}
     </>
   );

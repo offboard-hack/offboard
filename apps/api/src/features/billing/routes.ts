@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import type { PortalAccessPlugin } from "../../shared/access.js";
+import { logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import type { AbacatePayGateway } from "./abacatepay.js";
 import type { BillingRepository } from "./repository.js";
@@ -22,9 +23,11 @@ const subscriptionRow = t.Object({
     t.Literal("past_due"),
     t.Literal("canceled"),
     t.Literal("trialing"),
+    t.Literal("pending"),
   ]),
   currentPeriodStart: t.String(),
   currentPeriodEnd: t.String(),
+  canRestart: t.Boolean(),
   plan: planRow,
 });
 
@@ -52,6 +55,15 @@ export function billingRoutes(
   webOrigin: string,
   webhookSecret: string | undefined,
 ) {
+  const planScreen = `${webOrigin}/planos-e-gastos?aba=plano`;
+
+  const issueCheckout = (params: { externalId: string; planSlug: string }) =>
+    gateway.createSubscriptionCheckout({
+      ...params,
+      returnUrl: planScreen,
+      completionUrl: `${planScreen}&plano=ok`,
+    });
+
   return new Elysia()
     .use(access)
     .get("/billing/plans", () => repos.listPlans(), {
@@ -79,22 +91,73 @@ export function billingRoutes(
       async ({ principal, status }) => {
         if (!gateway.configured) return status(503, { error: "Payments are not configured" });
 
-        const subscription = await repos.getSubscription(principal.orgId);
+        try {
+          const paid = await repos.payExisting(principal.orgId, new Date(), issueCheckout);
 
-        if (!subscription) return status(404, { error: "No subscription" });
+          if (paid.outcome === "none") return status(404, { error: "No subscription" });
 
-        const checkout = await gateway.createSubscriptionCheckout({
-          externalId: subscription.id,
-          planSlug: subscription.plan.slug,
-          returnUrl: `${webOrigin}/planos-e-gastos`,
-          completionUrl: `${webOrigin}/planos-e-gastos`,
-        });
+          if (paid.outcome === "not_payable") {
+            return status(409, { error: "Nothing to pay on this subscription" });
+          }
 
-        return { checkoutId: checkout.id, url: checkout.url };
+          return { checkoutId: paid.checkoutId, url: paid.url };
+        } catch (cause) {
+          logFailureCode("Company checkout failed")(cause);
+
+          return status(502, { error: "Could not start the checkout" });
+        }
       },
       {
         permit: ["manage", "Billing"],
-        response: { 200: checkoutResponse, 404: errorResponse, 503: errorResponse },
+        response: {
+          200: checkoutResponse,
+          404: errorResponse,
+          409: errorResponse,
+          502: errorResponse,
+          503: errorResponse,
+        },
+      },
+    )
+    .post(
+      "/billing/subscription",
+      async ({ principal, body, status }) => {
+        if (!gateway.configured) return status(503, { error: "Payments are not configured" });
+
+        try {
+          const started = await repos.startSubscription(
+            principal.orgId,
+            body.planSlug,
+            new Date(),
+            issueCheckout,
+          );
+
+          if (started.outcome === "unknown_plan") return status(422, { error: "Unknown plan" });
+
+          if (started.outcome === "subscribed") {
+            return status(409, { error: "Already subscribed" });
+          }
+
+          if (started.outcome === "in_progress") {
+            return status(409, { error: "A checkout is already in progress" });
+          }
+
+          return { url: started.url };
+        } catch (cause) {
+          logFailureCode("Company plan checkout failed")(cause);
+
+          return status(502, { error: "Could not start the checkout" });
+        }
+      },
+      {
+        permit: ["manage", "Billing"],
+        body: t.Object({ planSlug: t.String() }),
+        response: {
+          200: t.Object({ url: t.String() }),
+          409: errorResponse,
+          422: errorResponse,
+          502: errorResponse,
+          503: errorResponse,
+        },
       },
     )
     .post(

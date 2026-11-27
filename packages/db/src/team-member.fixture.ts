@@ -17,5 +17,4 @@ export const seedTeamMembers: SeedTeamMember[] = [
   { name: "Mariana Santos", email: "mariana.santos@offboard.com", role: "visualizador" },
   { name: "Roberto Souza", email: "roberto.souza@offboard.com", role: "admin" },
   { name: "Juliana Ferreira", email: "juliana.ferreira@offboard.com", role: "visualizador" },
-  { name: "Samuel Molling", email: "samuelmolling@gmail.com", role: "admin" },
 ];
