@@ -6,46 +6,42 @@ import { organizations, plans } from "@offboard/db/schema";
 import { Elysia } from "elysia";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { PortalAccess } from "../../shared/portal-auth.js";
+import { accessKeys, audience, issuer } from "../../shared/access-token.test-utils.js";
+import { accessVerifier, type AccessVerifier } from "../../shared/cloudflare-access.js";
 import { parseStaffEmails, staffAccess } from "../../shared/staff-access.js";
 import { createBackofficeRepository } from "./repository.js";
 import { backofficeRoutes } from "./routes.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 
-const staffPrincipal = {
-  id: "m1",
-  name: "Staff",
-  email: "staff@offboard.xyz",
-  role: "admin" as const,
-  orgId: "00000000-0000-0000-0000-000000000001",
-};
-
-function appFor(access: PortalAccess, db: Database) {
-  const auth = {
-    handler: () => Promise.resolve(new Response(null, { status: 404 })),
-    resolvePrincipal: () => Promise.resolve(access),
-  };
-
+function appFor(verify: AccessVerifier, db: Database) {
   return new Elysia().use(
     backofficeRoutes(
       createBackofficeRepository(db),
-      staffAccess(auth, parseStaffEmails("staff@offboard.xyz")),
+      staffAccess({ verify, staffEmails: parseStaffEmails("staff@offboard.xyz") }),
     ),
   );
 }
 
 describe.skipIf(!url)("backoffice routes", () => {
   const db = createClient(url ?? "");
-  const staff: PortalAccess = { kind: "authenticated", principal: staffPrincipal };
+  let access: Awaited<ReturnType<typeof accessKeys>>;
+  let staffToken: string;
   let orgId: string;
   let planId: string;
 
-  function get(path: string, access: PortalAccess = staff) {
-    return appFor(access, db).handle(new Request(`http://api.test${path}`));
+  function get(path: string, token?: string) {
+    const headers = token === undefined ? undefined : { "cf-access-jwt-assertion": token };
+
+    return appFor(accessVerifier(issuer, audience, access.keys), db).handle(
+      new Request(`http://api.test${path}`, { headers }),
+    );
   }
 
   beforeAll(async () => {
+    access = await accessKeys();
+    staffToken = await access.sign({ email: "staff@offboard.xyz" });
+
     await migrate(db, {
       migrationsFolder: fileURLToPath(
         new URL("../../../../../packages/db/drizzle", import.meta.url),
@@ -82,17 +78,14 @@ describe.skipIf(!url)("backoffice routes", () => {
     `/backoffice/organizations/${randomUUID()}`,
     "/backoffice/talent",
     "/backoffice/plans",
-  ])("blocks %s for anonymous visitors", async (path) => {
-    const response = await get(path, { kind: "anonymous" });
+  ])("blocks %s without an Access token", async (path) => {
+    const response = await get(path);
 
     expect(response.status).toBe(401);
   });
 
-  it("blocks a customer admin from every backoffice route", async () => {
-    const customerAdmin: PortalAccess = {
-      kind: "authenticated",
-      principal: { ...staffPrincipal, email: "ceo@acme.com" },
-    };
+  it("blocks an identity that is not staff", async () => {
+    const customerAdmin = await access.sign({ email: "ceo@acme.com" });
 
     const response = await get("/backoffice/plans", customerAdmin);
 
@@ -100,14 +93,14 @@ describe.skipIf(!url)("backoffice routes", () => {
   });
 
   it("serves the summary to staff", async () => {
-    const response = await get("/backoffice/summary");
+    const response = await get("/backoffice/summary", staffToken);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ organizations: expect.any(Number) });
   });
 
   it("pages the organization list", async () => {
-    const response = await get("/backoffice/organizations?limit=1&offset=0");
+    const response = await get("/backoffice/organizations?limit=1&offset=0", staffToken);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -116,7 +109,7 @@ describe.skipIf(!url)("backoffice routes", () => {
   });
 
   it("uses the default page for organizations when no pagination is given", async () => {
-    const response = await get("/backoffice/organizations");
+    const response = await get("/backoffice/organizations", staffToken);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -124,49 +117,49 @@ describe.skipIf(!url)("backoffice routes", () => {
   });
 
   it("applies explicit pagination to organizations and talent", async () => {
-    const organizations = await get("/backoffice/organizations?limit=2&offset=0");
-    const talent = await get("/backoffice/talent?limit=3&offset=0");
+    const organizationsPage = await get("/backoffice/organizations?limit=2&offset=0", staffToken);
+    const talent = await get("/backoffice/talent?limit=3&offset=0", staffToken);
 
-    expect(organizations.status).toBe(200);
-    expect((await organizations.json()).items.length).toBeLessThanOrEqual(2);
+    expect(organizationsPage.status).toBe(200);
+    expect((await organizationsPage.json()).items.length).toBeLessThanOrEqual(2);
     expect(talent.status).toBe(200);
     expect((await talent.json()).items.length).toBeLessThanOrEqual(3);
   });
 
   it("uses a default page when no pagination is given", async () => {
-    const response = await get("/backoffice/talent");
+    const response = await get("/backoffice/talent", staffToken);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ items: expect.any(Array) });
   });
 
   it("rejects a page size above the maximum", async () => {
-    const response = await get("/backoffice/talent?limit=500");
+    const response = await get("/backoffice/talent?limit=500", staffToken);
 
     expect(response.status).toBe(422);
   });
 
   it("returns an organization that exists", async () => {
-    const response = await get(`/backoffice/organizations/${orgId}`);
+    const response = await get(`/backoffice/organizations/${orgId}`, staffToken);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ id: orgId, name: "Backoffice Route Org" });
   });
 
   it("returns 404 for an unknown organization", async () => {
-    const response = await get(`/backoffice/organizations/${randomUUID()}`);
+    const response = await get(`/backoffice/organizations/${randomUUID()}`, staffToken);
 
     expect(response.status).toBe(404);
   });
 
   it("rejects an organization id that is not a uuid", async () => {
-    const response = await get("/backoffice/organizations/acme");
+    const response = await get("/backoffice/organizations/acme", staffToken);
 
     expect(response.status).toBe(422);
   });
 
   it("serves the plan catalogue to staff", async () => {
-    const response = await get("/backoffice/plans");
+    const response = await get("/backoffice/plans", staffToken);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(

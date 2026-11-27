@@ -60,6 +60,7 @@ import { status } from "elysia";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.ts";
+import { closedBackoffice } from "./shared/staff-access.js";
 import type { TrackingConfig } from "./features/offboardings/correios.ts";
 import { codeAudienceHeader, createAuth, createRuntimeAuth } from "./features/auth/auth.js";
 import { catalogSources, type CatalogSource } from "./features/sources/catalog.js";
@@ -138,6 +139,7 @@ const auth: PortalAuth = {
 const browserbase = { apiKey: "bb-key", projectId: "bb-project" };
 
 const appOptions = {
+  backofficeAccess: closedBackoffice,
   auth,
   sendEmail,
   cronSecret,
@@ -4518,9 +4520,11 @@ describe.skipIf(!url)("api", () => {
         ).toBe(401);
         expect(
           (
-            await createApp(webOrigin, repos, { auth, sendEmail }).handle(
-              drainRequest("GET", `Bearer ${cronSecret}`),
-            )
+            await createApp(webOrigin, repos, {
+              backofficeAccess: closedBackoffice,
+              auth,
+              sendEmail,
+            }).handle(drainRequest("GET", `Bearer ${cronSecret}`))
           ).status,
         ).toBe(401);
 
@@ -4553,6 +4557,7 @@ describe.skipIf(!url)("api", () => {
             },
           },
           {
+            backofficeAccess: closedBackoffice,
             auth,
             sendEmail,
             generateStructured: async ({ schema }) => schema.parse(draft),
@@ -8019,7 +8024,12 @@ describe.skipIf(!url)("api", () => {
   });
 
   it("rejects missing and incorrect machine credentials", async () => {
-    const noSecret = createApp(webOrigin, repos, { auth, sendEmail });
+    const noSecret = createApp(webOrigin, repos, {
+      backofficeAccess: closedBackoffice,
+      auth,
+      sendEmail,
+    });
+
     const cronWithoutConfig = await noSecret.handle(cronRequest());
 
     const webhookWithoutCredential = await app.handle(
@@ -8048,7 +8058,12 @@ describe.skipIf(!url)("api", () => {
     expect((await app.handle(request)).status).toBe(401);
     expect((await app.handle(slackRequest('{"type":"event_callback"}', "1"))).status).toBe(401);
 
-    const noSecret = createApp(webOrigin, repos, { auth, sendEmail });
+    const noSecret = createApp(webOrigin, repos, {
+      backofficeAccess: closedBackoffice,
+      auth,
+      sendEmail,
+    });
+
     expect((await noSecret.handle(slackRequest('{"type":"event_callback"}'))).status).toBe(401);
   });
 
@@ -10035,7 +10050,11 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     },
   });
 
-  const app = createApp(webOrigin, repos, { auth: employeeAuth, sendEmail });
+  const app = createApp(webOrigin, repos, {
+    backofficeAccess: closedBackoffice,
+    auth: employeeAuth,
+    sendEmail,
+  });
 
   type EmployeeSettings = Parameters<typeof repos.employee.saveSettings>[2];
 
@@ -10135,7 +10154,12 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
   afterAll(() => db.$client.end());
 
   it("does not expose employee access settings through fallback portal authentication", async () => {
-    const fallbackApp = createApp(webOrigin, repos, { auth, sendEmail });
+    const fallbackApp = createApp(webOrigin, repos, {
+      backofficeAccess: closedBackoffice,
+      auth,
+      sendEmail,
+    });
+
     const target = webOrigin + "/api/employee-access/" + missingCaseId;
     expect((await fallbackApp.handle(new Request(target))).status).toBe(503);
     expect(
@@ -10488,6 +10512,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     });
 
     const racingApp = createApp(webOrigin, repos, {
+      backofficeAccess: closedBackoffice,
       sendEmail,
       auth: {
         ...employeeAuth,
@@ -11105,6 +11130,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     );
 
     const delayedApp = createApp(webOrigin, repos, {
+      backofficeAccess: closedBackoffice,
       sendEmail,
       auth: {
         ...employeeAuth,
@@ -11727,7 +11753,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
               pendingPerson: () => Promise.reject(new Error("db down")),
             },
           },
-          { auth: employeeAuth, sendEmail },
+          { auth: employeeAuth, sendEmail, backofficeAccess: closedBackoffice },
         );
 
         const response = await failing.handle(
@@ -11984,6 +12010,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         .returning({ id: subscriptions.id });
 
       const composed = createApp(webOrigin, repos, {
+        backofficeAccess: closedBackoffice,
         auth: employeeAuth,
         sendEmail,
         browserbase: { apiKey: "bb-key", projectId: "bb-project" },

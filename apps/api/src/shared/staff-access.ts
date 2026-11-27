@@ -1,5 +1,9 @@
 import { Elysia } from "elysia";
-import type { PortalAuth } from "./portal-auth.js";
+import { accessVerifierFromEnv, denyAll, type AccessVerifier } from "./cloudflare-access.js";
+
+export type BackofficeAccess = { verify: AccessVerifier; staffEmails: ReadonlySet<string> };
+
+export const closedBackoffice: BackofficeAccess = { verify: denyAll, staffEmails: new Set() };
 
 export function parseStaffEmails(value: string | undefined) {
   return new Set(
@@ -10,19 +14,29 @@ export function parseStaffEmails(value: string | undefined) {
   );
 }
 
-export function staffAccess(auth: PortalAuth, staffEmails: ReadonlySet<string>) {
+export function backofficeAccessFromEnv(env: {
+  CF_ACCESS_TEAM_DOMAIN?: string;
+  CF_ACCESS_AUD?: string;
+  BACKOFFICE_STAFF_EMAILS?: string;
+}) {
+  return {
+    verify: accessVerifierFromEnv(env),
+    staffEmails: parseStaffEmails(env.BACKOFFICE_STAFF_EMAILS),
+  } satisfies BackofficeAccess;
+}
+
+export function staffAccess({ verify, staffEmails }: BackofficeAccess) {
   return new Elysia({ name: "offboard:staff-access" }).macro({
     staff: {
       async resolve({ request, set, status }) {
         set.headers["cache-control"] = "no-store";
-        const access = await auth.resolvePrincipal(request.headers);
 
-        if (access.kind === "anonymous") return status(401, { error: "Unauthorized" });
+        const token = request.headers.get("cf-access-jwt-assertion");
+        const email = token === null ? undefined : await verify(token).catch(() => undefined);
 
-        if (access.kind !== "authenticated") return status(403, { error: "Forbidden" });
+        if (email === undefined) return status(401, { error: "Unauthorized" });
 
-        if (!staffEmails.has(access.principal.email.toLowerCase()))
-          return status(403, { error: "Forbidden" });
+        if (!staffEmails.has(email.toLowerCase())) return status(403, { error: "Forbidden" });
 
         return {};
       },

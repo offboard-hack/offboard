@@ -50,6 +50,8 @@ if (apiConfigured) {
   env.TRACKING_API_KEY = bindings.secret();
   env.TRACKING_BASE_URL = bindings.secret();
   env.BACKOFFICE_STAFF_EMAILS = bindings.secret();
+  env.CF_ACCESS_TEAM_DOMAIN = bindings.secret();
+  env.CF_ACCESS_AUD = bindings.secret();
   env.ABACATEPAY_API_KEY = bindings.secret();
   env.ABACATEPAY_WEBHOOK_SECRET = bindings.secret();
 }

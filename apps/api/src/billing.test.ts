@@ -15,6 +15,7 @@ import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.ts";
+import { closedBackoffice } from "./shared/staff-access.js";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRepositories } from "./repositories.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
@@ -163,9 +164,17 @@ describe.skipIf(!url)("billing", () => {
     );
   });
 
-  let app = createApp(webOrigin, repos, { auth, sendEmail: () => Promise.resolve() });
+  let app = createApp(webOrigin, repos, {
+    auth,
+    sendEmail: () => Promise.resolve(),
+    backofficeAccess: closedBackoffice,
+  });
 
-  const unconfigured = createApp(webOrigin, repos, { auth, sendEmail: () => Promise.resolve() });
+  const unconfigured = createApp(webOrigin, repos, {
+    auth,
+    sendEmail: () => Promise.resolve(),
+    backofficeAccess: closedBackoffice,
+  });
 
   function call(path: string, init: { method?: string; session?: string; body?: string } = {}) {
     const headers = new Headers({ origin: webOrigin });
@@ -244,6 +253,7 @@ describe.skipIf(!url)("billing", () => {
     const base = `http://127.0.0.1:${(abacate.address() as AddressInfo).port}/v`;
 
     app = createApp(webOrigin, repos, {
+      backofficeAccess: closedBackoffice,
       auth,
       sendEmail: () => Promise.resolve(),
       abacatepay: createAbacatePayGateway("secret-key", base),
