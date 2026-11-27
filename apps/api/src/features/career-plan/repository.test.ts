@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import {
+  benefitAssignments,
   defaultOrgId,
   employeeAccess,
   offboardingCases,
@@ -33,10 +34,12 @@ describe.skipIf(!url)("career plan repository", () => {
   });
 
   beforeEach(async () => {
+    await db.delete(benefitAssignments);
     await seedDatabase(db, testSeedFixtures);
   });
 
   afterAll(async () => {
+    await db.delete(benefitAssignments);
     await db.$client.end();
   });
 
@@ -92,7 +95,8 @@ describe.skipIf(!url)("career plan repository", () => {
     expect(await repos.careerPlan.plan(profileId, now)).toEqual({
       company: { name: "Platinum Premium", includesAiApply: true, sponsoredUntil: "2026-12-20" },
       individual: null,
-      aiApply: { allowedBy: "company" },
+      benefit: null,
+      aiApply: { allowedBy: "company", dailyLimit: 10 },
       upgrade: { offered: true, priceCents: 7900, dailyLimit: 10 },
     });
 
@@ -137,7 +141,8 @@ describe.skipIf(!url)("career plan repository", () => {
     expect(await repos.careerPlan.plan(profileId, now)).toEqual({
       company: { name: null, includesAiApply: false, sponsoredUntil: "2099-12-31" },
       individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-12-26" },
-      aiApply: { allowedBy: "individual" },
+      benefit: null,
+      aiApply: { allowedBy: "individual", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
     expect(await repos.careerPlan.allowedBy(profileId, now)).toBe("individual");
@@ -227,6 +232,43 @@ describe.skipIf(!url)("career plan repository", () => {
       status: "active",
       currentPeriodEnd: "2027-01-01",
     });
+  });
+
+  it("reads the person's benefit assignment and ignores an expired one", async () => {
+    const { profileId } = await profile("2026-11-30");
+
+    await onPlan("gold");
+
+    const [gold] = await db.select({ id: plans.id }).from(plans).where(eq(plans.slug, "gold"));
+
+    await db.insert(benefitAssignments).values({
+      profileId,
+      assignedPlanId: gold.id,
+      effectivePlanId: gold.id,
+      source: "manual",
+      validUntil: "2027-06-01",
+    });
+
+    const granted = await repos.careerPlan.plan(profileId, now);
+
+    expect(granted?.benefit).toMatchObject({ planName: "Gold", validUntil: "2027-06-01" });
+    expect(granted?.aiApply).toEqual({ allowedBy: "benefit", dailyLimit: 3 });
+
+    await db
+      .update(benefitAssignments)
+      .set({ validUntil: "2026-11-25" })
+      .where(eq(benefitAssignments.profileId, profileId));
+
+    const expired = await repos.careerPlan.plan(profileId, now);
+
+    expect(expired?.aiApply.allowedBy).toBeNull();
+    expect(expired?.benefit).toBeNull();
+  });
+
+  it("has no benefit without an assignment", async () => {
+    const { profileId } = await profile("2026-11-30");
+
+    expect((await repos.careerPlan.plan(profileId, now))?.benefit).toBeNull();
   });
 
   it("has no plan for an unknown profile", async () => {

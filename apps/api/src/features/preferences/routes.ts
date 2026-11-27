@@ -59,6 +59,11 @@ const profileFields = t.Object({
   cpf: profileField,
   birthDate: profileField,
   address: addressField,
+  gender: profileField,
+  race: profileField,
+  orientation: profileField,
+  disability: profileField,
+  pronoun: profileField,
 });
 
 const preferencesResponse = t.Object({

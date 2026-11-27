@@ -25,6 +25,17 @@ export function individualEntitlement(individual: IndividualPlan | null, now: Da
   return { kind: "lapsed", until: null } satisfies Entitlement;
 }
 
+export function benefitEntitlement(
+  benefit: { aiApplyDailyLimit: number; validUntil: string } | null,
+  today: string,
+) {
+  if (benefit !== null && benefit.aiApplyDailyLimit > 0 && today <= benefit.validUntil) {
+    return { kind: "sponsored", until: benefit.validUntil } satisfies Entitlement;
+  }
+
+  return { kind: "lapsed", until: null } satisfies Entitlement;
+}
+
 export function entitlementOf(input: {
   sponsoredUntil: string;
   companyActive: boolean;

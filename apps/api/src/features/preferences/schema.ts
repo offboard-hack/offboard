@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isValidCpf } from "../../shared/cpf.js";
+import { type DiversityKey, isDiversityValue } from "../../shared/diversity.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 import { sanitizeText } from "../../shared/storable-text.js";
 
@@ -116,6 +117,15 @@ const addressField = z.object({
   share: z.boolean(),
 });
 
+const diversityField = (key: DiversityKey) =>
+  z.object({
+    value: z
+      .string()
+      .nullable()
+      .refine((value) => value === null || isDiversityValue(key, value)),
+    share: z.boolean(),
+  });
+
 export const preferencesInputSchema = z.object({
   mode: z.enum(["automatic", "hybrid", "review"]).optional(),
   hybridThreshold: z.number().int().min(50).max(100).optional(),
@@ -148,6 +158,11 @@ export const preferencesInputSchema = z.object({
       cpf: cpfField,
       birthDate: birthDateField,
       address: addressField,
+      gender: diversityField("gender"),
+      race: diversityField("race"),
+      orientation: diversityField("orientation"),
+      disability: diversityField("disability"),
+      pronoun: diversityField("pronoun"),
     })
     .partial()
     .optional(),

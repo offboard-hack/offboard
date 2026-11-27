@@ -1,5 +1,6 @@
 import type { Database } from "@offboard/db/client";
 import {
+  benefitAssignments,
   employeeAccess,
   offboardingCases,
   plans,
@@ -7,7 +8,7 @@ import {
   talentProfiles,
   talentSubscriptions,
 } from "@offboard/db/schema";
-import { and, desc, eq, isNotNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, lt, or, sql } from "drizzle-orm";
 import { careerPlanOf, checkoutRetryMs } from "../../shared/career-pro.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 
@@ -19,6 +20,26 @@ export function createCareerPlanRepository(db: Database) {
       .innerJoin(plans, eq(plans.id, subscriptions.planId))
       .where(eq(subscriptions.orgId, orgId))
       .orderBy(desc(subscriptions.createdAt))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async function benefitOf(profileId: string, today: string) {
+    const [row] = await db
+      .select({
+        planName: plans.name,
+        aiApplyDailyLimit: plans.aiApplyDailyLimit,
+        aiApplyPriority: plans.aiApplyPriority,
+        detailedScore: plans.detailedScore,
+        validUntil: benefitAssignments.validUntil,
+        source: benefitAssignments.source,
+      })
+      .from(benefitAssignments)
+      .innerJoin(plans, eq(plans.id, benefitAssignments.effectivePlanId))
+      .where(
+        and(eq(benefitAssignments.profileId, profileId), gte(benefitAssignments.validUntil, today)),
+      )
       .limit(1);
 
     return row ?? null;
@@ -58,7 +79,14 @@ export function createCareerPlanRepository(db: Database) {
 
     const { orgId, ...standing } = row;
 
-    return careerPlanOf({ ...standing, company: await companyOf(orgId) }, now);
+    return careerPlanOf(
+      {
+        ...standing,
+        company: await companyOf(orgId),
+        benefit: await benefitOf(profileId, saoPauloDate(now)),
+      },
+      now,
+    );
   }
 
   async function allowedBy(profileId: string, now: Date) {

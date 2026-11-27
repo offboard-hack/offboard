@@ -187,6 +187,15 @@ describe("AI application form", () => {
       inferred: false,
       attention: "Sugerida a partir de uma resposta sua em outra vaga. Confira antes de enviar.",
     });
+    expect(
+      answerNote({
+        questionId: "x",
+        value: "2",
+        source: "profile",
+        inferred: false,
+        status: "suggested",
+      }).attention,
+    ).toBe("Sugerida a partir das suas preferências de diversidade. Confira antes de enviar.");
     expect(answerNote(undefined)).toEqual({
       source: null,
       inferred: false,

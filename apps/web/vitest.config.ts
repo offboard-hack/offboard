@@ -7,6 +7,7 @@ export default defineConfig({
       provider: "v8",
       include: [
         "src/features/checklist/action-config.ts",
+        "src/features/asset-returns/equipment-form.ts",
         "src/entities/career/failure.ts",
         "src/entities/career/refresh.ts",
         "src/features/employee/career/jobs-view.ts",
@@ -16,6 +17,7 @@ export default defineConfig({
         "src/features/employee/career/preferences-form.ts",
         "src/features/employee/career/job-preferences-form.ts",
         "src/features/employee/career/rejections.ts",
+        "src/features/employee/career/diversity-form.ts",
         "src/features/employee/career/resume-onboarding.ts",
       ],
       thresholds: { lines: 100, functions: 100, branches: 100, statements: 100 },

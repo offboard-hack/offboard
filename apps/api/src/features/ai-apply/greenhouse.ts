@@ -37,7 +37,9 @@ const rawDemographic = z.object({
   label: z.string(),
   required: z.boolean(),
   type: z.string(),
-  answer_options: z.array(z.object({ id: scalar, label: z.string() })).nullish(),
+  answer_options: z
+    .array(z.object({ id: scalar, label: z.string(), free_form: z.boolean().nullish() }))
+    .nullish(),
 });
 
 const job = z.object({
@@ -111,6 +113,7 @@ const fromDemographic = (questions: z.infer<typeof rawDemographic>[] | null | un
     const options = (item.answer_options ?? []).map((option) => ({
       label: option.label,
       value: String(option.id),
+      ...(option.free_form === true && { freeForm: true as const }),
     }));
 
     return build(id, item.label, item.required, "demographic", [

@@ -527,10 +527,11 @@ export function useAiConfirm(account: EmployeeAccount) {
     onSuccess(attempt) {
       queryClient.setQueryData(aiAttemptQuery(account, attempt.id).queryKey, attempt);
 
-      return queryClient.invalidateQueries({
-        queryKey: aiAttemptsQuery(account).queryKey,
-        exact: true,
-      });
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: aiAttemptsQuery(account).queryKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: careerPreferencesQuery(account).queryKey }),
+        queryClient.invalidateQueries({ queryKey: answerLibraryQuery(account).queryKey }),
+      ]);
     },
   });
 }

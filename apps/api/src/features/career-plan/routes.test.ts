@@ -174,7 +174,8 @@ describe.skipIf(!url)("career plan route", () => {
     expect(await response.json()).toEqual({
       company: { name: "Platinum Premium", includesAiApply: true, sponsoredUntil: "2099-12-31" },
       individual: null,
-      aiApply: { allowedBy: "company" },
+      benefit: null,
+      aiApply: { allowedBy: "company", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
   });
@@ -197,7 +198,8 @@ describe.skipIf(!url)("career plan route", () => {
     expect(await (await get(profileId)).json()).toEqual({
       company: { name: "Platinum Premium", includesAiApply: true, sponsoredUntil: yesterday },
       individual: null,
-      aiApply: { allowedBy: null },
+      benefit: null,
+      aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: true, priceCents: 7900, dailyLimit: 10 },
     });
   });
@@ -214,7 +216,8 @@ describe.skipIf(!url)("career plan route", () => {
     expect(await (await get(profileId)).json()).toEqual({
       company: { name: null, includesAiApply: false, sponsoredUntil: "2099-12-31" },
       individual: { plan: "carreira-pro", status: "pending", currentPeriodEnd: null },
-      aiApply: { allowedBy: null },
+      benefit: null,
+      aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
 
@@ -226,7 +229,8 @@ describe.skipIf(!url)("career plan route", () => {
     expect(await (await get(profileId)).json()).toEqual({
       company: { name: null, includesAiApply: false, sponsoredUntil: "2099-12-31" },
       individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2099-01-01" },
-      aiApply: { allowedBy: "individual" },
+      benefit: null,
+      aiApply: { allowedBy: "individual", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
   });

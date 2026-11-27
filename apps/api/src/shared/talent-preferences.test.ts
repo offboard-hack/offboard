@@ -29,6 +29,11 @@ describe("talent preferences view", () => {
         cpf: empty,
         birthDate: empty,
         address: empty,
+        gender: empty,
+        race: empty,
+        orientation: empty,
+        disability: empty,
+        pronoun: empty,
       },
     });
   });
