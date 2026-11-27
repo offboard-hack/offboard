@@ -235,6 +235,10 @@ function InviteButton({ caseId, email }: { caseId: string; email: string }) {
     async mutationFn() {
       const result = await getApiClient().api["employee-access"]({ caseId }).invite.post();
 
+      if (result.status === 429) {
+        throw new Error("Este caso já recebeu 3 convites nas últimas 24 horas. Tente mais tarde.");
+      }
+
       if (result.error) throw new Error("Não foi possível enviar o convite. Tente novamente.");
     },
     onSuccess() {
