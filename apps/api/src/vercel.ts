@@ -57,6 +57,7 @@ function buildApp() {
     cronSecret: process.env.CRON_SECRET,
     webhookSecret: process.env.WEBHOOK_SECRET,
     slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
+    secretKey: process.env.BETTER_AUTH_SECRET,
     abacatepay: createAbacatePayGateway(process.env.ABACATEPAY_API_KEY),
     abacatepayWebhookSecret: process.env.ABACATEPAY_WEBHOOK_SECRET,
     generateStructured: aiModel ? createGenerateStructured(aiModel) : undefined,

@@ -7,6 +7,7 @@ export default defineConfig({
       provider: "v8",
       include: [
         "src/features/checklist/action-config.ts",
+        "src/features/integrations/slack-settings.ts",
         "src/entities/career/failure.ts",
         "src/entities/career/refresh.ts",
         "src/features/employee/career/jobs-view.ts",

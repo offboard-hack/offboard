@@ -27,6 +27,7 @@ import { Button } from "@/shared/ui/shadcn/button";
 import { Card } from "@/shared/ui/shadcn/card";
 import { Input } from "@/shared/ui/shadcn/input";
 import { Switch } from "@/shared/ui/shadcn/switch";
+import { SlackDialog } from "./slack-dialog";
 
 const categories = {
   communication: "Comunicação",
@@ -53,6 +54,7 @@ type Integration = {
   category: keyof typeof categories;
   providers?: Provider[];
   comingSoon?: boolean;
+  setup?: "slack";
 } & (
   | { logo: `/brands/${string}.svg`; icon?: never }
   | { icon: ComponentProps<typeof HugeiconsIcon>["icon"]; logo?: never }
@@ -90,7 +92,8 @@ const catalog: Integration[] = [
     name: "Slack",
     category: "accounts",
     logo: "/brands/slack.svg",
-    purpose: "Bloqueia acessos e avisa as áreas responsáveis.",
+    purpose: "Avisa as áreas responsáveis em canais do Slack.",
+    setup: "slack",
   },
   {
     name: "HubSpot",
@@ -428,7 +431,9 @@ function IntegrationCard({
           )}
         </span>
 
-        {!hasProviders && (
+        {item.setup === "slack" && <SlackDialog connected={connection === "connected"} />}
+
+        {!hasProviders && !item.setup && (
           <Switch
             ref={switchButton}
             disabled={pending}
@@ -480,6 +485,10 @@ function IntegrationCard({
         {hasProviders ? (
           <span className="text-xs text-muted-foreground">
             {connectedCount} de {providers.length} ativos
+          </span>
+        ) : item.setup ? (
+          <span className="text-xs text-muted-foreground">
+            {connection !== "connected" && "Configure para conectar"}
           </span>
         ) : connection === "reconnect" ? (
           <Button
