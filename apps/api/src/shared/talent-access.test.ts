@@ -53,6 +53,7 @@ function build(options: {
   employee?: () => Promise<EmployeePrincipal | null>;
   ensured?: TalentProfile | "email_taken";
   ensure?: (principal: { caseId: string; name: string; email: string }, at: Date) => void;
+  bridged?: (me: TalentProfile, caseId: string) => void;
 }) {
   const auth: PortalAuth = {
     handler: async () => new Response(),
@@ -82,6 +83,9 @@ function build(options: {
           return options.companyActive ?? true;
         },
         individualPlan: async () => options.individual ?? null,
+        collaboratorBridged: options.bridged
+          ? async (me, caseId) => options.bridged?.(me, caseId)
+          : undefined,
         benefitPlan: "benefit" in options ? async () => options.benefit ?? null : undefined,
         now: options.realClock ? undefined : () => now,
       }),
@@ -354,6 +358,32 @@ describe("talentAccess", () => {
     const entitlement = await app.handle(new Request("http://localhost/entitlement"));
 
     expect(await entitlement.json()).toEqual({ kind: "sponsored", until: null });
+  });
+
+  it("hands the bridged profile over before the first career request is served", async () => {
+    const bridged: string[] = [];
+
+    const response = await build({
+      access: { kind: "forbidden" },
+      employee: async () => collaborator,
+      bridged: (me, caseId) => bridged.push(`${me.id}:${caseId}`),
+    }).handle(new Request("http://localhost/active"));
+
+    expect(response.status).toBe(200);
+    expect(bridged).toEqual(["t9:c9"]);
+  });
+
+  it("does not hand over a collaborator whose email is taken", async () => {
+    const bridged: string[] = [];
+
+    await build({
+      access: { kind: "forbidden" },
+      employee: async () => collaborator,
+      ensured: "email_taken",
+      bridged: (me) => bridged.push(me.id),
+    }).handle(new Request("http://localhost/active"));
+
+    expect(bridged).toEqual([]);
   });
 
   it("rejects a collaborator whose email belongs to another profile", async () => {

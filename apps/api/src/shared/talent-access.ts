@@ -22,6 +22,7 @@ export function talentAccess(deps: {
       now: Date,
     ): Promise<TalentProfile | "email_taken">;
   };
+  collaboratorBridged?: (me: TalentProfile, caseId: string) => Promise<void>;
   companyActive: (orgId: string) => Promise<boolean>;
   individualPlan: (profileId: string) => Promise<IndividualPlan | null>;
   benefitPlan?: (
@@ -55,6 +56,8 @@ export function talentAccess(deps: {
           const me = await deps.talent.ensureForCollaborator(collaborator, now());
 
           if (me === "email_taken") return status(403, { error: "Email already in use" });
+
+          await deps.collaboratorBridged?.(me, collaborator.caseId);
 
           return { me, entitlement: collaboratorEntitlement };
         }

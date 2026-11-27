@@ -15,7 +15,7 @@ import type { ChecklistChange } from "./checklist.js";
 import { allReceived } from "./equipment.js";
 import type { PortalAccessPlugin } from "../../shared/access.js";
 import { isEmployeeApp, type EmployeeAuth } from "../../shared/employee-auth.js";
-import type { InviteEmployee } from "../../shared/employee-invite.js";
+import type { AccessGranted, InviteEmployee } from "../../shared/employee-invite.js";
 import { errorResponse } from "../../shared/http.js";
 import type { EmployeeRepository } from "./repository.js";
 
@@ -42,6 +42,7 @@ export function employeeRoutes(
   origin: string,
   dispatchAction: DispatchAction,
   inviteEmployee: InviteEmployee,
+  accessGranted: AccessGranted,
 ) {
   function dispatchChanges(changes: ChecklistChange[]) {
     for (const change of changes) {
@@ -294,7 +295,10 @@ export function employeeRoutes(
         if (result === "changed")
           return status(409, { error: "Employee settings changed", code: "settings-changed" });
 
-        if (result === "email-set") await inviteEmployee(principal.orgId, params.caseId);
+        if (result === "email-set") {
+          await accessGranted(principal.orgId, params.caseId);
+          await inviteEmployee(principal.orgId, params.caseId);
+        }
 
         return (
           (await repo.readSettings(principal.orgId, params.caseId)) ??

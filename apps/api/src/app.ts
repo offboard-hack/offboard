@@ -25,7 +25,8 @@ import { talentRoutes } from "./features/talent/routes.js";
 import { careerPlanRoutes } from "./features/career-plan/routes.js";
 import { talentAccess } from "./shared/talent-access.js";
 import { companySponsors } from "./shared/entitlement.js";
-import type { InviteEmployee } from "./shared/employee-invite.js";
+import type { AccessGranted, InviteEmployee } from "./shared/employee-invite.js";
+import type { TalentProfile } from "./shared/talent-profile.js";
 import { welcomeEmail, type WelcomeMessage } from "./features/talent/welcome.js";
 import { employeeInviteEmail } from "./features/auth/sign-in-email.js";
 import { resumesRoutes } from "./features/resumes/routes.js";
@@ -161,6 +162,32 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     return "sent";
   };
 
+  async function applyCaseBenefit(orgId: string, caseId: string, profileId: string) {
+    const person = await repos.benefits.personOfCase(orgId, caseId);
+
+    if (person) await repos.benefits.applyBenefitPolicy(orgId, profileId, person);
+  }
+
+  const accessGranted: AccessGranted = async (orgId, caseId) => {
+    try {
+      const profile = await repos.talent.findByCase(orgId, caseId);
+
+      if (profile) await applyCaseBenefit(orgId, caseId, profile.id);
+    } catch {
+      console.error({ event: "benefit.apply_failed" });
+    }
+  };
+
+  const collaboratorBridged = async (me: TalentProfile, caseId: string) => {
+    try {
+      const covered = await repos.benefits.getEffectiveBenefit(me.id, saoPauloDate(new Date()));
+
+      if (!covered) await applyCaseBenefit(me.orgId, caseId, me.id);
+    } catch {
+      console.error({ event: "benefit.apply_failed" });
+    }
+  };
+
   const companyActive = async (orgId: string) =>
     companySponsors((await repos.billing.getSubscription(orgId))?.status);
 
@@ -168,6 +195,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     auth: options.auth,
     webOrigin,
     talent: repos.talent,
+    collaboratorBridged,
     companyActive,
     individualPlan: repos.careerPlan.individual,
     benefitPlan: (profileId) =>
@@ -472,6 +500,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         webOrigin,
         dispatchAction,
         inviteEmployee,
+        accessGranted,
       ),
     )
     .use(

@@ -3,10 +3,13 @@ import {
   type BenefitPolicyRule,
   benefitAssignments,
   benefitPolicies,
+  offboardingCases,
   plans,
   talentProfiles,
 } from "@offboard/db/schema";
-import { aliasedTable, and, eq, gte } from "drizzle-orm";
+import { aliasedTable, and, eq, gte, ne, or } from "drizzle-orm";
+import { evaluateBenefitRules, matchesBenefitRule } from "../../shared/benefit-rules.js";
+import { addMonths, saoPauloDate } from "../../shared/sao-paulo-date.js";
 
 type AssignmentSource = (typeof benefitAssignments.$inferSelect)["source"];
 
@@ -127,7 +130,75 @@ export function createBenefitRepository(db: Database) {
     return row !== undefined;
   }
 
+  async function personOfCase(orgId: string, caseId: string) {
+    const [row] = await db
+      .select({ department: offboardingCases.department, role: offboardingCases.role })
+      .from(offboardingCases)
+      .where(and(eq(offboardingCases.orgId, orgId), eq(offboardingCases.id, caseId)))
+      .limit(1);
+
+    return row;
+  }
+
+  async function applyBenefitPolicy(
+    orgId: string,
+    profileId: string,
+    person: { department: string; role: string },
+  ) {
+    const policy = await getPolicy(orgId);
+
+    if (!policy) return false;
+
+    const planId = evaluateBenefitRules(
+      policy.rules,
+      person,
+      await planPriceMap(),
+      policy.defaultPlanId,
+    );
+
+    if (planId === null || !(await profileInOrg(orgId, profileId))) return false;
+
+    const source = policy.rules.some((rule) => matchesBenefitRule(rule, person))
+      ? "rule"
+      : "default";
+
+    const validUntil = addMonths(saoPauloDate(new Date()), policy.benefitDurationMonths);
+
+    const rows = await db
+      .insert(benefitAssignments)
+      .values({
+        orgId,
+        profileId,
+        assignedPlanId: planId,
+        effectivePlanId: planId,
+        source,
+        validUntil,
+      })
+      .onConflictDoUpdate({
+        target: benefitAssignments.profileId,
+        set: {
+          assignedPlanId: planId,
+          effectivePlanId: planId,
+          source,
+          validUntil,
+          updatedAt: new Date(),
+        },
+        setWhere: and(
+          ne(benefitAssignments.source, "manual"),
+          or(
+            ne(benefitAssignments.assignedPlanId, planId),
+            ne(benefitAssignments.effectivePlanId, planId),
+          ),
+        ),
+      })
+      .returning({ id: benefitAssignments.id });
+
+    return rows.length > 0;
+  }
+
   return {
+    personOfCase,
+    applyBenefitPolicy,
     profileInOrg,
     getPolicy,
     savePolicy,

@@ -9,6 +9,7 @@ import { Elysia } from "elysia";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createRepositories } from "../../repositories.js";
 import { portalAccess } from "../../shared/access.js";
+import type { AccessGranted } from "../../shared/employee-invite.js";
 import type { PortalAuth } from "../../shared/portal-auth.js";
 import { employeeRoutes } from "./routes.js";
 
@@ -32,7 +33,7 @@ const auth: PortalAuth = {
 };
 
 type Settings = {
-  email: null;
+  email: string | null;
   plan: EmployeePlan;
   revision: number;
   careerSponsoredUntil?: string | null;
@@ -42,7 +43,7 @@ describe.skipIf(!url)("employee access settings", () => {
   const db = createClient(url ?? "");
   const repos = createRepositories(db);
 
-  function routes(repo = repos.employee) {
+  function routes(repo = repos.employee, granted: AccessGranted = async () => undefined) {
     return new Elysia().use(
       employeeRoutes(
         repo,
@@ -51,6 +52,7 @@ describe.skipIf(!url)("employee access settings", () => {
         webOrigin,
         async () => undefined,
         async () => "sent",
+        granted,
       ),
     );
   }
@@ -163,6 +165,33 @@ describe.skipIf(!url)("employee access settings", () => {
       careerSponsoredIsDefault: true,
     });
     expect(await storedDate(caseId)).toBeNull();
+  });
+
+  it("announces the access grant only when HR sets or changes the email", async () => {
+    const granted: string[][] = [];
+
+    const target = routes(repos.employee, async (orgId, caseId) => {
+      granted.push([orgId, caseId]);
+    });
+
+    const caseId = await createCase(defaultOrgId, "2027-01-10");
+    const plan = emptyEmployeePlan;
+
+    await call(caseId, defaultOrgId, { email: null, plan, revision: 0 }, target);
+
+    expect(granted).toEqual([]);
+
+    await call(caseId, defaultOrgId, { email: "ana@example.com", plan, revision: 1 }, target);
+
+    expect(granted).toEqual([[defaultOrgId, caseId]]);
+
+    await call(caseId, defaultOrgId, { email: "ana@example.com", plan, revision: 2 }, target);
+
+    expect(granted).toHaveLength(1);
+
+    await call(caseId, defaultOrgId, { email: "bia@example.com", plan, revision: 3 }, target);
+
+    expect(granted).toHaveLength(2);
   });
 
   it("rejects a career sponsorship date that is not a calendar date", async () => {
