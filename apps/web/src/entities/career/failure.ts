@@ -84,3 +84,18 @@ export function careerFailure<Failure>(status: number, failure: Failure) {
 
   return undefined;
 }
+
+export function deleteAccountFailure<Failure>(status: number, failure: Failure) {
+  const parsed = failureBody.safeParse(failure);
+  const reason = parsed.success ? parsed.data.value.error : undefined;
+
+  if (status === 502 && reason === "Could not delete stored files")
+    return "Não foi possível apagar seus arquivos agora. Tente de novo em alguns minutos.";
+
+  if (status === 502)
+    return "Não foi possível cancelar sua assinatura agora. Tente de novo em alguns minutos.";
+
+  if (status === 503) return "Não é possível apagar agora. Tente mais tarde.";
+
+  return "Não foi possível apagar sua conta. Tente de novo.";
+}

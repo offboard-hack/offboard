@@ -21,6 +21,7 @@ export default defineConfig({
         "src/features/employee/career/benefit-features.ts",
         "src/features/employee/career/plan-card.ts",
         "src/features/employee/career/preferences-form.ts",
+        "src/features/employee/career/account-data.ts",
         "src/features/employee/career/job-preferences-form.ts",
         "src/features/employee/career/rejections.ts",
         "src/features/employee/career/diversity-form.ts",

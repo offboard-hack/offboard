@@ -36,8 +36,15 @@ import {
   textProblem,
 } from "./preferences-form";
 import { useUnsavedGuard } from "./use-unsaved-guard";
+import { YourDataSection } from "./your-data";
 
-export type PreferencesSection = "perfil" | "diversidade" | "vagas" | "respostas" | "dispensadas";
+export type PreferencesSection =
+  | "perfil"
+  | "diversidade"
+  | "vagas"
+  | "respostas"
+  | "dispensadas"
+  | "dados";
 
 const sections = [
   { id: "perfil", label: "Perfil" },
@@ -45,6 +52,7 @@ const sections = [
   { id: "vagas", label: "Vagas que procuro" },
   { id: "respostas", label: "Respostas salvas" },
   { id: "dispensadas", label: "Vagas dispensadas" },
+  { id: "dados", label: "Seus dados" },
 ] as const satisfies { id: PreferencesSection; label: string }[];
 
 const shareLabel = "Usar nas candidaturas";
@@ -84,6 +92,7 @@ export function Preferences({
       {section === "vagas" ? <JobPreferencesSection account={account} /> : null}
       {section === "respostas" ? <AnswersSection account={account} /> : null}
       {section === "dispensadas" ? <RejectionsSection account={account} /> : null}
+      {section === "dados" ? <YourDataSection account={account} /> : null}
     </div>
   );
 }
