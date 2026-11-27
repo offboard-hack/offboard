@@ -9376,6 +9376,13 @@ describe.skipIf(!url)("api", () => {
       });
 
       req.on("end", () => {
+        if (req.headers.authorization === "Bearer xoxb-broken-9999") {
+          res.writeHead(502, { "content-type": "text/plain" });
+          res.end("Bad Gateway");
+
+          return;
+        }
+
         res.writeHead(200, { "content-type": "application/json" });
 
         if (req.headers.authorization === "Bearer xoxb-noteam-5678") {
@@ -9555,6 +9562,15 @@ describe.skipIf(!url)("api", () => {
       await slackCall("/integrations/slack", "PUT", { botToken: "xoxb-good-1234" });
 
       expect(await slackTokenReader(repos.integrations, undefined)(defaultOrgId)).toBeUndefined();
+    });
+
+    it("reports an error when the Slack API returns non-JSON", async () => {
+      const res = await slackCall("/integrations/slack", "PUT", {
+        botToken: "xoxb-broken-9999",
+      });
+
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({ error: "HTTP 502" });
     });
   });
 
@@ -10886,6 +10902,24 @@ describe.skipIf(!url)("api", () => {
 
     const after = await (await call(`/offboardings/${list[0].id}`)).json();
     expect(after.tasks.find((t: { id: string }) => t.id === todo.id).status).toBe("done");
+  });
+
+  it("passes task phase and stepId through the inbound webhook", async () => {
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const todo = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    await db
+      .update(tasks)
+      .set({ phase: "d0", checklistStepId: "webhook-step" })
+      .where(eq(tasks.id, todo.id));
+
+    const res = await call(`/webhooks/inbound/${todo.id}`, "POST", {
+      event: "delivered",
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ accepted: true });
   });
 
   it("ignores non-delivered/completed webhook events", async () => {
