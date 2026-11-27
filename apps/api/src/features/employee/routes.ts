@@ -288,6 +288,8 @@ export function employeeRoutes(
 
         if (result === "no-email") return status(409, { error: "Employee email missing" });
 
+        if (result === "rate-limited") return status(429, { error: "Too many invites" });
+
         if (result === "failed") return status(502, { error: "Invite not sent" });
 
         return { sent: true };
@@ -299,6 +301,7 @@ export function employeeRoutes(
           200: t.Object({ sent: t.Literal(true) }),
           404: errorResponse,
           409: errorResponse,
+          429: errorResponse,
           502: errorResponse,
         },
       },
