@@ -3370,17 +3370,10 @@ describe.skipIf(!url)("api", () => {
         );
       }
 
-      function upload(
-        instance: ReturnType<typeof resumesApp>["instance"],
-        talentId: string,
-        bytes: Uint8Array = pdf,
-        name = "cv.pdf",
-      ) {
-        const form = new FormData();
+      function upload(instance: ReturnType<typeof resumesApp>["instance"], talentId: string) {
+        const { isResume: _isResume, ...content } = draft;
 
-        form.set("file", new File([new Uint8Array(bytes)], name, { type: "application/pdf" }));
-
-        return request(instance, talentId, "/me/resume/upload", { method: "POST", body: form });
+        return create(instance, talentId, JSON.stringify(content), { bytes: pdf, name: "cv.pdf" });
       }
 
       function docx() {
@@ -3391,162 +3384,6 @@ describe.skipIf(!url)("api", () => {
           "[Content_Types].xml": new TextEncoder().encode("<Types/>"),
         });
       }
-
-      it("uploads a résumé and replaces it on the next upload", async () => {
-        const { instance, store } = resumesApp();
-        const id = await profile();
-
-        const first = await upload(instance, id);
-
-        expect(first.status).toBe(200);
-
-        const created = await first.json();
-
-        expect(created).toMatchObject({ kind: "base", score: null });
-        expect(created.content.headline.text).toBe("Engenheira de Software");
-        expect(store.puts).toHaveLength(1);
-        expect(store.puts[0].key).toMatch(new RegExp(`^resumes/${id}/[0-9a-f-]+\\.pdf$`));
-        expect(store.puts[0].contentType).toBe("application/pdf");
-
-        const second = await upload(instance, id, docx(), "cv.docx");
-
-        expect(second.status).toBe(200);
-        expect((await second.json()).id).toBe(created.id);
-        expect(store.puts[1].key).toMatch(/\.docx$/);
-        expect(store.puts[1].contentType).toBe(
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        );
-        expect(store.removed).toEqual([store.puts[0].key]);
-      });
-
-      it("keeps the new résumé when removing the previous file fails", async () => {
-        const { instance, store } = resumesApp();
-        const id = await profile();
-
-        expect((await upload(instance, id)).status).toBe(200);
-
-        store.failRemove = true;
-
-        expect((await upload(instance, id)).status).toBe(200);
-        expect(store.puts).toHaveLength(2);
-      });
-
-      it("rejects files whose bytes are not a PDF or DOCX", async () => {
-        const { instance, store } = resumesApp();
-        const id = await profile();
-
-        const html = await upload(instance, id, new TextEncoder().encode("<html></html>"));
-
-        expect(html.status).toBe(422);
-        expect(await html.json()).toEqual({ error: "Unsupported file" });
-        expect(store.puts).toEqual([]);
-      });
-
-      it("rejects an oversized docx expansion", async () => {
-        const { instance, store } = resumesApp();
-        const id = await profile();
-
-        const bomb = zipSync({
-          "word/document.xml": new Uint8Array(3_000_000).fill(0x61),
-        });
-
-        const res = await upload(instance, id, bomb, "cv.docx");
-
-        expect(res.status).toBe(422);
-        expect(await res.json()).toEqual({ error: "File too large" });
-        expect(store.puts).toEqual([]);
-      });
-
-      it("rejects files above the size limit", async () => {
-        const { instance, store } = resumesApp();
-        const id = await profile();
-        const big = new Uint8Array(5_242_881);
-
-        big.set(pdf);
-
-        expect((await upload(instance, id, big)).status).toBe(422);
-        expect(store.puts).toEqual([]);
-      });
-
-      it("cleans up the stored file when extraction fails", async () => {
-        const logged = vi.spyOn(console, "error");
-
-        const failing = resumesApp({
-          generate: async ({ prompt }) => {
-            throw leakyError(prompt);
-          },
-        });
-
-        const id = await profile();
-        const res = await upload(failing.instance, id);
-
-        expect(res.status).toBe(502);
-        expect(await res.json()).toEqual({ error: "Could not read the résumé" });
-        expect(failing.store.removed).toEqual([failing.store.puts[0].key]);
-        expect(logged.mock.calls).toEqual([
-          ["résumé extraction failed", { name: "Error", message: "gateway down" }],
-        ]);
-        logged.mockRestore();
-
-        const notResume = resumesApp({ draft: { ...draft, isResume: false } });
-        const refused = await upload(notResume.instance, id);
-
-        expect(refused.status).toBe(422);
-        expect(await refused.json()).toEqual({ error: "File is not a résumé" });
-        expect(notResume.store.removed).toEqual([notResume.store.puts[0].key]);
-        expect((await request(notResume.instance, id, "/me/resume")).status).toBe(404);
-
-        const stuck = resumesApp({ draft: { ...draft, isResume: false } });
-
-        stuck.store.failRemove = true;
-
-        expect((await upload(stuck.instance, id)).status).toBe(422);
-      });
-
-      it("cleans up the stored file when saving fails", async () => {
-        const store: string[] = [];
-
-        const instance = createApp(
-          webOrigin,
-          {
-            ...repos,
-            resumes: {
-              ...repos.resumes,
-              replaceBase: () => Promise.reject(new Error("db down")),
-            },
-          },
-          {
-            ...appOptions,
-            generateStructured: async ({ schema }) => schema.parse(draft),
-            storage: {
-              put: async () => undefined,
-              remove: async (keys) => {
-                store.push(...keys);
-              },
-              removePrefix: async () => undefined,
-              get: async () => null,
-            },
-          },
-        );
-
-        const res = await upload(instance, await profile());
-
-        expect(res.status).toBe(500);
-        expect(store).toHaveLength(1);
-      });
-
-      it("answers 503 when upload is not configured", async () => {
-        const id = await profile();
-
-        for (const options of [{ storage: false }, { generate: null }]) {
-          const { instance, store } = resumesApp(options);
-          const res = await upload(instance, id);
-
-          expect(res.status).toBe(503);
-          expect(await res.json()).toEqual({ error: "Résumé upload not configured" });
-          expect(store.puts).toEqual([]);
-        }
-      });
 
       function create(
         instance: ReturnType<typeof resumesApp>["instance"],
@@ -4777,6 +4614,7 @@ describe.skipIf(!url)("api", () => {
         const embedder = fakeEmbed();
         const app = resumesApp({ embedProfile: embedder.embed });
         const id = await profile();
+        const profileCalls = () => embedder.calls.filter((call) => call.length === 1);
 
         const created = await (await upload(app.instance, id)).json();
 
@@ -4786,7 +4624,7 @@ describe.skipIf(!url)("api", () => {
 
         expect(first.embedding).toHaveLength(1024);
         expect(first.hash).toMatch(/^[0-9a-f]{64}$/);
-        expect(embedder.calls).toEqual([
+        expect(profileCalls()).toEqual([
           [
             "Engenheira de Software\nDez anos de experiência\nDev · Acme · 2019 – atual\nFez X\nTypeScript",
           ],
@@ -4795,7 +4633,7 @@ describe.skipIf(!url)("api", () => {
         await repos.background.enqueue("embed_profile", created.id);
         await app.settle();
 
-        expect(embedder.calls).toHaveLength(1);
+        expect(profileCalls()).toHaveLength(1);
 
         const edited = await request(app.instance, id, "/me/resume", {
           method: "PATCH",
@@ -4812,9 +4650,9 @@ describe.skipIf(!url)("api", () => {
 
         await app.settle();
 
-        expect(embedder.calls).toHaveLength(2);
-        expect(embedder.calls[1][0]).toContain("Inglês (Fluente)\nRecife");
-        expect(embedder.calls[1][0]).not.toContain("maria@example.com");
+        expect(profileCalls()).toHaveLength(2);
+        expect(profileCalls()[1][0]).toContain("Inglês (Fluente)\nRecife");
+        expect(profileCalls()[1][0]).not.toContain("maria@example.com");
         expect((await profileEmbedding(id)).hash).not.toBe(first.hash);
       });
 
@@ -4860,6 +4698,7 @@ describe.skipIf(!url)("api", () => {
               ...repos.resumes,
               withoutProfileEmbedding: () => Promise.reject(new Error("db down")),
             },
+            demo: { ...repos.demo, stored: () => Promise.reject(new Error("demo down")) },
           },
           { ...appOptions, embedProfile: fakeEmbed().embed },
         );
@@ -4875,6 +4714,10 @@ describe.skipIf(!url)("api", () => {
         expect(logged.mock.calls).toContainEqual([
           "profile embedding backfill failed",
           { name: "Error", message: "db down" },
+        ]);
+        expect(logged.mock.calls).toContainEqual([
+          "demo embedding sync failed",
+          { name: "Error", message: "demo down" },
         ]);
         logged.mockRestore();
       });

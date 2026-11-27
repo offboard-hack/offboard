@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Http, Reply } from "./http.js";
+import type { Receiver } from "./receiver.js";
 
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
@@ -11,6 +12,7 @@ export type Context = {
   webOrigin: string;
   readCode(email: string): Promise<string>;
   seedCatalog(): Promise<void>;
+  startReceiver(): Promise<Receiver>;
   newId(): string;
   today(): string;
   log(line: string): void;

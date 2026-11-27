@@ -32,3 +32,12 @@ Nothing is saved before Criar currículo, so replacing a résumé keeps the old 
 - A background job `embed_profile` runs after every base change (create, edit, applied suggestion), skips unchanged text by hash, and uses the same Workers AI `@cf/baai/bge-m3` model.
 - Contact email, phone and links are not embedded.
 - Migration 0019 goes to production before merge.
+
+## Landing demo search
+
+Samuel, 2026-11-26: the landing page gets a public people search so visitors can try it. It searches only fictional profiles. Real résumés stay inside the product, and who can search them is not decided yet.
+
+- The profiles live in code (`features/demo/profiles.ts`), with fictional people and companies and no email, phone or links. Only `demo_profile_embeddings` (slug, hash, vector) is stored. Every scheduled drain re-embeds whatever changed and drops removed slugs, so editing the file is enough.
+- `GET /api/demo/search?q=` is public. It embeds the query with the same `bge-m3` model and returns the six nearest cards with a match percentage.
+- `demo_search_usage` caps each visitor (by a hash of `cf-connecting-ip`) at 30 searches a day, and everyone together at 2,000 a day, which keeps Workers AI inside the free allocation.
+- The landing section is plain HTML and JavaScript in the static page. It builds results with `textContent`, never HTML.

@@ -6,6 +6,12 @@ export const scenarioNames = [
   "company-payment",
   "career",
   "offboarding",
+  "applications",
+  "answers",
+  "benefits-manual",
+  "equipment",
+  "integrations",
+  "checklist-actions",
   "all",
 ] as const;
 

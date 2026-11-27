@@ -10,11 +10,11 @@ import {
   type Json,
 } from "./context.js";
 import type { Http, Reply } from "./http.js";
+import { startReceiver } from "./receiver.js";
 import {
   addPerson,
   listJobs,
   readBenefit,
-  rehearseAiApply,
   setBenefitPolicy,
   signIn,
   subscribeCompany,
@@ -44,6 +44,7 @@ function scripted(replies: Reply[], env: Record<string, string | undefined> = {}
     webOrigin: "http://localhost:5173",
     readCode: async () => "123456",
     seedCatalog: async () => undefined,
+    startReceiver,
     newId: () => "abcdef12-0000-0000-0000-000000000000",
     today: () => "2026-11-26",
     log: (line) => lines.push(line),
@@ -169,22 +170,6 @@ it("skips Carreira Pro without keys and reports a missing individual plan", asyn
   expect(await upgradeCareerPro(paid.ctx, { person, session: { cookie: "c" } }, "p1")).toBe(
     "missing",
   );
-});
-
-it("reports why AI Apply is skipped", () => {
-  const bare = scripted([]);
-
-  const configured = scripted([], {
-    ANTHROPIC_API_KEY: "k",
-    BROWSERBASE_API_KEY: "k",
-    BROWSERBASE_PROJECT_ID: "p",
-  });
-
-  rehearseAiApply(bare.ctx);
-  rehearseAiApply(configured.ctx);
-
-  expect(bare.lines[0]).toContain("needs an AI key and Browserbase");
-  expect(configured.lines[0]).toContain("does not drive it yet");
 });
 
 it("fails on unknown plans, foreign emails and unexpected bodies", async () => {

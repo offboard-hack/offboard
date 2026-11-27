@@ -18,14 +18,14 @@ export function SignInLayout({
     <main className="grid min-h-svh grid-rows-[auto_1fr] bg-background p-3 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] md:grid-rows-1 md:p-4">
       <SignInVisual description={visualDescription} />
       <section className="mx-auto grid w-full max-w-96 content-start gap-4 px-3 py-6 md:my-auto md:w-[calc(100%_-_4rem)] md:px-0 md:py-12">
-        <svg
-          role="img"
-          aria-label="Offboard"
-          viewBox="0 0 877 256"
-          className="h-10 w-auto fill-foreground text-primary"
-        >
-          <use href="/offboard-logo.svg#wordmark" />
-        </svg>
+        <div>
+          <img src="/offboard-logo.svg" alt="Offboard" className="h-10 w-auto dark:hidden" />
+          <img
+            src="/offboard-logo-branco.svg"
+            alt="Offboard"
+            className="hidden h-10 w-auto dark:block"
+          />
+        </div>
         <div className="grid gap-7">
           <div className="grid gap-3">
             <h1 className="text-[clamp(1.6rem,3vw,1.9rem)] leading-none font-[730] tracking-tight">

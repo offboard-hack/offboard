@@ -30,6 +30,8 @@ const reasons = new Map([
   ["Unsupported file", "Envie um arquivo PDF ou DOCX."],
   ["File too large", "O arquivo passa de 5 MB."],
   ["File is not a résumé", "O arquivo não parece ser um currículo."],
+  ["Résumé is empty", "Preencha o título ou uma experiência para criar o currículo."],
+  ["Invalid résumé content", "Revise os dados do currículo: algum campo está longo demais."],
   ["Could not read the résumé", "Não foi possível ler o currículo. Tente outro arquivo."],
   ["Invalid answers", "Revise as respostas: alguma está incompleta ou inválida."],
   ["Résumé not ready for this job", "Seu currículo ainda não está pronto para esta vaga."],
