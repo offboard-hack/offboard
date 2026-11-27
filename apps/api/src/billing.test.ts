@@ -4,12 +4,16 @@ import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import {
+  benefitAssignments,
+  benefitInvoices,
+  copayProducts,
   defaultOrgId,
   invoices,
   offboardingCases,
   organizations,
   plans,
   subscriptions,
+  talentProfiles,
   talentSubscriptions,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
@@ -217,6 +221,65 @@ describe("abacatepay gateway", () => {
     await expect(
       createAbacatePayGateway("secret-key", base).createSubscriptionCheckout(params),
     ).rejects.toThrow("AbacatePay subscription checkout failed");
+  });
+});
+
+describe("abacatepay gateway cancel", () => {
+  let requestPath = "";
+  let requestBody = "";
+  let responseBody = "";
+
+  const server = createServer((req, res) => {
+    requestPath = req.url ?? "";
+    requestBody = "";
+    req.on("data", (chunk) => {
+      requestBody += String(chunk);
+    });
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(responseBody);
+    });
+  });
+
+  let base = "";
+
+  beforeAll(async () => {
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+
+    // WARNING: listen(0) guarantees AddressInfo with a port
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+    });
+  });
+
+  it("cancels a subscription", async () => {
+    responseBody = JSON.stringify({ success: true, data: { id: "subs_123" }, error: null });
+
+    await expect(
+      createAbacatePayGateway("secret-key", base).cancelSubscription("subs_123"),
+    ).resolves.toBeUndefined();
+    expect(requestPath).toContain("/subscriptions/cancel");
+    expect(JSON.parse(requestBody)).toEqual({ id: "subs_123" });
+  });
+
+  it("throws when cancel fails", async () => {
+    responseBody = JSON.stringify({ success: false, data: null, error: "not found" });
+
+    await expect(
+      createAbacatePayGateway("secret-key", base).cancelSubscription("subs_x"),
+    ).rejects.toThrow("AbacatePay subscription cancel failed");
+  });
+
+  it("throws when the gateway is not configured", async () => {
+    await expect(createAbacatePayGateway(undefined).cancelSubscription("subs_1")).rejects.toThrow(
+      "ABACATEPAY_API_KEY is not configured",
+    );
   });
 });
 
@@ -1597,5 +1660,327 @@ describe.skipIf(!url)("billing", () => {
     expect(refunded).toMatchObject({ status: "refunded", abacatepayBillingId: null });
     expect(await repos.billing.updateInvoiceStatus(defaultOrgId, missingId, "paid")).toBeNull();
     expect(await repos.billing.getInvoiceByBillingId(defaultOrgId, "missing")).toBeNull();
+  });
+  describe("co-pay webhook", () => {
+    const cancelled: string[] = [];
+
+    const copayApp = createApp(webOrigin, repos, {
+      auth,
+      sendEmail: () => Promise.resolve(),
+      abacatepay: {
+        configured: true,
+        createSubscriptionCheckout: () => Promise.resolve({ id: "bill_x", url: "https://x" }),
+        cancelSubscription(id: string) {
+          cancelled.push(id);
+
+          return Promise.resolve();
+        },
+      },
+      abacatepayWebhookSecret: webhookSecret,
+    });
+
+    let profileId = "";
+    let goldId = "";
+    let platinumId = "";
+
+    beforeEach(async () => {
+      cancelled.length = 0;
+      await db.delete(benefitAssignments);
+      await db.delete(copayProducts);
+
+      const rows = await db.select().from(plans).orderBy(plans.monthlyPriceCents);
+
+      goldId = rows[0].id;
+      platinumId = rows[rows.length - 1].id;
+
+      const [profile] = await db
+        .insert(talentProfiles)
+        .values({
+          orgId: defaultOrgId,
+          personalEmail: `pessoa-${randomUUID()}@exemplo.com`,
+          name: "Pessoa Teste",
+          sponsoredUntil: "2099-12-31",
+        })
+        .returning({ id: talentProfiles.id });
+
+      profileId = profile.id;
+      await db
+        .insert(copayProducts)
+        .values({ fromPlanId: goldId, toPlanId: platinumId, abacatePayProductId: "prod_1" });
+    });
+
+    async function assign(patch: Partial<typeof benefitAssignments.$inferInsert> = {}) {
+      await db.insert(benefitAssignments).values({
+        orgId: defaultOrgId,
+        profileId,
+        assignedPlanId: goldId,
+        effectivePlanId: goldId,
+        source: "manual",
+        validUntil: "2099-12-31",
+        ...patch,
+      });
+    }
+
+    async function assignment() {
+      const [row] = await db.select().from(benefitAssignments);
+
+      return row;
+    }
+
+    function copayWebhook(event: string, externalId: string | null, subscription = "subs_1") {
+      return copayApp.handle(
+        new Request(`http://localhost/api/billing/webhook?webhookSecret=${webhookSecret}`, {
+          method: "POST",
+          body: JSON.stringify({
+            id: randomUUID(),
+            event,
+            apiVersion: 2,
+            data: {
+              subscription: { id: subscription, amount: 1000 },
+              ...(externalId !== null && { checkout: { id: "bill_1", externalId } }),
+            },
+          }),
+        }),
+      );
+    }
+
+    it("subscription.completed upgrades effectivePlanId", async () => {
+      await assign();
+
+      const res = await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
+
+      expect(res.status).toBe(200);
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
+      });
+    });
+
+    it("cancels subscription when target is already below effective plan", async () => {
+      await assign({ effectivePlanId: platinumId });
+      await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
+
+      expect(cancelled).toEqual(["subs_1"]);
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: null,
+      });
+    });
+
+    it("cancels incoming subscription when another is already attached", async () => {
+      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_2" });
+      await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
+
+      expect(cancelled).toEqual(["subs_1"]);
+      expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_2" });
+    });
+
+    it("ignores events for unknown profiles and malformed ids", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      try {
+        await assign();
+        await copayWebhook("subscription.completed", `copay:${missingId}:${platinumId}`);
+        await copayWebhook("subscription.completed", "copay:");
+
+        expect(logged).toHaveBeenCalledTimes(2);
+        expect(await assignment()).toMatchObject({ effectivePlanId: goldId });
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("subscription.cancelled reverts effectivePlanId", async () => {
+      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+      await copayWebhook("subscription.cancelled", `copay:${profileId}:${platinumId}`);
+
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: goldId,
+        copaySubscriptionId: null,
+      });
+    });
+
+    it("stale cancel for wrong subscription is noop", async () => {
+      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_2" });
+      await copayWebhook("subscription.cancelled", `copay:${profileId}:${platinumId}`);
+
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_2",
+      });
+    });
+
+    it("renewal after benefit expiry cancels subscription", async () => {
+      await assign({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
+        validUntil: "2020-01-01",
+      });
+      await copayWebhook("subscription.renewed", `copay:${profileId}:${platinumId}`);
+
+      expect(cancelled).toEqual(["subs_1"]);
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: goldId,
+        copaySubscriptionId: null,
+      });
+    });
+
+    it("renewal within validity is noop", async () => {
+      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+      await copayWebhook("subscription.renewed", `copay:${profileId}:${platinumId}`);
+
+      expect(cancelled).toEqual([]);
+      expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_1" });
+    });
+
+    it("payment failure keeps the current tier", async () => {
+      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+
+      const logged = vi.spyOn(console, "error");
+
+      try {
+        await copayWebhook("subscription.payment_failed", `copay:${profileId}:${platinumId}`);
+
+        expect(logged).toHaveBeenCalledWith("copay payment failed", { profileId });
+        expect(await assignment()).toMatchObject({
+          effectivePlanId: platinumId,
+          copaySubscriptionId: "subs_1",
+        });
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("falls back to the provider subscription id", async () => {
+      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+      await copayWebhook("subscription.cancelled", null);
+
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: goldId,
+        copaySubscriptionId: null,
+      });
+    });
+
+    it("does not upgrade from a completed event without an external id", async () => {
+      await assign({ copaySubscriptionId: "subs_1" });
+      await copayWebhook("subscription.completed", null);
+
+      expect(await assignment()).toMatchObject({ effectivePlanId: goldId });
+    });
+
+    it("ignores unknown subscriptions without an external id", async () => {
+      await assign({ copaySubscriptionId: "subs_1" });
+      await copayWebhook("subscription.cancelled", null, "subs_other");
+
+      expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_1" });
+    });
+  });
+
+  describe("benefit invoices", () => {
+    const period = saoPauloDate(new Date()).slice(0, 7);
+    let goldId = "";
+    let platinumId = "";
+
+    beforeEach(async () => {
+      await db.delete(benefitAssignments);
+      await db.delete(benefitInvoices);
+
+      const rows = await db.select().from(plans).orderBy(plans.monthlyPriceCents);
+
+      goldId = rows[0].id;
+      platinumId = rows[rows.length - 1].id;
+    });
+
+    async function assignPlan(planId: string, validUntil = "2099-12-31") {
+      const [profile] = await db
+        .insert(talentProfiles)
+        .values({
+          orgId: defaultOrgId,
+          personalEmail: `pessoa-${randomUUID()}@exemplo.com`,
+          name: "Pessoa Teste",
+          sponsoredUntil: "2099-12-31",
+        })
+        .returning({ id: talentProfiles.id });
+
+      await db.insert(benefitAssignments).values({
+        orgId: defaultOrgId,
+        profileId: profile.id,
+        assignedPlanId: planId,
+        effectivePlanId: planId,
+        source: "manual",
+        validUntil,
+      });
+    }
+
+    async function priceOf(planId: string) {
+      const [row] = await db.select().from(plans).where(eq(plans.id, planId));
+
+      return row.perPersonPriceCents;
+    }
+
+    const generate = () => call("/billing/benefit-invoices/generate", { method: "POST" });
+
+    it("generates a benefit invoice for the current month", async () => {
+      await assignPlan(goldId);
+      await assignPlan(goldId);
+      await assignPlan(platinumId);
+
+      const res = await generate();
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        id: expect.any(String),
+        period,
+        totalCents: (await priceOf(goldId)) * 2 + (await priceOf(platinumId)),
+        status: "draft",
+      });
+    });
+
+    it("generate is idempotent", async () => {
+      await assignPlan(goldId);
+
+      const first = await (await generate()).json();
+      const second = await (await generate()).json();
+
+      expect(second.id).toBe(first.id);
+    });
+
+    it("generate excludes expired assignments", async () => {
+      await assignPlan(goldId);
+      await assignPlan(platinumId, "2000-01-01");
+
+      expect((await (await generate()).json()).totalCents).toBe(await priceOf(goldId));
+    });
+
+    it("restricts generation to admins", async () => {
+      const res = await call("/billing/benefit-invoices/generate", {
+        method: "POST",
+        session: "rh",
+      });
+
+      expect(res.status).toBe(403);
+    });
+
+    it("lists benefit invoices by period descending", async () => {
+      await db.insert(benefitInvoices).values([
+        { orgId: defaultOrgId, period: "2026-01", totalCents: 100 },
+        { orgId: defaultOrgId, period: "2026-03", totalCents: 300 },
+      ]);
+
+      const res = await call("/billing/benefit-invoices", { session: "rh" });
+      const list = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(list.map((invoice: { period: string }) => invoice.period)).toEqual([
+        "2026-03",
+        "2026-01",
+      ]);
+    });
+
+    it("returns empty when no invoices", async () => {
+      const res = await call("/billing/benefit-invoices");
+
+      expect(await res.json()).toEqual([]);
+    });
   });
 });

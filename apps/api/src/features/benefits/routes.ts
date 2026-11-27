@@ -40,7 +40,28 @@ const assignmentRow = t.Object({
 
 const idRow = t.Object({ id: t.String() });
 
-export function benefitRoutes(repos: BenefitRepository, access: PortalAccessPlugin) {
+type CopayGateway = {
+  cancelSubscription(id: string): Promise<void>;
+};
+
+async function cancelActiveCopay(
+  repos: BenefitRepository,
+  gateway: CopayGateway,
+  profileId: string,
+) {
+  const current = await repos.findAssignmentByProfile(profileId);
+
+  if (!current?.copaySubscriptionId) return;
+
+  await gateway.cancelSubscription(current.copaySubscriptionId);
+  await repos.updateCopayState(profileId, { copaySubscriptionId: null });
+}
+
+export function benefitRoutes(
+  repos: BenefitRepository,
+  access: PortalAccessPlugin,
+  gateway: CopayGateway,
+) {
   return new Elysia()
     .use(access)
     .get(
@@ -94,6 +115,12 @@ export function benefitRoutes(repos: BenefitRepository, access: PortalAccessPlug
           policy?.benefitDurationMonths ?? defaultDurationMonths,
         );
 
+        try {
+          await cancelActiveCopay(repos, gateway, body.profileId);
+        } catch {
+          return status(502, { error: "Could not cancel co-pay subscription" });
+        }
+
         const created = await repos.upsertAssignment({
           orgId: principal.orgId,
           profileId: body.profileId,
@@ -114,7 +141,7 @@ export function benefitRoutes(repos: BenefitRepository, access: PortalAccessPlug
           planId: t.String({ format: "uuid" }),
           source: t.Optional(t.Literal("manual")),
         }),
-        response: { 201: idRow, 404: errorResponse, 422: errorResponse },
+        response: { 201: idRow, 404: errorResponse, 422: errorResponse, 502: errorResponse },
       },
     )
     .put(
@@ -129,6 +156,12 @@ export function benefitRoutes(repos: BenefitRepository, access: PortalAccessPlug
 
         if (!existing) return status(404, { error: "Assignment not found" });
 
+        try {
+          await cancelActiveCopay(repos, gateway, existing.profileId);
+        } catch {
+          return status(502, { error: "Could not cancel co-pay subscription" });
+        }
+
         return repos.upsertAssignment({
           orgId: principal.orgId,
           profileId: existing.profileId,
@@ -142,7 +175,7 @@ export function benefitRoutes(repos: BenefitRepository, access: PortalAccessPlug
         permit: ["manage", "Billing"],
         params: t.Object({ id: t.String({ format: "uuid" }) }),
         body: t.Object({ planId: t.String({ format: "uuid" }) }),
-        response: { 200: idRow, 404: errorResponse, 422: errorResponse },
+        response: { 200: idRow, 404: errorResponse, 422: errorResponse, 502: errorResponse },
       },
     );
 }

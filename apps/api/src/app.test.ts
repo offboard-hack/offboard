@@ -1112,6 +1112,7 @@ describe.skipIf(!url)("api", () => {
         benefit: null,
         aiApply: { allowedBy: "individual", dailyLimit: 10 },
         upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
+        copay: null,
       });
 
       await db.delete(talentSubscriptions).where(eq(talentSubscriptions.profileId, mine.id));

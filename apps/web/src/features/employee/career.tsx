@@ -12,17 +12,19 @@ export function Career({
   account,
   view,
   paid,
+  copayPaid,
 }: {
   account: EmployeeAccount;
   view: "vagas" | "candidaturas";
   paid: boolean;
+  copayPaid: boolean;
 }) {
   const applications = useQuery(careerApplicationsQuery(account));
   const resume = useQuery(careerResumeQuery(account));
 
   return (
     <div className="space-y-5">
-      <PlanSection account={account} paid={paid} />
+      <PlanSection account={account} paid={paid} copayPaid={copayPaid} />
       <nav aria-label="Carreira" className="flex flex-wrap gap-2">
         <Link
           to="/colaborador"

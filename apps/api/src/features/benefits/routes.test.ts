@@ -8,7 +8,7 @@ import {
   talentProfiles,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Elysia } from "elysia";
@@ -42,7 +42,20 @@ const auth: PortalAuth = {
 describe.skipIf(!url)("benefit routes", () => {
   const db = createClient(url ?? "");
   const repos = createRepositories(db);
-  const app = new Elysia().use(benefitRoutes(repos.benefits, portalAccess(auth, webOrigin)));
+  const cancelled: string[] = [];
+  let cancelFails = false;
+
+  const gateway = {
+    cancelSubscription(id: string) {
+      cancelled.push(id);
+
+      return cancelFails ? Promise.reject(new Error("boom")) : Promise.resolve();
+    },
+  };
+
+  const app = new Elysia().use(
+    benefitRoutes(repos.benefits, portalAccess(auth, webOrigin), gateway),
+  );
 
   beforeAll(async () => {
     await migrate(db, {
@@ -53,6 +66,8 @@ describe.skipIf(!url)("benefit routes", () => {
   });
 
   beforeEach(async () => {
+    cancelled.length = 0;
+    cancelFails = false;
     await db.delete(benefitAssignments);
     await db.delete(benefitPolicies);
 
@@ -316,6 +331,99 @@ describe.skipIf(!url)("benefit routes", () => {
 
     expect(unknownPlan.status).toBe(422);
     expect(unknownAssignment.status).toBe(404);
+  });
+
+  async function seedCopay() {
+    const { low, high } = await planIds();
+    const profileId = await profile();
+
+    await db.insert(benefitAssignments).values({
+      orgId: defaultOrgId,
+      profileId,
+      assignedPlanId: low,
+      effectivePlanId: high,
+      copaySubscriptionId: "subs_1",
+      source: "manual",
+      validUntil: "2099-12-31",
+    });
+
+    return { low, high, profileId };
+  }
+
+  async function row(profileId: string) {
+    const [found] = await db
+      .select()
+      .from(benefitAssignments)
+      .where(eq(benefitAssignments.profileId, profileId));
+
+    return found;
+  }
+
+  it("POST benefit-assignments cancels active copay", async () => {
+    const { high, profileId } = await seedCopay();
+
+    const res = await call("/benefit-assignments", {
+      method: "POST",
+      json: { profileId, planId: high },
+    });
+
+    const saved = await row(profileId);
+
+    expect(res.status).toBe(201);
+    expect(cancelled).toEqual(["subs_1"]);
+    expect(saved.copaySubscriptionId).toBeNull();
+    expect(saved.effectivePlanId).toBe(high);
+  });
+
+  it("PUT benefit-assignments cancels active copay", async () => {
+    const { high, profileId } = await seedCopay();
+    const saved = await row(profileId);
+
+    const res = await call(`/benefit-assignments/${saved.id}`, {
+      method: "PUT",
+      json: { planId: high },
+    });
+
+    const after = await row(profileId);
+
+    expect(res.status).toBe(200);
+    expect(cancelled).toEqual(["subs_1"]);
+    expect(after.copaySubscriptionId).toBeNull();
+    expect(after.effectivePlanId).toBe(high);
+  });
+
+  it("does not call the gateway without an active copay", async () => {
+    const { low } = await planIds();
+    const profileId = await profile();
+
+    await call("/benefit-assignments", { method: "POST", json: { profileId, planId: low } });
+
+    expect(cancelled).toEqual([]);
+  });
+
+  it("returns 502 and keeps the row when cancel fails", async () => {
+    const { low, profileId } = await seedCopay();
+    const before = await row(profileId);
+
+    cancelFails = true;
+
+    const post = await call("/benefit-assignments", {
+      method: "POST",
+      json: { profileId, planId: low },
+    });
+
+    const put = await call(`/benefit-assignments/${before.id}`, {
+      method: "PUT",
+      json: { planId: low },
+    });
+
+    const after = await row(profileId);
+
+    expect(post.status).toBe(502);
+    expect(put.status).toBe(502);
+    expect(after.copaySubscriptionId).toBe("subs_1");
+    expect(after.assignedPlanId).toBe(before.assignedPlanId);
+    expect(after.effectivePlanId).toBe(before.effectivePlanId);
   });
 
   it("forbids writes for non-admin roles", async () => {

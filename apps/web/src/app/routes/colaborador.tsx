@@ -33,6 +33,7 @@ export const Route = createFileRoute("/colaborador")({
       .default("perfil")
       .catch("perfil"),
     plano: z.literal("ok").optional().catch(undefined),
+    copay: z.literal("ok").optional().catch(undefined),
   }),
   beforeLoad: async ({ context }) => {
     const result = await getApiClient().api.employee.session.get();
