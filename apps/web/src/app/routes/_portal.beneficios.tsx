@@ -1,21 +1,7 @@
-import { createFileRoute, lazyRouteComponent } from "@tanstack/react-router";
-import {
-  benefitAssignmentsQuery,
-  benefitPlansQuery,
-  benefitPolicyQuery,
-} from "@/entities/benefits";
-
-import { requirePortalAccess } from "../portal-access";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_portal/beneficios")({
-  beforeLoad: ({ context }) => requirePortalAccess(context.principal, "read", "Billing"),
-  loader: async ({ context }) => {
-    await Promise.all([
-      context.queryClient.ensureQueryData(benefitPolicyQuery),
-      context.queryClient.ensureQueryData(benefitAssignmentsQuery),
-      context.queryClient.ensureQueryData(benefitPlansQuery),
-    ]);
+  beforeLoad: () => {
+    throw redirect({ to: "/planos-e-gastos", search: { aba: "beneficios" }, replace: true });
   },
-  component: lazyRouteComponent(() => import("@/features/benefits/benefits-page"), "BenefitsPage"),
-  head: () => ({ meta: [{ title: "Benefícios · Offboard" }] }),
 });

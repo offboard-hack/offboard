@@ -14,7 +14,7 @@ import {
   type InvoiceRow,
   type PlanRow,
 } from "@/entities/billing";
-import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
+import { ListMetrics } from "@/shared/ui/list-page";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
 import { classProps } from "../../shared/lib/class-props";
@@ -87,7 +87,7 @@ const planColumns: TableColumn<PlanRow>[] = [
   },
 ];
 
-export function PlansPage() {
+export function PlansTab() {
   const { data: plans } = useSuspenseQuery(plansQuery);
   const { data: subscription } = useSuspenseQuery(subscriptionQuery);
   const { data: invoices } = useSuspenseQuery(invoicesQuery);
@@ -98,36 +98,36 @@ export function PlansPage() {
   const nextDue = pending.map((invoice) => invoice.dueDate).sort()[0];
 
   return (
-    <ListPage
-      title="Planos e gastos"
-      breadcrumb={<ListBreadcrumb title="Planos e gastos" />}
-      metrics={[
-        {
-          label: "Plano atual",
-          value: subscription?.plan.name ?? "Sem plano",
-          icon: CreditCardIcon,
-          tone: "primary",
-        },
-        {
-          label: "Capacidade do plano",
-          value: subscription?.plan.maxEmployees ?? 0,
-          icon: UserGroupIcon,
-          tone: "success",
-        },
-        {
-          label: "Valor mensal",
-          value: formatCents(subscription?.plan.monthlyPriceCents ?? 0),
-          icon: Calendar03Icon,
-          tone: "warning",
-        },
-        {
-          label: "Em aberto",
-          value: formatCents(pendingTotal),
-          icon: Tick02Icon,
-          tone: pending.length > 0 ? "danger" : "success",
-        },
-      ]}
-    >
+    <>
+      <ListMetrics
+        title="Plano da empresa"
+        metrics={[
+          {
+            label: "Plano atual",
+            value: subscription?.plan.name ?? "Sem plano",
+            icon: CreditCardIcon,
+            tone: "primary",
+          },
+          {
+            label: "Capacidade do plano",
+            value: subscription?.plan.maxEmployees ?? 0,
+            icon: UserGroupIcon,
+            tone: "success",
+          },
+          {
+            label: "Valor mensal",
+            value: formatCents(subscription?.plan.monthlyPriceCents ?? 0),
+            icon: Calendar03Icon,
+            tone: "warning",
+          },
+          {
+            label: "Em aberto",
+            value: formatCents(pendingTotal),
+            icon: Tick02Icon,
+            tone: pending.length > 0 ? "danger" : "success",
+          },
+        ]}
+      />
       <div {...classProps(styles.billingGrid)}>
         <section className="min-w-0" aria-labelledby="plans-title">
           <DataTable
@@ -200,6 +200,6 @@ export function PlansPage() {
         </p>
       )}
       {nextDue && <p {...classProps(styles.label)}>Próximo vencimento em {formatDate(nextDue)}.</p>}
-    </ListPage>
+    </>
   );
 }
