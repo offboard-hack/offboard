@@ -7,6 +7,7 @@ import {
   talentSubscriptions,
 } from "@offboard/db/schema";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { checkoutAttempt } from "../../shared/checkout-attempt.js";
 import { checkoutRetryMs } from "../../shared/career-pro.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 
@@ -61,7 +62,7 @@ async function issueCheckout(
   now: Date,
   create: CreateCheckout,
 ) {
-  const checkout = await create({ externalId: id, planSlug });
+  const checkout = await create({ externalId: `${id}:${checkoutAttempt()}`, planSlug });
 
   await tx
     .update(subscriptions)
