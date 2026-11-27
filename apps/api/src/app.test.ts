@@ -1112,6 +1112,7 @@ describe.skipIf(!url)("api", () => {
         benefit: null,
         aiApply: { allowedBy: "individual", dailyLimit: 10 },
         upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
+        copay: null,
       });
 
       await db.delete(talentSubscriptions).where(eq(talentSubscriptions.profileId, mine.id));
@@ -4772,6 +4773,86 @@ describe.skipIf(!url)("api", () => {
 
         expect(capped.status).toBe(429);
         expect(await capped.json()).toEqual({ error: "Too many searches" });
+      });
+
+      it("emails an opted-in candidate without exposing their address", async () => {
+        const app = resumesApp({ embedProfile: fakeEmbed().embed });
+        const visible = await profile();
+        const hidden = await profile("outra.pessoal@example.com", 1);
+        const shown = await (await upload(app.instance, visible)).json();
+        const kept = await (await upload(app.instance, hidden)).json();
+
+        await repos.talent.setSearchable(visible, true, new Date());
+        await db.delete(demoSearchUsage);
+
+        const contact = (id: string, body: Record<string, string>) =>
+          app.instance.handle(
+            new Request(`http://localhost/api/candidates/${id}/contact`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(body),
+            }),
+          );
+
+        const message = {
+          name: "Rita Recrutadora",
+          email: "rita@empresa.example",
+          company: "Empresa X",
+          message: "  Temos uma vaga de backend sênior remota e seu perfil combina muito.  ",
+        };
+
+        const sent = await contact(shown.id, message);
+
+        expect(sent.status).toBe(204);
+        expect(invitedEmails.at(-1)).toBe(personalEmail);
+        expect(sentTexts.at(-1)).toContain("Rita Recrutadora (Empresa X) encontrou seu currículo");
+        expect(sentTexts.at(-1)).toContain("\n\nTemos uma vaga de backend sênior remota");
+        expect(sentTexts.at(-1)).toContain("responda direto para rita@empresa.example");
+
+        const { company: _company, ...withoutCompany } = message;
+
+        expect((await contact(shown.id, withoutCompany)).status).toBe(204);
+        expect(sentTexts.at(-1)).toContain("Rita Recrutadora encontrou seu currículo");
+
+        expect((await contact(kept.id, message)).status).toBe(404);
+        expect((await contact("not-a-uuid", message)).status).toBe(422);
+        expect((await contact(shown.id, { ...message, message: "oi" })).status).toBe(422);
+
+        await db.delete(demoSearchUsage);
+
+        const logged = vi.spyOn(console, "error");
+
+        inviteFailures.remaining = 1;
+
+        const failed = await contact(shown.id, message);
+
+        expect(failed.status).toBe(502);
+        expect(await failed.json()).toEqual({ error: "Could not send the message" });
+        expect(logged.mock.calls).toContainEqual([
+          "candidate contact email failed",
+          { name: "Error", message: "invite failed" },
+        ]);
+        logged.mockRestore();
+
+        await db.delete(demoSearchUsage);
+        await db.insert(demoSearchUsage).values({
+          bucket: `contact:to:${shown.id}`,
+          day: new Date().toISOString().slice(0, 10),
+          searches: 5,
+        });
+
+        expect((await contact(shown.id, message)).status).toBe(429);
+
+        await db.delete(demoSearchUsage);
+
+        for (let index = 0; index < 5; index += 1) {
+          await contact(kept.id, message);
+        }
+
+        const capped = await contact(shown.id, message);
+
+        expect(capped.status).toBe(429);
+        expect(await capped.json()).toEqual({ error: "Too many messages" });
       });
 
       it("backfills profiles without a search embedding and skips what it cannot embed", async () => {

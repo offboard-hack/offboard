@@ -580,7 +580,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         },
       ),
     )
-    .use(careerPlanRoutes(repos.careerPlan, talent, abacatepay, webOrigin))
+    .use(careerPlanRoutes(repos.careerPlan, talent, abacatepay, webOrigin, repos.benefits))
     .use(jobsRoutes(repos.jobs, talent))
     .use(applicationsRoutes(repos.applications, talent, publicPageUrl))
     .use(
@@ -666,16 +666,28 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       }),
     )
     .use(demoRoutes(repos.demo, repos.searchQuota, options.embedProfile))
-    .use(candidatesRoutes(repos.candidates, repos.searchQuota, options.embedProfile))
+    .use(
+      candidatesRoutes(repos.candidates, repos.searchQuota, options.embedProfile, {
+        send: options.sendEmail,
+        origin: webOrigin,
+      }),
+    )
     .use(accountRoutes(repos.account, talent, options.storage, abacatepay))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
     .use(
       integrationsRoutes(repos.integrations, access, options.slackSigningSecret, box, slackApiUrl),
     )
-    .use(benefitRoutes(repos.benefits, access))
+    .use(benefitRoutes(repos.benefits, access, abacatepay))
     .use(
-      billingRoutes(repos.billing, access, abacatepay, webOrigin, options.abacatepayWebhookSecret),
+      billingRoutes(
+        repos.billing,
+        repos.benefits,
+        access,
+        abacatepay,
+        webOrigin,
+        options.abacatepayWebhookSecret,
+      ),
     )
     .use(backofficeRoutes(repos.backoffice, staffAccess(options.auth)));
 }

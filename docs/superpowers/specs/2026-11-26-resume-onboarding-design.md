@@ -57,3 +57,11 @@ Samuel, 2026-11-26: real résumés can be found only by people who opt in. The s
 - `GET /api/candidates/search?q=` embeds the query and returns up to 12 base résumés by cosine distance on `resumes.profile_embedding`. Only profiles with `talent_profiles.searchable_at` set are included.
 - A card shows name, headline, summary, city, two experiences, skills and languages. It never includes email, phone, links or the profile id. Its `id` is the résumé id, used only as a list key.
 - It shares the per-visitor and daily caps with the landing demo through `shared/search-quota.ts`, under its own `candidates:` buckets (30 per visitor and 2,000 in total per day).
+
+## Contacting a candidate
+
+- Each card on `/busca-candidato` has "Entrar em contato". It asks for name, email, an optional company and a message of 20 to 2,000 characters.
+- `POST /api/candidates/:id/contact` emails the candidate's personal address. The email includes the sender's message and address, says Offboard did not share the candidate's email, and links to Preferências to leave the search. The sender never sees the candidate's address unless the candidate replies.
+- It answers 404 unless the résumé is a base résumé whose owner still has `searchable_at` set.
+- Caps: 5 messages per visitor and 300 in total per day (`contact:*` buckets), plus 5 per candidate per day (`contact:to:<id>`).
+- Nothing is stored except those counters. There is no inbox in the product yet.

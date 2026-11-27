@@ -2,7 +2,9 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import {
   benefitAssignments,
+  benefitInvoices,
   benefitPolicies,
+  copayProducts,
   defaultOrgId,
   offboardingCases,
   organizations,
@@ -33,6 +35,8 @@ describe.skipIf(!url)("benefit repository", () => {
   beforeEach(async () => {
     await db.delete(benefitAssignments);
     await db.delete(benefitPolicies);
+    await db.delete(benefitInvoices);
+    await db.delete(copayProducts);
 
     await seedDatabase(db, testSeedFixtures);
   });
@@ -40,6 +44,8 @@ describe.skipIf(!url)("benefit repository", () => {
   afterAll(async () => {
     await db.delete(benefitAssignments);
     await db.delete(benefitPolicies);
+    await db.delete(benefitInvoices);
+    await db.delete(copayProducts);
 
     await db.$client.end();
   });
@@ -168,6 +174,23 @@ describe.skipIf(!url)("benefit repository", () => {
     expect(second.id).toBe(first.id);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ effectivePlanName: high.name, source: "manual" });
+  });
+
+  it("makes a fresh assignment immediately eligible for a co-pay checkout", async () => {
+    const { low } = await twoPlans();
+    const profileId = await profile();
+
+    await repos.benefits.upsertAssignment({
+      orgId: defaultOrgId,
+      profileId,
+      assignedPlanId: low.id,
+      effectivePlanId: low.id,
+      source: "default",
+      validUntil: "2099-12-31",
+    });
+
+    expect(await repos.careerPlan.startCopayCheckout(profileId, new Date())).not.toBeNull();
+    expect(await repos.careerPlan.startCopayCheckout(profileId, new Date())).toBeNull();
   });
 
   it("returns null benefit when there is no assignment", async () => {
@@ -491,5 +514,136 @@ describe.skipIf(!url)("benefit repository", () => {
         await db.delete(offboardingCases).where(eq(offboardingCases.id, created.id));
       }
     });
+  });
+
+  async function assign(
+    planId: string,
+    extra: { validUntil?: string; copaySubscriptionId?: string; effectivePlanId?: string } = {},
+  ) {
+    const profileId = await profile();
+
+    await db.insert(benefitAssignments).values({
+      orgId: defaultOrgId,
+      profileId,
+      assignedPlanId: planId,
+      effectivePlanId: extra.effectivePlanId ?? planId,
+      source: "manual",
+      validUntil: extra.validUntil ?? "2099-12-31",
+      copaySubscriptionId: extra.copaySubscriptionId,
+    });
+
+    return profileId;
+  }
+
+  it("finds a copay product by plan pair", async () => {
+    const { low, high } = await twoPlans();
+
+    await db
+      .insert(copayProducts)
+      .values({ fromPlanId: low.id, toPlanId: high.id, abacatePayProductId: "prod_1" });
+
+    expect(await repos.benefits.getCopayProduct(low.id, high.id)).toEqual({
+      abacatePayProductId: "prod_1",
+    });
+    expect(await repos.benefits.getCopayProduct(high.id, low.id)).toBeNull();
+  });
+
+  it("finds an assignment by profile", async () => {
+    const { low } = await twoPlans();
+    const profileId = await assign(low.id, { copaySubscriptionId: "subs_1" });
+
+    expect(await repos.benefits.findAssignmentByProfile(profileId)).toEqual({
+      id: expect.any(String),
+      assignedPlanId: low.id,
+      effectivePlanId: low.id,
+      copaySubscriptionId: "subs_1",
+      validUntil: "2099-12-31",
+    });
+    expect(await repos.benefits.findAssignmentByProfile(crypto.randomUUID())).toBeNull();
+  });
+
+  it("updates copay state", async () => {
+    const { low, high } = await twoPlans();
+    const profileId = await assign(low.id);
+
+    await repos.benefits.updateCopayState(profileId, {
+      effectivePlanId: high.id,
+      copaySubscriptionId: "subs_1",
+    });
+
+    expect(await repos.benefits.findAssignmentByProfile(profileId)).toMatchObject({
+      effectivePlanId: high.id,
+      copaySubscriptionId: "subs_1",
+    });
+
+    await repos.benefits.updateCopayState(profileId, {
+      effectivePlanId: low.id,
+      copaySubscriptionId: null,
+    });
+
+    expect(await repos.benefits.findAssignmentByProfile(profileId)).toMatchObject({
+      effectivePlanId: low.id,
+      copaySubscriptionId: null,
+    });
+  });
+
+  it("finds an assignment by copay subscription", async () => {
+    const { low, high } = await twoPlans();
+
+    const profileId = await assign(low.id, {
+      copaySubscriptionId: "subs_1",
+      effectivePlanId: high.id,
+    });
+
+    expect(await repos.benefits.findAssignmentBySubscription("subs_1")).toEqual({
+      profileId,
+      assignedPlanId: low.id,
+      effectivePlanId: high.id,
+      validUntil: "2099-12-31",
+    });
+    expect(await repos.benefits.findAssignmentBySubscription("subs_x")).toBeNull();
+  });
+
+  it("tallies active assignments by assigned plan price", async () => {
+    const { low, high } = await twoPlans();
+
+    expect(await repos.benefits.tallyActiveAssignments(defaultOrgId)).toEqual({
+      totalCents: 0,
+      count: 0,
+    });
+
+    await assign(low.id);
+    await assign(low.id);
+    await assign(high.id, { effectivePlanId: low.id });
+    await assign(high.id, { validUntil: "2000-01-01" });
+
+    expect(await repos.benefits.tallyActiveAssignments(defaultOrgId)).toEqual({
+      totalCents: low.perPersonPriceCents * 2 + high.perPersonPriceCents,
+      count: 3,
+    });
+  });
+
+  it("creates a benefit invoice idempotently", async () => {
+    const created = await repos.benefits.createBenefitInvoice(defaultOrgId, "2026-12", 5000);
+
+    expect(created).toEqual({
+      id: expect.any(String),
+      period: "2026-12",
+      totalCents: 5000,
+      status: "draft",
+    });
+    expect(await repos.benefits.createBenefitInvoice(defaultOrgId, "2026-12", 9999)).toEqual(
+      created,
+    );
+  });
+
+  it("lists benefit invoices by period descending", async () => {
+    await repos.benefits.createBenefitInvoice(defaultOrgId, "2026-11", 100);
+    await repos.benefits.createBenefitInvoice(defaultOrgId, "2026-12", 200);
+
+    const rows = await repos.benefits.listBenefitInvoices(defaultOrgId);
+
+    expect(rows.map((row) => row.period)).toEqual(["2026-12", "2026-11"]);
+    expect(rows[0]).toMatchObject({ totalCents: 200, status: "draft" });
   });
 });

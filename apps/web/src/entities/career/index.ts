@@ -298,6 +298,22 @@ export function useUpgradeCheckout(account: EmployeeAccount) {
   });
 }
 
+export function useCopayCheckout(account: EmployeeAccount) {
+  return useMutation({
+    async mutationFn(targetPlanId: string) {
+      const result = await client().plan["copay-checkout"].post(
+        { targetPlanId },
+        { headers: employeeAccessHeaders(account) },
+      );
+
+      return settle(result, "Não foi possível abrir o pagamento. Tente de novo.");
+    },
+    onSuccess(checkout) {
+      window.location.assign(checkout.url);
+    },
+  });
+}
+
 export function useCancelCareerPro(account: EmployeeAccount) {
   const queryClient = useQueryClient();
 

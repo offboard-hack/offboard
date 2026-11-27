@@ -186,7 +186,49 @@ export function createCareerPlanRepository(db: Database) {
       );
   }
 
-  return { plan, allowedBy, individual, cancelable, markCanceled, startCheckout, releaseCheckout };
+  async function startCopayCheckout(profileId: string, now: Date) {
+    const [row] = await db
+      .update(benefitAssignments)
+      .set({ copayCheckoutAt: now })
+      .where(
+        and(
+          eq(benefitAssignments.profileId, profileId),
+          gte(benefitAssignments.validUntil, saoPauloDate(now)),
+          isNull(benefitAssignments.copaySubscriptionId),
+          or(
+            isNull(benefitAssignments.copayCheckoutAt),
+            lt(benefitAssignments.copayCheckoutAt, new Date(now.getTime() - checkoutRetryMs)),
+          ),
+        ),
+      )
+      .returning({ assignmentId: benefitAssignments.id });
+
+    return row ?? null;
+  }
+
+  async function releaseCopayCheckout(profileId: string) {
+    await db
+      .update(benefitAssignments)
+      .set({ copayCheckoutAt: null })
+      .where(
+        and(
+          eq(benefitAssignments.profileId, profileId),
+          isNull(benefitAssignments.copaySubscriptionId),
+        ),
+      );
+  }
+
+  return {
+    plan,
+    allowedBy,
+    individual,
+    cancelable,
+    markCanceled,
+    startCheckout,
+    releaseCheckout,
+    startCopayCheckout,
+    releaseCopayCheckout,
+  };
 }
 
 export type CareerPlanRepository = ReturnType<typeof createCareerPlanRepository>;

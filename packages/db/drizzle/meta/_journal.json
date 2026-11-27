@@ -183,6 +183,20 @@
       "when": 1795751957797,
       "tag": "0025_add_backoffice_staff_session",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795754308579,
+      "tag": "0026_add_copay_products",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1795790000000,
+      "tag": "0027_add_copay_checkout_at",
+      "breakpoints": true
     }
   ]
 }
