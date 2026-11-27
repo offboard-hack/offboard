@@ -1,47 +1,30 @@
 import Download01Icon from "@hugeicons/core-free-icons/Download01Icon";
 import File01Icon from "@hugeicons/core-free-icons/File01Icon";
 import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
-import Upload01Icon from "@hugeicons/core-free-icons/Upload01Icon";
+import ArrowRight02Icon from "@hugeicons/core-free-icons/ArrowRight02Icon";
+import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { Link } from "@tanstack/react-router";
+import { useCallback, useState } from "react";
 import {
   type CareerResume,
   careerResumeQuery,
   resumePdfUrl,
   resumeSuggestionsQuery,
-  useResumeUpload,
   useSuggestionAction,
 } from "@/entities/career";
 import type { EmployeeAccount } from "@/entities/employee";
 import { ProgressBar } from "@/shared/ui/progress";
 import { Badge } from "@/shared/ui/shadcn/badge";
+import { cn } from "@/shared/lib/utils";
+import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/shadcn/alert";
 import { Button, buttonVariants } from "@/shared/ui/shadcn/button";
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/shadcn/dialog";
-import { Dropzone } from "@/shared/ui/shadcn/dropzone";
 import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { Spinner } from "@/shared/ui/shadcn/spinner";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "../ui";
 import { careerDate, criterionLabel, resumeScoreState, scoreCriteria } from "./labels";
-
-const maxResumeBytes = 5_242_880;
-
-const resumeTypes = {
-  "application/pdf": [".pdf"],
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
-};
-
-const rejections = new Map([
-  ["file-too-large", "O arquivo passa de 5 MB."],
-  ["file-invalid-type", "Envie um arquivo PDF ou DOCX."],
-]);
+import { ResumeWizard } from "./resume-wizard";
 
 export function CareerPending() {
   return (
@@ -60,44 +43,6 @@ export function CareerRetry({ message, retry }: { message: string; retry: () => 
         Tentar de novo
       </Button>
     </EmployeePanel>
-  );
-}
-
-function ResumeUpload({ account, onDone }: { account: EmployeeAccount; onDone?: () => void }) {
-  const upload = useResumeUpload(account);
-  const [rejected, setRejected] = useState("");
-
-  return (
-    <div className="grid gap-3">
-      <Dropzone
-        accept={resumeTypes}
-        maxSize={maxResumeBytes}
-        label={upload.isPending ? "Lendo o currículo…" : "Escolher arquivo"}
-        describedBy="resume-upload-help"
-        onFile={(file) => {
-          setRejected("");
-          upload.mutate(file, { onSuccess: onDone });
-        }}
-        onReject={(files) => {
-          const code = files[0]?.errors[0]?.code ?? "";
-
-          setRejected(rejections.get(code) ?? "Não foi possível selecionar o arquivo.");
-        }}
-      >
-        <span className="grid size-9 place-items-center text-muted-foreground">
-          {upload.isPending ? (
-            <Spinner className="size-6" />
-          ) : (
-            <HugeiconsIcon icon={Upload01Icon} aria-hidden="true" className="size-6" />
-          )}
-        </span>
-        <span className="text-base font-medium">Solte o currículo aqui</span>
-        <span id="resume-upload-help" className="text-sm text-muted-foreground">
-          PDF ou DOCX, até 5 MB. A IA lê o arquivo e leva alguns segundos.
-        </span>
-      </Dropzone>
-      <EmployeeError message={rejected || upload.error?.message} />
-    </div>
   );
 }
 
@@ -247,13 +192,20 @@ function Suggestions({ account }: { account: EmployeeAccount }) {
   );
 }
 
-export function ResumeFirst({ account }: { account: EmployeeAccount }) {
+export function ResumeFirst() {
   return (
     <EmployeePanel
       title="Comece pelo currículo"
-      description="Envie seu currículo para ver as vagas em ordem de compatibilidade e se candidatar com IA. A IA lê o arquivo, dá uma nota e sugere melhorias."
+      description="Crie seu currículo para ver as vagas em ordem de compatibilidade e se candidatar com IA. A IA lê o seu arquivo, você revisa os dados e ela dá uma nota com sugestões."
     >
-      <ResumeUpload account={account} />
+      <Link
+        to="/colaborador"
+        search={{ tela: "curriculo" }}
+        className={cn(buttonVariants(), "w-fit")}
+      >
+        Criar currículo
+        <HugeiconsIcon icon={ArrowRight02Icon} aria-hidden="true" />
+      </Link>
     </EmployeePanel>
   );
 }
@@ -261,6 +213,12 @@ export function ResumeFirst({ account }: { account: EmployeeAccount }) {
 export function ResumeCareer({ account }: { account: EmployeeAccount }) {
   const resume = useQuery(careerResumeQuery(account));
   const [replacing, setReplacing] = useState(false);
+  const [created, setCreated] = useState(false);
+
+  const onCreated = useCallback(() => {
+    setReplacing(false);
+    setCreated(true);
+  }, []);
 
   if (resume.isPending) return <CareerPending />;
 
@@ -268,21 +226,25 @@ export function ResumeCareer({ account }: { account: EmployeeAccount }) {
     return <CareerRetry message={resume.error.message} retry={() => void resume.refetch()} />;
   }
 
-  if (!resume.data) {
+  if (!resume.data || replacing) {
     return (
-      <div className="space-y-5">
-        <EmployeePanel
-          title="Envie seu currículo"
-          description="Comece por aqui. A IA lê seu currículo, dá uma nota e sugere melhorias. Com ele, as vagas aparecem em ordem de compatibilidade e você pode se candidatar com IA."
-        >
-          <ResumeUpload account={account} />
-        </EmployeePanel>
-      </div>
+      <ResumeWizard
+        account={account}
+        onCreated={onCreated}
+        onCancel={resume.data ? () => setReplacing(false) : undefined}
+      />
     );
   }
 
   return (
     <div className="space-y-5">
+      {created ? (
+        <Alert role="status">
+          <HugeiconsIcon icon={CheckmarkCircle02Icon} aria-hidden="true" />
+          <AlertTitle>Currículo criado</AlertTitle>
+          <AlertDescription>A IA está calculando a nota e as sugestões.</AlertDescription>
+        </Alert>
+      ) : null}
       <EmployeePanel
         title="Seu currículo"
         description={`Atualizado em ${careerDate(resume.data.updatedAt)}`}
@@ -297,27 +259,18 @@ export function ResumeCareer({ account }: { account: EmployeeAccount }) {
           >
             <HugeiconsIcon icon={Download01Icon} aria-hidden="true" /> Baixar PDF
           </a>
-          <Button variant="outline" onClick={() => setReplacing(true)}>
-            <HugeiconsIcon icon={File01Icon} aria-hidden="true" /> Enviar outro arquivo
+          <Button
+            variant="outline"
+            onClick={() => {
+              setCreated(false);
+              setReplacing(true);
+            }}
+          >
+            <HugeiconsIcon icon={File01Icon} aria-hidden="true" /> Refazer currículo
           </Button>
         </div>
       </EmployeePanel>
       <Suggestions account={account} />
-      {replacing ? (
-        <Dialog open onOpenChange={(open) => setReplacing(open)}>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Enviar outro currículo</DialogTitle>
-              <DialogDescription>
-                O novo arquivo substitui o atual. A nota e as sugestões são refeitas.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogBody>
-              <ResumeUpload account={account} onDone={() => setReplacing(false)} />
-            </DialogBody>
-          </DialogContent>
-        </Dialog>
-      ) : null}
     </div>
   );
 }

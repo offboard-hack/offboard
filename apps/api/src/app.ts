@@ -17,7 +17,11 @@ import { catalogSources, type CatalogSource } from "./features/sources/catalog.j
 import { fetchFeed } from "./features/sources/sources.js";
 import { exitSurveysRoutes } from "./features/exit-surveys/routes.js";
 import { insightsRoutes } from "./features/insights/routes.js";
-import { integrationsRoutes, slackTokenReader } from "./features/integrations/routes.js";
+import {
+  emailIntegration,
+  integrationsRoutes,
+  slackTokenReader,
+} from "./features/integrations/routes.js";
 import { organizationsRoutes } from "./features/organizations/routes.js";
 import { jobsRoutes } from "./features/jobs/routes.js";
 import { offboardingsRoutes } from "./features/offboardings/routes.js";
@@ -37,6 +41,8 @@ import { scoreResume } from "./features/resumes/score.js";
 import { scoreMatches, type MatchJob } from "./features/matches/score.js";
 import { searchTerms, toTsQuery } from "./features/matches/terms.js";
 import { backgroundRoutes } from "./features/background/routes.js";
+import { demoRoutes } from "./features/demo/routes.js";
+import { syncDemoEmbeddings } from "./features/demo/sync.js";
 import { drain, type JobHandler } from "./features/background/drain.js";
 import { accountRoutes } from "./features/account/routes.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
@@ -136,10 +142,15 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       ? (orgId: string) => repos.actionConfigs.getActionConfigsByStep(orgId, stepId)
       : repos.actionConfigs.getActionConfigsByPhase;
 
-    await fireActions({ getActionConfigsByPhase }, context, {
-      apiUrl: slackApiUrl,
-      readToken: readSlackToken,
-    });
+    await fireActions(
+      { getActionConfigsByPhase },
+      context,
+      {
+        apiUrl: slackApiUrl,
+        readToken: readSlackToken,
+      },
+      (orgId) => repos.integrations.isConnected(orgId, emailIntegration),
+    );
   };
 
   const inviteEmployee: InviteEmployee = async (orgId, caseId) => {
@@ -504,6 +515,9 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       .catch(logFailure("AI application scheduling failed"));
 
     if (options.embedProfile) {
+      await syncDemoEmbeddings(repos.demo, options.embedProfile).catch(
+        logFailure("demo embedding sync failed"),
+      );
       await repos.resumes
         .withoutProfileEmbedding(profileBackfill)
         .then((ids) => repos.background.enqueueMany("embed_profile", ids))
@@ -648,6 +662,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         isolated: { kind: "ai_apply", budgetMs: aiApplyBudgetMs },
       }),
     )
+    .use(demoRoutes(repos.demo, options.embedProfile))
     .use(accountRoutes(repos.account, talent, options.storage))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))

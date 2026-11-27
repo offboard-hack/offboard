@@ -1,3 +1,5 @@
+import { signInCodeSubject } from "../../shared/dev-outbox.js";
+
 export const signInLinkMinutes = 10;
 
 const ignore = "Se você não tentou entrar, pode ignorar este e-mail.";
@@ -119,7 +121,7 @@ export function signInCodeEmail({
   minutes: number;
   origin: string;
 }) {
-  const subject = "Seu código de acesso ao Offboard";
+  const subject = signInCodeSubject;
   const title = "Seu código para entrar";
   const request = "Use este código para entrar no Offboard.";
   const expires = `O código expira em ${minutes} minutos e só pode ser usado uma vez.`;
