@@ -380,7 +380,40 @@ export function createBillingRepository(db: Database) {
     });
   }
 
+  async function claimRefund(checkoutId: string, now: Date) {
+    const rows = await db
+      .insert(billingWebhookEvents)
+      .values({ id: `refund:${checkoutId}`, receivedAt: now })
+      .onConflictDoNothing()
+      .returning({ id: billingWebhookEvents.id });
+
+    return rows.length > 0;
+  }
+
+  async function releaseRefund(checkoutId: string) {
+    await db
+      .delete(billingWebhookEvents)
+      .where(eq(billingWebhookEvents.id, `refund:${checkoutId}`));
+  }
+
+  async function findPlanIdBySlug(slug: string) {
+    const [row] = await db.select({ id: plans.id }).from(plans).where(eq(plans.slug, slug));
+
+    return row?.id ?? null;
+  }
+
+  async function updateSubscriptionPlan(orgId: string, id: string, planId: string) {
+    await db
+      .update(subscriptions)
+      .set({ planId, updatedAt: new Date() })
+      .where(and(eq(subscriptions.id, id), eq(subscriptions.orgId, orgId)));
+  }
+
   return {
+    claimRefund,
+    releaseRefund,
+    findPlanIdBySlug,
+    updateSubscriptionPlan,
     listPlans,
     getSubscription,
     startSubscription,
