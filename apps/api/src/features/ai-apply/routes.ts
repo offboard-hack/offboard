@@ -41,7 +41,10 @@ export function aiApplyRoutes(
   repos: AiApplyRepository,
   talentAccess: TalentAccessPlugin,
   deps: {
-    allowedBy: (profileId: string, now: Date) => Promise<AllowedBy>;
+    allowedBy: (
+      profileId: string,
+      now: Date,
+    ) => Promise<{ allowedBy: AllowedBy; dailyLimit: number }>;
     generate: GenerateStructured | undefined;
     runnerConfigured: boolean;
     takeLlmCall: UsageRepository["takeLlmCall"];
@@ -82,18 +85,24 @@ export function aiApplyRoutes(
   }
 
   const gate = async (me: { id: string; aiApplyConsentAt: string | null }) => {
-    const access = aiApplyAccess(me, await deps.allowedBy(me.id, new Date()));
+    const standing = await deps.allowedBy(me.id, new Date());
+    const access = aiApplyAccess(me, standing.allowedBy);
 
     if (access !== "allowed") {
       return {
         refused: { code: 403 as const, error: "AI Apply not available" },
         generate: undefined,
+        dailyLimit: 0,
       };
     }
 
     return deps.generate === undefined
-      ? { refused: { code: 503 as const, error: "AI not configured" }, generate: undefined }
-      : { refused: undefined, generate: deps.generate };
+      ? {
+          refused: { code: 503 as const, error: "AI not configured" },
+          generate: undefined,
+          dailyLimit: 0,
+        }
+      : { refused: undefined, generate: deps.generate, dailyLimit: standing.dailyLimit };
   };
 
   const conflicts = {
@@ -271,6 +280,7 @@ export function aiApplyRoutes(
           },
           now,
           { answer: deps.saveAnswer, profile: deps.saveProfile },
+          open.dailyLimit,
         );
 
         if (result === "job_closed") return status(404, { error: "Job not found" });
