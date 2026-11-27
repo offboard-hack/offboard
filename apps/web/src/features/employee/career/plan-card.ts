@@ -147,6 +147,14 @@ function benefitLine(benefit: CareerPlan["benefit"], proActive: boolean) {
     : `${benefit.planName} · Patrocinado pela empresa até ${planDate(benefit.validUntil)}`;
 }
 
+function sponsorLine(company: CareerPlan["company"], hasBenefit: boolean) {
+  if (company.name === null) return null;
+
+  const text = `Patrocinado pela empresa até ${planDate(company.sponsoredUntil)}`;
+
+  return hasBenefit ? `Plano ${company.name} · ${text}` : text;
+}
+
 const proAiApplyDailyLimit = 10;
 
 function benefitExpiryNote(days: number, proActive: boolean) {
@@ -192,10 +200,7 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean, cop
       : company.includesAiApply
         ? "Inclui candidatura com IA"
         : "Não inclui",
-    sponsorLine:
-      company.name === null
-        ? null
-        : `Patrocinado pela empresa até ${planDate(company.sponsoredUntil)}`,
+    sponsorLine: sponsorLine(company, activeBenefit !== null),
     paymentNote: paid && !proActive,
     copayPaymentNote: copayPaid && copay?.active !== true,
     statusNote: statusNote(pastDue, checkoutPending && !paid),
