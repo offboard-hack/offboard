@@ -202,7 +202,7 @@ export function accountRoutes(
             return status(502, { error: "Could not cancel Carreira Pro; try again" });
           }
 
-          await repos.markSubscriptionCanceled(me.id);
+          await repos.markSubscriptionCanceled(me.id, subscriptionId);
         }
 
         if (storage) {

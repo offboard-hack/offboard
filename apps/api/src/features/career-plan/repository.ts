@@ -8,7 +8,7 @@ import {
   talentProfiles,
   talentSubscriptions,
 } from "@offboard/db/schema";
-import { and, desc, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { careerPlanOf, checkoutRetryMs } from "../../shared/career-pro.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 
@@ -53,6 +53,7 @@ export function createCareerPlanRepository(db: Database) {
         individual: {
           status: talentSubscriptions.status,
           currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
+          providerSubscriptionId: talentSubscriptions.providerSubscriptionId,
           updatedAt: talentSubscriptions.updatedAt,
         },
       })
@@ -108,27 +109,34 @@ export function createCareerPlanRepository(db: Database) {
   async function cancelable(profileId: string) {
     const [row] = await db
       .select({
-        providerSubscriptionId: sql<string>`${talentSubscriptions.providerSubscriptionId}`,
+        providerSubscriptionId: talentSubscriptions.providerSubscriptionId,
         currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
       })
       .from(talentSubscriptions)
       .where(
         and(
           eq(talentSubscriptions.profileId, profileId),
-          eq(talentSubscriptions.status, "active"),
-          isNotNull(talentSubscriptions.providerSubscriptionId),
+          inArray(talentSubscriptions.status, ["active", "past_due"]),
         ),
       );
 
-    return row ?? null;
+    if (!row || row.providerSubscriptionId === null) return null;
+
+    return {
+      providerSubscriptionId: row.providerSubscriptionId,
+      currentPeriodEnd: row.currentPeriodEnd,
+    };
   }
 
-  async function markCanceled(profileId: string, now: Date) {
+  async function markCanceled(profileId: string, providerSubscriptionId: string, now: Date) {
     await db
       .update(talentSubscriptions)
       .set({ status: "canceled", updatedAt: now })
       .where(
-        and(eq(talentSubscriptions.profileId, profileId), eq(talentSubscriptions.status, "active")),
+        and(
+          eq(talentSubscriptions.profileId, profileId),
+          eq(talentSubscriptions.providerSubscriptionId, providerSubscriptionId),
+        ),
       );
   }
 

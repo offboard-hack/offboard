@@ -4,6 +4,7 @@ export type CareerPlan = {
     plan: "carreira-pro";
     status: "pending" | "active" | "past_due" | "canceled";
     currentPeriodEnd: string | null;
+    cancelable: boolean;
   } | null;
   benefit: {
     planName: string;
@@ -156,7 +157,7 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
     paymentNote: paid && !proActive,
     statusNote: statusNote(pastDue, checkoutPending && !paid),
     proLine: proLabel(individual, proActive),
-    cancelable: proActive && individual?.status === "active",
+    cancelable: individual?.cancelable === true,
     upgrade: upgradeState(wantsUpgrade, upgrade.offered),
     upgradeLabel: `Fazer upgrade · ${planPrice(upgrade.priceCents)}`,
     benefitLine: benefitLine(activeBenefit, proActive),

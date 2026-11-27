@@ -140,7 +140,12 @@ describe.skipIf(!url)("career plan repository", () => {
 
     expect(await repos.careerPlan.plan(profileId, now)).toEqual({
       company: { name: null, includesAiApply: false, sponsoredUntil: "2099-12-31" },
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-12-26" },
+      individual: {
+        plan: "carreira-pro",
+        status: "active",
+        currentPeriodEnd: "2026-12-26",
+        cancelable: false,
+      },
       benefit: null,
       aiApply: { allowedBy: "individual", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },

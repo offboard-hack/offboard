@@ -26,6 +26,15 @@ describe("careerFailure", () => {
     ).toBe("Não foi possível abrir o pagamento. Tente de novo.");
   });
 
+  it("tells when a canceled Carreira Pro still has access", () => {
+    expect(
+      careerFailure(409, {
+        status: 409,
+        value: { error: "Carreira Pro canceled until 2026-12-26" },
+      }),
+    ).toBe("Seu Carreira Pro cancelado ainda vale até 26/12/2026.");
+  });
+
   it("explains cancellation failures", () => {
     expect(
       careerFailure(502, { status: 502, value: { error: "Could not cancel Carreira Pro" } }),

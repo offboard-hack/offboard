@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 import { careerPro } from "../../shared/career-pro.js";
 import { logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
+import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
 import type { CareerPlanRepository } from "./repository.js";
 
@@ -23,6 +24,7 @@ const careerPlanResponse = t.Object({
         t.Literal("canceled"),
       ]),
       currentPeriodEnd: nullableDate,
+      cancelable: t.Boolean(),
     }),
     t.Null(),
   ]),
@@ -98,7 +100,17 @@ export function careerPlanRoutes(
 
         const row = await repos.startCheckout(me.id, new Date());
 
-        if (!row) return status(409, { error: "Already subscribed" });
+        if (!row) {
+          const today = saoPauloDate(new Date());
+          const current = await repos.individual(me.id);
+          const end = current?.status === "canceled" ? current.currentPeriodEnd : null;
+
+          if (end !== null && today <= end) {
+            return status(409, { error: `Carreira Pro canceled until ${end}` });
+          }
+
+          return status(409, { error: "Already subscribed" });
+        }
 
         try {
           const checkout = await gateway.createSubscriptionCheckout({
@@ -143,7 +155,7 @@ export function careerPlanRoutes(
           return status(502, { error: "Could not cancel Carreira Pro" });
         }
 
-        await repos.markCanceled(me.id, new Date());
+        await repos.markCanceled(me.id, subscription.providerSubscriptionId, new Date());
 
         return { currentPeriodEnd: subscription.currentPeriodEnd };
       },

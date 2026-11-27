@@ -381,24 +381,28 @@ export function createAccountRepository(db: Database) {
 
   async function cancelableSubscription(profileId: string) {
     const [row] = await db
-      .select({ id: sql<string>`${talentSubscriptions.providerSubscriptionId}` })
+      .select({ id: talentSubscriptions.providerSubscriptionId })
       .from(talentSubscriptions)
       .where(
         and(
           eq(talentSubscriptions.profileId, profileId),
           inArray(talentSubscriptions.status, ["active", "past_due", "pending"]),
-          isNotNull(talentSubscriptions.providerSubscriptionId),
         ),
       );
 
     return row?.id ?? null;
   }
 
-  async function markSubscriptionCanceled(profileId: string) {
+  async function markSubscriptionCanceled(profileId: string, providerSubscriptionId: string) {
     await db
       .update(talentSubscriptions)
       .set({ status: "canceled", updatedAt: new Date() })
-      .where(eq(talentSubscriptions.profileId, profileId));
+      .where(
+        and(
+          eq(talentSubscriptions.profileId, profileId),
+          eq(talentSubscriptions.providerSubscriptionId, providerSubscriptionId),
+        ),
+      );
   }
 
   async function deleteProfile(profileId: string) {

@@ -220,7 +220,12 @@ describe.skipIf(!url)("career plan route", () => {
 
     expect(await (await get(profileId)).json()).toEqual({
       company: { name: null, includesAiApply: false, sponsoredUntil: "2099-12-31" },
-      individual: { plan: "carreira-pro", status: "pending", currentPeriodEnd: null },
+      individual: {
+        plan: "carreira-pro",
+        status: "pending",
+        currentPeriodEnd: null,
+        cancelable: false,
+      },
       benefit: null,
       aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
@@ -233,7 +238,12 @@ describe.skipIf(!url)("career plan route", () => {
 
     expect(await (await get(profileId)).json()).toEqual({
       company: { name: null, includesAiApply: false, sponsoredUntil: "2099-12-31" },
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2099-01-01" },
+      individual: {
+        plan: "carreira-pro",
+        status: "active",
+        currentPeriodEnd: "2099-01-01",
+        cancelable: false,
+      },
       benefit: null,
       aiApply: { allowedBy: "individual", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
@@ -375,7 +385,7 @@ describe.skipIf(!url)("career plan route", () => {
     const refused = await checkout(profileId);
 
     expect(refused.status).toBe(409);
-    expect(await refused.json()).toEqual({ error: "Already subscribed" });
+    expect(await refused.json()).toEqual({ error: `Carreira Pro canceled until ${today}` });
     expect(checkouts).toEqual([]);
   });
 
@@ -456,22 +466,61 @@ describe.skipIf(!url)("career plan route", () => {
 
       await db
         .update(talentSubscriptions)
-        .set({ status: "past_due" })
-        .where(eq(talentSubscriptions.profileId, none));
-      expect((await cancel(none)).status).toBe(409);
-
-      await db
-        .update(talentSubscriptions)
         .set({ status: "canceled" })
         .where(eq(talentSubscriptions.profileId, none));
       expect((await cancel(none)).status).toBe(409);
 
+      for (const status of ["active", "past_due"] as const) {
+        await db
+          .update(talentSubscriptions)
+          .set({ status, providerSubscriptionId: null })
+          .where(eq(talentSubscriptions.profileId, none));
+        expect((await cancel(none)).status).toBe(409);
+      }
+
+      expect(cancellations).toEqual([]);
+    });
+
+    it("cancels a past-due Carreira Pro", async () => {
+      const profileId = await profile("2020-01-01");
+
+      await subscribed(profileId, "past_due", "2099-01-01");
+
+      expect((await cancel(profileId)).status).toBe(200);
+      expect(cancellations).toEqual(["subs_pro"]);
+      expect((await subscription(profileId)).status).toBe("canceled");
+    });
+
+    it("marks only the subscription it canceled", async () => {
+      const profileId = await profile("2020-01-01");
+
+      await subscribed(profileId, "active", "2099-01-01");
+      await repos.careerPlan.markCanceled(profileId, "subs_replaced", new Date());
+
+      expect((await subscription(profileId)).status).toBe("active");
+
+      await repos.careerPlan.markCanceled(profileId, "subs_pro", new Date());
+
+      expect((await subscription(profileId)).status).toBe("canceled");
+    });
+
+    it("exposes whether the plan can be canceled", async () => {
+      const profileId = await profile("2020-01-01");
+
+      await subscribed(profileId, "past_due", "2099-01-01");
+
+      expect(await (await get(profileId)).json()).toMatchObject({
+        individual: { status: "past_due", cancelable: true },
+      });
+
       await db
         .update(talentSubscriptions)
-        .set({ status: "active", providerSubscriptionId: null })
-        .where(eq(talentSubscriptions.profileId, none));
-      expect((await cancel(none)).status).toBe(409);
-      expect(cancellations).toEqual([]);
+        .set({ status: "canceled" })
+        .where(eq(talentSubscriptions.profileId, profileId));
+
+      expect(await (await get(profileId)).json()).toMatchObject({
+        individual: { status: "canceled", cancelable: false },
+      });
     });
 
     it("answers 502 and changes nothing when AbacatePay fails", async () => {

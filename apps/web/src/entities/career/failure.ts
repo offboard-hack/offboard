@@ -44,11 +44,18 @@ const reasons = new Map([
   ["Nothing to check", "Esta candidatura não precisa mais de confirmação."],
 ]);
 
+const canceledUntil = /^Carreira Pro canceled until (\d{4})-(\d{2})-(\d{2})$/;
+
 export function careerFailure<Failure>(status: number, failure: Failure) {
   const parsed = failureBody.safeParse(failure);
   const reason = parsed.success ? reasons.get(parsed.data.value.error) : undefined;
 
   if (reason) return reason;
+
+  const until = parsed.success ? canceledUntil.exec(parsed.data.value.error) : null;
+
+  if (until)
+    return `Seu Carreira Pro cancelado ainda vale até ${until[3]}/${until[2]}/${until[1]}.`;
 
   if (status === 402) return "Seu acesso à carreira terminou.";
 
