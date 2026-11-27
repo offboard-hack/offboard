@@ -110,7 +110,7 @@ it("subscribes, delivers the signed payment event and reads the activated subscr
 
   expect(await subscribeCompany(ctx, admin, "gold")).toBe("active");
   expect(calls).toEqual([
-    "POST /billing/subscribe",
+    "POST /billing/subscription",
     "GET /billing/subscription",
     "POST /billing/webhook",
     "GET /billing/subscription",

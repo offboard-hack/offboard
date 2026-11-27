@@ -222,7 +222,7 @@ export async function subscribeCompany(ctx: Context, admin: Admin, planSlug: str
 
   const checkout = parseBody(
     expectStatus(
-      await ctx.http("POST", "/billing/subscribe", {
+      await ctx.http("POST", "/billing/subscription", {
         body: { planSlug },
         cookie: admin.session.cookie,
       }),
