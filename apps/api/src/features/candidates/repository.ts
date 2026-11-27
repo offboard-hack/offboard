@@ -1,6 +1,6 @@
 import type { Database } from "@offboard/db/client";
 import { candidateContactRequests, resumes, talentProfiles } from "@offboard/db/schema";
-import { and, asc, cosineDistance, eq, gt, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, cosineDistance, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
 
 export function createCandidatesRepository(db: Database) {
   async function nearest(embedding: number[], limit: number) {
@@ -76,7 +76,11 @@ export function createCandidatesRepository(db: Database) {
       .where(eq(candidateContactRequests.id, id));
   }
 
-  return { nearest, contactTarget, requestContact, claimContact, releaseContact };
+  async function pruneContacts(before: Date) {
+    await db.delete(candidateContactRequests).where(lt(candidateContactRequests.createdAt, before));
+  }
+
+  return { nearest, contactTarget, requestContact, claimContact, releaseContact, pruneContacts };
 }
 
 export type CandidatesRepository = ReturnType<typeof createCandidatesRepository>;

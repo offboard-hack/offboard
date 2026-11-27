@@ -85,6 +85,9 @@ const embedJobsLimit = 100;
 const embedBatch = 20;
 const embedSubject = "jobs";
 const profileBackfill = 100;
+const dayMs = 24 * 60 * 60 * 1000;
+const contactRetentionMs = 30 * dayMs;
+const usageRetentionMs = 7 * dayMs;
 const aiApplyBudgetMs = 210_000;
 
 type AppOptions = {
@@ -515,6 +518,15 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       .queuedIds()
       .then((ids) => repos.background.enqueueMany("ai_apply", ids))
       .catch(logFailure("AI application scheduling failed"));
+
+    const now = Date.now();
+
+    await repos.candidates
+      .pruneContacts(new Date(now - contactRetentionMs))
+      .catch(logFailure("contact request pruning failed"));
+    await repos.searchQuota
+      .prune(new Date(now - usageRetentionMs).toISOString().slice(0, 10))
+      .catch(logFailure("search usage pruning failed"));
 
     if (options.embedProfile) {
       await syncDemoEmbeddings(repos.demo, options.embedProfile).catch(

@@ -1,6 +1,6 @@
 import type { Database } from "@offboard/db/client";
 import { demoSearchUsage } from "@offboard/db/schema";
-import { sql } from "drizzle-orm";
+import { lt, sql } from "drizzle-orm";
 import { textHash } from "./embed.js";
 
 export function createSearchQuota(db: Database) {
@@ -39,7 +39,11 @@ export function createSearchQuota(db: Database) {
     );
   }
 
-  return { take, takeForVisitor };
+  async function prune(beforeDay: string) {
+    await db.delete(demoSearchUsage).where(lt(demoSearchUsage.day, beforeDay));
+  }
+
+  return { take, takeForVisitor, prune };
 }
 
 export type SearchQuota = ReturnType<typeof createSearchQuota>;

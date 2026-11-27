@@ -4943,6 +4943,42 @@ describe.skipIf(!url)("api", () => {
         expect(await capped.json()).toEqual({ error: "Too many messages" });
       });
 
+      it("forgets contact requests after 30 days and search counters after a week", async () => {
+        const app = resumesApp();
+        const resume = await (await upload(app.instance, await profile())).json();
+        const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        const dayOf = (days: number) => daysAgo(days).toISOString().slice(0, 10);
+
+        const request = (tokenHash: string, createdAt: Date) => ({
+          resumeId: resume.id,
+          name: "Rita",
+          email: "rita@empresa.example",
+          message: "Temos uma vaga que combina com você.",
+          tokenHash,
+          createdAt,
+        });
+
+        await db.delete(demoSearchUsage);
+        await db
+          .insert(candidateContactRequests)
+          .values([request("old", daysAgo(31)), request("recent", daysAgo(29))]);
+        await db.insert(demoSearchUsage).values([
+          { bucket: "contact:all", day: dayOf(8), searches: 1 },
+          { bucket: "contact:all", day: dayOf(6), searches: 1 },
+        ]);
+
+        await app.settle();
+
+        const kept = await db
+          .select({ tokenHash: candidateContactRequests.tokenHash })
+          .from(candidateContactRequests);
+
+        const days = await db.select({ day: demoSearchUsage.day }).from(demoSearchUsage);
+
+        expect(kept).toEqual([{ tokenHash: "recent" }]);
+        expect(days).toEqual([{ day: dayOf(6) }]);
+      });
+
       it("backfills profiles without a search embedding and skips what it cannot embed", async () => {
         const embedder = fakeEmbed();
         const app = resumesApp({ embedProfile: embedder.embed });
