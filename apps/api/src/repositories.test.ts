@@ -988,6 +988,7 @@ describe.skipIf(!url)("automation rules", () => {
     await repos.automationRules.createRule(orgA, rule);
 
     const rules = await repos.automationRules.getAllCronRules();
+    expect(rules.every(({ cronSchedule }) => cronSchedule === "0 9 * * *")).toBe(true);
     expect(rules.map(({ id, orgId }) => [id, orgId]).sort()).toEqual(
       [
         [a.id, orgA],

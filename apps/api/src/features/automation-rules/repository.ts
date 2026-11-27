@@ -66,13 +66,7 @@ export function createAutomationRulesRepository(db: Database) {
 
   async function getEnabledRulesByTrigger(orgId: string, trigger: RuleTrigger) {
     return db
-      .select({
-        id: automationRules.id,
-        name: automationRules.name,
-        trigger: automationRules.trigger,
-        conditions: automationRules.conditions,
-        actions: automationRules.actions,
-      })
+      .select(ruleColumns)
       .from(automationRules)
       .where(
         and(
@@ -86,14 +80,7 @@ export function createAutomationRulesRepository(db: Database) {
 
   async function getAllCronRules() {
     return db
-      .select({
-        id: automationRules.id,
-        orgId: automationRules.orgId,
-        name: automationRules.name,
-        trigger: automationRules.trigger,
-        conditions: automationRules.conditions,
-        actions: automationRules.actions,
-      })
+      .select({ ...ruleColumns, orgId: automationRules.orgId })
       .from(automationRules)
       .where(and(eq(automationRules.trigger, "schedule.cron"), eq(automationRules.enabled, true)))
       .orderBy(asc(automationRules.createdAt), asc(automationRules.id));
