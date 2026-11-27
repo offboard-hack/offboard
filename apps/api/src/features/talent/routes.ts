@@ -41,13 +41,16 @@ function toTalentAccess(profile: TalentProfile) {
 }
 
 type AiApply = {
-  allowedBy: (profileId: string, now: Date) => Promise<AllowedBy>;
+  allowedBy: (
+    profileId: string,
+    now: Date,
+  ) => Promise<{ allowedBy: AllowedBy; dailyLimit: number }>;
   configured: boolean;
 };
 
 async function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: AiApply) {
-  const allowedBy = await aiApply.allowedBy(profile.id, new Date());
-  const access = aiApplyAccess(profile, allowedBy);
+  const standing = await aiApply.allowedBy(profile.id, new Date());
+  const access = aiApplyAccess(profile, standing.allowedBy);
 
   return {
     id: profile.id,
@@ -57,7 +60,7 @@ async function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: A
     shareOutcomeWithHr: profile.shareOutcomeWithHr,
     searchable: profile.searchableAt !== null,
     aiApply: {
-      eligible: allowedBy !== null,
+      eligible: standing.allowedBy !== null,
       consented: profile.aiApplyConsentAt !== null,
       available: access === "allowed" && aiApply.configured,
     },
