@@ -7,7 +7,7 @@ import { Elysia } from "elysia";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PortalAccess } from "../../shared/portal-auth.js";
-import { parseStaffEmails, staffAccess } from "../../shared/staff-access.js";
+import { staffAccess } from "../../shared/staff-access.js";
 import { createBackofficeRepository } from "./repository.js";
 import { backofficeRoutes } from "./routes.js";
 
@@ -27,17 +27,12 @@ function appFor(access: PortalAccess, db: Database) {
     resolvePrincipal: () => Promise.resolve(access),
   };
 
-  return new Elysia().use(
-    backofficeRoutes(
-      createBackofficeRepository(db),
-      staffAccess(auth, parseStaffEmails("staff@offboard.xyz")),
-    ),
-  );
+  return new Elysia().use(backofficeRoutes(createBackofficeRepository(db), staffAccess(auth)));
 }
 
 describe.skipIf(!url)("backoffice routes", () => {
   const db = createClient(url ?? "");
-  const staff: PortalAccess = { kind: "authenticated", principal: staffPrincipal };
+  const staff: PortalAccess = { kind: "staff", email: staffPrincipal.email };
   let orgId: string;
   let planId: string;
 

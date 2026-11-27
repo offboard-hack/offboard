@@ -10,19 +10,17 @@ export function parseStaffEmails(value: string | undefined) {
   );
 }
 
-export function staffAccess(auth: PortalAuth, staffEmails: ReadonlySet<string>) {
+export function staffAccess(auth: PortalAuth) {
   return new Elysia({ name: "offboard:staff-access" }).macro({
     staff: {
       async resolve({ request, set, status }) {
         set.headers["cache-control"] = "no-store";
+
         const access = await auth.resolvePrincipal(request.headers);
 
         if (access.kind === "anonymous") return status(401, { error: "Unauthorized" });
 
-        if (access.kind !== "authenticated") return status(403, { error: "Forbidden" });
-
-        if (!staffEmails.has(access.principal.email.toLowerCase()))
-          return status(403, { error: "Forbidden" });
+        if (access.kind !== "staff") return status(403, { error: "Forbidden" });
 
         return {};
       },

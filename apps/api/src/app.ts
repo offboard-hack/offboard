@@ -102,7 +102,6 @@ type AppOptions = {
   runInBackground?: (task: () => Promise<void>) => void;
   publicPageOrigin?: string;
   browserbase?: { apiKey: string; projectId: string };
-  backofficeStaffEmails?: ReadonlySet<string>;
 };
 
 function ownResumePdf(name: string, content: ResumeContent) {
@@ -659,12 +658,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     .use(
       billingRoutes(repos.billing, access, abacatepay, webOrigin, options.abacatepayWebhookSecret),
     )
-    .use(
-      backofficeRoutes(
-        repos.backoffice,
-        staffAccess(options.auth, options.backofficeStaffEmails ?? new Set()),
-      ),
-    );
+    .use(backofficeRoutes(repos.backoffice, staffAccess(options.auth)));
 }
 
 export type App = ReturnType<typeof createApp>;
