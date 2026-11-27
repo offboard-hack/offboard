@@ -19,7 +19,7 @@ export function App() {
     queryFn: async () => {
       const { data, error, status } = await api.api.backoffice.summary.get();
 
-      if (status === 401) throw new Unauthorized();
+      if (status === 401 || status === 403) throw new Unauthorized();
 
       if (error) throw error;
 
