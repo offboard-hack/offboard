@@ -1,0 +1,3 @@
+ALTER TABLE "auth_session" DROP CONSTRAINT "auth_session_one_audience";--> statement-breakpoint
+ALTER TABLE "auth_session" ADD COLUMN "staff_email" text;--> statement-breakpoint
+ALTER TABLE "auth_session" ADD CONSTRAINT "auth_session_one_audience" CHECK (num_nonnulls("auth_session"."member_id", "auth_session"."employee_case_id", "auth_session"."talent_profile_id", "auth_session"."staff_email") = 1);

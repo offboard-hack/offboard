@@ -162,6 +162,13 @@
       "when": 1795743045512,
       "tag": "0022_add_subscription_pending",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795751957797,
+      "tag": "0023_add_backoffice_staff_session",
+      "breakpoints": true
     }
   ]
 }
