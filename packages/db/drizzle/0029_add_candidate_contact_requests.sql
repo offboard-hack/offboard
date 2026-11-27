@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS "candidate_contact_requests" (
+CREATE TABLE "candidate_contact_requests" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"resume_id" uuid NOT NULL,
 	"name" varchar(120) NOT NULL,
@@ -11,5 +11,4 @@ CREATE TABLE IF NOT EXISTS "candidate_contact_requests" (
 	CONSTRAINT "candidate_contact_requests_token_hash_unique" UNIQUE("token_hash")
 );
 --> statement-breakpoint
-ALTER TABLE "candidate_contact_requests" DROP CONSTRAINT IF EXISTS "candidate_contact_requests_resume_id_resumes_id_fk";--> statement-breakpoint
 ALTER TABLE "candidate_contact_requests" ADD CONSTRAINT "candidate_contact_requests_resume_id_resumes_id_fk" FOREIGN KEY ("resume_id") REFERENCES "public"."resumes"("id") ON DELETE cascade ON UPDATE no action;

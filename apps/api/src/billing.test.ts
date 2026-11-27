@@ -18,13 +18,16 @@ import {
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
+import { Elysia } from "elysia";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.ts";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
+import { careerPlanRoutes } from "./features/career-plan/routes.js";
 import { createRepositories } from "./repositories.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 import { saoPauloDate } from "./shared/sao-paulo-date.js";
+import { talentAccess } from "./shared/talent-access.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const webOrigin = "http://localhost:5173";
@@ -798,7 +801,7 @@ describe.skipIf(!url)("billing", () => {
       });
       expect(issued).toEqual([
         {
-          externalId: created.id,
+          externalId: expect.stringMatching(new RegExp(`^${created.id}:[a-z0-9]+$`)),
           planSlug: "silver",
           returnUrl: `${webOrigin}/planos-e-gastos?aba=plano`,
           completionUrl: `${webOrigin}/planos-e-gastos?aba=plano&plano=ok`,
@@ -948,7 +951,7 @@ describe.skipIf(!url)("billing", () => {
       expect(res.status).toBe(200);
       expect(own).toMatchObject({ status: "active", planId: await planId("gold") });
       expect(other).toMatchObject({ status: "pending", planId: await planId("silver") });
-      expect(issued[0].externalId).toBe(other.id);
+      expect(issued[0].externalId).toMatch(new RegExp(`^${other.id}:[a-z0-9]+$`));
 
       await db.delete(subscriptions).where(eq(subscriptions.orgId, otherOrgId));
     });
@@ -1038,6 +1041,96 @@ describe.skipIf(!url)("billing", () => {
       expect(first.status).toBe(200);
       expect((await second.json()).url).toBe("https://pay.example/bill_1");
       expect(issued).toHaveLength(1);
+    });
+
+    it("gives every new checkout of a past due subscription its own external id", async () => {
+      const [row] = await db
+        .insert(subscriptions)
+        .values({
+          orgId: defaultOrgId,
+          planId: await planId("gold"),
+          status: "past_due",
+          currentPeriodStart: "2026-11-01",
+          currentPeriodEnd: "2026-12-01",
+        })
+        .returning();
+
+      await pay();
+      await ageCheckout();
+
+      const second = await pay();
+
+      expect(second.status).toBe(200);
+      expect(issued).toHaveLength(2);
+      expect(issued[0].externalId).toMatch(new RegExp(`^${row.id}:[a-z0-9]+$`));
+      expect(issued[1].externalId).toMatch(new RegExp(`^${row.id}:[a-z0-9]+$`));
+      expect(issued[1].externalId).not.toBe(issued[0].externalId);
+
+      const [stored] = await subscriptionsOf(defaultOrgId);
+
+      expect(stored.checkoutId).toBe("bill_2");
+
+      await webhook("subscription.completed", {
+        subscription: { id: "subs_new", amount: 24900 },
+        checkout: { id: "bill_2", externalId: issued[1].externalId },
+        payment: { id: "pay_new" },
+      });
+
+      expect((await subscriptionsOf(defaultOrgId))[0]).toMatchObject({
+        status: "active",
+        providerSubscriptionId: "subs_new",
+      });
+    });
+
+    it("keeps routing a legacy checkout reference to its subscription", async () => {
+      await subscribe("silver");
+
+      const [row] = await subscriptionsOf(defaultOrgId);
+
+      expect((await completion(row, "subs_legacy")).status).toBe(200);
+      expect((await subscriptionsOf(defaultOrgId))[0]).toMatchObject({
+        status: "active",
+        providerSubscriptionId: "subs_legacy",
+      });
+    });
+
+    it("never lets an attempt suffix redirect a company event", async () => {
+      await subscribe("silver");
+
+      const [row] = await subscriptionsOf(defaultOrgId);
+      const logged = vi.spyOn(console, "error");
+
+      try {
+        const forged = [
+          `${row.id}:${row.id}`,
+          `${row.id}:a:b`,
+          `${row.id}:`,
+          `${missingId}:${row.id}`,
+          `${missingId}:abc`,
+        ];
+
+        for (const externalId of forged) {
+          await webhook("subscription.completed", {
+            subscription: { id: "subs_forged", amount: 24900 },
+            checkout: { id: row.checkoutId ?? "", externalId },
+            payment: { id: "pay_forged" },
+          });
+        }
+
+        await webhook("subscription.completed", {
+          subscription: { id: "subs_forged", amount: 24900 },
+          checkout: { id: "bill_other", externalId: `${row.id}:abc` },
+          payment: { id: "pay_forged" },
+        });
+
+        expect((await subscriptionsOf(defaultOrgId))[0]).toMatchObject({
+          status: "pending",
+          providerSubscriptionId: null,
+        });
+        expect(await allInvoices()).toEqual([]);
+      } finally {
+        logged.mockRestore();
+      }
     });
 
     it("refuses to pay subscriptions that are active, trialing or canceled", async () => {
@@ -1361,6 +1454,341 @@ describe.skipIf(!url)("billing", () => {
     await talentWebhook("subscription.cancelled", talent);
 
     expect((await talentRow(profileId)).currentPeriodEnd).toBe(monthAfter(monthAfter(today)));
+  });
+
+  describe("Carreira Pro checkout attempts", () => {
+    const talentAuth: PortalAuth = {
+      handler: async () => new Response(null),
+      resolvePrincipal: (headers) =>
+        Promise.resolve({
+          kind: "talent",
+          profile: {
+            id: headers.get("x-test-talent-id") ?? "",
+            name: "Test",
+            email: "t@example.com",
+          },
+        }),
+    };
+
+    const proApp = new Elysia().use(
+      careerPlanRoutes(
+        repos.careerPlan,
+        talentAccess({
+          auth: talentAuth,
+          webOrigin,
+          talent: repos.talent,
+          companyActive: async () => false,
+          individualPlan: repos.careerPlan.individual,
+        }),
+        stubGateway,
+        webOrigin,
+        repos.benefits,
+      ),
+    );
+
+    function proCall(path: string, profileId: string) {
+      return proApp.handle(
+        new Request(`http://localhost/me/plan/${path}`, {
+          method: "POST",
+          headers: { "x-test-talent-id": profileId, origin: webOrigin },
+        }),
+      );
+    }
+
+    function completed(externalId: string, billId: string, providerId: string) {
+      return talentWebhook("subscription.completed", {
+        subscription: { id: providerId, amount: 7900 },
+        checkout: { id: billId, externalId },
+      });
+    }
+
+    beforeEach(() => {
+      issued.length = 0;
+      gatewayFailure = false;
+    });
+
+    it("subscribes again after a cancellation with a new external id", async () => {
+      const profileId = await talentProfile();
+
+      expect((await proCall("checkout", profileId)).status).toBe(200);
+      expect((await completed(issued[0].externalId, "bill_1", "subs_first")).status).toBe(200);
+      expect(await talentRow(profileId)).toMatchObject({
+        status: "active",
+        providerSubscriptionId: "subs_first",
+      });
+
+      expect((await proCall("cancel", profileId)).status).toBe(200);
+      await db
+        .update(talentSubscriptions)
+        .set({ currentPeriodEnd: "2020-01-01" })
+        .where(eq(talentSubscriptions.profileId, profileId));
+
+      expect((await proCall("checkout", profileId)).status).toBe(200);
+      expect(issued).toHaveLength(2);
+      expect(issued[0].externalId).toMatch(new RegExp(`^talent:${profileId}:[a-z0-9]+$`));
+      expect(issued[1].externalId).toMatch(new RegExp(`^talent:${profileId}:[a-z0-9]+$`));
+      expect(issued[1].externalId).not.toBe(issued[0].externalId);
+
+      expect((await completed(issued[1].externalId, "bill_2", "subs_second")).status).toBe(200);
+      expect(await talentRow(profileId)).toEqual({
+        status: "active",
+        providerSubscriptionId: "subs_second",
+        currentPeriodEnd: monthAfter(saoPauloDate(new Date())),
+      });
+    });
+
+    function cancelCalls() {
+      return abacateCalls.filter((entry) => entry.startsWith("/v2/subscriptions/cancel"));
+    }
+
+    function webhookOn(target: typeof app, externalId: string, billId: string, providerId: string) {
+      return target.handle(
+        new Request(`http://localhost/api/billing/webhook?webhookSecret=${webhookSecret}`, {
+          method: "POST",
+          body: JSON.stringify({
+            id: randomUUID(),
+            event: "subscription.completed",
+            data: {
+              subscription: { id: providerId, amount: 7900 },
+              checkout: { id: billId, externalId },
+            },
+          }),
+        }),
+      );
+    }
+
+    async function agedPendingCheckout(profileId: string) {
+      expect((await proCall("checkout", profileId)).status).toBe(200);
+      await db
+        .update(talentSubscriptions)
+        .set({ updatedAt: new Date(Date.now() - 61 * 60_000) })
+        .where(eq(talentSubscriptions.profileId, profileId));
+    }
+
+    async function lapsedActive(profileId: string) {
+      const now = new Date();
+
+      await db.insert(talentSubscriptions).values({
+        profileId,
+        status: "active",
+        providerSubscriptionId: "subs_old",
+        currentPeriodEnd: "2020-01-01",
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    it("cancels the first subscription when a second checkout is paid too", async () => {
+      const profileId = await talentProfile();
+
+      await agedPendingCheckout(profileId);
+      expect((await proCall("checkout", profileId)).status).toBe(200);
+      expect(issued).toHaveLength(2);
+
+      await completed(issued[0].externalId, "bill_1", "subs_A");
+
+      expect(cancelCalls()).toEqual([]);
+
+      await completed(issued[1].externalId, "bill_2", "subs_B");
+
+      expect(await talentRow(profileId)).toMatchObject({
+        status: "active",
+        providerSubscriptionId: "subs_B",
+      });
+      expect(cancelCalls()).toEqual(['/v2/subscriptions/cancel {"id":"subs_A"}']);
+    });
+
+    it("cancels the old subscription when an active Carreira Pro whose period ended re-subscribes", async () => {
+      const profileId = await talentProfile();
+
+      await lapsedActive(profileId);
+      expect((await proCall("checkout", profileId)).status).toBe(200);
+
+      await completed(issued[0].externalId, "bill_1", "subs_new");
+
+      expect(await talentRow(profileId)).toMatchObject({
+        status: "active",
+        providerSubscriptionId: "subs_new",
+      });
+      expect(cancelCalls()).toEqual(['/v2/subscriptions/cancel {"id":"subs_old"}']);
+    });
+
+    it("does not cancel anything on a duplicate or repeated completion", async () => {
+      const profileId = await talentProfile();
+
+      await lapsedActive(profileId);
+      await proCall("checkout", profileId);
+
+      const body = {
+        subscription: { id: "subs_new", amount: 7900 },
+        checkout: { id: "bill_1", externalId: issued[0].externalId },
+      };
+
+      const sameDelivery = "00000000-0000-4000-8000-0000000000d1";
+
+      await talentWebhook("subscription.completed", body, {}, sameDelivery);
+      await talentWebhook("subscription.completed", body, {}, sameDelivery);
+      await talentWebhook("subscription.completed", body);
+
+      expect(cancelCalls()).toEqual(['/v2/subscriptions/cancel {"id":"subs_old"}']);
+      expect(await talentRow(profileId)).toMatchObject({ providerSubscriptionId: "subs_new" });
+    });
+
+    it("logs both ids when billing is not configured or the cancel fails", async () => {
+      const logged = vi.spyOn(console, "error");
+      const options = { auth, sendEmail: () => Promise.resolve() };
+
+      const unconfiguredApp = createApp(webOrigin, repos, {
+        ...options,
+        abacatepayWebhookSecret: webhookSecret,
+      });
+
+      const failingApp = createApp(webOrigin, repos, {
+        ...options,
+        abacatepay: {
+          ...stubGateway,
+          cancelSubscription: async () => {
+            throw new Error("gateway down");
+          },
+        },
+        abacatepayWebhookSecret: webhookSecret,
+      });
+
+      try {
+        const cases = [
+          { target: unconfiguredApp, providerId: "subs_n1", index: 0 },
+          { target: failingApp, providerId: "subs_n2", index: 1 },
+        ];
+
+        for (const { target, providerId, index } of cases) {
+          const profileId = await pendingTalent(index);
+
+          await db
+            .update(talentSubscriptions)
+            .set({ providerSubscriptionId: providerId })
+            .where(eq(talentSubscriptions.profileId, profileId));
+
+          const response = await webhookOn(target, `talent:${profileId}`, "bill_1", "subs_kept");
+
+          expect(response.status).toBe(200);
+          expect(await talentRow(profileId)).toMatchObject({ providerSubscriptionId: "subs_kept" });
+        }
+
+        expect(logged).toHaveBeenCalledWith("superseded subscription could not be canceled", {
+          superseded: "subs_n1",
+          kept: "subs_kept",
+        });
+        expect(logged).toHaveBeenCalledWith("superseded subscription left active", {
+          superseded: "subs_n2",
+          kept: "subs_kept",
+        });
+        expect(abacateCalls).toEqual([]);
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("logs the subscription id of a malformed Carreira Pro reference", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      try {
+        await completed(`talent:${missingId}:a:b`, "bill_1", "subs_bad");
+
+        expect(logged).toHaveBeenCalledWith("talent webhook ignored", {
+          event: "subscription.completed",
+          subscriptionId: "subs_bad",
+        });
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    describe("company subscriptions", () => {
+      async function bind(patch: Partial<typeof subscriptions.$inferInsert>) {
+        await db.update(subscriptions).set(patch);
+      }
+
+      it("cancels the subscription of a stale company bill that was paid", async () => {
+        await bind({ status: "pending", checkoutId: "bill_live", providerSubscriptionId: null });
+
+        await webhook("subscription.completed", {
+          subscription: { id: "subs_stale", amount: 24900 },
+          checkout: { id: "bill_old", externalId: `${subscriptionId}:abc` },
+        });
+
+        expect(cancelCalls()).toEqual(['/v2/subscriptions/cancel {"id":"subs_stale"}']);
+        expect((await currentSubscription()).status).toBe("pending");
+      });
+
+      it("leaves a stale renewal alone and never cancels the live subscription", async () => {
+        await bind({ status: "pending", checkoutId: "bill_live", providerSubscriptionId: null });
+        await webhook("subscription.renewed", {
+          subscription: { id: "subs_stale", amount: 24900 },
+          checkout: { id: "bill_old", externalId: subscriptionId },
+        });
+
+        await bind({ status: "active", checkoutId: "bill_a", providerSubscriptionId: "subs_live" });
+        await webhook("subscription.completed", {
+          subscription: { id: "subs_live", amount: 24900 },
+          checkout: { id: "bill_b", externalId: subscriptionId },
+        });
+
+        expect(cancelCalls()).toEqual([]);
+      });
+
+      it("cancels the previous subscription when a company is rebound to a new one", async () => {
+        await bind({
+          status: "past_due",
+          checkoutId: "bill_2",
+          providerSubscriptionId: "subs_old",
+        });
+
+        await webhook("subscription.completed", {
+          subscription: { id: "subs_new", amount: 24900 },
+          checkout: { id: "bill_2", externalId: `${subscriptionId}:abc` },
+          payment: { id: "pay_rebind" },
+        });
+
+        expect(await currentSubscription()).toMatchObject({
+          status: "active",
+          providerSubscriptionId: "subs_new",
+        });
+        expect(cancelCalls()).toEqual(['/v2/subscriptions/cancel {"id":"subs_old"}']);
+      });
+    });
+
+    it("never lets an attempt suffix redirect a Carreira Pro event", async () => {
+      const victim = await pendingTalent(1);
+      const attacker = await pendingTalent(2);
+      const logged = vi.spyOn(console, "error");
+
+      try {
+        const forged = [
+          `talent:${attacker}:${victim}`,
+          `talent:${attacker}:a:${victim}`,
+          `talent:${attacker}:`,
+          `talent::${victim}`,
+        ];
+
+        for (const externalId of forged) {
+          expect((await completed(externalId, "bill_x", "subs_forged")).status).toBe(200);
+        }
+
+        expect(abacateCalls).toEqual([]);
+        expect(await talentRow(victim)).toMatchObject({ status: "pending" });
+        expect(await talentRow(attacker)).toMatchObject({ status: "pending" });
+
+        await completed(`talent:${attacker}:abc`, "bill_x", "subs_attacker");
+
+        expect(await talentRow(attacker)).toMatchObject({
+          status: "active",
+          providerSubscriptionId: "subs_attacker",
+        });
+        expect(await talentRow(victim)).toMatchObject({ status: "pending" });
+      } finally {
+        logged.mockRestore();
+      }
+    });
   });
 
   it("renews from today when the Carreira Pro period has no end or already ended", async () => {
@@ -1756,6 +2184,17 @@ describe.skipIf(!url)("billing", () => {
       });
     });
 
+    it("routes a co-pay reference carrying an attempt suffix", async () => {
+      await assign();
+
+      await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}:mwz027`);
+
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
+      });
+    });
+
     it("cancels subscription when target is already below effective plan", async () => {
       await assign({ effectivePlanId: platinumId });
       await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
@@ -1773,6 +2212,24 @@ describe.skipIf(!url)("billing", () => {
 
       expect(cancelled).toEqual(["subs_1"]);
       expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_2" });
+    });
+
+    it("ignores co-pay references with a malformed plan, suffix or extra segment", async () => {
+      await assign();
+
+      for (const reference of [
+        `copay:${profileId}:not-a-uuid`,
+        `copay:${profileId}:${platinumId}:`,
+        `copay:${profileId}:${platinumId}:a:b`,
+        `copay:${profileId}`,
+      ]) {
+        await copayWebhook("subscription.completed", reference);
+      }
+
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: goldId,
+        copaySubscriptionId: null,
+      });
     });
 
     it("ignores events for unknown profiles and malformed ids", async () => {

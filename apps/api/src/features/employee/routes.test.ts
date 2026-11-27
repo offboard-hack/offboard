@@ -112,6 +112,7 @@ describe.skipIf(!url)("employee access settings", () => {
 
     expect(await (await call(caseId, defaultOrgId)).json()).toEqual({
       email: null,
+      personalEmail: null,
       plan: emptyEmployeePlan,
       revision: 0,
       careerSponsoredUntil: "2027-02-28",
@@ -121,7 +122,7 @@ describe.skipIf(!url)("employee access settings", () => {
 
   it("saves, keeps and resets the career sponsorship date", async () => {
     const caseId = await createCase(defaultOrgId, "2027-01-10");
-    const base = { email: null, plan: emptyEmployeePlan };
+    const base = { email: null, personalEmail: null, plan: emptyEmployeePlan };
 
     const created = await call(caseId, defaultOrgId, {
       ...base,

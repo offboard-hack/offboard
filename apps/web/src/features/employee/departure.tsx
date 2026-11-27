@@ -9,14 +9,12 @@ import { employeeDate, type EmployeeState } from "@offboard/employee";
 import {
   bookingFormSchema,
   bookingSchema,
-  feedbackFormSchema,
-  responseOptions,
+  feedbackTopics,
   type BookingForm,
-  type FeedbackForm,
 } from "@offboard/employee/departure";
 import { revalidateLogic, useForm } from "@tanstack/react-form";
 import { Link } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import {
   type EmployeeAccount,
   type EmployeeJourney,
@@ -26,6 +24,7 @@ import {
 } from "@/entities/employee";
 import { todayAtWorkspace } from "@/entities/offboarding";
 import { PortalFilter } from "@/shared/ui/select";
+import { ProgressBar } from "@/shared/ui/progress";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
 import { Checkbox } from "@/shared/ui/shadcn/checkbox";
@@ -41,6 +40,13 @@ import {
 import { Label } from "@/shared/ui/shadcn/label";
 import { Textarea } from "@/shared/ui/shadcn/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/shadcn/toggle-group";
+import {
+  feedbackStepIssues,
+  feedbackStepRatings,
+  feedbackSteps,
+  feedbackWizardDefaults,
+  toDepartureFeedback,
+} from "./feedback-wizard";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "./ui";
 
 type DepartureState = Extract<EmployeeState, { key: "departure-v1" }>;
@@ -672,49 +678,92 @@ export function Termination({ journey }: { journey: EmployeeJourney }) {
   );
 }
 
-const assessmentOptions = [1, 2, 3, 4, 5] as const;
-
 const selectedAnswer =
   "aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground";
 
-const ratedQuestions = [
-  { key: "clarity", text: "A comunicação foi clara?" },
-  { key: "respect", text: "Você se sentiu respeitado?" },
-] as const;
+const ratingOptions = [1, 2, 3, 4, 5];
+const scoreOptions = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+function RatingScale({
+  legend,
+  options,
+  low,
+  high,
+  value,
+  error,
+  onChange,
+}: {
+  legend: string;
+  options: number[];
+  low: string;
+  high: string;
+  value: number | null;
+  error: string | undefined;
+  onChange: (value: number | null) => void;
+}) {
+  return (
+    <fieldset className="space-y-2">
+      <legend className="font-semibold">{legend}</legend>
+      <ToggleGroup
+        aria-label={legend}
+        variant="outline"
+        className="max-w-full flex-wrap"
+        value={value === null ? [] : [String(value)]}
+        onValueChange={([next]) =>
+          onChange(options.find((option) => String(option) === next) ?? null)
+        }
+      >
+        {options.map((option) => (
+          <ToggleGroupItem key={option} value={String(option)} className={selectedAnswer}>
+            {option}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+      <p className="flex max-w-md justify-between text-xs text-muted-foreground">
+        <span>{low}</span>
+        <span>{high}</span>
+      </p>
+      <EmployeeError message={error} />
+    </fieldset>
+  );
+}
 
 export function Feedback({ account, state }: { account: EmployeeAccount; state: DepartureState }) {
   const write = useEmployeeWrite(account);
   const submitted = state.value.feedback;
-  const recommendationInput = useRef<HTMLInputElement>(null);
-
-  const initial: FeedbackForm = {
-    anonymous: true,
-    assessment: null,
-    clarity: null,
-    respect: null,
-    comment: "",
-    recommendation: "",
-  };
+  const [step, setStep] = useState(0);
+  const [attempted, setAttempted] = useState(false);
+  const lastStep = feedbackSteps.length - 1;
 
   const form = useForm({
-    defaultValues: initial,
+    defaultValues: feedbackWizardDefaults,
     validationLogic: revalidateLogic({ mode: "submit", modeAfterSubmission: "change" }),
-    validators: { onDynamic: feedbackFormSchema },
-    onSubmitInvalid: ({ formApi }) => {
-      if (formApi.getFieldMeta("recommendation")?.errors.length) {
-        recommendationInput.current?.focus();
-      }
+    validators: {
+      onDynamic: ({ value }) => {
+        const issues = feedbackStepIssues(step, value);
+
+        return Object.keys(issues).length > 0 ? { fields: issues } : undefined;
+      },
     },
+    onSubmitInvalid: () => setAttempted(true),
     onSubmit: ({ value }) => {
-      const parsed = feedbackFormSchema.parse(value);
-      const recommendation = parsed.recommendation === "" ? null : Number(parsed.recommendation);
+      if (step < lastStep) {
+        setAttempted(false);
+        setStep(step + 1);
+
+        return;
+      }
 
       write.mutate({
         ...state,
-        value: { ...state.value, feedback: { ...parsed, recommendation } },
+        value: { ...state.value, feedback: toDepartureFeedback(value) },
       });
     },
   });
+
+  function fieldError(errors: readonly (string | undefined)[]) {
+    return attempted ? errors[0] : undefined;
+  }
 
   return (
     <div className="space-y-5">
@@ -734,118 +783,114 @@ export function Feedback({ account, state }: { account: EmployeeAccount; state: 
               void form.handleSubmit();
             }}
           >
-            <form.Field name="anonymous">
-              {(field) => (
-                <label className="flex min-h-11 items-center gap-2">
-                  <Checkbox checked={field.state.value} onCheckedChange={field.handleChange} />{" "}
-                  Omitir meu nome em relatórios
-                </label>
-              )}
-            </form.Field>
-            <form.Field name="assessment">
-              {(field) => (
-                <fieldset className="space-y-2">
-                  <legend className="font-semibold">Qual nota você dá ao processo?</legend>
-                  <ToggleGroup
-                    aria-label="Nota do processo"
-                    variant="outline"
-                    className="max-w-full flex-wrap"
-                    value={field.state.value === null ? [] : [String(field.state.value)]}
-                    onValueChange={([next]) =>
-                      field.handleChange(
-                        assessmentOptions.find((rating) => String(rating) === next) ?? null,
-                      )
-                    }
-                  >
-                    {assessmentOptions.map((rating) => (
-                      <ToggleGroupItem
-                        key={rating}
-                        value={String(rating)}
-                        className={selectedAnswer}
-                      >
-                        {rating}
-                      </ToggleGroupItem>
-                    ))}
-                  </ToggleGroup>
-                </fieldset>
-              )}
-            </form.Field>
-            {ratedQuestions.map(({ key, text }) => (
+            <div className="grid gap-2">
+              <p className="text-sm text-muted-foreground" aria-live="polite">
+                Etapa {step + 1} de {feedbackSteps.length}
+              </p>
+              <ProgressBar
+                label="Progresso da pesquisa"
+                value={step + 1}
+                max={feedbackSteps.length}
+              />
+              <h3 className="text-lg font-semibold">{feedbackSteps[step].title}</h3>
+              <p className="text-sm text-muted-foreground">{feedbackSteps[step].description}</p>
+            </div>
+            {step === 0 ? (
+              <form.Field name="recommendation">
+                {(field) => (
+                  <RatingScale
+                    legend="De 0 a 10, quanto você recomendaria a empresa?"
+                    options={scoreOptions}
+                    low="Nada provável"
+                    high="Muito provável"
+                    value={field.state.value}
+                    error={fieldError(field.state.meta.errors)}
+                    onChange={field.handleChange}
+                  />
+                )}
+              </form.Field>
+            ) : null}
+            {feedbackStepRatings[step].map(({ key, question }) => (
               <form.Field key={key} name={key}>
                 {(field) => (
-                  <fieldset className="space-y-2">
-                    <legend className="font-semibold">{text}</legend>
-                    <ToggleGroup
-                      aria-label={text}
-                      variant="outline"
-                      className="max-w-full flex-wrap"
-                      value={field.state.value === null ? [] : [field.state.value]}
-                      onValueChange={([next]) =>
-                        field.handleChange(
-                          responseOptions.find((answer) => answer === next) ?? null,
-                        )
-                      }
-                    >
-                      {responseOptions.map((answer) => (
-                        <ToggleGroupItem key={answer} value={answer} className={selectedAnswer}>
-                          {answer}
-                        </ToggleGroupItem>
-                      ))}
-                    </ToggleGroup>
-                  </fieldset>
+                  <RatingScale
+                    legend={question}
+                    options={ratingOptions}
+                    low="Muito ruim"
+                    high="Excelente"
+                    value={field.state.value}
+                    error={fieldError(field.state.meta.errors)}
+                    onChange={field.handleChange}
+                  />
                 )}
               </form.Field>
             ))}
-            <form.Field name="comment">
-              {(field) => (
-                <div className="grid gap-1.5">
-                  <Label htmlFor="employee-comment">O que poderia ser melhor?</Label>
-                  <Textarea
-                    id="employee-comment"
-                    maxLength={800}
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                </div>
-              )}
-            </form.Field>
-            <form.Field name="recommendation">
-              {(field) => (
-                <div className="grid gap-1.5">
-                  <Label htmlFor="employee-recommendation">
-                    De 0 a 10, quanto você recomendaria a empresa?
-                  </Label>
-                  <Input
-                    ref={recommendationInput}
-                    id="employee-recommendation"
-                    className="max-w-28"
-                    inputMode="numeric"
-                    maxLength={2}
-                    aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                    aria-describedby={
-                      field.state.meta.errors.length > 0
-                        ? "employee-recommendation-error"
-                        : undefined
-                    }
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                  <EmployeeError
-                    id="employee-recommendation-error"
-                    message={field.state.meta.errors[0]?.message}
-                  />
-                </div>
-              )}
-            </form.Field>
-            <form.Subscribe selector={(formState) => formState.errorMap.onDynamic}>
-              {(validation) =>
-                validation ? <EmployeeError message={validation.form?.[0]?.message} /> : null
-              }
-            </form.Subscribe>
+            {step === lastStep ? (
+              <>
+                <form.Field name="topics">
+                  {(field) => (
+                    <fieldset className="grid gap-2">
+                      <legend className="font-semibold">O que mais marcou sua saída?</legend>
+                      {feedbackTopics.map((topic) => (
+                        <label key={topic} className="flex min-h-11 items-center gap-2">
+                          <Checkbox
+                            checked={field.state.value.includes(topic)}
+                            onCheckedChange={(checked) =>
+                              field.handleChange(
+                                checked
+                                  ? [...field.state.value, topic]
+                                  : field.state.value.filter((current) => current !== topic),
+                              )
+                            }
+                          />{" "}
+                          {topic}
+                        </label>
+                      ))}
+                    </fieldset>
+                  )}
+                </form.Field>
+                <form.Field name="comment">
+                  {(field) => (
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="employee-comment">O que poderia ser melhor?</Label>
+                      <Textarea
+                        id="employee-comment"
+                        maxLength={800}
+                        value={field.state.value}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      />
+                      <EmployeeError message={fieldError(field.state.meta.errors)} />
+                    </div>
+                  )}
+                </form.Field>
+                <form.Field name="anonymous">
+                  {(field) => (
+                    <label className="flex min-h-11 items-center gap-2">
+                      <Checkbox checked={field.state.value} onCheckedChange={field.handleChange} />{" "}
+                      Omitir meu nome em relatórios
+                    </label>
+                  )}
+                </form.Field>
+              </>
+            ) : null}
             <EmployeeError message={write.error?.message} />
-            <Button type="submit" className="justify-self-start" disabled={write.isPending}>
-              {write.isPending ? "Enviando…" : "Enviar feedback"}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {step > 0 ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setAttempted(false);
+                    setStep(step - 1);
+                  }}
+                >
+                  Voltar
+                </Button>
+              ) : null}
+              <Button type="submit" disabled={write.isPending}>
+                {step < lastStep ? "Próxima" : write.isPending ? "Enviando…" : "Enviar feedback"}
+              </Button>
+            </div>
           </form>
         </EmployeePanel>
       )}

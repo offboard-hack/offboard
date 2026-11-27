@@ -59,7 +59,7 @@ export async function expectManualBenefit(ctx: Context, admin: Admin, name: stri
 }
 
 const equipmentList = z.array(
-  z.object({ id: z.string(), tag: z.string(), person: z.string(), status: z.string() }),
+  z.object({ id: z.string(), tag: z.string(), person: z.string().nullable(), status: z.string() }),
 );
 
 export const inventoryItems = [

@@ -339,7 +339,7 @@ describe.skipIf(!url)("career plan route", () => {
     expect(await response.json()).toEqual({ url: "https://pay.example/bill_pro" });
     expect(checkouts).toEqual([
       {
-        externalId: `talent:${profileId}`,
+        externalId: expect.stringMatching(new RegExp(`^talent:${profileId}:[a-z0-9]+$`)),
         planSlug: "carreira-pro",
         returnUrl: `${webOrigin}/colaborador?tela=carreira`,
         completionUrl: `${webOrigin}/colaborador?tela=carreira&plano=ok`,
@@ -375,6 +375,7 @@ describe.skipIf(!url)("career plan route", () => {
       providerSubscriptionId: null,
     });
     expect(checkouts).toHaveLength(2);
+    expect(checkouts[0].externalId).not.toBe(checkouts[1].externalId);
   });
 
   it("restarts the checkout of a canceled Carreira Pro without a period end", async () => {
@@ -817,7 +818,9 @@ describe.skipIf(!url)("career plan route", () => {
       expect(await response.json()).toEqual({ url: "https://pay.example/bill_pro" });
       expect(checkouts).toEqual([
         {
-          externalId: `copay:${profileId}:${await planId("platinum")}`,
+          externalId: expect.stringMatching(
+            new RegExp(`^copay:${profileId}:${await planId("platinum")}:[a-z0-9]+$`),
+          ),
           planSlug: "prod_gold_platinum",
           returnUrl: `${webOrigin}/colaborador?tela=carreira`,
           completionUrl: `${webOrigin}/colaborador?tela=carreira&copay=ok`,
@@ -836,6 +839,24 @@ describe.skipIf(!url)("career plan route", () => {
       expect((await copay(profileId, target)).status).toBe(200);
       expect((await copay(profileId, target)).status).toBe(409);
       expect(checkouts).toHaveLength(1);
+    });
+
+    it("gives a second co-pay checkout its own external id", async () => {
+      const profileId = await profile("2099-12-31");
+
+      await assigned(profileId);
+      await registered("gold", "platinum");
+
+      const target = await planId("platinum");
+
+      expect((await copay(profileId, target)).status).toBe(200);
+      await db
+        .update(benefitAssignments)
+        .set({ copayCheckoutAt: new Date(Date.now() - 61 * 60_000) })
+        .where(eq(benefitAssignments.profileId, profileId));
+      expect((await copay(profileId, target)).status).toBe(200);
+      expect(checkouts).toHaveLength(2);
+      expect(checkouts[1].externalId).not.toBe(checkouts[0].externalId);
     });
 
     it("answers 404 without a benefit assignment", async () => {

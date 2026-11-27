@@ -30,7 +30,7 @@ import {
   type EquipmentReturn,
 } from "@/entities/equipment-returns";
 import { Button } from "@/shared/ui/shadcn/button";
-import { EquipmentDialog, RemoveEquipmentDialog } from "./equipment-dialog";
+import { AssignEquipmentDialog, EquipmentDialog, RemoveEquipmentDialog } from "./equipment-dialog";
 import { EquipmentImportDialog } from "./equipment-import-dialog";
 import {
   Dialog,
@@ -86,9 +86,9 @@ function CollectionAddress({ caseId }: { caseId: string }) {
   return <p className="wrap-anywhere">{address.data.address ?? "Endereço indisponível."}</p>;
 }
 
-function CollectionDetails({ item }: { item: EquipmentReturn }) {
+function CollectionDetails({ item, caseId }: { item: EquipmentReturn; caseId: string }) {
   const [open, setOpen] = useState(false);
-  const { person, caseId, schedule } = item;
+  const { person, schedule } = item;
 
   if (!schedule) return null;
 
@@ -124,12 +124,11 @@ function CollectionDetails({ item }: { item: EquipmentReturn }) {
   );
 }
 
-function ReceiptAction({ item }: { item: EquipmentReturn }) {
+function ReceiptAction({ item, caseId }: { item: EquipmentReturn; caseId: string }) {
   const client = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: () =>
-      updateEquipmentReceipt({ caseId: item.caseId, code: item.code, received: !item.received }),
+    mutationFn: () => updateEquipmentReceipt({ caseId, code: item.code, received: !item.received }),
     onSuccess: async () => {
       await Promise.all([
         client.invalidateQueries({ queryKey: equipmentReturnsQuery.queryKey }),
@@ -251,26 +250,31 @@ function equipmentColumns(canUpdate: boolean, cases: CaseOption[]) {
     { id: "tag", accessorFn: ({ code }) => code, header: "Patrimônio" },
     {
       id: "person",
-      accessorFn: ({ person }) => person,
+      accessorFn: ({ person, holderEmail }) => person ?? holderEmail ?? "",
       header: "Pessoa",
       enableSorting: true,
       sortFn: "portugueseText",
-      cell: ({ row: { original } }) => (
-        <Link
-          className="underline-offset-4 hover:underline"
-          to="/desligamentos/$caseId"
-          params={{ caseId: original.caseId }}
-        >
-          {original.person}
-        </Link>
-      ),
+      cell: ({ row: { original } }) =>
+        original.caseId ? (
+          <Link
+            className="underline-offset-4 hover:underline"
+            to="/desligamentos/$caseId"
+            params={{ caseId: original.caseId }}
+          >
+            {original.person}
+          </Link>
+        ) : (
+          <span className="text-muted-foreground">
+            {original.holderEmail ? `Aguardando ${original.holderEmail}` : "Em estoque"}
+          </span>
+        ),
     },
     {
       id: "method",
       header: "Como volta",
       cell: ({ row: { original } }) =>
-        original.schedule && original.addressAvailable && canUpdate ? (
-          <CollectionDetails item={original} />
+        original.caseId && original.schedule && original.addressAvailable && canUpdate ? (
+          <CollectionDetails item={original} caseId={original.caseId} />
         ) : (
           methods[original.method]
         ),
@@ -311,7 +315,9 @@ function equipmentColumns(canUpdate: boolean, cases: CaseOption[]) {
             id: "receipt",
             header: "Recebimento",
             cell: ({ row }) =>
-              row.original.status === "inventory" ? null : <ReceiptAction item={row.original} />,
+              row.original.status === "inventory" || !row.original.caseId ? null : (
+                <ReceiptAction item={row.original} caseId={row.original.caseId} />
+              ),
           } satisfies TableColumn<EquipmentReturn>,
           {
             id: "manage",
@@ -321,6 +327,7 @@ function equipmentColumns(canUpdate: boolean, cases: CaseOption[]) {
                 <span className="text-xs text-muted-foreground">Plano da pessoa</span>
               ) : (
                 <div className="flex gap-1">
+                  {!original.caseId && <AssignEquipmentDialog item={original} />}
                   <EquipmentDialog cases={cases} item={original} />
                   <RemoveEquipmentDialog item={original} />
                 </div>
@@ -473,7 +480,7 @@ export function EquipmentPage() {
             status
               ? "Nenhum item neste status."
               : canUpdate
-                ? "Nenhum bem cadastrado. Use “Adicionar bem” para vincular um item a um desligamento."
+                ? "Nenhum bem cadastrado. Use “Adicionar bem” para registrar um item e vinculá-lo a um desligamento."
                 : "O inventário mostra os bens vinculados aos desligamentos."
           }
           scrollLabel="Tabela do inventário"

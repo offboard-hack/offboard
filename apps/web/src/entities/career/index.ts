@@ -33,6 +33,10 @@ export type WorkModel = NonNullable<CareerJob["workModel"]>;
 
 export type CareerApplication = Treaty.Data<Me["applications"]["get"]>[number];
 
+export type CareerInterview = Treaty.Data<Me["interviews"]["get"]>[number];
+
+export type InterviewInput = Parameters<ReturnType<Me["applications"]>["interviews"]["post"]>[0];
+
 export type ApplicationsSummary = Treaty.Data<Me["applications"]["summary"]["get"]>;
 
 export type AiAttempt = Treaty.Data<Me["ai-applications"]["get"]>["items"][number];
@@ -213,6 +217,60 @@ export function careerApplicationsQuery(account: EmployeeAccount) {
         }),
         "Não foi possível abrir suas candidaturas.",
       ),
+  });
+}
+
+export function careerInterviewsQuery(account: EmployeeAccount, from: string, to: string) {
+  return queryOptions({
+    queryKey: [...careerKey(account), "interviews", from, to],
+    staleTime: freshness,
+    retry: retryEmployeeRead,
+    queryFn: async ({ signal }) =>
+      settle(
+        await client().interviews.get({
+          query: { from, to },
+          headers: employeeAccessHeaders(account),
+          fetch: { signal },
+        }),
+        "Não foi possível abrir suas entrevistas.",
+      ),
+  });
+}
+
+export function useAddInterview(account: EmployeeAccount, applicationId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: InterviewInput) =>
+      settle(
+        await client()
+          .applications({ id: applicationId })
+          .interviews.post(input, { headers: employeeAccessHeaders(account) }),
+        "Não foi possível registrar a entrevista. Tente de novo.",
+      ),
+    onSuccess() {
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: [...careerKey(account), "interviews"] }),
+        queryClient.invalidateQueries({ queryKey: careerApplicationsQuery(account).queryKey }),
+      ]);
+    },
+  });
+}
+
+export function useRemoveInterview(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) =>
+      settleEmpty(
+        await client()
+          .interviews({ id })
+          .delete(undefined, { headers: employeeAccessHeaders(account) }),
+        "Não foi possível remover a entrevista. Tente de novo.",
+      ),
+    onSuccess() {
+      return queryClient.invalidateQueries({ queryKey: [...careerKey(account), "interviews"] });
+    },
   });
 }
 

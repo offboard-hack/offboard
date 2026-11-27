@@ -4,7 +4,12 @@ export type ImportedEquipment = ManualEquipment & { person: string };
 
 export type ImportProblem = "unknown-person" | "ambiguous-person" | "tag-in-use" | "repeated-tag";
 
-type CaseMatch = { id: string; name: string; email: string | null };
+type CaseMatch = {
+  id: string;
+  name: string;
+  email: string | null;
+  personalEmail: string | null;
+};
 
 export function personKey(person: string) {
   return person.trim().toLowerCase();
@@ -17,8 +22,10 @@ export function resolveImport(
 ) {
   const byKey = new Map<string, Set<string>>();
 
-  for (const { id, name, email } of cases) {
-    for (const key of [name, email ?? ""].flatMap((value) => personKey(value) || [])) {
+  for (const { id, name, email, personalEmail } of cases) {
+    for (const key of [name, email ?? "", personalEmail ?? ""].flatMap(
+      (value) => personKey(value) || [],
+    )) {
       byKey.set(key, (byKey.get(key) ?? new Set()).add(id));
     }
   }

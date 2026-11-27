@@ -3,7 +3,12 @@ import Briefcase01Icon from "@hugeicons/core-free-icons/Briefcase01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { type AiAttempt, aiAttemptsQuery, careerApplicationsQuery } from "@/entities/career";
+import {
+  type AiAttempt,
+  aiAttemptsQuery,
+  type CareerApplication,
+  careerApplicationsQuery,
+} from "@/entities/career";
 import type { EmployeeAccount } from "@/entities/employee";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
@@ -19,10 +24,12 @@ import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "../ui";
 import { AiApplyDialog } from "./ai-apply";
 import { AttemptBadge, SentCheck } from "./attempt-result";
+import { InterviewDialog } from "./interview-dialog";
 import { applicationStatus, attemptReason, careerDate } from "./labels";
 
 export function CareerApplications({ account }: { account: EmployeeAccount }) {
   const [opened, setOpened] = useState<AiAttempt | null>(null);
+  const [scheduling, setScheduling] = useState<CareerApplication | null>(null);
   const attempts = useQuery(aiAttemptsQuery(account));
   const applications = useQuery(careerApplicationsQuery(account));
 
@@ -98,12 +105,24 @@ export function CareerApplications({ account }: { account: EmployeeAccount }) {
                     <Badge variant="outline">via IA</Badge>
                   ) : null}
                   <Badge variant="secondary">{applicationStatus(application)}</Badge>
+                  {application.status === "closed" ? null : (
+                    <Button size="sm" variant="outline" onClick={() => setScheduling(application)}>
+                      Entrevista marcada
+                    </Button>
+                  )}
                 </ItemActions>
               </Item>
             </li>
           ))}
         </ul>
       </EmployeePanel>
+      {scheduling ? (
+        <InterviewDialog
+          account={account}
+          application={scheduling}
+          close={() => setScheduling(null)}
+        />
+      ) : null}
       {opened ? (
         <AiApplyDialog
           account={account}

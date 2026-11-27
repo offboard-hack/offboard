@@ -623,7 +623,14 @@ export async function submitExitSurvey(ctx: Context, admin: Admin, person: Perso
       body: {
         caseId: person.caseId,
         npsScore: 9,
-        responses: { communication: 5, deadlines: 4, wouldRecommend: true },
+        responses: {
+          assessment: 4,
+          managerSupport: 5,
+          teamRespect: 5,
+          communication: 5,
+          equipmentReturn: 4,
+          documents: 4,
+        },
         topics: ["Respeito na comunicação", "Clareza de prazos"],
       },
     }),
