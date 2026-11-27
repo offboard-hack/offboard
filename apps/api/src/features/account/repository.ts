@@ -379,6 +379,28 @@ export function createAccountRepository(db: Database) {
     return [...files, ...screenshots].map((row) => row.key);
   }
 
+  async function cancelableSubscription(profileId: string) {
+    const [row] = await db
+      .select({ id: sql<string>`${talentSubscriptions.providerSubscriptionId}` })
+      .from(talentSubscriptions)
+      .where(
+        and(
+          eq(talentSubscriptions.profileId, profileId),
+          inArray(talentSubscriptions.status, ["active", "past_due", "pending"]),
+          isNotNull(talentSubscriptions.providerSubscriptionId),
+        ),
+      );
+
+    return row?.id ?? null;
+  }
+
+  async function markSubscriptionCanceled(profileId: string) {
+    await db
+      .update(talentSubscriptions)
+      .set({ status: "canceled", updatedAt: new Date() })
+      .where(eq(talentSubscriptions.profileId, profileId));
+  }
+
   async function deleteProfile(profileId: string) {
     return db.transaction(async (tx) => {
       const [deleted] = await tx
@@ -416,7 +438,7 @@ export function createAccountRepository(db: Database) {
     });
   }
 
-  return { exportData, fileKeys, deleteProfile };
+  return { exportData, fileKeys, cancelableSubscription, markSubscriptionCanceled, deleteProfile };
 }
 
 export type AccountRepository = ReturnType<typeof createAccountRepository>;

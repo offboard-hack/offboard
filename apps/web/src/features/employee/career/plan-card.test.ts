@@ -33,6 +33,7 @@ describe("plan card view", () => {
       aiLine: "Inclui candidatura com IA",
       sponsorLine: "Patrocinado pela empresa até 10/03/2027",
       proLine: null,
+      cancelable: false,
       paymentNote: false,
       statusNote: null,
       upgrade: "hidden",
@@ -97,6 +98,63 @@ describe("plan card view", () => {
         false,
       ).proLine,
     ).toBe("Carreira Pro ativo");
+  });
+
+  it("offers cancellation only while Carreira Pro is active", () => {
+    const withIndividual = (
+      status: "active" | "pending" | "past_due" | "canceled",
+      currentPeriodEnd: string | null,
+    ) => ({
+      ...base,
+      aiApply: { allowedBy: "individual" as const, dailyLimit: 10 },
+      individual: { plan: "carreira-pro" as const, status, currentPeriodEnd },
+    });
+
+    expect(planCardView(withIndividual("active", "2026-12-26"), today, false).cancelable).toBe(
+      true,
+    );
+    expect(planCardView(withIndividual("active", null), today, false).cancelable).toBe(true);
+    expect(planCardView(withIndividual("active", "2026-11-25"), today, false).cancelable).toBe(
+      false,
+    );
+    expect(planCardView(withIndividual("pending", null), today, false).cancelable).toBe(false);
+    expect(planCardView(withIndividual("past_due", null), today, false).cancelable).toBe(false);
+    expect(planCardView(base, today, false).cancelable).toBe(false);
+  });
+
+  it("shows the access end of a canceled Carreira Pro and withholds the upgrade until it passes", () => {
+    const canceled = (end: string | null) => ({
+      ...base,
+      aiApply: {
+        allowedBy: end === "2026-11-25" || end === null ? null : ("individual" as const),
+        dailyLimit: 10,
+      },
+      individual: {
+        plan: "carreira-pro" as const,
+        status: "canceled" as const,
+        currentPeriodEnd: end,
+      },
+    });
+
+    expect(planCardView(canceled("2026-12-26"), today, false)).toMatchObject({
+      proLine: "Carreira Pro cancelado · acesso até 26/12/2026",
+      cancelable: false,
+      upgrade: "hidden",
+    });
+    expect(planCardView(canceled(today), today, false)).toMatchObject({
+      proLine: "Carreira Pro cancelado · acesso até 26/11/2026",
+      upgrade: "hidden",
+    });
+    expect(isProActive(canceled("2026-11-25"), today)).toBe(false);
+    expect(planCardView(canceled("2026-11-25"), today, false)).toMatchObject({
+      proLine: null,
+      cancelable: false,
+      upgrade: "available",
+    });
+    expect(planCardView(canceled(null), today, false)).toMatchObject({
+      proLine: null,
+      upgrade: "available",
+    });
   });
 
   it("hides the upgrade while a checkout is in flight and offers it again once the API allows a retry", () => {

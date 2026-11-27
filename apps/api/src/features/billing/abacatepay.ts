@@ -14,13 +14,22 @@ export function createAbacatePayGateway(
   apiKey: string | undefined,
   base = "https://api.abacatepay.com/v",
 ) {
-  async function createSubscriptionCheckout(params: CreateSubscriptionCheckoutParams) {
+  function client() {
     if (!apiKey) throw new Error("ABACATEPAY_API_KEY is not configured");
 
-    const result = await AbacatePay({
-      secret: apiKey,
-      rest: { base },
-    }).subscriptions.create({
+    return AbacatePay({ secret: apiKey, rest: { base } });
+  }
+
+  async function cancelSubscription(id: string) {
+    const result = await client().subscriptions.cancel(id);
+
+    if (!result.success) {
+      throw new Error(`AbacatePay subscription cancel failed: ${result.error}`);
+    }
+  }
+
+  async function createSubscriptionCheckout(params: CreateSubscriptionCheckoutParams) {
+    const result = await client().subscriptions.create({
       items: [{ id: params.planSlug, quantity: 1 }],
       methods: [PaymentMethod.Pix, PaymentMethod.Card],
       externalId: params.externalId,
@@ -36,7 +45,7 @@ export function createAbacatePayGateway(
     return { id: result.data.id, url: result.data.url } satisfies SubscriptionCheckout;
   }
 
-  return { configured: Boolean(apiKey), createSubscriptionCheckout };
+  return { configured: Boolean(apiKey), createSubscriptionCheckout, cancelSubscription };
 }
 
 export type AbacatePayGateway = ReturnType<typeof createAbacatePayGateway>;

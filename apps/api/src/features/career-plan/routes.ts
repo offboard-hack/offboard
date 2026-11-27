@@ -61,6 +61,7 @@ type CareerCheckout = {
     returnUrl: string;
     completionUrl: string;
   }): Promise<{ url: string }>;
+  cancelSubscription(id: string): Promise<void>;
 };
 
 export function careerPlanRoutes(
@@ -119,6 +120,37 @@ export function careerPlanRoutes(
         talent: "signed-in",
         response: {
           200: t.Object({ url: t.String() }),
+          409: errorResponse,
+          502: errorResponse,
+          503: errorResponse,
+        },
+      },
+    )
+    .post(
+      "/me/plan/cancel",
+      async ({ me, status }) => {
+        if (!gateway.configured) return status(503, { error: "Billing not configured" });
+
+        const subscription = await repos.cancelable(me.id);
+
+        if (!subscription) return status(409, { error: "No active Carreira Pro" });
+
+        try {
+          await gateway.cancelSubscription(subscription.providerSubscriptionId);
+        } catch (cause) {
+          logFailureCode("Carreira Pro cancellation failed")(cause);
+
+          return status(502, { error: "Could not cancel Carreira Pro" });
+        }
+
+        await repos.markCanceled(me.id, new Date());
+
+        return { currentPeriodEnd: subscription.currentPeriodEnd };
+      },
+      {
+        talent: "signed-in",
+        response: {
+          200: t.Object({ currentPeriodEnd: nullableDate }),
           409: errorResponse,
           502: errorResponse,
           503: errorResponse,

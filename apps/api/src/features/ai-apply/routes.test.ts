@@ -432,7 +432,7 @@ describe.skipIf(!url)("ai apply route", () => {
 
       await db
         .update(talentSubscriptions)
-        .set({ status: "canceled" })
+        .set({ status: "canceled", currentPeriodEnd: "2020-01-01" })
         .where(eq(talentSubscriptions.profileId, profileId));
 
       const canceled = await post(profileId, jobId);

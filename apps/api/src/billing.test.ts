@@ -63,11 +63,13 @@ type CheckoutRequest = {
 describe("abacatepay gateway", () => {
   let requestBody = "";
   let requestAuthorization = "";
+  let requestPath = "";
   let responseStatus = 200;
   let responseBody = "";
 
   const server = createServer((req, res) => {
     requestAuthorization = req.headers.authorization ?? "";
+    requestPath = req.url ?? "";
     requestBody = "";
     req.on("data", (chunk) => {
       requestBody += String(chunk);
@@ -138,6 +140,33 @@ describe("abacatepay gateway", () => {
       completionUrl: "http://done",
       retryPolicy: { maxRetry: 3, retryEvery: 1 },
     });
+  });
+
+  it("cancels a subscription by its id", async () => {
+    responseStatus = 200;
+    responseBody = JSON.stringify({
+      success: true,
+      data: { id: "subs_1", status: "CANCELLED" },
+      error: null,
+    });
+
+    await expect(
+      createAbacatePayGateway("secret-key", base).cancelSubscription("subs_1"),
+    ).resolves.toBeUndefined();
+    expect(requestPath).toBe("/v2/subscriptions/cancel");
+    expect(JSON.parse(requestBody)).toEqual({ id: "subs_1" });
+  });
+
+  it("throws when AbacatePay rejects the cancellation or the key is missing", async () => {
+    responseStatus = 400;
+    responseBody = JSON.stringify({ success: false, data: null, error: "unknown" });
+
+    await expect(
+      createAbacatePayGateway("secret-key", base).cancelSubscription("subs_1"),
+    ).rejects.toThrow("AbacatePay subscription cancel failed");
+    await expect(createAbacatePayGateway(undefined).cancelSubscription("subs_1")).rejects.toThrow(
+      "ABACATEPAY_API_KEY is not configured",
+    );
   });
 
   it("throws when AbacatePay rejects the checkout", async () => {
@@ -554,6 +583,7 @@ describe.skipIf(!url)("billing", () => {
 
       return { id: `bill_${issued.length}`, url: `https://pay.example/bill_${issued.length}` };
     },
+    cancelSubscription: async () => undefined,
   };
 
   const stubApp = createApp(webOrigin, repos, {
@@ -1205,9 +1235,17 @@ describe.skipIf(!url)("billing", () => {
 
     await talentWebhook("subscription.cancelled", talent);
 
-    expect((await talentRow(profileId)).status).toBe("canceled");
+    expect(await talentRow(profileId)).toEqual({
+      status: "canceled",
+      providerSubscriptionId: "subs_t",
+      currentPeriodEnd: monthAfter(monthAfter(today)),
+    });
     expect(await currentSubscription()).toEqual(company);
     expect(await allInvoices()).toEqual(before);
+
+    await talentWebhook("subscription.cancelled", talent);
+
+    expect((await talentRow(profileId)).currentPeriodEnd).toBe(monthAfter(monthAfter(today)));
   });
 
   it("renews from today when the Carreira Pro period has no end or already ended", async () => {

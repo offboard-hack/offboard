@@ -8,7 +8,7 @@ import {
   talentProfiles,
   talentSubscriptions,
 } from "@offboard/db/schema";
-import { and, desc, eq, gte, isNotNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { careerPlanOf, checkoutRetryMs } from "../../shared/career-pro.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 
@@ -105,15 +105,52 @@ export function createCareerPlanRepository(db: Database) {
     return row ?? null;
   }
 
+  async function cancelable(profileId: string) {
+    const [row] = await db
+      .select({
+        providerSubscriptionId: sql<string>`${talentSubscriptions.providerSubscriptionId}`,
+        currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
+      })
+      .from(talentSubscriptions)
+      .where(
+        and(
+          eq(talentSubscriptions.profileId, profileId),
+          eq(talentSubscriptions.status, "active"),
+          isNotNull(talentSubscriptions.providerSubscriptionId),
+        ),
+      );
+
+    return row ?? null;
+  }
+
+  async function markCanceled(profileId: string, now: Date) {
+    await db
+      .update(talentSubscriptions)
+      .set({ status: "canceled", updatedAt: now })
+      .where(
+        and(eq(talentSubscriptions.profileId, profileId), eq(talentSubscriptions.status, "active")),
+      );
+  }
+
   async function startCheckout(profileId: string, now: Date) {
     const [row] = await db
       .insert(talentSubscriptions)
       .values({ profileId, status: "pending", createdAt: now, updatedAt: now })
       .onConflictDoUpdate({
         target: talentSubscriptions.profileId,
-        set: { status: "pending", updatedAt: now },
+        set: {
+          status: "pending",
+          updatedAt: now,
+          providerSubscriptionId: sql`case when ${talentSubscriptions.status} = 'canceled' then null else ${talentSubscriptions.providerSubscriptionId} end`,
+        },
         setWhere: or(
-          eq(talentSubscriptions.status, "canceled"),
+          and(
+            eq(talentSubscriptions.status, "canceled"),
+            or(
+              isNull(talentSubscriptions.currentPeriodEnd),
+              lt(talentSubscriptions.currentPeriodEnd, saoPauloDate(now)),
+            ),
+          ),
           and(
             eq(talentSubscriptions.status, "pending"),
             lt(talentSubscriptions.updatedAt, new Date(now.getTime() - checkoutRetryMs)),
@@ -141,7 +178,7 @@ export function createCareerPlanRepository(db: Database) {
       );
   }
 
-  return { plan, allowedBy, individual, startCheckout, releaseCheckout };
+  return { plan, allowedBy, individual, cancelable, markCanceled, startCheckout, releaseCheckout };
 }
 
 export type CareerPlanRepository = ReturnType<typeof createCareerPlanRepository>;

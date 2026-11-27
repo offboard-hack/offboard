@@ -48,11 +48,27 @@ export const checkoutPendingNote =
 export function isProActive(plan: Pick<CareerPlan, "individual">, today: string) {
   const { individual } = plan;
 
+  if (individual === null) return false;
+
+  if (individual.status === "active") {
+    return individual.currentPeriodEnd === null || individual.currentPeriodEnd >= today;
+  }
+
   return (
-    individual?.status === "active" &&
-    (individual.currentPeriodEnd === null || individual.currentPeriodEnd >= today)
+    individual.status === "canceled" &&
+    individual.currentPeriodEnd !== null &&
+    individual.currentPeriodEnd >= today
   );
 }
+
+export const cancelProLabel = "Cancelar Carreira Pro";
+
+export const cancelConfirmPrompt =
+  "Cancelar o Carreira Pro? Você mantém o acesso até o fim do período já pago.";
+
+export const cancelConfirmLabel = "Sim, cancelar";
+
+export const cancelKeepLabel = "Manter";
 
 export function shouldPollPlan(plan: CareerPlan | undefined, today: string) {
   return plan === undefined || !isProActive(plan, today);
@@ -77,9 +93,13 @@ function statusNote(pastDue: boolean, checkoutPending: boolean) {
 function proLabel(individual: CareerPlan["individual"], active: boolean) {
   if (!active || !individual) return null;
 
-  return individual.currentPeriodEnd
-    ? `Carreira Pro ativo · renova em ${planDate(individual.currentPeriodEnd)}`
-    : "Carreira Pro ativo";
+  const end = individual.currentPeriodEnd;
+
+  if (end === null) return "Carreira Pro ativo";
+
+  return individual.status === "canceled"
+    ? `Carreira Pro cancelado · acesso até ${planDate(end)}`
+    : `Carreira Pro ativo · renova em ${planDate(end)}`;
 }
 
 function benefitLine(benefit: CareerPlan["benefit"], proActive: boolean) {
@@ -136,6 +156,7 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
     paymentNote: paid && !proActive,
     statusNote: statusNote(pastDue, checkoutPending && !paid),
     proLine: proLabel(individual, proActive),
+    cancelable: proActive && individual?.status === "active",
     upgrade: upgradeState(wantsUpgrade, upgrade.offered),
     upgradeLabel: `Fazer upgrade · ${planPrice(upgrade.priceCents)}`,
     benefitLine: benefitLine(activeBenefit, proActive),
