@@ -726,6 +726,7 @@ describe.skipIf(!url)("career plan route", () => {
         effectivePlanId: id,
         source: "default",
         validUntil: "2099-12-31",
+        updatedAt: new Date(0),
       });
     }
 

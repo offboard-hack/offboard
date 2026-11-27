@@ -7,6 +7,7 @@ import { getApiClient } from "@/shared/lib/api-client";
 import { Button } from "@/shared/ui/shadcn/button";
 import { Input } from "@/shared/ui/shadcn/input";
 import { Skeleton } from "@/shared/ui/shadcn/skeleton";
+import { ContactDialog } from "./contact-dialog";
 import { examples, initials, period, resultSummary, searchFailure } from "./format";
 
 type Search = ReturnType<typeof getApiClient>["api"]["candidates"]["search"]["get"];
@@ -79,6 +80,7 @@ function CandidateCard({ candidate }: { candidate: Candidate }) {
           ))}
         </ul>
       ) : null}
+      <ContactDialog id={candidate.id} name={candidate.name} />
     </li>
   );
 }

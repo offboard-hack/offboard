@@ -39,7 +39,7 @@ export function createSearchQuota(db: Database) {
     );
   }
 
-  return { takeForVisitor };
+  return { take, takeForVisitor };
 }
 
 export type SearchQuota = ReturnType<typeof createSearchQuota>;

@@ -813,6 +813,7 @@ export const benefitAssignments = pgTable(
     validUntil: date("valid_until").notNull(),
     copaySubscriptionId: varchar("copay_subscription_id", { length: 255 }),
     graceUntil: date("grace_until"),
+    copayCheckoutAt: timestamp("copay_checkout_at"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
