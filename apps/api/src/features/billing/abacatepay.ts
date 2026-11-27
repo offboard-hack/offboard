@@ -43,16 +43,6 @@ export function createAbacatePayGateway(
     if (!result.success) throw new Error(`AbacatePay refund failed: ${result.error}`);
   }
 
-  async function productExternalId(productId: string) {
-    const result = await client({ timeout: cancelTimeoutMs, retry: { max: 0 } }).products.get({
-      id: productId,
-    });
-
-    if (!result.success) throw new Error(`AbacatePay product lookup failed: ${result.error}`);
-
-    return result.data.externalId;
-  }
-
   async function createSubscriptionCheckout(params: CreateSubscriptionCheckoutParams) {
     const result = await client().subscriptions.create({
       items: [{ id: params.planSlug, quantity: 1 }],
@@ -75,7 +65,6 @@ export function createAbacatePayGateway(
     createSubscriptionCheckout,
     cancelSubscription,
     refundCheckout,
-    productExternalId,
   };
 }
 

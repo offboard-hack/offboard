@@ -2,7 +2,6 @@ import { createHmac } from "node:crypto";
 import { z } from "zod";
 import { errorSummary, logFailureCode } from "../../shared/error-summary.js";
 import { matchesSecret } from "../../shared/machine-auth.js";
-import { careerPro } from "../../shared/career-pro.js";
 import { addMonths, saoPauloDate } from "../../shared/sao-paulo-date.js";
 import type { BillingRepository } from "./repository.js";
 
@@ -164,45 +163,71 @@ export type WebhookGateway = {
   configured: boolean;
   cancelSubscription(id: string): Promise<void>;
   refundCheckout(checkoutId: string, reason: string): Promise<void>;
-  productExternalId(productId: string): Promise<string>;
 };
 
-type RefundClaims = Pick<BillingRepository, "claimRefund" | "releaseRefund">;
+type ChargeClaims = Pick<BillingRepository, "claimCharge" | "hasCharge" | "releaseRefund">;
 
-const refundableEvents = new Set(["subscription.completed", "subscription.renewed"]);
+const chargingEvents = new Set(["subscription.completed", "subscription.renewed"]);
 
 const duplicateReason = "Cobrança duplicada cancelada automaticamente";
 
-const planChangeReason = "Troca de plano não suportada cancelada automaticamente";
+function chargeOf(name: string, event: SubscriptionEvent) {
+  const paymentId = event.data.payment?.id;
 
-async function refundChargeOf(
-  repos: RefundClaims,
+  if (paymentId !== undefined || name !== "subscription.completed") return paymentId;
+
+  return event.data.checkout?.id;
+}
+
+async function recordPaid(repos: ChargeClaims, name: string | undefined, event: SubscriptionEvent) {
+  if (name === undefined || !chargingEvents.has(name)) return;
+
+  const chargeId = chargeOf(name, event);
+
+  if (chargeId !== undefined) await repos.claimCharge("paid", chargeId, new Date());
+}
+
+async function refundPaidCharge(
+  repos: ChargeClaims,
   gateway: WebhookGateway,
   name: string | undefined,
   event: SubscriptionEvent,
-  reason: string,
 ) {
+  if (name === undefined || !chargingEvents.has(name)) return;
+
   const subscriptionId = event.data.subscription.id;
   const checkoutId = event.data.checkout?.id;
-  const paymentId = event.data.payment?.id;
+  const chargeId = chargeOf(name, event);
 
-  if (paymentId === undefined && name === "subscription.renewed") {
-    console.error("refund needs manual action", { subscriptionId, checkoutId });
+  if (chargeId === undefined) {
+    if (name === "subscription.renewed") {
+      console.error("refund needs manual action", { subscriptionId, checkoutId });
+    }
 
     return;
   }
 
-  const chargeId = paymentId ?? checkoutId;
+  const marker =
+    name === "subscription.completed" && checkoutId !== chargeId ? checkoutId : undefined;
 
-  if (chargeId === undefined) return;
+  if (await repos.hasCharge("paid", marker === undefined ? [chargeId] : [chargeId, marker])) return;
 
-  if (!(await repos.claimRefund(chargeId, new Date()))) return;
+  if (!(await repos.claimCharge("refund", chargeId, new Date()))) return;
+
+  if (marker !== undefined && !(await repos.claimCharge("refund", marker, new Date()))) {
+    await repos.releaseRefund(chargeId);
+
+    return;
+  }
 
   try {
-    await gateway.refundCheckout(chargeId, reason);
+    await gateway.refundCheckout(chargeId, duplicateReason);
     console.error("charge refunded", { subscriptionId, checkoutId, chargeId });
   } catch (cause) {
     await repos.releaseRefund(chargeId);
+
+    if (marker !== undefined) await repos.releaseRefund(marker);
+
     console.error("refund failed", {
       subscriptionId,
       checkoutId,
@@ -212,42 +237,27 @@ async function refundChargeOf(
   }
 }
 
-async function refundPaidCharge(
-  repos: RefundClaims,
-  gateway: WebhookGateway,
+async function flagUnclaimedPayment(
+  repos: ChargeClaims,
   name: string | undefined,
   event: SubscriptionEvent,
 ) {
-  if (name === undefined || !refundableEvents.has(name)) return;
+  const paymentId = event.data.payment?.id;
 
-  await refundChargeOf(repos, gateway, name, event, duplicateReason);
+  if (name === undefined || !chargingEvents.has(name) || paymentId === undefined) return;
+
+  if (await repos.hasCharge("paid", [paymentId])) return;
+
+  console.error("refund needs manual action", {
+    subscriptionId: event.data.subscription.id,
+    checkoutId: event.data.checkout?.id,
+    paymentId,
+  });
 }
-
-async function changedProduct(gateway: WebhookGateway, event: SubscriptionEvent) {
-  const { productId, status } = event.data;
-
-  if (productId === undefined || status === "CANCELLED") return null;
-
-  try {
-    return { productId, externalId: await gateway.productExternalId(productId) };
-  } catch (cause) {
-    logFailureCode("plan change product lookup failed")(cause);
-
-    return null;
-  }
-}
-
-type ChangedProduct = NonNullable<Awaited<ReturnType<typeof changedProduct>>>;
-
-function isSold(product: ChangedProduct, expected: string) {
-  return product.productId === expected || product.externalId === expected;
-}
-
-const chargingEvents = new Set(["subscription.completed", "subscription.renewed"]);
 
 async function cancelOrphan(
   kind: "talent" | "copay",
-  repos: RefundClaims,
+  repos: ChargeClaims,
   gateway: WebhookGateway,
   name: string | undefined,
   event: SubscriptionEvent,
@@ -269,30 +279,6 @@ async function cancelOrphan(
   await refundPaidCharge(repos, gateway, name, event);
 }
 
-async function applyTalentPlanChange(
-  repos: RefundClaims,
-  gateway: WebhookGateway,
-  event: SubscriptionEvent,
-  talent: TalentTarget,
-) {
-  if (talent.providerSubscriptionId !== event.data.subscription.id) return;
-
-  const product = await changedProduct(gateway, event);
-
-  if (!product || isSold(product, careerPro.slug)) return;
-
-  console.error("talent plan change not supported", {
-    profileId: talent.profileId,
-    subscriptionId: event.data.subscription.id,
-    productId: product.productId,
-  });
-
-  if (!gateway.configured) return;
-
-  await gateway.cancelSubscription(event.data.subscription.id);
-  await refundChargeOf(repos, gateway, "subscription.plan_changed", event, planChangeReason);
-}
-
 async function applyTalentEvent(
   repos: BillingRepository,
   gateway: WebhookGateway,
@@ -309,10 +295,6 @@ async function applyTalentEvent(
     return;
   }
 
-  if (name === "subscription.plan_changed") {
-    return applyTalentPlanChange(repos, gateway, event, talent);
-  }
-
   const patch = talentPatch(name, event, talent);
 
   if (!patch) return;
@@ -324,7 +306,11 @@ async function applyTalentEvent(
     new Date(),
   );
 
-  if (applied && name === "subscription.completed" && talent.providerSubscriptionId !== null) {
+  if (!applied) return;
+
+  await recordPaid(repos, name, event);
+
+  if (name === "subscription.completed" && talent.providerSubscriptionId !== null) {
     await cancelSuperseded(gateway, talent.providerSubscriptionId, event.data.subscription.id);
   }
 }
@@ -363,6 +349,10 @@ function isStaleCompanyEvent(name: string, event: SubscriptionEvent, subscriptio
   );
 }
 
+function billingIdOf(event: SubscriptionEvent) {
+  return event.data.payment?.id ?? event.id ?? event.data.subscription.id;
+}
+
 async function openInvoice(
   repos: BillingRepository,
   orgId: string,
@@ -394,10 +384,6 @@ export type CopayBenefits = {
     subscriptionId: string,
   ): Promise<(Omit<CopayAssignment, "copaySubscriptionId"> & { profileId: string }) | null>;
   planPriceMap(): Promise<Map<string, number>>;
-  getCopayProduct(
-    fromPlanId: string,
-    toPlanId: string,
-  ): Promise<{ abacatePayProductId: string } | null>;
   activateCopay(
     profileId: string,
     checkoutId: string,
@@ -441,7 +427,7 @@ async function copayTargetOf(benefits: CopayBenefits, providerSubscriptionId: st
 }
 
 async function rejectUnowned(
-  repos: RefundClaims,
+  repos: ChargeClaims,
   gateway: WebhookGateway,
   name: string | undefined,
   event: SubscriptionEvent,
@@ -467,9 +453,13 @@ async function rejectUnowned(
 
   await gateway.cancelSubscription(event.data.subscription.id);
 
-  if (event.data.checkout?.id !== ownedCheckoutId) {
-    await refundPaidCharge(repos, gateway, name, event);
+  if (event.data.checkout?.id === ownedCheckoutId) {
+    await flagUnclaimedPayment(repos, name, event);
+
+    return;
   }
+
+  await refundPaidCharge(repos, gateway, name, event);
 }
 
 function ownedCheckout(
@@ -479,7 +469,7 @@ function ownedCheckout(
 }
 
 async function activateCopay(
-  repos: RefundClaims,
+  repos: ChargeClaims,
   benefits: CopayBenefits,
   gateway: WebhookGateway,
   name: string | undefined,
@@ -535,7 +525,11 @@ async function activateCopay(
     copayPeriodEnd: addMonths(saoPauloDate(new Date()), 1),
   });
 
-  if (activated) return;
+  if (activated) {
+    await recordPaid(repos, name, event);
+
+    return;
+  }
 
   const current = await benefits.findAssignmentByProfile(profileId);
 
@@ -552,40 +546,8 @@ async function activateCopay(
   }
 }
 
-async function applyCopayPlanChange(
-  repos: RefundClaims,
-  benefits: CopayBenefits,
-  gateway: WebhookGateway,
-  event: SubscriptionEvent,
-  target: CopayTarget,
-) {
-  const { profileId, assignment } = target;
-  const subscriptionId = event.data.subscription.id;
-
-  const expected = await benefits.getCopayProduct(
-    assignment.assignedPlanId,
-    assignment.effectivePlanId,
-  );
-
-  const product = await changedProduct(gateway, event);
-
-  if (!expected || !product || isSold(product, expected.abacatePayProductId)) return;
-
-  console.error("copay plan change not supported", {
-    profileId,
-    subscriptionId,
-    productId: product.productId,
-  });
-
-  if (!gateway.configured) return;
-
-  await gateway.cancelSubscription(subscriptionId);
-  await benefits.revertCopay(profileId, subscriptionId);
-  await refundChargeOf(repos, gateway, "subscription.plan_changed", event, planChangeReason);
-}
-
 async function applyCopayEvent(
-  repos: RefundClaims,
+  repos: ChargeClaims,
   benefits: CopayBenefits,
   gateway: WebhookGateway,
   name: string | undefined,
@@ -645,47 +607,15 @@ async function applyCopayEvent(
     }
 
     await benefits.renewCopay(profileId, providerSubscriptionId, addMonths(today, 1));
+    await recordPaid(repos, name, event);
 
     return;
-  }
-
-  if (name === "subscription.plan_changed") {
-    return applyCopayPlanChange(repos, benefits, gateway, event, target);
   }
 
   if (name === "subscription.payment_failed") {
     console.error("copay payment failed", { profileId });
     await benefits.failCopayPayment(profileId, providerSubscriptionId, new Date());
   }
-}
-
-async function applyCompanyPlanChange(
-  repos: BillingRepository,
-  gateway: WebhookGateway,
-  event: SubscriptionEvent,
-  subscription: CompanyTarget & { id: string; orgId: string; planId: string },
-) {
-  if (subscription.providerSubscriptionId !== event.data.subscription.id) return;
-
-  const product = await changedProduct(gateway, event);
-
-  if (!product) return;
-
-  const planId =
-    (await repos.findPlanIdBySlug(product.externalId)) ??
-    (await repos.findPlanIdBySlug(product.productId));
-
-  if (planId === subscription.planId) return;
-
-  console.error("company plan change", {
-    subscriptionId: subscription.id,
-    productId: product.productId,
-    externalId: product.externalId,
-    known: planId !== null,
-  });
-
-  if (planId !== null)
-    await repos.updateSubscriptionPlan(subscription.orgId, subscription.id, planId);
 }
 
 export async function applyWebhookEvent(
@@ -697,6 +627,17 @@ export async function applyWebhookEvent(
 ) {
   const name = event.event ?? event.type;
   const externalId = event.data.checkout?.externalId;
+
+  if (name === "subscription.plan_changed") {
+    console.error("plan change ignored", {
+      subscriptionId: event.data.subscription.id,
+      checkoutId: event.data.checkout?.id,
+      productId: event.data.productId,
+      status: event.data.status,
+    });
+
+    return;
+  }
 
   if (externalId?.startsWith(copayPrefix)) {
     const reference = copayReference(externalId);
@@ -761,14 +702,12 @@ export async function applyWebhookEvent(
         subscription.providerSubscriptionId,
       );
 
-      if (canceled) await refundPaidCharge(repos, gateway, name, event);
+      if (canceled && !(await repos.getInvoiceByBillingId(orgId, billingIdOf(event)))) {
+        await refundPaidCharge(repos, gateway, name, event);
+      }
     }
 
     return;
-  }
-
-  if (name === "subscription.plan_changed") {
-    return applyCompanyPlanChange(repos, gateway, event, subscription);
   }
 
   const amount = event.data.subscription.amount;
@@ -785,7 +724,7 @@ export async function applyWebhookEvent(
   }
 
   if (name === "subscription.completed" || name === "subscription.renewed") {
-    const billingId = event.data.payment?.id ?? event.id ?? event.data.subscription.id;
+    const billingId = billingIdOf(event);
 
     if (await repos.getInvoiceByBillingId(orgId, billingId)) return;
 

@@ -253,27 +253,6 @@ describe("abacatepay gateway", () => {
     ).rejects.toThrow("ABACATEPAY_API_KEY is not configured");
   });
 
-  it("reads the external id of a product", async () => {
-    lookupBody = JSON.stringify({
-      success: true,
-      data: { id: "prod_1", externalId: "carreira-pro" },
-      error: null,
-    });
-
-    await expect(
-      createAbacatePayGateway("secret-key", base).productExternalId("prod_1"),
-    ).resolves.toBe("carreira-pro");
-    expect(requestPath).toContain("/v2/products/get");
-  });
-
-  it("throws when the product lookup fails", async () => {
-    lookupBody = JSON.stringify({ success: false, data: null, error: "Produto não encontrado." });
-
-    await expect(
-      createAbacatePayGateway("secret-key", base).productExternalId("prod_1"),
-    ).rejects.toThrow("AbacatePay product lookup failed: Produto não encontrado.");
-  });
-
   it("throws when the key is missing", async () => {
     await expect(createAbacatePayGateway(undefined).cancelSubscription("subs_1")).rejects.toThrow(
       "ABACATEPAY_API_KEY is not configured",
@@ -800,7 +779,6 @@ describe.skipIf(!url)("billing", () => {
       return { id: `bill_${issued.length}`, url: `https://pay.example/bill_${issued.length}` };
     },
     refundCheckout: () => Promise.resolve(),
-    productExternalId: () => Promise.resolve("prod_x"),
     cancelSubscription: async () => undefined,
   };
 
@@ -1748,7 +1726,6 @@ describe.skipIf(!url)("billing", () => {
         abacatepay: {
           ...stubGateway,
           refundCheckout: () => Promise.resolve(),
-          productExternalId: () => Promise.resolve("prod_x"),
           cancelSubscription: async () => {
             throw new Error("gateway down");
           },
@@ -2212,7 +2189,6 @@ describe.skipIf(!url)("billing", () => {
         },
         createSubscriptionCheckout: () => Promise.resolve({ id: "bill_x", url: "https://x" }),
         refundCheckout: () => Promise.resolve(),
-        productExternalId: () => Promise.resolve("prod_x"),
         cancelSubscription(id: string) {
           cancelled.push(id);
 
@@ -2502,7 +2478,6 @@ describe.skipIf(!url)("billing", () => {
             configured: true,
             cancelSubscription: async (id) => void cancelled.push(id),
             refundCheckout: () => Promise.resolve(),
-            productExternalId: () => Promise.resolve("prod_x"),
           },
           event,
           null,
@@ -2855,7 +2830,6 @@ describe.skipIf(!url)("billing", () => {
         },
         createSubscriptionCheckout: () => Promise.resolve({ id: "bill_x", url: "https://x" }),
         refundCheckout: () => Promise.resolve(),
-        productExternalId: () => Promise.resolve("prod_x"),
         async cancelSubscription(id: string) {
           cancelled.push(id);
         },
@@ -2949,7 +2923,6 @@ describe.skipIf(!url)("billing", () => {
       },
       createSubscriptionCheckout: () => Promise.resolve({ id: "bill_x", url: "https://x" }),
       refundCheckout: () => Promise.resolve(),
-      productExternalId: () => Promise.resolve("prod_x"),
       async cancelSubscription(id: string) {
         if (failing.has(id)) throw new Error("gateway down");
 
@@ -3174,7 +3147,6 @@ describe.skipIf(!url)("billing", () => {
           configured: true,
           createSubscriptionCheckout: () => Promise.resolve({ id: "bill_x", url: "https://x" }),
           refundCheckout: () => Promise.resolve(),
-          productExternalId: () => Promise.resolve("prod_x"),
           async cancelSubscription(id: string) {
             attempts.push(id);
             elapsed += 10_000;
@@ -3414,10 +3386,8 @@ describe.skipIf(!url)("billing", () => {
     };
 
     const duplicateReason = "Cobrança duplicada cancelada automaticamente";
-    const planChangeReason = "Troca de plano não suportada cancelada automaticamente";
     const cancels: string[] = [];
     const refunds: { chargeId: string; reason: string }[] = [];
-    const products = new Map<string, string>();
     let refundFailure = false;
     let configured = true;
     let logged: MockInstance<typeof console.error>;
@@ -3431,13 +3401,6 @@ describe.skipIf(!url)("billing", () => {
         if (refundFailure) throw new Error("refund down");
 
         refunds.push({ chargeId, reason });
-      },
-      productExternalId: async (productId: string) => {
-        const found = products.get(productId);
-
-        if (found === undefined) throw new Error("unknown product");
-
-        return found;
       },
     };
 
@@ -3456,14 +3419,16 @@ describe.skipIf(!url)("billing", () => {
       logged = vi.spyOn(console, "error");
     });
 
-    afterAll(() => {
+    afterAll(async () => {
       logged.mockRestore();
+      await db.delete(benefitAssignments);
+      await db.delete(copayProducts);
+      await db.delete(talentSubscriptions);
     });
 
     beforeEach(async () => {
       cancels.length = 0;
       refunds.length = 0;
-      products.clear();
       refundFailure = false;
       configured = true;
       logged.mockClear();
@@ -3605,84 +3570,69 @@ describe.skipIf(!url)("billing", () => {
         expect(refunds).toEqual([{ chargeId: "pay_old", reason: duplicateReason }]);
       });
 
-      describe("plan_changed", () => {
-        const changed = (
-          productId: string | undefined,
-          subscription = "subs_live",
-          status = "PENDING",
-        ) => ({
-          subscription: { id: subscription, amount: 24900 },
+      it("only logs a plan change", async () => {
+        await bind({
+          status: "active",
+          checkoutId: "bill_1",
+          providerSubscriptionId: "subs_live",
+        });
+
+        const before = await current();
+
+        await deliver("subscription.plan_changed", {
+          subscription: { id: "subs_live", amount: 24900 },
           checkout: { id: "bill_1", externalId: subscriptionId },
-          productId,
-          status,
+          productId: "prod_silver",
+          status: "PENDING",
         });
 
-        beforeEach(async () => {
-          await bind({
-            status: "active",
-            checkoutId: "bill_1",
-            providerSubscriptionId: "subs_live",
-          });
+        expect(await current()).toEqual(before);
+        expect(cancels).toEqual([]);
+        expect(refunds).toEqual([]);
+        expect(logged).toHaveBeenCalledWith("plan change ignored", {
+          subscriptionId: "subs_live",
+          checkoutId: "bill_1",
+          productId: "prod_silver",
+          status: "PENDING",
         });
+      });
 
-        it("moves the subscription to the plan of the new product and logs it", async () => {
-          products.set("prod_silver", "silver");
-          await deliver("subscription.plan_changed", changed("prod_silver"));
+      it("refunds nothing when the old checkout is delivered again after a rebind", async () => {
+        const old = {
+          subscription: { id: "subs_old", amount: 24900 },
+          checkout: { id: "bill_1", externalId: `${subscriptionId}:abc` },
+          payment: { id: "pay_old" },
+        };
 
-          expect((await current()).planId).toBe(await planId("silver"));
-          expect(logCalls("company plan change")).toHaveLength(1);
+        await bind({ status: "pending", checkoutId: "bill_1", providerSubscriptionId: null });
+        await deliver("subscription.completed", old);
+        await bind({ status: "past_due", checkoutId: "bill_2" });
+        await deliver("subscription.completed", {
+          subscription: { id: "subs_new", amount: 24900 },
+          checkout: { id: "bill_2", externalId: `${subscriptionId}:def` },
+          payment: { id: "pay_new" },
         });
+        await deliver("subscription.completed", old);
 
-        it("matches the plan by product id when the external id is not a slug", async () => {
-          products.set("platinum", "ext-1");
-          await deliver("subscription.plan_changed", changed("platinum"));
+        expect(cancels).toEqual(["subs_old", "subs_old"]);
+        expect(refunds).toEqual([]);
+        expect((await current()).providerSubscriptionId).toBe("subs_new");
+      });
 
-          expect((await current()).planId).toBe(await planId("platinum"));
-        });
+      it("refunds a stale charge once when it arrives without and then with a payment", async () => {
+        await bind({ status: "pending", checkoutId: "bill_live", providerSubscriptionId: null });
+        await deliver("subscription.completed", stale());
+        await deliver("subscription.completed", { ...stale(), payment: { id: "pay_old" } });
 
-        it("does nothing when the product is the plan already held", async () => {
-          products.set("prod_gold", "gold");
-          await deliver("subscription.plan_changed", changed("prod_gold"));
+        expect(refunds).toEqual([{ chargeId: "bill_old", reason: duplicateReason }]);
+      });
 
-          expect((await current()).planId).toBe(await planId("gold"));
-          expect(logCalls("company plan change")).toEqual([]);
-        });
+      it("refunds a stale charge once when it arrives with and then without a payment", async () => {
+        await bind({ status: "pending", checkoutId: "bill_live", providerSubscriptionId: null });
+        await deliver("subscription.completed", { ...stale(), payment: { id: "pay_old" } });
+        await deliver("subscription.completed", stale());
 
-        it("logs a product that is none of our plans and keeps the plan", async () => {
-          products.set("prod_x", "mystery");
-          await deliver("subscription.plan_changed", changed("prod_x"));
-
-          expect((await current()).planId).toBe(await planId("gold"));
-          expect(logged).toHaveBeenCalledWith(
-            "company plan change",
-            expect.objectContaining({ known: false, externalId: "mystery" }),
-          );
-        });
-
-        it("logs a failed product lookup and keeps the plan", async () => {
-          await deliver("subscription.plan_changed", changed("prod_unknown"));
-
-          expect((await current()).planId).toBe(await planId("gold"));
-          expect(logCalls("plan change product lookup failed")).toHaveLength(1);
-        });
-
-        it("ignores a subscription the company does not own", async () => {
-          products.set("prod_silver", "silver");
-          await deliver("subscription.plan_changed", changed("prod_silver", "subs_other"));
-
-          expect((await current()).planId).toBe(await planId("gold"));
-        });
-
-        it.each([
-          ["a cancelled change", "prod_silver", "CANCELLED"],
-          ["the applied notice without a product", undefined, "APPLIED"],
-        ])("ignores %s", async (_label, productId, status) => {
-          products.set("prod_silver", "silver");
-          await deliver("subscription.plan_changed", changed(productId, "subs_live", status));
-
-          expect((await current()).planId).toBe(await planId("gold"));
-          expect(logCalls("plan change product lookup failed")).toEqual([]);
-        });
+        expect(refunds).toEqual([{ chargeId: "pay_old", reason: duplicateReason }]);
       });
     });
 
@@ -3760,90 +3710,46 @@ describe.skipIf(!url)("billing", () => {
         expect(refunds).toEqual([]);
       });
 
-      describe("plan_changed", () => {
-        const changed = (
-          productId: string,
-          subscription = "subs_pro",
-          checkout: string | null = "bill_pro",
-        ) => ({ ...event(subscription, checkout), productId, status: "PENDING" });
+      it("only logs a plan change", async () => {
+        await subscribed("subs_pro");
 
-        beforeEach(async () => {
-          await subscribed("subs_pro");
+        const [before] = await db.select().from(talentSubscriptions);
+
+        await deliver("subscription.plan_changed", {
+          ...event("subs_pro"),
+          productId: "prod_other",
+          status: "PENDING",
         });
 
-        it.each([
-          ["its external id", "prod_pro", "carreira-pro"],
-          ["its product id", "carreira-pro", "other"],
-        ])("accepts the product matched by %s", async (_label, productId, externalId) => {
-          products.set(productId, externalId);
-          await deliver("subscription.plan_changed", changed(productId));
+        expect(await db.select().from(talentSubscriptions)).toEqual([before]);
+        expect(cancels).toEqual([]);
+        expect(refunds).toEqual([]);
+        expect(logCalls("plan change ignored")).toHaveLength(1);
+      });
 
-          expect(cancels).toEqual([]);
-          expect(refunds).toEqual([]);
-        });
+      it("refunds nothing when an earned charge is delivered again after the account is deleted", async () => {
+        await subscribed(null);
 
-        it("cancels and refunds a change to another product", async () => {
-          products.set("prod_other", "enterprise");
-          await deliver("subscription.plan_changed", changed("prod_other"));
+        const paid = { ...event("subs_pro"), payment: { id: "pay_pro" } };
 
-          expect(cancels).toEqual(["subs_pro"]);
-          expect(refunds).toEqual([{ chargeId: "bill_pro", reason: planChangeReason }]);
-          expect(logCalls("talent plan change not supported")).toHaveLength(1);
-        });
+        await deliver("subscription.completed", paid);
+        await db.delete(talentSubscriptions);
+        await deliver("subscription.completed", paid);
 
-        it("refunds once when the change is delivered again", async () => {
-          products.set("prod_other", "enterprise");
-          await deliver("subscription.plan_changed", changed("prod_other"));
-          await deliver("subscription.plan_changed", changed("prod_other"));
+        expect(cancels).toEqual(["subs_pro"]);
+        expect(refunds).toEqual([]);
+      });
 
-          expect(refunds).toHaveLength(1);
-        });
+      it("refunds nothing when an earned renewal is delivered again after the account is deleted", async () => {
+        await subscribed("subs_pro");
 
-        it("cancels without a refund when the event carries no checkout", async () => {
-          products.set("prod_other", "enterprise");
-          await deliver("subscription.plan_changed", changed("prod_other", "subs_pro", null));
+        const paid = { ...event("subs_pro"), payment: { id: "pay_renewal" } };
 
-          expect(cancels).toEqual(["subs_pro"]);
-          expect(refunds).toEqual([]);
-        });
+        await deliver("subscription.renewed", paid);
+        await db.delete(talentSubscriptions);
+        await deliver("subscription.renewed", paid);
 
-        it("logs a failed refund and does not throw", async () => {
-          products.set("prod_other", "enterprise");
-          refundFailure = true;
-
-          await expect(
-            deliver("subscription.plan_changed", changed("prod_other")),
-          ).resolves.toBeUndefined();
-
-          expect(logged).toHaveBeenCalledWith(
-            "refund failed",
-            expect.objectContaining({ subscriptionId: "subs_pro", checkoutId: "bill_pro" }),
-          );
-        });
-
-        it("only logs when the gateway is not configured", async () => {
-          configured = false;
-          products.set("prod_other", "enterprise");
-          await deliver("subscription.plan_changed", changed("prod_other"));
-
-          expect(cancels).toEqual([]);
-          expect(refunds).toEqual([]);
-          expect(logCalls("talent plan change not supported")).toHaveLength(1);
-        });
-
-        it("ignores a subscription the profile does not own", async () => {
-          products.set("prod_other", "enterprise");
-          await deliver("subscription.plan_changed", changed("prod_other", "subs_stray"));
-
-          expect(cancels).toEqual([]);
-          expect(refunds).toEqual([]);
-        });
-
-        it("ignores a change whose product cannot be resolved", async () => {
-          await deliver("subscription.plan_changed", changed("prod_unknown"));
-
-          expect(cancels).toEqual([]);
-        });
+        expect(refunds).toEqual([]);
       });
     });
 
@@ -4043,68 +3949,112 @@ describe.skipIf(!url)("billing", () => {
         expect(refunds).toHaveLength(1);
       });
 
-      describe("plan_changed", () => {
-        const changed = (productId: string, subscription = "subs_1") =>
-          event(subscription, "bill_1", { productId, status: "PENDING" });
+      it("only logs a plan change", async () => {
+        await seed({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
 
-        beforeEach(async () => {
-          await seed({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+        const before = await assignment();
+
+        await deliver(
+          "subscription.plan_changed",
+          event("subs_1", "bill_1", { productId: "prod_other", status: "PENDING" }),
+        );
+
+        expect(await assignment()).toEqual(before);
+        expect(cancels).toEqual([]);
+        expect(refunds).toEqual([]);
+        expect(logCalls("plan change ignored")).toHaveLength(1);
+      });
+
+      it("refunds nothing when the original charge is delivered again after a revert", async () => {
+        await seed();
+
+        const original = { ...event("subs_1", "bill_1"), payment: { id: "pay_1" } };
+
+        await deliver("subscription.completed", original);
+        await db.update(benefitAssignments).set({ validUntil: "2020-01-01" });
+        await deliver("subscription.renewed", {
+          ...event("subs_1", "bill_1"),
+          payment: { id: "pay_renewal" },
+        });
+        await deliver("subscription.completed", original);
+
+        expect(cancels).toEqual(["subs_1", "subs_1"]);
+        expect(refunds).toEqual([{ chargeId: "pay_renewal", reason: duplicateReason }]);
+      });
+
+      it("refunds nothing when the original charge is delivered again after a new upgrade", async () => {
+        await seed();
+
+        const original = { ...event("subs_1", "bill_1"), payment: { id: "pay_1" } };
+
+        await deliver("subscription.completed", original);
+        await db.update(benefitAssignments).set({
+          effectivePlanId: goldId,
+          copaySubscriptionId: null,
+          copayCheckoutId: "bill_2",
+          copayCheckoutUrl: "https://pay.example/bill_2",
+          copayCheckoutAt: new Date(),
+        });
+        await deliver("subscription.completed", original);
+
+        expect(cancels).toEqual(["subs_1"]);
+        expect(refunds).toEqual([]);
+      });
+
+      it("refunds nothing when an accepted renewal is delivered again after a revert", async () => {
+        await seed({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+
+        const renewal = { ...event("subs_1", "bill_1"), payment: { id: "pay_renewal" } };
+
+        await deliver("subscription.renewed", renewal);
+        await db.update(benefitAssignments).set({ copaySubscriptionId: null });
+        await deliver("subscription.renewed", renewal);
+
+        expect(cancels).toEqual(["subs_1"]);
+        expect(refunds).toEqual([]);
+      });
+
+      it("logs both ids for manual action when another charge of the owned checkout arrives", async () => {
+        await seed({ effectivePlanId: platinumId, copaySubscriptionId: "subs_2" });
+        await deliver("subscription.completed", {
+          ...event("subs_dup", "bill_1"),
+          payment: { id: "pay_dup" },
         });
 
-        it.each([
-          ["its external id", "prod_z", "prod_1"],
-          ["its product id", "prod_1", "other"],
-        ])("accepts the product matched by %s", async (_label, productId, externalId) => {
-          products.set(productId, externalId);
-          await deliver("subscription.plan_changed", changed(productId));
+        expect(cancels).toEqual(["subs_dup"]);
+        expect(refunds).toEqual([]);
+        expect(logged).toHaveBeenCalledWith("refund needs manual action", {
+          subscriptionId: "subs_dup",
+          checkoutId: "bill_1",
+          paymentId: "pay_dup",
+        });
+      });
 
-          expect(cancels).toEqual([]);
-          expect(refunds).toEqual([]);
+      it("does not flag the owned payment delivered under another subscription", async () => {
+        await seed();
+        await deliver("subscription.completed", {
+          ...event("subs_1", "bill_1"),
+          payment: { id: "pay_1" },
+        });
+        await deliver("subscription.completed", {
+          ...event("subs_dup", "bill_1"),
+          payment: { id: "pay_1" },
         });
 
-        it("cancels, reverts and refunds a change to another product", async () => {
-          products.set("prod_other", "elsewhere");
-          await deliver("subscription.plan_changed", changed("prod_other"));
+        expect(logCalls("refund needs manual action")).toEqual([]);
+        expect(refunds).toEqual([]);
+      });
 
-          expect(cancels).toEqual(["subs_1"]);
-          expect(refunds).toEqual([{ chargeId: "bill_1", reason: planChangeReason }]);
-          expect(await assignment()).toMatchObject({
-            effectivePlanId: goldId,
-            copaySubscriptionId: null,
-          });
-          expect(logCalls("copay plan change not supported")).toHaveLength(1);
+      it("does not flag an owned checkout that carries no payment or charges nothing", async () => {
+        await seed({ effectivePlanId: platinumId, copaySubscriptionId: "subs_2" });
+        await deliver("subscription.trial_started", {
+          ...event("subs_trial", "bill_1"),
+          payment: { id: "pay_trial" },
         });
+        await deliver("subscription.completed", event("subs_dup", "bill_1"));
 
-        it("only logs when the gateway is not configured", async () => {
-          configured = false;
-          products.set("prod_other", "elsewhere");
-          await deliver("subscription.plan_changed", changed("prod_other"));
-
-          expect(cancels).toEqual([]);
-          expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_1" });
-        });
-
-        it("ignores a subscription the co-pay does not own", async () => {
-          products.set("prod_other", "elsewhere");
-          await deliver("subscription.plan_changed", changed("prod_other", "subs_stray"));
-
-          expect(cancels).toEqual([]);
-          expect(refunds).toEqual([]);
-        });
-
-        it("ignores the change when no co-pay product is registered for the pair", async () => {
-          await db.delete(copayProducts);
-          products.set("prod_other", "elsewhere");
-          await deliver("subscription.plan_changed", changed("prod_other"));
-
-          expect(cancels).toEqual([]);
-        });
-
-        it("ignores a change whose product cannot be resolved", async () => {
-          await deliver("subscription.plan_changed", changed("prod_unknown"));
-
-          expect(cancels).toEqual([]);
-        });
+        expect(logCalls("refund needs manual action")).toEqual([]);
+        expect(refunds).toEqual([]);
       });
     });
   });
