@@ -1,0 +1,34 @@
+# Résumé Onboarding Design
+
+Samuel, 2026-11-26: importing a résumé should go through a step-by-step review before the résumé exists, following the "Onboarding: Novo currículo" mockup. He also wants the imported data in pgvector so a natural-language people search can find anyone by languages, programming languages, roles, people management, location or anything else in the résumé.
+
+Decisions he made:
+
+- Options: "Enviar um arquivo" and "Criar do zero". "Importar do LinkedIn" is out because LinkedIn has no API or scraping path.
+- Surface: the web collaborator app (`/colaborador?tela=curriculo`), mobile-width first. The Expo app still runs on demo data.
+- Search is not built here. It will live on the landing page as a demo, and its scope is decided after this work.
+
+## Flow
+
+1. **Seu novo currículo**: how it works (send the file, review the data), then Começar.
+2. **Como quer enviar seu currículo?** (step 1 of 2): send a file (PDF or DOCX, up to 5 MB) or create from scratch.
+3. **Lendo seu currículo…**: the file name and size, with Trocar. One extraction call reads the whole file, so the section checklist fills in all at once when it returns. Continuar unlocks after that.
+4. **O que encontramos no seu currículo** (step 2 of 2): one row per section with a count, opening an editor for that section. "N para conferir" is derived from the content (an experience without a start date or role, for example). It is not an LLM judgement. Criar currículo saves.
+5. **Seu currículo**: the existing résumé screen, with a "Currículo criado" toast. The score and suggestions arrive afterwards, as today.
+
+Nothing is saved before Criar currículo, so replacing a résumé keeps the old one until the new one is confirmed.
+
+## API
+
+- `POST /me/resume/read` takes the file and returns `{ content }` from the existing extraction. It neither stores the file nor saves anything.
+- `POST /me/resume` takes the reviewed `content`, plus the optional original `file`. It validates content like `PATCH /me/resume`, refuses an empty résumé (no headline and no experience), stores the file when one is sent, and replaces the base résumé and its previous file. It then requests scoring and matching, as an upload does.
+- The client sends the file again at confirm, so no object is left behind when someone abandons the review.
+- `POST /me/resume/upload` stays until the web switches over, then goes away.
+
+## Search embedding
+
+- A separate `resumes.profile_embedding vector(1024)` with `profile_embedded_hash`, on the base résumé only.
+- Its text is the whole résumé: headline, summary, every experience with company, role, dates and bullets, education, skills, languages with level, and city. The job-matching embedding stays tuned to titles and skills, so job ranking does not change.
+- A background job `embed_profile` runs after every base change (create, edit, applied suggestion), skips unchanged text by hash, and uses the same Workers AI `@cf/baai/bge-m3` model.
+- Contact email, phone and links are not embedded.
+- Migration 0019 goes to production before merge.

@@ -40,7 +40,7 @@ function contentObject<Id extends TSchema>(id: Id) {
 
 export const resumeContentBody = contentObject(t.Optional(t.String()));
 
-const resumeContent = contentObject(t.String());
+export const resumeContent = contentObject(t.String());
 
 export const resumeResponse = t.Object({
   id: t.String(),

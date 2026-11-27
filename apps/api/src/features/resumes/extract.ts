@@ -103,7 +103,7 @@ export async function extractResume(
   const draft = await generate({ schema: resumeDraftSchema, system, ...request(file) });
   const input = resumeContentInputSchema.parse(clamp(draft));
 
-  if (!draft.isResume || (!input.headline.text && input.experiences.length === 0)) {
+  if (!draft.isResume || isEmptyResume(input)) {
     return "not_a_resume" as const;
   }
 
@@ -112,4 +112,8 @@ export async function extractResume(
   if (content === "duplicate_ids") throw new Error("duplicate node ids");
 
   return content;
+}
+
+export function isEmptyResume(content: { headline: { text: string }; experiences: unknown[] }) {
+  return !content.headline.text.trim() && content.experiences.length === 0;
 }
