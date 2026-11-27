@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { z } from "zod";
+import { logFailureCode } from "../../shared/error-summary.js";
 import { matchesSecret } from "../../shared/machine-auth.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 import type { BillingRepository } from "./repository.js";
@@ -74,6 +75,28 @@ export function checkoutReferenceId(externalId: string, prefix = "") {
   if (!parsed.success || extra.length > 0) return null;
 
   return attempt === undefined || attemptToken.test(attempt) ? parsed.data : null;
+}
+
+async function cancelSuperseded(
+  gateway: SubscriptionCanceler,
+  superseded: string,
+  kept: string | null,
+) {
+  if (superseded === kept) return;
+
+  if (!gateway.configured) {
+    console.error("superseded subscription could not be canceled", { superseded, kept });
+
+    return;
+  }
+
+  try {
+    await gateway.cancelSubscription(superseded);
+    console.error("superseded subscription canceled", { superseded, kept });
+  } catch (cause) {
+    logFailureCode("superseded subscription cancellation failed")(cause);
+    console.error("superseded subscription left active", { superseded, kept });
+  }
 }
 
 type TalentTarget = {
@@ -182,7 +205,16 @@ async function applyTalentEvent(
 
   if (!patch) return;
 
-  await repos.updateTalentSubscription(talent.profileId, patch, event.id ?? deliveryId, new Date());
+  const applied = await repos.updateTalentSubscription(
+    talent.profileId,
+    patch,
+    event.id ?? deliveryId,
+    new Date(),
+  );
+
+  if (applied && name === "subscription.completed" && talent.providerSubscriptionId !== null) {
+    await cancelSuperseded(gateway, talent.providerSubscriptionId, event.data.subscription.id);
+  }
 }
 
 type CompanyTarget = {
@@ -249,19 +281,41 @@ export type CopayBenefits = {
   ): Promise<void>;
 };
 
+function copayReference(externalId: string) {
+  const [profileId, planId, attempt, ...extra] = externalId.slice(copayPrefix.length).split(":");
+  const profile = talentProfileId.safeParse(profileId);
+  const plan = talentProfileId.safeParse(planId);
+
+  if (!profile.success || !plan.success || extra.length > 0) return null;
+
+  if (attempt !== undefined && !attemptToken.test(attempt)) return null;
+
+  return { profileId: profile.data, targetPlanId: plan.data };
+}
+
 async function copayTargetOf(
   benefits: CopayBenefits,
   externalId: string | null | undefined,
   providerSubscriptionId: string,
 ) {
-  const [profileId, targetPlanId] = externalId?.startsWith(copayPrefix)
-    ? externalId.slice(copayPrefix.length).split(":")
-    : [(await benefits.findAssignmentBySubscription(providerSubscriptionId))?.profileId];
+  const reference = externalId?.startsWith(copayPrefix)
+    ? copayReference(externalId)
+    : await copayReferenceOfSubscription(benefits, providerSubscriptionId);
 
-  const parsed = talentProfileId.safeParse(profileId);
-  const assignment = parsed.success ? await benefits.findAssignmentByProfile(parsed.data) : null;
+  if (!reference) return null;
 
-  return assignment && parsed.success ? { profileId: parsed.data, targetPlanId, assignment } : null;
+  const assignment = await benefits.findAssignmentByProfile(reference.profileId);
+
+  return assignment ? { ...reference, assignment } : null;
+}
+
+async function copayReferenceOfSubscription(
+  benefits: CopayBenefits,
+  providerSubscriptionId: string,
+) {
+  const found = await benefits.findAssignmentBySubscription(providerSubscriptionId);
+
+  return found ? { profileId: found.profileId, targetPlanId: undefined } : null;
 }
 
 async function applyCopayEvent(
@@ -352,7 +406,10 @@ export async function applyWebhookEvent(
     const profileId = checkoutReferenceId(externalId, talentPrefix);
 
     if (!profileId) {
-      console.error("talent webhook ignored", { event: name });
+      console.error("talent webhook ignored", {
+        event: name,
+        subscriptionId: event.data.subscription.id,
+      });
 
       return;
     }
@@ -385,6 +442,14 @@ export async function applyWebhookEvent(
   if (isStaleCompanyEvent(name, event, subscription)) {
     console.error("company webhook ignored", { event: name });
 
+    if (name === "subscription.completed") {
+      await cancelSuperseded(
+        gateway,
+        event.data.subscription.id,
+        subscription.providerSubscriptionId,
+      );
+    }
+
     return;
   }
 
@@ -416,6 +481,14 @@ export async function applyWebhookEvent(
       currentPeriodEnd: addOneMonth(today),
       ...(bindsCheckout(name, subscription) && issuedCheckout(event)),
     });
+
+    if (name === "subscription.completed" && subscription.providerSubscriptionId !== null) {
+      await cancelSuperseded(
+        gateway,
+        subscription.providerSubscriptionId,
+        event.data.subscription.id,
+      );
+    }
   }
 
   if (name === "subscription.payment_failed") {

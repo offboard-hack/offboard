@@ -240,7 +240,7 @@ export function careerPlanRoutes(
 
         try {
           const checkout = await gateway.createSubscriptionCheckout({
-            externalId: `copay:${me.id}:${body.targetPlanId}`,
+            externalId: `copay:${me.id}:${body.targetPlanId}:${checkoutAttempt()}`,
             planSlug: product.abacatePayProductId,
             returnUrl: careerScreen,
             completionUrl: `${careerScreen}&copay=ok`,

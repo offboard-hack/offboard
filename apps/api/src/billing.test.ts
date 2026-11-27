@@ -1537,6 +1537,226 @@ describe.skipIf(!url)("billing", () => {
       });
     });
 
+    function cancelCalls() {
+      return abacateCalls.filter((entry) => entry.startsWith("/v2/subscriptions/cancel"));
+    }
+
+    function webhookOn(target: typeof app, externalId: string, billId: string, providerId: string) {
+      return target.handle(
+        new Request(`http://localhost/api/billing/webhook?webhookSecret=${webhookSecret}`, {
+          method: "POST",
+          body: JSON.stringify({
+            id: randomUUID(),
+            event: "subscription.completed",
+            data: {
+              subscription: { id: providerId, amount: 7900 },
+              checkout: { id: billId, externalId },
+            },
+          }),
+        }),
+      );
+    }
+
+    async function agedPendingCheckout(profileId: string) {
+      expect((await proCall("checkout", profileId)).status).toBe(200);
+      await db
+        .update(talentSubscriptions)
+        .set({ updatedAt: new Date(Date.now() - 61 * 60_000) })
+        .where(eq(talentSubscriptions.profileId, profileId));
+    }
+
+    async function lapsedActive(profileId: string) {
+      const now = new Date();
+
+      await db.insert(talentSubscriptions).values({
+        profileId,
+        status: "active",
+        providerSubscriptionId: "subs_old",
+        currentPeriodEnd: "2020-01-01",
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    it("cancels the first subscription when a second checkout is paid too", async () => {
+      const profileId = await talentProfile();
+
+      await agedPendingCheckout(profileId);
+      expect((await proCall("checkout", profileId)).status).toBe(200);
+      expect(issued).toHaveLength(2);
+
+      await completed(issued[0].externalId, "bill_1", "subs_A");
+
+      expect(cancelCalls()).toEqual([]);
+
+      await completed(issued[1].externalId, "bill_2", "subs_B");
+
+      expect(await talentRow(profileId)).toMatchObject({
+        status: "active",
+        providerSubscriptionId: "subs_B",
+      });
+      expect(cancelCalls()).toEqual(['/v2/subscriptions/cancel {"id":"subs_A"}']);
+    });
+
+    it("cancels the old subscription when an active Carreira Pro whose period ended re-subscribes", async () => {
+      const profileId = await talentProfile();
+
+      await lapsedActive(profileId);
+      expect((await proCall("checkout", profileId)).status).toBe(200);
+
+      await completed(issued[0].externalId, "bill_1", "subs_new");
+
+      expect(await talentRow(profileId)).toMatchObject({
+        status: "active",
+        providerSubscriptionId: "subs_new",
+      });
+      expect(cancelCalls()).toEqual(['/v2/subscriptions/cancel {"id":"subs_old"}']);
+    });
+
+    it("does not cancel anything on a duplicate or repeated completion", async () => {
+      const profileId = await talentProfile();
+
+      await lapsedActive(profileId);
+      await proCall("checkout", profileId);
+
+      const body = {
+        subscription: { id: "subs_new", amount: 7900 },
+        checkout: { id: "bill_1", externalId: issued[0].externalId },
+      };
+
+      const sameDelivery = "00000000-0000-4000-8000-0000000000d1";
+
+      await talentWebhook("subscription.completed", body, {}, sameDelivery);
+      await talentWebhook("subscription.completed", body, {}, sameDelivery);
+      await talentWebhook("subscription.completed", body);
+
+      expect(cancelCalls()).toEqual(['/v2/subscriptions/cancel {"id":"subs_old"}']);
+      expect(await talentRow(profileId)).toMatchObject({ providerSubscriptionId: "subs_new" });
+    });
+
+    it("logs both ids when billing is not configured or the cancel fails", async () => {
+      const logged = vi.spyOn(console, "error");
+      const options = { auth, sendEmail: () => Promise.resolve() };
+
+      const unconfiguredApp = createApp(webOrigin, repos, {
+        ...options,
+        abacatepayWebhookSecret: webhookSecret,
+      });
+
+      const failingApp = createApp(webOrigin, repos, {
+        ...options,
+        abacatepay: {
+          ...stubGateway,
+          cancelSubscription: async () => {
+            throw new Error("gateway down");
+          },
+        },
+        abacatepayWebhookSecret: webhookSecret,
+      });
+
+      try {
+        const cases = [
+          { target: unconfiguredApp, providerId: "subs_n1", index: 0 },
+          { target: failingApp, providerId: "subs_n2", index: 1 },
+        ];
+
+        for (const { target, providerId, index } of cases) {
+          const profileId = await pendingTalent(index);
+
+          await db
+            .update(talentSubscriptions)
+            .set({ providerSubscriptionId: providerId })
+            .where(eq(talentSubscriptions.profileId, profileId));
+
+          const response = await webhookOn(target, `talent:${profileId}`, "bill_1", "subs_kept");
+
+          expect(response.status).toBe(200);
+          expect(await talentRow(profileId)).toMatchObject({ providerSubscriptionId: "subs_kept" });
+        }
+
+        expect(logged).toHaveBeenCalledWith("superseded subscription could not be canceled", {
+          superseded: "subs_n1",
+          kept: "subs_kept",
+        });
+        expect(logged).toHaveBeenCalledWith("superseded subscription left active", {
+          superseded: "subs_n2",
+          kept: "subs_kept",
+        });
+        expect(abacateCalls).toEqual([]);
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("logs the subscription id of a malformed Carreira Pro reference", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      try {
+        await completed(`talent:${missingId}:a:b`, "bill_1", "subs_bad");
+
+        expect(logged).toHaveBeenCalledWith("talent webhook ignored", {
+          event: "subscription.completed",
+          subscriptionId: "subs_bad",
+        });
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    describe("company subscriptions", () => {
+      async function bind(patch: Partial<typeof subscriptions.$inferInsert>) {
+        await db.update(subscriptions).set(patch);
+      }
+
+      it("cancels the subscription of a stale company bill that was paid", async () => {
+        await bind({ status: "pending", checkoutId: "bill_live", providerSubscriptionId: null });
+
+        await webhook("subscription.completed", {
+          subscription: { id: "subs_stale", amount: 24900 },
+          checkout: { id: "bill_old", externalId: `${subscriptionId}:abc` },
+        });
+
+        expect(cancelCalls()).toEqual(['/v2/subscriptions/cancel {"id":"subs_stale"}']);
+        expect((await currentSubscription()).status).toBe("pending");
+      });
+
+      it("leaves a stale renewal alone and never cancels the live subscription", async () => {
+        await bind({ status: "pending", checkoutId: "bill_live", providerSubscriptionId: null });
+        await webhook("subscription.renewed", {
+          subscription: { id: "subs_stale", amount: 24900 },
+          checkout: { id: "bill_old", externalId: subscriptionId },
+        });
+
+        await bind({ status: "active", checkoutId: "bill_a", providerSubscriptionId: "subs_live" });
+        await webhook("subscription.completed", {
+          subscription: { id: "subs_live", amount: 24900 },
+          checkout: { id: "bill_b", externalId: subscriptionId },
+        });
+
+        expect(cancelCalls()).toEqual([]);
+      });
+
+      it("cancels the previous subscription when a company is rebound to a new one", async () => {
+        await bind({
+          status: "past_due",
+          checkoutId: "bill_2",
+          providerSubscriptionId: "subs_old",
+        });
+
+        await webhook("subscription.completed", {
+          subscription: { id: "subs_new", amount: 24900 },
+          checkout: { id: "bill_2", externalId: `${subscriptionId}:abc` },
+          payment: { id: "pay_rebind" },
+        });
+
+        expect(await currentSubscription()).toMatchObject({
+          status: "active",
+          providerSubscriptionId: "subs_new",
+        });
+        expect(cancelCalls()).toEqual(['/v2/subscriptions/cancel {"id":"subs_old"}']);
+      });
+    });
+
     it("never lets an attempt suffix redirect a Carreira Pro event", async () => {
       const victim = await pendingTalent(1);
       const attacker = await pendingTalent(2);
@@ -1992,6 +2212,24 @@ describe.skipIf(!url)("billing", () => {
 
       expect(cancelled).toEqual(["subs_1"]);
       expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_2" });
+    });
+
+    it("ignores co-pay references with a malformed plan, suffix or extra segment", async () => {
+      await assign();
+
+      for (const reference of [
+        `copay:${profileId}:not-a-uuid`,
+        `copay:${profileId}:${platinumId}:`,
+        `copay:${profileId}:${platinumId}:a:b`,
+        `copay:${profileId}`,
+      ]) {
+        await copayWebhook("subscription.completed", reference);
+      }
+
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: goldId,
+        copaySubscriptionId: null,
+      });
     });
 
     it("ignores events for unknown profiles and malformed ids", async () => {
