@@ -7,7 +7,8 @@ import { Toggle } from "@/shared/ui/shadcn/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/shadcn/toggle-group";
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { formatDeadline, getCaseStatus, todayAtWorkspace } from "../../entities/offboarding";
+import { formatDeadline, todayAtWorkspace } from "../../entities/offboarding";
+import { caseBreakdown } from "./case-breakdown";
 import type { OffboardingCase } from "../../entities/offboarding";
 import { PortalFilter } from "../../shared/ui/select";
 import { portalStyles as s } from "../../shared/ui/surface.styles";
@@ -53,6 +54,7 @@ export function DashboardPage({
   onAreaChange,
   onDeadlineChange,
   renderCaseLink,
+  emptyAction,
 }: {
   cases: OffboardingCase[];
   areaFilter: string;
@@ -60,6 +62,7 @@ export function DashboardPage({
   onAreaChange: (area: string) => void;
   onDeadlineChange: (deadline: DeadlineFilter) => void;
   renderCaseLink: (id: string, content: ReactNode, xstyle: string) => ReactNode;
+  emptyAction?: ReactNode;
 }) {
   const [today] = useState(todayAtWorkspace);
   const tasks = cases.flatMap((item) => item.tasks);
@@ -104,11 +107,12 @@ export function DashboardPage({
   const completed = tasks.length - pending.length;
   const progress = tasks.length ? Math.round((completed / tasks.length) * 100) : 0;
 
-  const overdue = cases.filter((item) => getCaseStatus(item, today) === "overdue").length;
+  const breakdown = caseBreakdown(cases, today);
 
   const caseSeries = [
-    { name: "Em atraso", count: overdue, fill: "var(--chart-2)" },
-    { name: "Demais desligamentos", count: cases.length - overdue, fill: "var(--chart-1)" },
+    { name: "Em atraso", count: breakdown.overdue, fill: "var(--chart-2)" },
+    { name: "No prazo", count: breakdown.onTrack, fill: "var(--chart-1)" },
+    { name: "Concluídos", count: breakdown.complete, fill: "var(--chart-3)" },
   ];
 
   const progressSeries = [
@@ -248,7 +252,10 @@ export function DashboardPage({
             <p {...classProps(styles.empty, styles.muted)}>
               {areaFilter || deadlineFilter !== "all"
                 ? "Nenhum desligamento corresponde a estes filtros."
-                : "Nenhum desligamento com tarefas pendentes."}
+                : cases.length === 0
+                  ? "Nenhum desligamento cadastrado ainda. "
+                  : "Nenhum desligamento com tarefas pendentes."}
+              {cases.length === 0 && !areaFilter && deadlineFilter === "all" && emptyAction}
             </p>
           )}
         </Card>
