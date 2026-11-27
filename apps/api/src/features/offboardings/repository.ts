@@ -275,6 +275,8 @@ export function createOffboardingsRepository(db: Database) {
         description: tasks.description,
         dueDate: tasks.dueDate,
         trackingCode: tasks.trackingCode,
+        phase: tasks.phase,
+        stepId: tasks.checklistStepId,
       });
 
     if (!updated) return null;
