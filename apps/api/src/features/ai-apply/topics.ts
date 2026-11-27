@@ -30,7 +30,7 @@ const topics: [Topic, RegExp][] = [
 const kin = word("familiar(?:es)?|parentes?|relatives?|family members?|conjuge|spouse");
 
 const thirdParty = word(
-  "familia|family|familiar(?:es)?|parentes?|relatives?|family members?|filh[oa]s?|child(?:ren)?|dependentes?|dependents?|esposa|marido|companheir[oa]|partner|spouse|conjuge|(?:seus|meus|teus|os|your|my) pais|parents?|mae|pai|irma[os]?|siblings?|netos?|neta|avos?|tios?|tias?|membros? do seu lar|household|cuida(?:r)? de alguem|care for|responda pelo",
+  "familia|family|familiar(?:es)?|parentes?|relatives?|family members?|filh[oa]s?|child(?:ren)?|dependentes?|dependents?|esposa|marido|companheir[oa]|partner|spouse|conjuge|(?:seus|meus|teus|os|your|my) pais|parents?|mae|pai|irma[os]?|siblings?|netos?|neta|avos?|tios?|tias?|membros? do seu lar|household|husband|wife|sobrinh[oa]s?|prim[oa]s?|sogr[oa]s?|entead[oa]s?|namorad[oa]s?|boyfriend|girlfriend|live with|mora(?:m)? com|cuida(?:r)? de alguem|care for|responda pelo",
 );
 
 const relativeVeto = word("concorrentes?|competitors?|fornecedor\\w*|suppliers?|orgaos? publicos?");
@@ -46,7 +46,7 @@ const publicOffice = word(
 );
 
 const uncertain = word(
-  "nao sei|nao tenho certeza|nao se aplica|nao aplicavel|nao tenho como (?:saber|informar)|nao tenho conhecimento|nao lembro|nao que eu saiba|nao sou obrigad[oa] a responder|nao possuo essa informacao|(?:i )?(?:do not|don.t) (?:remember|have this information)|n/a|not sure|unsure|(?:i )?(?:do not|don.t) know|not applicable|talvez|maybe",
+  "nao sei|nao tenho certeza|nao se aplica|nao aplicavel|nao tenho como (?:saber|informar)|nao tenho conhecimento|nao lembro|nao que eu saiba|nao sou obrigad[oa] a responder|nao tenho como responder|nao tenho informacao|nao posso afirmar|nao consigo dizer|nao me lembro|(?:i )?(?:do not|don.t) recall|nao possuo essa informacao|(?:i )?(?:do not|don.t) (?:remember|have this information)|n/a|not sure|unsure|(?:i )?(?:do not|don.t) know|not applicable|talvez|maybe",
 );
 
 const decline: Values = [
@@ -65,7 +65,7 @@ const answered: Values = [
       "nao|no|nao possuo|nao tenho|nao sou|nenhum[a]?|nenhuma das anteriores|none(?: of the above)?|nao concordo|i do not|i don.t",
     ),
   ],
-  ["yes", word("sim|yes|concordo|i agree|i consent|aceito")],
+  ["yes", word("sim|yes|concordo|i agree|i consent|aceito|autorizo|consinto|i authori[sz]e")],
 ];
 
 const startsWith = (values: Values) =>

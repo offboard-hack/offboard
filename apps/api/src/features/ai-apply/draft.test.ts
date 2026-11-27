@@ -856,6 +856,29 @@ describe("draftAnswers", () => {
         ]);
       });
 
+      it("fills demographic answers when consent is answered Autorizo", async () => {
+        const consent = select(
+          "consent",
+          "Consentimento - Diversidade e Inclusão (D&I)",
+          options("Autorizo", "Não autorizo"),
+          true,
+        );
+
+        const exact = select("exact", "Raça/cor", options("Branca", "Preta"), true);
+
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([consent, exact, race], {
+            library: [
+              ...saved,
+              { question: "Consentimento D&I", answer: "Autorizo", sensitive: true },
+            ],
+          }),
+        );
+
+        expect(answers.map(({ status }) => status)).toEqual(["suggested", "filled", "suggested"]);
+      });
+
       it("reads topics only from saved answers that pass the filters", async () => {
         const answers = await draftAnswers(
           fake([]).generate,
