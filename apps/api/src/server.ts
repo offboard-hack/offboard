@@ -7,6 +7,7 @@ import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
 import { createRuntimeAuth } from "./features/auth/auth.js";
 import { createGenerateStructured, resolveModel } from "./shared/ai.js";
 import { diskStorage } from "./shared/disk-storage.js";
+import { parseStaffEmails } from "./shared/staff-access.js";
 
 const config = z
   .object({
@@ -47,6 +48,7 @@ createApp(origin, repos, {
   generateStructured: aiModel ? createGenerateStructured(aiModel) : undefined,
   storage: process.env.RESUME_STORAGE_DIR ? diskStorage(process.env.RESUME_STORAGE_DIR) : undefined,
   publicPageOrigin: process.env.PUBLIC_PAGE_ORIGIN,
+  backofficeStaffEmails: parseStaffEmails(process.env.BACKOFFICE_STAFF_EMAILS),
 }).listen({
   hostname: config.API_HOST,
   reusePort: false,

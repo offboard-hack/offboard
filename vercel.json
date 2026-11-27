@@ -41,6 +41,7 @@
     { "source": "/api/correios/:path*", "destination": "/api/offboard" },
     { "source": "/api/background/:path*", "destination": "/api/offboard" },
     { "source": "/api/public/:path*", "destination": "/api/offboard" },
+    { "source": "/api/backoffice/:path*", "destination": "/api/offboard" },
     { "source": "/((?!assets/).*)", "destination": "/api/ssr" }
   ]
 }

@@ -19,6 +19,7 @@ import { createVersionsRepository } from "./features/resumes/versions.js";
 import { createMatchesRepository } from "./features/matches/repository.js";
 import { createUsageRepository } from "./shared/llm-usage.js";
 import { createAccountRepository } from "./features/account/repository.js";
+import { createBackofficeRepository } from "./features/backoffice/repository.js";
 import { createBackgroundRepository } from "./features/background/repository.js";
 import { createPagesRepository } from "./features/pages/repository.js";
 import { createInsightsRepository } from "./features/insights/repository.js";
@@ -38,6 +39,7 @@ export function createRepositories(db: Database) {
     equipment: createEquipmentRepository(db),
     exitSurveys: createExitSurveysRepository(db),
     billing: createBillingRepository(db),
+    backoffice: createBackofficeRepository(db),
     benefits: createBenefitRepository(db),
     careerPlan: createCareerPlanRepository(db),
     employee: createEmployeeRepository(db),
