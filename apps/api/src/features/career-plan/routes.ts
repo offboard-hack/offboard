@@ -51,6 +51,16 @@ const careerPlanResponse = t.Object({
     priceCents: t.Literal(7900),
     dailyLimit: t.Literal(10),
   }),
+  copay: t.Union([
+    t.Object({
+      offered: t.Boolean(),
+      targetPlanId: t.String(),
+      targetPlanName: t.String(),
+      priceCents: t.Number(),
+      active: t.Boolean(),
+    }),
+    t.Null(),
+  ]),
 });
 
 type CareerCheckout = {
@@ -73,6 +83,9 @@ type CopayBenefits = {
     toPlanId: string,
   ): Promise<{ abacatePayProductId: string } | null>;
   planPriceMap(): Promise<Map<string, number>>;
+  listCopayTargets(
+    fromPlanId: string,
+  ): Promise<{ planId: string; name: string; upgradeCents: number }[]>;
 };
 
 export function careerPlanRoutes(
@@ -83,6 +96,26 @@ export function careerPlanRoutes(
   benefits: CopayBenefits,
 ) {
   const careerScreen = `${webOrigin}/colaborador?tela=carreira`;
+
+  async function copayOf(profileId: string) {
+    const assignment = await benefits.findAssignmentByProfile(profileId);
+
+    if (!assignment) return null;
+
+    const [target] = await benefits.listCopayTargets(assignment.assignedPlanId);
+
+    if (!target) return null;
+
+    const active = assignment.copaySubscriptionId !== null;
+
+    return {
+      offered: gateway.configured && !active,
+      targetPlanId: target.planId,
+      targetPlanName: target.name,
+      priceCents: target.upgradeCents,
+      active,
+    };
+  }
 
   return new Elysia()
     .use(talentAccess)
@@ -96,6 +129,7 @@ export function careerPlanRoutes(
         return {
           ...plan,
           upgrade: { ...plan.upgrade, offered: plan.upgrade.offered && gateway.configured },
+          copay: await copayOf(me.id),
         };
       },
       {

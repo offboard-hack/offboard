@@ -16,6 +16,7 @@ const base: CareerPlan = {
   benefit: null,
   aiApply: { allowedBy: "company", dailyLimit: 10 },
   upgrade: { offered: true, priceCents: 7900, dailyLimit: 10 },
+  copay: null,
 };
 
 const today = "2026-11-26";
@@ -42,6 +43,9 @@ describe("plan card view", () => {
       benefitExpiryWarning: null,
       activeBenefit: null,
       showComparison: false,
+      copayButton: "hidden",
+      copayLabel: null,
+      copayActiveLabel: null,
       aiApplyLine: "10 candidaturas/dia com IA",
     });
   });
@@ -193,6 +197,7 @@ const benefitBase: CareerPlan = {
   },
   aiApply: { allowedBy: "benefit", dailyLimit: 3 },
   upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
+  copay: null,
 };
 
 const withValidUntil = (validUntil: string) =>
@@ -328,5 +333,48 @@ describe("plan card benefit view", () => {
     };
 
     expect(planCardView(plan, today, false).showComparison).toBe(true);
+  });
+});
+
+describe("co-pay button", () => {
+  const copay = {
+    offered: true,
+    targetPlanId: "x",
+    targetPlanName: "Platinum",
+    priceCents: 3000,
+    active: false,
+  };
+
+  it("shows co-pay button when offered", () => {
+    expect(planCardView({ ...benefitBase, copay }, today, false)).toMatchObject({
+      copayButton: "available",
+      copayLabel: "Upgrade para Platinum · R$ 30/mês",
+      copayActiveLabel: null,
+    });
+  });
+
+  it("hides co-pay button when not offered", () => {
+    expect(planCardView(benefitBase, today, false)).toMatchObject({
+      copayButton: "hidden",
+      copayLabel: null,
+      copayActiveLabel: null,
+    });
+    expect(
+      planCardView({ ...benefitBase, copay: { ...copay, offered: false } }, today, false),
+    ).toMatchObject({ copayButton: "hidden", copayLabel: null });
+  });
+
+  it("shows co-pay active state", () => {
+    expect(
+      planCardView(
+        { ...benefitBase, copay: { ...copay, offered: false, active: true } },
+        today,
+        false,
+      ),
+    ).toMatchObject({
+      copayButton: "active",
+      copayLabel: null,
+      copayActiveLabel: "Upgrade ativo · Platinum",
+    });
   });
 });

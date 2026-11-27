@@ -15,6 +15,13 @@ export type CareerPlan = {
   } | null;
   aiApply: { allowedBy: "company" | "individual" | "benefit" | null; dailyLimit: number };
   upgrade: { offered: boolean; priceCents: number; dailyLimit: number };
+  copay: {
+    offered: boolean;
+    targetPlanId: string;
+    targetPlanName: string;
+    priceCents: number;
+    active: boolean;
+  } | null;
 };
 
 export const paymentReceivedNote =
@@ -68,6 +75,12 @@ function upgradeState(wanted: boolean, offered: boolean) {
   return offered ? ("available" as const) : ("unavailable" as const);
 }
 
+function copayState(copay: CareerPlan["copay"]) {
+  if (copay?.active) return "active" as const;
+
+  return copay?.offered ? ("available" as const) : ("hidden" as const);
+}
+
 function statusNote(pastDue: boolean, checkoutPending: boolean) {
   if (pastDue) return pastDueNote;
 
@@ -105,7 +118,7 @@ function aiApplyLabel(dailyLimit: number, priority: boolean) {
 }
 
 export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
-  const { company, individual, aiApply, upgrade, benefit } = plan;
+  const { company, individual, aiApply, upgrade, benefit, copay } = plan;
 
   const activeBenefit = benefit !== null && benefit.validUntil >= today ? benefit : null;
   const benefitDays = activeBenefit ? daysUntil(activeBenefit.validUntil, today) : null;
@@ -146,6 +159,11 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
     showComparison:
       activeBenefit !== null &&
       (!proActive || activeBenefit.aiApplyDailyLimit > proAiApplyDailyLimit),
+    copayButton: copayState(copay),
+    copayLabel: copay?.offered
+      ? `Upgrade para ${copay.targetPlanName} · ${planPrice(copay.priceCents)}`
+      : null,
+    copayActiveLabel: copay?.active ? `Upgrade ativo · ${copay.targetPlanName}` : null,
     aiApplyLine: aiApplyLabel(aiApply.dailyLimit, activeBenefit?.aiApplyPriority === true),
   };
 }

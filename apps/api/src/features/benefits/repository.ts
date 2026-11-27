@@ -201,6 +201,28 @@ export function createBenefitRepository(db: Database) {
     return row ?? null;
   }
 
+  async function listCopayTargets(fromPlanId: string) {
+    const from = aliasedTable(plans, "from_plan");
+
+    return db
+      .select({
+        planId: copayProducts.toPlanId,
+        name: plans.name,
+        upgradeCents: sql<number>`${plans.perPersonPriceCents} - ${from.perPersonPriceCents}`,
+      })
+      .from(copayProducts)
+      .innerJoin(plans, eq(plans.id, copayProducts.toPlanId))
+      .innerJoin(from, eq(from.id, copayProducts.fromPlanId))
+      .where(
+        and(
+          eq(copayProducts.fromPlanId, fromPlanId),
+          sql`${plans.perPersonPriceCents} > ${from.perPersonPriceCents}`,
+        ),
+      )
+      .orderBy(sql`${plans.perPersonPriceCents} - ${from.perPersonPriceCents}`)
+      .limit(1);
+  }
+
   async function findAssignmentByProfile(profileId: string) {
     const [row] = await db
       .select({
@@ -296,6 +318,7 @@ export function createBenefitRepository(db: Database) {
 
   return {
     getCopayProduct,
+    listCopayTargets,
     findAssignmentByProfile,
     updateCopayState,
     findAssignmentBySubscription,

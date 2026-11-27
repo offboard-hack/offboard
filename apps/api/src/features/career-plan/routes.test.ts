@@ -184,6 +184,7 @@ describe.skipIf(!url)("career plan route", () => {
       benefit: null,
       aiApply: { allowedBy: "company", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
+      copay: null,
     });
   });
 
@@ -208,6 +209,7 @@ describe.skipIf(!url)("career plan route", () => {
       benefit: null,
       aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: true, priceCents: 7900, dailyLimit: 10 },
+      copay: null,
     });
   });
 
@@ -226,6 +228,7 @@ describe.skipIf(!url)("career plan route", () => {
       benefit: null,
       aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
+      copay: null,
     });
 
     await db
@@ -239,6 +242,7 @@ describe.skipIf(!url)("career plan route", () => {
       benefit: null,
       aiApply: { allowedBy: "individual", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
+      copay: null,
     });
   });
 
@@ -484,6 +488,64 @@ describe.skipIf(!url)("career plan route", () => {
         abacatePayProductId: `prod_${from}_${to}`,
       });
     }
+
+    it("reports the cheapest co-pay upgrade on the plan", async () => {
+      const profileId = await profile("2099-12-31");
+
+      await assigned(profileId);
+      await registered("gold", "platinum-premium");
+      await registered("gold", "platinum");
+      await registered("gold", "silver");
+
+      const body = await (await get(profileId)).json();
+
+      expect(body.copay).toEqual({
+        offered: true,
+        targetPlanId: await planId("platinum"),
+        targetPlanName: "Platinum",
+        priceCents: expect.any(Number),
+        active: false,
+      });
+      expect(body.copay.priceCents).toBeGreaterThan(0);
+    });
+
+    it("reports no co-pay without a product or an assignment", async () => {
+      const profileId = await profile("2099-12-31");
+
+      expect((await (await get(profileId)).json()).copay).toBeNull();
+
+      await assigned(profileId);
+
+      expect((await (await get(profileId)).json()).copay).toBeNull();
+
+      await registered("gold", "silver");
+
+      expect((await (await get(profileId)).json()).copay).toBeNull();
+    });
+
+    it("marks the co-pay active and not offered once subscribed", async () => {
+      const profileId = await profile("2099-12-31");
+
+      await assigned(profileId);
+      await registered("gold", "platinum");
+      await db.update(benefitAssignments).set({ copaySubscriptionId: "subs_copay" });
+
+      expect((await (await get(profileId)).json()).copay).toMatchObject({
+        offered: false,
+        active: true,
+      });
+    });
+
+    it("does not offer the co-pay when billing is not configured", async () => {
+      const profileId = await profile("2099-12-31");
+
+      await assigned(profileId);
+      await registered("gold", "platinum");
+
+      const off = planApp({ ...gateway, configured: false });
+
+      expect((await (await get(profileId, off)).json()).copay).toMatchObject({ offered: false });
+    });
 
     it("starts a co-pay checkout for a valid upgrade", async () => {
       const profileId = await profile("2099-12-31");

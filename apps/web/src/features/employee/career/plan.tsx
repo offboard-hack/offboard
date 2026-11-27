@@ -1,7 +1,7 @@
 import { brazilTimezone } from "@offboard/employee";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { careerPlanQuery, useUpgradeCheckout } from "@/entities/career";
+import { careerPlanQuery, useCopayCheckout, useUpgradeCheckout } from "@/entities/career";
 import type { EmployeeAccount } from "@/entities/employee";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
@@ -25,6 +25,7 @@ const dayFormat = new Intl.DateTimeFormat("en-CA", {
 
 export function PlanSection({ account, paid }: { account: EmployeeAccount; paid: boolean }) {
   const checkout = useUpgradeCheckout(account);
+  const copayCheckout = useCopayCheckout(account);
   const [openedAt] = useState(() => Date.now());
   const [today] = useState(() => dayFormat.format(new Date()));
 
@@ -46,8 +47,10 @@ export function PlanSection({ account, paid }: { account: EmployeeAccount; paid:
       today={today}
       paid={paid}
       upgrading={checkout.isPending || checkout.isSuccess}
-      error={checkout.error?.message}
+      copaying={copayCheckout.isPending || copayCheckout.isSuccess}
+      error={checkout.error?.message ?? copayCheckout.error?.message}
       onUpgrade={() => checkout.mutate()}
+      onCopay={(targetPlanId) => copayCheckout.mutate(targetPlanId)}
     />
   );
 }
@@ -80,17 +83,22 @@ export function PlanCard({
   today,
   paid,
   upgrading,
+  copaying,
   error,
   onUpgrade,
+  onCopay,
 }: {
   plan: CareerPlan;
   today: string;
   paid: boolean;
   upgrading: boolean;
+  copaying: boolean;
   error?: string;
   onUpgrade: () => void;
+  onCopay: (targetPlanId: string) => void;
 }) {
   const view = planCardView(plan, today, paid);
+  const { copay } = plan;
   const comparison = view.showComparison ? featureComparisonView(view.activeBenefit) : null;
 
   return (
@@ -117,13 +125,6 @@ export function PlanCard({
           {comparison.next ? (
             <FeatureList title={`No ${comparison.next.name}`} tier={comparison.next} />
           ) : null}
-          {comparison.copayLabel ? (
-            <div>
-              <Button variant="outline" disabled>
-                {comparison.copayLabel} · Em breve
-              </Button>
-            </div>
-          ) : null}
         </div>
       ) : null}
       {view.sponsorLine ? (
@@ -135,6 +136,16 @@ export function PlanCard({
         </p>
       ) : null}
       {view.statusNote ? <p className="text-sm text-destructive">{view.statusNote}</p> : null}
+      {copay && view.copayButton === "available" ? (
+        <div>
+          <Button variant="outline" onClick={() => onCopay(copay.targetPlanId)} disabled={copaying}>
+            {view.copayLabel}
+          </Button>
+        </div>
+      ) : null}
+      {view.copayButton === "active" ? (
+        <Badge variant="status-success">{view.copayActiveLabel}</Badge>
+      ) : null}
       {view.upgrade === "available" ? (
         <div>
           <Button onClick={onUpgrade} disabled={upgrading}>
