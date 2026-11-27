@@ -165,24 +165,25 @@ export type SubscriptionCanceler = {
 const chargingEvents = new Set(["subscription.completed", "subscription.renewed"]);
 
 async function cancelOrphan(
+  kind: "talent" | "copay",
   gateway: SubscriptionCanceler,
   name: string | undefined,
   event: SubscriptionEvent,
 ) {
   if (name === undefined || !chargingEvents.has(name)) {
-    console.error("talent webhook ignored", { event: name });
+    console.error(`${kind} webhook ignored`, { event: name });
 
     return;
   }
 
   if (!gateway.configured) {
-    console.error("talent webhook for a deleted account could not be canceled", { event: name });
+    console.error(`${kind} webhook for a deleted account could not be canceled`, { event: name });
 
     return;
   }
 
   await gateway.cancelSubscription(event.data.subscription.id);
-  console.error("talent subscription of a deleted account canceled", { event: name });
+  console.error(`${kind} subscription of a deleted account canceled`, { event: name });
 }
 
 async function applyTalentEvent(
@@ -193,7 +194,7 @@ async function applyTalentEvent(
   deliveryId: string | null,
   talent: TalentTarget | null,
 ) {
-  if (!talent) return cancelOrphan(gateway, name, event);
+  if (!talent) return cancelOrphan("talent", gateway, name, event);
 
   if (isStale(name, event, talent)) {
     console.error("talent webhook ignored", { event: name });
@@ -273,7 +274,12 @@ export type CopayBenefits = {
     copaySubscriptionId: string | null;
     validUntil: string;
   } | null>;
-  findAssignmentBySubscription(subscriptionId: string): Promise<{ profileId: string } | null>;
+  findAssignmentBySubscription(subscriptionId: string): Promise<{
+    profileId: string;
+    assignedPlanId: string;
+    effectivePlanId: string;
+    validUntil: string;
+  } | null>;
   planPriceMap(): Promise<Map<string, number>>;
   updateCopayState(
     profileId: string,
@@ -293,29 +299,24 @@ function copayReference(externalId: string) {
   return { profileId: profile.data, targetPlanId: plan.data };
 }
 
-async function copayTargetOf(
-  benefits: CopayBenefits,
-  externalId: string | null | undefined,
-  providerSubscriptionId: string,
-) {
-  const reference = externalId?.startsWith(copayPrefix)
-    ? copayReference(externalId)
-    : await copayReferenceOfSubscription(benefits, providerSubscriptionId);
+type CopayTarget = {
+  profileId: string;
+  targetPlanId: string | undefined;
+  assignment: NonNullable<Awaited<ReturnType<CopayBenefits["findAssignmentByProfile"]>>>;
+};
 
-  if (!reference) return null;
-
-  const assignment = await benefits.findAssignmentByProfile(reference.profileId);
-
-  return assignment ? { ...reference, assignment } : null;
-}
-
-async function copayReferenceOfSubscription(
-  benefits: CopayBenefits,
-  providerSubscriptionId: string,
-) {
+async function copayTargetOf(benefits: CopayBenefits, providerSubscriptionId: string) {
   const found = await benefits.findAssignmentBySubscription(providerSubscriptionId);
 
-  return found ? { profileId: found.profileId, targetPlanId: undefined } : null;
+  if (!found) return null;
+
+  const { profileId, ...assignment } = found;
+
+  return {
+    profileId,
+    targetPlanId: undefined,
+    assignment: { ...assignment, copaySubscriptionId: providerSubscriptionId },
+  };
 }
 
 async function applyCopayEvent(
@@ -323,13 +324,15 @@ async function applyCopayEvent(
   gateway: SubscriptionCanceler,
   name: string | undefined,
   event: SubscriptionEvent,
-  target: NonNullable<Awaited<ReturnType<typeof copayTargetOf>>>,
+  target: CopayTarget,
 ) {
   const { profileId, targetPlanId, assignment } = target;
   const providerSubscriptionId = event.data.subscription.id;
   const owned = assignment.copaySubscriptionId === providerSubscriptionId;
 
   if (name === "subscription.completed" && targetPlanId) {
+    if (owned) return;
+
     if (assignment.copaySubscriptionId !== null) {
       await gateway.cancelSubscription(providerSubscriptionId);
 
@@ -391,15 +394,19 @@ export async function applyWebhookEvent(
   const externalId = event.data.checkout?.externalId;
 
   if (externalId?.startsWith(copayPrefix)) {
-    const copay = await copayTargetOf(benefits, externalId, event.data.subscription.id);
+    const reference = copayReference(externalId);
 
-    if (!copay) {
+    if (!reference) {
       console.error("copay webhook ignored", { event: name });
 
       return;
     }
 
-    return applyCopayEvent(benefits, gateway, name, event, copay);
+    const assignment = await benefits.findAssignmentByProfile(reference.profileId);
+
+    if (!assignment) return cancelOrphan("copay", gateway, name, event);
+
+    return applyCopayEvent(benefits, gateway, name, event, { ...reference, assignment });
   }
 
   if (externalId?.startsWith(talentPrefix)) {
@@ -424,7 +431,7 @@ export async function applyWebhookEvent(
 
     if (talent) return applyTalentEvent(repos, gateway, name, event, deliveryId, talent);
 
-    const copay = await copayTargetOf(benefits, null, event.data.subscription.id);
+    const copay = await copayTargetOf(benefits, event.data.subscription.id);
 
     if (copay) return applyCopayEvent(benefits, gateway, name, event, copay);
   }
