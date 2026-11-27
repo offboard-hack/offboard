@@ -30,6 +30,7 @@ import {
   type EquipmentReturn,
 } from "@/entities/equipment-returns";
 import { Button } from "@/shared/ui/shadcn/button";
+import { EquipmentDialog, RemoveEquipmentDialog } from "./equipment-dialog";
 import {
   Dialog,
   DialogBody,
@@ -234,7 +235,9 @@ const shipmentColumns: TableColumn<Shipment>[] = [
   },
 ];
 
-function equipmentColumns(canUpdate: boolean) {
+type CaseOption = { id: string; name: string };
+
+function equipmentColumns(canUpdate: boolean, cases: CaseOption[]) {
   const columns: TableColumn<EquipmentReturn>[] = [
     {
       id: "item",
@@ -309,6 +312,19 @@ function equipmentColumns(canUpdate: boolean) {
             cell: ({ row }) =>
               row.original.status === "inventory" ? null : <ReceiptAction item={row.original} />,
           } satisfies TableColumn<EquipmentReturn>,
+          {
+            id: "manage",
+            header: "Cadastro",
+            cell: ({ row: { original } }) =>
+              original.fromEmployeePlan ? (
+                <span className="text-xs text-muted-foreground">Plano da pessoa</span>
+              ) : (
+                <div className="flex gap-1">
+                  <EquipmentDialog cases={cases} item={original} />
+                  <RemoveEquipmentDialog item={original} />
+                </div>
+              ),
+          } satisfies TableColumn<EquipmentReturn>,
         ]
       : []),
   ];
@@ -322,7 +338,6 @@ export function EquipmentPage() {
   const navigate = route.useNavigate();
   const { principal } = route.useRouteContext();
   const canUpdate = createPortalAbility(principal.role).can("update", "Offboarding");
-  const columns = useMemo(() => equipmentColumns(canUpdate), [canUpdate]);
 
   const urlPagination = listPagination(
     route.useSearch(),
@@ -348,6 +363,16 @@ export function EquipmentPage() {
 
   const { data: cases } = useSuspenseQuery(offboardingsQuery);
   const { data: equipment } = useSuspenseQuery(equipmentReturnsQuery);
+
+  const caseOptions = useMemo(
+    () =>
+      cases
+        .map(({ id, name }) => ({ id, name }))
+        .sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+    [cases],
+  );
+
+  const columns = useMemo(() => equipmentColumns(canUpdate, caseOptions), [canUpdate, caseOptions]);
 
   const tasks = useMemo(
     () =>
@@ -417,9 +442,12 @@ export function EquipmentPage() {
       ]}
     >
       <section className="min-w-0" aria-labelledby="equipment-title">
-        <h2 className="sr-only" id="equipment-title">
-          Inventário de bens
-        </h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 {...classProps(portalStyles.subheading)} id="equipment-title">
+            Inventário de bens
+          </h2>
+          {canUpdate && <EquipmentDialog cases={caseOptions} />}
+        </div>
         <DataTable
           urlPagination={urlPagination}
           data={visibleEquipment}
@@ -438,7 +466,9 @@ export function EquipmentPage() {
           emptyText={
             status
               ? "Nenhum item neste status."
-              : "O inventário mostra os bens vinculados aos desligamentos."
+              : canUpdate
+                ? "Nenhum bem cadastrado. Use “Adicionar bem” para vincular um item a um desligamento."
+                : "O inventário mostra os bens vinculados aos desligamentos."
           }
           scrollLabel="Tabela do inventário"
           columns={columns}
