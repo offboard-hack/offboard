@@ -925,6 +925,45 @@ describe("draftAnswers", () => {
           expect(answers[1]).toMatchObject({ value: "2", status: "suggested" });
         });
 
+        it("does not fill an exact saved answer when consent is refused", async () => {
+          const exact = select("exact", "Raça/cor", options("Branca", "Preta"), true);
+
+          const answers = await draftAnswers(
+            fake([]).generate,
+            input([consent("consent"), exact], {
+              library: [consentSaved("Prefiro não responder"), ...saved],
+            }),
+          );
+
+          expect(answers[1]).toMatchObject({ value: null, status: "sensitive" });
+        });
+
+        it("treats conflicting saved consent answers as withheld", async () => {
+          const other = select(
+            "consent",
+            "Consentimento D&I - diversidade",
+            options("Sim", "Não"),
+            true,
+          );
+
+          const answers = await draftAnswers(
+            fake([]).generate,
+            input([other, race], {
+              library: [
+                ...saved,
+                consentSaved("Sim. Eu concordo com a coleta"),
+                {
+                  question: "Consent to collect demographic data",
+                  answer: "Não. Eu não concordo com a coleta",
+                  sensitive: true,
+                },
+              ],
+            }),
+          );
+
+          expect(answers[1]).toMatchObject({ value: null, status: "sensitive" });
+        });
+
         it("reads a suggested consent answer from another form", async () => {
           const other = select(
             "consent",

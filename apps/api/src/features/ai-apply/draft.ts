@@ -355,7 +355,9 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
 
       const answer = fromLibrary(question) ?? fromTopic(question);
 
-      const given = [answer?.value].flat();
+      if (answer === undefined) return topicAnswers.get("consent") === null;
+
+      const given = [answer.value].flat();
 
       return field.options.some((option) => {
         const read = canonicalValue("consent", option.label);
@@ -363,6 +365,12 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
         return given.includes(option.value) && (read === "no" || read === "decline");
       });
     });
+
+  const demographicHeld = (question: FormQuestion) => {
+    const topic = topicOf(question.label);
+
+    return topic !== undefined && topic !== "consent" && topic !== "relative" && consentWithheld();
+  };
 
   const fromTopic = (question: FormQuestion) => {
     const topic = topicOf(question.label);
@@ -373,8 +381,6 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
     const wanted = topicAnswers.get(topic);
 
     if (wanted === undefined || wanted === null) return undefined;
-
-    if (topic !== "consent" && topic !== "relative" && consentWithheld()) return undefined;
 
     const matches = [...wanted].map((value) =>
       field.options.filter((option) => canonicalValue(topic, option.label) === value),
@@ -422,6 +428,8 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
     if (kind === "document") return draft(question, "blank");
 
     if (question.sensitive && !insensitive.has(kind)) {
+      if (demographicHeld(question)) return draft(question, "sensitive");
+
       return fromLibrary(question) ?? fromTopic(question) ?? draft(question, "sensitive");
     }
 

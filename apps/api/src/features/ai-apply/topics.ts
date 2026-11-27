@@ -14,9 +14,15 @@ type Values = [string, RegExp][];
 
 const word = (pattern: string) => new RegExp(`(?<![a-z0-9])(?:${pattern})(?![a-z0-9])`);
 
-const thirdParty = word("familiar(?:es)?|parentes?|relatives?|family members?|conjuge|spouse");
+const thirdParty = word(
+  "familia|family|familiar(?:es)?|parentes?|relatives?|family members?|filh[oa]s?|child(?:ren)?|dependentes?|dependents?|esposa|marido|companheir[oa]|partner|spouse|conjuge|pais|parents?|mae|pai|irma[os]?|siblings?|cuida(?:r)? de alguem|care for|responda pelo",
+);
 
-const workplace = /(?:trabalh|work|employ|empresa|company|companhia)/;
+const workplace = word("trabalh\\w*|works?|working|employ\\w*|empresa|company|companhia");
+
+const relativeVeto = word(
+  "pep|politicamente|public (?:officials?|office)|orgaos? publicos?|governo|government|concorrentes?|competitors?|fornecedor\\w*|suppliers?",
+);
 
 const topics: [Topic, RegExp][] = [
   [
@@ -26,7 +32,7 @@ const topics: [Topic, RegExp][] = [
   [
     "relative",
     new RegExp(
-      `^(?=.*${workplace.source})(?=.*${word("parentes?|familiares?|relatives?|family members?|conhece alguem|pessoas que (?:ja )?trabalham").source})`,
+      `^(?=.*${workplace.source})(?!.*${relativeVeto.source})(?=.*${word("parentes?|familiares?|relatives?|family members?|conhece alguem|pessoas que (?:ja )?trabalham").source})`,
     ),
   ],
   ["pronoun", word("pronomes?|pronouns?")],
@@ -49,15 +55,15 @@ const decline: Values = [
 const answered: Values = [
   [
     "no",
-    word(
-      "nao|no|nao possuo|nao tenho|nao sou|nenhum[a]?|nenhuma das anteriores|none(?: of the above)?|nao concordo|i do not|i don.t",
+    new RegExp(
+      `(?:(?:nao|no)\\s*(?:[.,;:!]|$)|${word("nao (?:possuo|sou|tenho|autorizo|concordo)|i do not|i don.t|discordo|i disagree|recuso|nenhuma das anteriores|none of the above").source})`,
     ),
   ],
   ["yes", word("sim|yes|concordo|i agree|i consent|aceito")],
 ];
 
 const unsure = word(
-  "nao sei|nao tenho certeza|nao se aplica|nao sei informar|not sure|unsure|n ?/ ?a|i do not know|i don.t know",
+  "nao sei|nao tenho certeza|nao tenho como saber|nao tenho conhecimento|nao se aplica|nao aplicavel|nao sei informar|not sure|unsure|n ?/ ?a|i do not know|i don.t know",
 );
 
 const startsWith = (values: Values) =>
@@ -115,13 +121,17 @@ const values: Record<Topic, Values> = {
 export const topicOf = (label: string) => {
   const normalized = normalizeQuestion(label);
 
-  const own = normalizeQuestion(label.replace(/\([^)]*\)/g, " "));
+  const own = normalizeQuestion(label.replace(/\?\s*\([^)]*\)\s*$/, "?"));
   const found = topics.filter(([, pattern]) => pattern.test(own));
   const [first] = found;
 
-  if (found.length !== 1 || first === undefined) return undefined;
+  const topic = found.some(([name]) => name === "consent")
+    ? "consent"
+    : found.length === 1
+      ? first?.[0]
+      : undefined;
 
-  return first[0] !== "relative" && thirdParty.test(normalized) ? undefined : first[0];
+  return topic !== "relative" && thirdParty.test(normalized) ? undefined : topic;
 };
 
 export const canonicalValue = (topic: Topic, text: string) => {
