@@ -156,9 +156,11 @@ export function PlanCard({
     <EmployeePanel title="Seu plano">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">{view.companyPlan}</span>
-        <Badge variant={plan.company.includesAiApply ? "status-success" : "secondary"}>
-          {view.aiLine}
-        </Badge>
+        {view.aiLine ? (
+          <Badge variant={plan.company.includesAiApply ? "status-success" : "secondary"}>
+            {view.aiLine}
+          </Badge>
+        ) : null}
         {view.proLine ? <Badge variant="status-success">{view.proLine}</Badge> : null}
         {view.aiApplyLine ? <Badge variant="status-success">{view.aiApplyLine}</Badge> : null}
       </div>
