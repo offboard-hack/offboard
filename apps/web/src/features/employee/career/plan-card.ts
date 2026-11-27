@@ -90,8 +90,12 @@ function benefitLine(benefit: CareerPlan["benefit"], proActive: boolean) {
     : `${benefit.planName} · Patrocinado pela empresa até ${planDate(benefit.validUntil)}`;
 }
 
-function benefitExpiryNote(days: number) {
-  return `Seu benefício expira em ${days} ${days === 1 ? "dia" : "dias"}. Faça upgrade para manter o acesso.`;
+const proAiApplyDailyLimit = 10;
+
+function benefitExpiryNote(days: number, proActive: boolean) {
+  const base = `Seu benefício expira em ${days} ${days === 1 ? "dia" : "dias"}.`;
+
+  return proActive ? base : `${base} Faça upgrade para manter o acesso.`;
 }
 
 function aiApplyLabel(dailyLimit: number, priority: boolean) {
@@ -137,7 +141,11 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
     benefitLine: benefitLine(activeBenefit, proActive),
     benefitExpiring,
     benefitExpiryWarning:
-      benefitDays !== null && benefitExpiring ? benefitExpiryNote(benefitDays) : null,
+      benefitDays !== null && benefitExpiring ? benefitExpiryNote(benefitDays, proActive) : null,
+    activeBenefit,
+    showComparison:
+      activeBenefit !== null &&
+      (!proActive || activeBenefit.aiApplyDailyLimit > proAiApplyDailyLimit),
     aiApplyLine: aiApplyLabel(aiApply.dailyLimit, activeBenefit?.aiApplyPriority === true),
   };
 }

@@ -91,7 +91,7 @@ export function PlanCard({
   onUpgrade: () => void;
 }) {
   const view = planCardView(plan, today, paid);
-  const comparison = featureComparisonView(plan.benefit);
+  const comparison = view.showComparison ? featureComparisonView(view.activeBenefit) : null;
 
   return (
     <EmployeePanel title="Seu plano">

@@ -282,4 +282,49 @@ describe("plan card benefit view", () => {
         .aiApplyLine,
     ).toBe("Sem candidatura com IA");
   });
+
+  it("drops the upgrade prompt from the expiry warning when Carreira Pro is active", () => {
+    const plan: CareerPlan = {
+      ...withValidUntil("2026-12-20"),
+      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+    };
+
+    expect(planCardView(plan, today, false).benefitExpiryWarning).toBe(
+      "Seu benefício expira em 24 dias.",
+    );
+  });
+
+  it("exposes the active benefit and hides the comparison when the benefit is lapsed", () => {
+    const view = planCardView(withValidUntil("2026-11-25"), today, false);
+
+    expect(view.activeBenefit).toBeNull();
+    expect(view.showComparison).toBe(false);
+  });
+
+  it("shows the comparison for an active benefit without Carreira Pro", () => {
+    const view = planCardView(benefitBase, today, false);
+
+    expect(view.activeBenefit).toBe(benefitBase.benefit);
+    expect(view.showComparison).toBe(true);
+  });
+
+  it("hides the comparison when Carreira Pro matches or exceeds the benefit tier", () => {
+    const plan: CareerPlan = {
+      ...benefitBase,
+      benefit: { ...benefitBase.benefit!, planName: "Silver", aiApplyDailyLimit: 0 },
+      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+    };
+
+    expect(planCardView(plan, today, false).showComparison).toBe(false);
+  });
+
+  it("keeps the comparison when the benefit tier beats Carreira Pro", () => {
+    const plan: CareerPlan = {
+      ...benefitBase,
+      benefit: { ...benefitBase.benefit!, planName: "Platinum Premium", aiApplyDailyLimit: 25 },
+      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+    };
+
+    expect(planCardView(plan, today, false).showComparison).toBe(true);
+  });
 });
