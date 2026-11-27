@@ -15,12 +15,12 @@ CREATE TABLE "automation_rules" (
 ALTER TABLE "automation_rules" ADD CONSTRAINT "automation_rules_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "automation_rules_org_trigger_idx" ON "automation_rules" USING btree ("org_id","trigger");--> statement-breakpoint
 CREATE UNIQUE INDEX "automation_rules_org_source_ref_idx" ON "automation_rules" USING btree ("org_id","source_ref") WHERE "automation_rules"."source_ref" IS NOT NULL;--> statement-breakpoint
+INSERT INTO "automation_rules" ("org_id", "name", "trigger", "conditions", "actions", "enabled", "cron_schedule", "source_ref", "created_at", "updated_at")
+SELECT "org_id", "action_id", 'task.status_changed', jsonb_build_object('task.phase', "phase"), jsonb_build_array(jsonb_build_object('type', split_part("action_id", ':', 1)) || "config"), "enabled", NULL, "action_id", "created_at", "updated_at"
+FROM "action_configs";--> statement-breakpoint
 INSERT INTO "automation_rules" ("org_id", "name", "trigger", "conditions", "actions", "enabled", "cron_schedule")
 SELECT o.id, r.name, r.trigger, r.conditions::jsonb, r.actions::jsonb, true, r.cron_schedule
 FROM "organizations" o
 CROSS JOIN (VALUES
-  ('Correios entregue → equipamento recebido', 'correios.delivered', '{}', '[{"type":"update_equipment","set":{"status":"received"}}]', NULL),
-  ('Correios entregue → tarefa concluída', 'correios.delivered', '{}', '[{"type":"update_task","set":{"status":"done"}}]', NULL),
-  ('Todo equipamento devolvido → notificar RH', 'equipment.status_changed', '{"equipment.status":"received","case.allEquipmentReceived":"true"}', '[{"type":"slack","channel":"#rh","message":"Todos os equipamentos de {{case.name}} foram devolvidos"}]', NULL),
-  ('Verificar rastreios Correios', 'schedule.cron', '{}', '[{"type":"correios_check"}]', '0 */4 * * *')
+  ('Todo equipamento devolvido → notificar RH', 'equipment.status_changed', '{"equipment.status":"received","case.allEquipmentReceived":"true"}', '[{"type":"slack","channel":"#rh","message":"Todos os equipamentos de {{case.name}} foram devolvidos"}]', NULL)
 ) AS r(name, trigger, conditions, actions, cron_schedule);
