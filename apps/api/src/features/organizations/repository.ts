@@ -1,3 +1,4 @@
+import { seedAutomationRules } from "@offboard/db/automation-rules";
 import type { Database } from "@offboard/db/client";
 import { organizations, teamMembers } from "@offboard/db/schema";
 import { z } from "zod";
@@ -28,6 +29,8 @@ export function createOrganizationsRepository(db: Database) {
             role: "admin",
           })
           .returning({ id: teamMembers.id });
+
+        await seedAutomationRules(tx, org.id);
 
         return { orgId: org.id, memberId: member.id };
       });

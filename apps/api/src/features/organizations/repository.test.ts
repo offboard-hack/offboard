@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { defaultAutomationRules } from "@offboard/db/automation-rules";
 import { createClient } from "@offboard/db/client";
-import { organizations, teamMembers } from "@offboard/db/schema";
+import { automationRules, organizations, teamMembers } from "@offboard/db/schema";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -40,6 +41,13 @@ describe.skipIf(!url)("createOrgWithAdmin", () => {
       email: email.toLowerCase(),
       role: "admin",
     });
+
+    const rules = await db
+      .select()
+      .from(automationRules)
+      .where(eq(automationRules.orgId, result.orgId));
+
+    expect(rules.map(({ name }) => name)).toEqual(defaultAutomationRules.map(({ name }) => name));
   });
 
   it("rethrows errors that are not unique violations", async () => {

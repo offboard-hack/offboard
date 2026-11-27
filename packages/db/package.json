@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./automation-rules": "./src/automation-rules.fixture.ts",
     "./client": "./src/client.ts",
     "./question": "./src/question.ts",
     "./schema": "./src/schema/index.ts",
