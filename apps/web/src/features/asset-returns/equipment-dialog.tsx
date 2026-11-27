@@ -30,7 +30,6 @@ import {
   equipmentErrorMessage,
   equipmentFormSchema,
   equipmentPayload,
-  returnMethods,
 } from "./equipment-form";
 
 type CaseOption = { id: string; name: string };
@@ -211,20 +210,9 @@ export function EquipmentDialog({
                 }}
               </form.Field>
             ))}
-            <form.Field name="returnMethod">
-              {(field) => (
-                <div className="grid content-start gap-2">
-                  <span className="text-sm font-medium">Como volta</span>
-                  <PortalFilter
-                    label="Como volta"
-                    className="w-full"
-                    value={field.state.value}
-                    items={[...returnMethods]}
-                    onChange={field.handleChange}
-                  />
-                </div>
-              )}
-            </form.Field>
+            <p className="text-sm text-muted-foreground">
+              A pessoa devolve o bem postando-o nos Correios.
+            </p>
             {save.isError && (
               <p role="alert" className="text-sm text-destructive">
                 {equipmentErrorMessage(failure)}

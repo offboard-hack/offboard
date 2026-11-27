@@ -1,11 +1,6 @@
 import { z } from "zod";
 import type { EquipmentReturn } from "@/entities/equipment-returns";
 
-export const returnMethods = [
-  { value: "pickup", label: "Coleta em casa" },
-  { value: "in_person", label: "Entrega no escritório" },
-] as const;
-
 const holderEmail = z
   .string()
   .trim()
@@ -22,7 +17,6 @@ export const equipmentFormSchema = z.object({
     .min(1, "Informe o patrimônio.")
     .max(255, "Use até 255 caracteres.")
     .regex(/^\S+$/, "O patrimônio não pode ter espaços."),
-  returnMethod: z.enum(["pickup", "in_person"], { error: "Escolha como o bem volta." }),
 });
 
 export const assignFormSchema = z.object({
@@ -36,20 +30,24 @@ export const assignFormSchema = z.object({
 export type EquipmentForm = z.output<typeof equipmentFormSchema>;
 
 export function equipmentPayload({ caseId, email, ...fields }: EquipmentForm) {
-  return { ...fields, caseId: caseId || undefined, email: caseId ? undefined : email || undefined };
+  return {
+    ...fields,
+    returnMethod: "pickup" as const,
+    caseId: caseId || undefined,
+    email: caseId ? undefined : email || undefined,
+  };
 }
 
 export function equipmentDefaults(
   item?: Pick<EquipmentReturn, "caseId" | "title" | "code" | "method">,
 ) {
-  if (!item) return { caseId: "", email: "", item: "", tag: "", returnMethod: "pickup" };
+  if (!item) return { caseId: "", email: "", item: "", tag: "" };
 
   return {
     caseId: item.caseId ?? "",
     email: "",
     item: item.title,
     tag: item.code,
-    returnMethod: item.method === "office" ? "in_person" : "pickup",
   };
 }
 

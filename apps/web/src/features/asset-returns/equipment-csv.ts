@@ -1,14 +1,12 @@
 export const maxImportedEquipment = 500;
 
 export const equipmentCsvTemplate =
-  "pessoa;item;patrimonio;devolucao\nana@empresa.com;Notebook Dell Latitude 5440;AUR-0412;coleta\nBruno Lima;Monitor LG 27;AUR-0413;escritorio\n";
-
-type ReturnMethod = "pickup" | "in_person";
+  "pessoa;item;patrimonio;devolucao\nana@empresa.com;Notebook Dell Latitude 5440;AUR-0412;correios\nBruno Lima;Monitor LG 27;AUR-0413;correios\n";
 
 type ParsedFields = { record: number; person: string; item: string; tag: string };
 
 export type EquipmentCsvRow = ParsedFields &
-  ({ kind: "valid"; returnMethod: ReturnMethod } | { kind: "invalid"; issue: string });
+  ({ kind: "valid"; returnMethod: "pickup" } | { kind: "invalid"; issue: string });
 
 export type ImportProblem = "unknown-person" | "ambiguous-person" | "tag-in-use" | "repeated-tag";
 
@@ -22,19 +20,10 @@ function plain(text: string) {
     .toLowerCase();
 }
 
-const methods = new Map<string, ReturnMethod>([
-  ["", "pickup"],
-  ["coleta", "pickup"],
-  ["coleta em casa", "pickup"],
-  ["escritorio", "in_person"],
-  ["entrega no escritorio", "in_person"],
-]);
-
 function checkRow(cells: string[], record: number, seen: Set<string>) {
   const cell = (index: number) => cells[index]?.trim() ?? "";
-  const [person, item, tag, method] = [0, 1, 2, 3].map(cell);
+  const [person, item, tag] = [0, 1, 2].map(cell);
   const fields = { record, person, item, tag };
-  const returnMethod = methods.get(plain(method));
 
   const invalid = (issue: string) =>
     ({ ...fields, kind: "invalid", issue }) satisfies EquipmentCsvRow;
@@ -49,13 +38,11 @@ function checkRow(cells: string[], record: number, seen: Set<string>) {
 
   if (/\s/.test(tag)) return invalid("O patrimônio não pode ter espaços.");
 
-  if (!returnMethod) return invalid("Na devolução, use coleta ou escritorio.");
-
   if (seen.has(tag)) return invalid("Este patrimônio aparece mais de uma vez no arquivo.");
 
   seen.add(tag);
 
-  return { ...fields, kind: "valid", returnMethod } satisfies EquipmentCsvRow;
+  return { ...fields, kind: "valid", returnMethod: "pickup" } satisfies EquipmentCsvRow;
 }
 
 export async function parseEquipmentCsv(content: string) {
