@@ -64,7 +64,7 @@ const catalog: Integration[] = [
     name: "E-mail",
     category: "communication",
     icon: Mail01Icon,
-    purpose: "Envia notificações e links de acesso por e-mail.",
+    purpose: "Envia os e-mails das ações do checklist. Desligado, essas ações não enviam.",
   },
   {
     name: "Sistema de folha",
@@ -158,6 +158,8 @@ function resolveStatus(statusMap: Map<string, ConnectionStatus>, key: string) {
 }
 
 function deriveConnection(item: Integration, statusMap: Map<string, ConnectionStatus>) {
+  if (item.comingSoon) return "disconnected";
+
   if (item.providers) {
     const statuses = item.providers.map((p) => resolveStatus(statusMap, `${item.name}::${p.name}`));
 

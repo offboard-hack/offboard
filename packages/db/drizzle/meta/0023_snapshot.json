@@ -1,6 +1,6 @@
 {
-  "id": "d0637990-57a5-4fb8-89e3-4e8baa138001",
-  "prevId": "c65c2c3f-1664-4f31-a6fb-0ffc25d152c2",
+  "id": "c65c2c3f-1664-4f31-a6fb-0ffc25d152c2",
+  "prevId": "d5fbb2f4-0a73-451c-8fdc-10f9a210ef4a",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4202,12 +4202,6 @@
         "ai_apply_consent_version": {
           "name": "ai_apply_consent_version",
           "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "searchable_at": {
-          "name": "searchable_at",
-          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },

@@ -31,6 +31,7 @@ import {
 } from "@/entities/equipment-returns";
 import { Button } from "@/shared/ui/shadcn/button";
 import { EquipmentDialog, RemoveEquipmentDialog } from "./equipment-dialog";
+import { EquipmentImportDialog } from "./equipment-import-dialog";
 import {
   Dialog,
   DialogBody,
@@ -446,7 +447,12 @@ export function EquipmentPage() {
           <h2 {...classProps(portalStyles.subheading)} id="equipment-title">
             Inventário de bens
           </h2>
-          {canUpdate && <EquipmentDialog cases={caseOptions} />}
+          {canUpdate && (
+            <div className="flex flex-wrap gap-2">
+              <EquipmentImportDialog />
+              <EquipmentDialog cases={caseOptions} />
+            </div>
+          )}
         </div>
         <DataTable
           urlPagination={urlPagination}

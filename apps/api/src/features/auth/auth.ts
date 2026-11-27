@@ -580,7 +580,8 @@ export function createRuntimeAuth(
     secret,
     talent,
     onVercel: env.VERCEL === "1",
-    ipAddressHeaders,
+    ipAddressHeaders:
+      ipAddressHeaders ?? (env.EMAIL_PROVIDER === "console" ? ["x-forwarded-for"] : undefined),
     async sendLink(message) {
       const delivery = sender.send(signInEmail(message));
 

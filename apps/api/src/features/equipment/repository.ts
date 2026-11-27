@@ -1,7 +1,8 @@
 import type { Database } from "@offboard/db/client";
-import { and, asc, eq } from "drizzle-orm";
-import { equipment, offboardingCases } from "@offboard/db/schema";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { employeeAccess, equipment, offboardingCases } from "@offboard/db/schema";
 import { uniqueViolation } from "../../shared/http.js";
+import { personKey, resolveImport, type ImportedEquipment } from "./import.js";
 
 type EquipmentStatus = (typeof equipment.$inferSelect)["status"];
 
@@ -103,7 +104,59 @@ export function createEquipmentRepository(db: Database) {
     return deleted ? { row: deleted } : await explainMiss(orgId, id);
   }
 
+  async function importEquipment(orgId: string, rows: ImportedEquipment[]) {
+    const keys = [...new Set(rows.map(({ person }) => personKey(person)))];
+    const tags = [...new Set(rows.map(({ tag }) => tag))];
+
+    return db.transaction(async (tx) => {
+      const cases = await tx
+        .select({
+          id: offboardingCases.id,
+          name: offboardingCases.name,
+          email: employeeAccess.email,
+        })
+        .from(offboardingCases)
+        .leftJoin(
+          employeeAccess,
+          and(
+            eq(employeeAccess.caseId, offboardingCases.id),
+            eq(employeeAccess.orgId, offboardingCases.orgId),
+          ),
+        )
+        .where(
+          and(
+            eq(offboardingCases.orgId, orgId),
+            or(
+              inArray(sql`lower(trim(${offboardingCases.name}))`, keys),
+              inArray(sql`lower(trim(${employeeAccess.email}))`, keys),
+            ),
+          ),
+        );
+
+      const used = await tx
+        .select({ tag: equipment.tag })
+        .from(equipment)
+        .where(and(eq(equipment.orgId, orgId), inArray(equipment.tag, tags)));
+
+      const { problems, values } = resolveImport(rows, cases, new Set(used.map(({ tag }) => tag)));
+
+      if (problems.length) return { problems, created: 0 };
+
+      await tx.insert(equipment).values(
+        values.map((value) => ({
+          ...value,
+          orgId,
+          status: "with_person" as const,
+          fromEmployeePlan: false,
+        })),
+      );
+
+      return { problems, created: values.length };
+    });
+  }
+
   return {
+    importEquipment,
     listEquipment,
     updateEquipmentStatus,
     createEquipment,

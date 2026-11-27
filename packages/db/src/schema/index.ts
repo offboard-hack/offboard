@@ -683,6 +683,7 @@ export const subscriptionStatusEnum = pgEnum("subscription_status", [
   "past_due",
   "canceled",
   "trialing",
+  "pending",
 ]);
 
 export const invoiceStatusEnum = pgEnum("invoice_status", [
@@ -718,6 +719,9 @@ export const subscriptions = pgTable(
     status: subscriptionStatusEnum("status").notNull().default("active"),
     currentPeriodStart: date("current_period_start").notNull(),
     currentPeriodEnd: date("current_period_end").notNull(),
+    checkoutId: varchar("checkout_id", { length: 255 }),
+    checkoutUrl: text("checkout_url"),
+    providerSubscriptionId: varchar("provider_subscription_id", { length: 255 }),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
