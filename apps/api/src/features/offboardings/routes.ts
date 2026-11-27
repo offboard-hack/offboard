@@ -72,6 +72,10 @@ export function offboardingsRoutes(
 
         delivered.push(task.id);
 
+        if (task.stepId === "collect") {
+          await repos.markEquipmentReturned(task.orgId, task.caseId);
+        }
+
         if (task.phase) {
           await dispatchAction(
             {

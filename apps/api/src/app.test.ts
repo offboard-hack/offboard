@@ -10992,6 +10992,7 @@ describe.skipIf(!url)("api", () => {
                 phase: "d0",
                 stepId: null,
                 trackingCode: "ZZ999999999BR",
+                caseId: randomUUID(),
               },
             ]),
         },
@@ -11070,6 +11071,13 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
   });
 
   const app = createApp(webOrigin, repos, { auth: employeeAuth, sendEmail });
+
+  let carrierBody = "";
+
+  const carrierServer = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(carrierBody);
+  });
 
   type EmployeeSettings = Parameters<typeof repos.employee.saveSettings>[2];
 
@@ -11161,12 +11169,22 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     return cookie;
   }
 
-  beforeAll(() =>
-    migrate(db, {
+  beforeAll(async () => {
+    await migrate(db, {
       migrationsFolder: fileURLToPath(new URL("../../../packages/db/drizzle", import.meta.url)),
-    }),
-  );
-  afterAll(() => db.$client.end());
+    });
+
+    await new Promise<void>((resolve) => {
+      carrierServer.listen(0, "127.0.0.1", resolve);
+    });
+  });
+  afterAll(async () => {
+    await new Promise<void>((resolve) => {
+      carrierServer.close(() => resolve());
+    });
+
+    await db.$client.end();
+  });
 
   it("does not expose employee access settings through fallback portal authentication", async () => {
     const fallbackApp = createApp(webOrigin, repos, { auth, sendEmail });
@@ -11369,6 +11387,31 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
     expect(journey.trackingCode).toBeNull();
 
+    const trackingRequest = (instance: typeof app) =>
+      instance.handle(
+        new Request(webOrigin + "/api/employee/tracking", {
+          headers: {
+            origin: webOrigin,
+            cookie,
+            [employeeGrantHeader]: grants.get(cookie) ?? "",
+            "x-test-employee-ip": "192.0.2.250",
+          },
+        }),
+      );
+
+    expect(await (await trackingRequest(app)).json()).toEqual({
+      trackingCode: null,
+      tracking: null,
+    });
+
+    const revoked = createApp(
+      webOrigin,
+      { ...repos, employee: { ...repos.employee, withAccess: async () => null } },
+      { auth: employeeAuth, sendEmail },
+    );
+
+    expect((await trackingRequest(revoked)).status).toBe(401);
+
     expect(
       (await request("/employee/tracking-code", "PATCH", cookie, { code: "INVALID!" })).status,
     ).toBe(422);
@@ -11382,6 +11425,86 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     const journeyAfterTracking = await (await request("/employee/journey", "GET", cookie)).json();
 
     expect(journeyAfterTracking.trackingCode).toBe("AB123456789BR");
+
+    expect(
+      (
+        await db
+          .select({ status: equipment.status })
+          .from(equipment)
+          .where(eq(equipment.caseId, record.id))
+      ).map(({ status }) => status),
+    ).toEqual(["transit", "transit"]);
+
+    expect(await (await trackingRequest(app)).json()).toEqual({
+      trackingCode: "AB123456789BR",
+      tracking: null,
+    });
+
+    const shipmentApp = createApp(webOrigin, repos, {
+      ...appOptions,
+      auth: { ...auth, resolveEmployee: employeeAuth.resolveEmployee },
+      tracking: {
+        baseUrl: `http://127.0.0.1:${z.object({ port: z.number() }).parse(carrierServer.address()).port}`,
+        apiKey: "key",
+      },
+    });
+
+    const respond = (delivered: boolean, descricao: string) => {
+      carrierBody = JSON.stringify({
+        status: "TRACKING_STATUS_FOUND",
+        payload: {
+          temEventoEntrega: delivered,
+          eventos: [{ descricao, dtHrCriado: { date: "2026-11-18 16:00:00.000000" } }],
+        },
+      });
+    };
+
+    const switchCorreios = (status: "connected" | "disconnected") =>
+      db
+        .insert(integrations)
+        .values({ orgId: defaultOrgId, name: "Transportadora::Correios", status })
+        .onConflictDoUpdate({
+          target: [integrations.orgId, integrations.name],
+          set: { status },
+        });
+
+    await switchCorreios("connected");
+    respond(false, "Objeto postado");
+
+    expect(await (await trackingRequest(shipmentApp)).json()).toEqual({
+      trackingCode: "AB123456789BR",
+      tracking: { delivered: false, lastEvent: "Objeto postado", lastUpdate: "2026-11-18 16:00" },
+    });
+
+    await switchCorreios("disconnected");
+    expect((await (await trackingRequest(shipmentApp)).json()).tracking).toBeNull();
+    await switchCorreios("connected");
+
+    respond(true, "Objeto entregue");
+
+    const check = await shipmentApp.handle(
+      new Request("http://localhost/api/correios/check", {
+        headers: { authorization: `Bearer ${cronSecret}` },
+      }),
+    );
+
+    expect((await check.json()).delivered.length).toBeGreaterThan(0);
+    expect(
+      (
+        await db
+          .select({ status: equipment.status })
+          .from(equipment)
+          .where(eq(equipment.caseId, record.id))
+      ).map(({ status }) => status),
+    ).toEqual(["received", "received"]);
+    await db
+      .update(equipment)
+      .set({ status: "with_person" })
+      .where(eq(equipment.caseId, record.id));
+    await db
+      .update(tasks)
+      .set({ status: "todo" })
+      .where(and(eq(tasks.caseId, record.id), eq(tasks.checklistStepId, "collect")));
 
     await db
       .update(tasks)

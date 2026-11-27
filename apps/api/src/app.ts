@@ -61,7 +61,7 @@ import { runAiApplication, type RunnerDeps } from "./features/ai-apply/runner.js
 import { packageRoutes } from "./features/preferences/package-routes.js";
 import { createPreferencesRepository } from "./features/preferences/repository.js";
 import { preferencesRoutes } from "./features/preferences/routes.js";
-import type { TrackingConfig } from "./features/offboardings/correios.js";
+import { trackPackage, type TrackingConfig } from "./features/offboardings/correios.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
 import { dispatchTaskAction, type DispatchAction } from "./shared/action-dispatch.js";
@@ -590,6 +590,10 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         dispatchAction,
         inviteEmployee,
         accessGranted,
+        async (orgId, code) =>
+          options.tracking && (await repos.integrations.isConnected(orgId, correiosIntegration))
+            ? trackPackage(code, options.tracking)
+            : null,
       ),
     )
     .use(
