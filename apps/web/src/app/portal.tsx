@@ -117,11 +117,6 @@ const navigationGroups: {
     label: "Transição",
     links: [
       {
-        to: "/candidaturas-assistidas",
-        label: "Candidaturas assistidas",
-        icon: "M3 8h18v12H3zM8 8V4h8v4M3 13h18m-11 0v2h4v-2",
-      },
-      {
         to: "/resultados-e-feedback",
         label: "Resultados e feedback",
         icon: "M4 4v16h16M8 15l4-4 3 2 5-6",
