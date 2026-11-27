@@ -131,3 +131,29 @@ export function useRemoveEquipment(id: string) {
     if (error) throw new EquipmentChangeError(equipmentFailure.safeParse(error.value).data?.error);
   });
 }
+
+const importFailure = z.object({
+  problems: z.array(
+    z.object({
+      record: z.number(),
+      problem: z.enum(["unknown-person", "ambiguous-person", "tag-in-use", "repeated-tag"]),
+    }),
+  ),
+});
+
+export class EquipmentImportError extends Error {
+  constructor(readonly problems: z.output<typeof importFailure>["problems"]) {
+    super("Failed to import equipment");
+  }
+}
+
+type ImportedEquipment = Omit<EquipmentInput, "caseId"> & { person: string };
+
+export function useImportEquipment() {
+  return useEquipmentChange(async (rows: ImportedEquipment[]) => {
+    const { error } = await getApiClient().api.equipment.import.post({ rows });
+
+    if (error)
+      throw new EquipmentImportError(importFailure.safeParse(error.value).data?.problems ?? []);
+  });
+}

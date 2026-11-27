@@ -5,6 +5,7 @@ The inventory shows offboarding equipment, its current return status, and instru
 ## Sub-features
 
 - `inventory` shows equipment, asset tag, person, and return status.
+- `csv-import` imports items with **Importar CSV** (columns `pessoa;item;patrimonio;devolucao`, person by e-mail or exact case name). Any refused row blocks the whole file and is shown per line.
 - `manual-items` adds, edits, and removes items with **Adicionar bem**, **Editar**, and **Remover**. Items from the employee plan show `Plano da pessoa` and are changed in the case.
 - `status-filter` filters the inventory and survives reload.
 - `shipments` shows tracking codes from cases and loads carrier updates separately.

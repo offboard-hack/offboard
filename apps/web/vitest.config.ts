@@ -8,6 +8,7 @@ export default defineConfig({
       include: [
         "src/features/checklist/action-config.ts",
         "src/features/asset-returns/equipment-form.ts",
+        "src/features/asset-returns/equipment-csv.ts",
         "src/entities/career/failure.ts",
         "src/entities/career/refresh.ts",
         "src/features/employee/career/jobs-view.ts",
