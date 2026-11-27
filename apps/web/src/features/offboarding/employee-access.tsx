@@ -229,11 +229,16 @@ class EmployeeSettingsChanged extends Error {
 }
 
 function InviteButton({ caseId, email }: { caseId: string; email: string }) {
+  const queryClient = useQueryClient();
+
   const invite = useMutation({
     async mutationFn() {
       const result = await getApiClient().api["employee-access"]({ caseId }).invite.post();
 
       if (result.error) throw new Error("Não foi possível enviar o convite. Tente novamente.");
+    },
+    onSuccess() {
+      void queryClient.invalidateQueries({ queryKey: offboardingsQuery.queryKey });
     },
   });
 
