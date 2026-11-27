@@ -115,6 +115,24 @@ describe.skipIf(!url)("backoffice routes", () => {
     expect(body.total).toBeGreaterThanOrEqual(1);
   });
 
+  it("uses the default page for organizations when no pagination is given", async () => {
+    const response = await get("/backoffice/organizations");
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.items.length).toBeLessThanOrEqual(25);
+  });
+
+  it("applies explicit pagination to organizations and talent", async () => {
+    const organizations = await get("/backoffice/organizations?limit=2&offset=0");
+    const talent = await get("/backoffice/talent?limit=3&offset=0");
+
+    expect(organizations.status).toBe(200);
+    expect((await organizations.json()).items.length).toBeLessThanOrEqual(2);
+    expect(talent.status).toBe(200);
+    expect((await talent.json()).items.length).toBeLessThanOrEqual(3);
+  });
+
   it("uses a default page when no pagination is given", async () => {
     const response = await get("/backoffice/talent");
 
