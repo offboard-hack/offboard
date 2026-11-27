@@ -26,7 +26,7 @@ import {
 } from "@/entities/benefits";
 import { offboardingDepartments } from "@/entities/offboarding";
 import { DataTable, type TableColumn } from "@/shared/ui/data-table";
-import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
+import { ListMetrics } from "@/shared/ui/list-page";
 import { PortalFilter } from "@/shared/ui/select";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
@@ -70,7 +70,7 @@ const departmentOptions = [
   ...offboardingDepartments.map((department) => ({ value: department, label: department })),
 ];
 
-export function BenefitsPage() {
+export function BenefitsTab() {
   const { principal } = portalRoute.useRouteContext();
   const canManage = createPortalAbility(principal.role).can("manage", "Billing");
   const { data: policyData } = useSuspenseQuery(benefitPolicyQuery);
@@ -134,36 +134,36 @@ export function BenefitsPage() {
   ];
 
   return (
-    <ListPage
-      title="Benefícios"
-      breadcrumb={<ListBreadcrumb title="Benefícios" />}
-      metrics={[
-        {
-          label: "Custo mensal",
-          value: formatCents(summary.totalCents),
-          icon: Calendar03Icon,
-          tone: "warning",
-        },
-        {
-          label: "Total de atribuições",
-          value: assignments.length,
-          icon: UserGroupIcon,
-          tone: "success",
-        },
-        {
-          label: "Duração padrão",
-          value: `${policy.benefitDurationMonths} ${policy.benefitDurationMonths === 1 ? "mês" : "meses"}`,
-          icon: Tick02Icon,
-          tone: "primary",
-        },
-        {
-          label: "Plano padrão",
-          value: defaultPlan?.name ?? "Nenhum",
-          icon: CreditCardIcon,
-          tone: "primary",
-        },
-      ]}
-    >
+    <>
+      <ListMetrics
+        title="Benefícios dos colaboradores"
+        metrics={[
+          {
+            label: "Custo mensal",
+            value: formatCents(summary.totalCents),
+            icon: Calendar03Icon,
+            tone: "warning",
+          },
+          {
+            label: "Total de atribuições",
+            value: assignments.length,
+            icon: UserGroupIcon,
+            tone: "success",
+          },
+          {
+            label: "Duração padrão",
+            value: `${policy.benefitDurationMonths} ${policy.benefitDurationMonths === 1 ? "mês" : "meses"}`,
+            icon: Tick02Icon,
+            tone: "primary",
+          },
+          {
+            label: "Plano padrão",
+            value: defaultPlan?.name ?? "Nenhum",
+            icon: CreditCardIcon,
+            tone: "primary",
+          },
+        ]}
+      />
       <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="grid min-w-0 gap-6">
           <PolicyCard policy={policy} plans={plans} canManage={canManage} />
@@ -238,7 +238,7 @@ export function BenefitsPage() {
         onClose={() => setEditing(null)}
         plans={plans}
       />
-    </ListPage>
+    </>
   );
 }
 

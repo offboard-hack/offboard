@@ -35,6 +35,45 @@ export type ListMetric = {
   tone: keyof typeof tones;
 };
 
+export function ListMetrics({ title, metrics }: { title: string; metrics: ListMetric[] }) {
+  if (metrics.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      role="group"
+      aria-label={`Resumo: ${title}`}
+      className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-5"
+    >
+      {metrics.map(({ label, value, icon, tone }) => (
+        <Card
+          key={label}
+          size="sm"
+          className={cn("bg-radial-[ellipse_at_92%_7%] to-transparent", tones[tone].gradient)}
+        >
+          <CardHeader>
+            <div className="flex items-center justify-between gap-2">
+              <dl className="min-w-0">
+                <dt className="text-sm text-muted-foreground">{label}</dt>
+                <dd className="mt-1 text-2xl font-semibold tabular-nums">{value}</dd>
+              </dl>
+              <span
+                className={cn(
+                  "grid size-9 shrink-0 place-items-center rounded-lg",
+                  tones[tone].icon,
+                )}
+              >
+                <HugeiconsIcon icon={icon} aria-hidden="true" className="size-4" />
+              </span>
+            </div>
+          </CardHeader>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 export function ListPage({
   title,
   pending = false,
@@ -58,38 +97,7 @@ export function ListPage({
         {title}
       </h1>
       {breadcrumb}
-      {metrics && metrics.length > 0 && (
-        <div
-          role="group"
-          aria-label={`Resumo: ${title}`}
-          className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-5"
-        >
-          {metrics.map(({ label, value, icon, tone }) => (
-            <Card
-              key={label}
-              size="sm"
-              className={cn("bg-radial-[ellipse_at_92%_7%] to-transparent", tones[tone].gradient)}
-            >
-              <CardHeader>
-                <div className="flex items-center justify-between gap-2">
-                  <dl className="min-w-0">
-                    <dt className="text-sm text-muted-foreground">{label}</dt>
-                    <dd className="mt-1 text-2xl font-semibold tabular-nums">{value}</dd>
-                  </dl>
-                  <span
-                    className={cn(
-                      "grid size-9 shrink-0 place-items-center rounded-lg",
-                      tones[tone].icon,
-                    )}
-                  >
-                    <HugeiconsIcon icon={icon} aria-hidden="true" className="size-4" />
-                  </span>
-                </div>
-              </CardHeader>
-            </Card>
-          ))}
-        </div>
-      )}
+      {metrics && <ListMetrics title={title} metrics={metrics} />}
       {children}
     </div>
   );
