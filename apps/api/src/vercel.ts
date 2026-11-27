@@ -10,6 +10,7 @@ import { createGenerateStructured, resolveModel } from "./shared/ai.js";
 import { diskStorage } from "./shared/disk-storage.js";
 import type { WelcomeMessage } from "./features/talent/welcome.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
+import { parseStaffEmails } from "./shared/staff-access.js";
 
 const aiModel = resolveModel({
   gatewayKey: process.env.AI_GATEWAY_API_KEY,
@@ -65,6 +66,7 @@ function buildApp() {
       ? diskStorage(process.env.RESUME_STORAGE_DIR)
       : undefined,
     publicPageOrigin: process.env.PUBLIC_PAGE_ORIGIN,
+    backofficeStaffEmails: parseStaffEmails(process.env.BACKOFFICE_STAFF_EMAILS),
   });
 }
 

@@ -9,7 +9,9 @@ import { applicationsRoutes } from "./features/applications/routes.js";
 import { authRoutes } from "./features/auth/routes.js";
 import { createAbacatePayGateway, type AbacatePayGateway } from "./features/billing/abacatepay.js";
 import { benefitRoutes } from "./features/benefits/routes.js";
+import { backofficeRoutes } from "./features/backoffice/routes.js";
 import { billingRoutes } from "./features/billing/routes.js";
+import { staffAccess } from "./shared/staff-access.js";
 import { equipmentRoutes } from "./features/equipment/routes.js";
 import { catalogSources, type CatalogSource } from "./features/sources/catalog.js";
 import { fetchFeed } from "./features/sources/sources.js";
@@ -100,6 +102,7 @@ type AppOptions = {
   runInBackground?: (task: () => Promise<void>) => void;
   publicPageOrigin?: string;
   browserbase?: { apiKey: string; projectId: string };
+  backofficeStaffEmails?: ReadonlySet<string>;
 };
 
 function ownResumePdf(name: string, content: ResumeContent) {
@@ -655,6 +658,12 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     .use(benefitRoutes(repos.benefits, access))
     .use(
       billingRoutes(repos.billing, access, abacatepay, webOrigin, options.abacatepayWebhookSecret),
+    )
+    .use(
+      backofficeRoutes(
+        repos.backoffice,
+        staffAccess(options.auth, options.backofficeStaffEmails ?? new Set()),
+      ),
     );
 }
 
