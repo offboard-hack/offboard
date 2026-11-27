@@ -61,6 +61,9 @@ describe.skipIf(!url)("scenario runner against the in-process API", () => {
 
         return { id: `bill_${checkouts}`, url: "https://checkout.example.com/x" };
       },
+      cancelSubscription: async () => {
+        throw new Error("not implemented in stub");
+      },
     },
     catalog: [],
     runInBackground: () => undefined,

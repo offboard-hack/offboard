@@ -613,6 +613,9 @@ describe.skipIf(!url)("billing", () => {
 
       return { id: `bill_${issued.length}`, url: `https://pay.example/bill_${issued.length}` };
     },
+    async cancelSubscription() {
+      throw new Error("not implemented in stub");
+    },
   };
 
   const stubApp = createApp(webOrigin, repos, {
