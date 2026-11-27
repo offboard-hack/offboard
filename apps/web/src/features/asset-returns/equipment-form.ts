@@ -38,9 +38,7 @@ export function equipmentPayload({ caseId, email, ...fields }: EquipmentForm) {
   };
 }
 
-export function equipmentDefaults(
-  item?: Pick<EquipmentReturn, "caseId" | "title" | "code" | "method">,
-) {
+export function equipmentDefaults(item?: Pick<EquipmentReturn, "caseId" | "title" | "code">) {
   if (!item) return { caseId: "", email: "", item: "", tag: "" };
 
   return {
