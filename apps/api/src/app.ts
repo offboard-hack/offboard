@@ -75,6 +75,7 @@ import {
   type Embed,
 } from "./shared/embed.js";
 import { renderResumePdf } from "./shared/resume-pdf.js";
+import type { Captcha } from "./shared/turnstile.js";
 import { secretBox } from "./shared/secret-box.js";
 import { defaultSlackApiUrl } from "./shared/slack.js";
 
@@ -105,6 +106,7 @@ type AppOptions = {
   generateStructured?: GenerateStructured;
   embed?: Embed;
   embedProfile?: Embed;
+  captcha?: Captcha;
   catalog?: readonly CatalogSource[];
   fetchFeedImpl?: typeof fetch;
   fetchGreenhouseImpl?: typeof fetch;
@@ -682,6 +684,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       candidatesRoutes(repos.candidates, repos.searchQuota, options.embedProfile, {
         send: options.sendEmail,
         origin: webOrigin,
+        captcha: options.captcha,
       }),
     )
     .use(accountRoutes(repos.account, talent, options.storage, abacatepay))

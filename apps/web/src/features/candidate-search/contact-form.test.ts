@@ -18,12 +18,13 @@ const valid = {
 describe("candidate contact form", () => {
   it("accepts a complete message and trims it", () => {
     expect(contactProblems(valid)).toEqual({});
-    expect(contactBody(valid)).toEqual({
+    expect(contactBody(valid, null)).toEqual({
       name: "Rita",
       email: "rita@empresa.example",
       message: "Temos uma vaga que combina com você.",
     });
-    expect(contactBody({ ...valid, company: " Empresa X " }).company).toBe("Empresa X");
+    expect(contactBody({ ...valid, company: " Empresa X " }, null).company).toBe("Empresa X");
+    expect(contactBody(valid, "token").captcha).toBe("token");
   });
 
   it("names every missing or oversized field", () => {
@@ -47,6 +48,7 @@ describe("candidate contact form", () => {
   });
 
   it("explains failures and greets by first name", () => {
+    expect(contactFailure(403)).toMatch(/robô/);
     expect(contactFailure(404)).toMatch(/saiu da busca/);
     expect(contactFailure(429)).toMatch(/Limite/);
     expect(contactFailure(502)).toBe(

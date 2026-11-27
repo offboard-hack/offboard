@@ -67,6 +67,7 @@ import { codeAudienceHeader, createAuth, createRuntimeAuth } from "./features/au
 import { catalogSources, type CatalogSource } from "./features/sources/catalog.js";
 import type { GenerateStructured } from "./shared/ai.js";
 import { type Embed, textHash } from "./shared/embed.js";
+import type { Captcha } from "./shared/turnstile.js";
 import { diskStorage } from "./shared/disk-storage.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
 import { zipSync } from "fflate";
@@ -3245,6 +3246,7 @@ describe.skipIf(!url)("api", () => {
           embed?: Embed;
           embedProfile?: Embed;
           billing?: BillingStub;
+          captcha?: Captcha;
         } = {},
       ) {
         const store: Store = { puts: [], removed: [], prefixes: [], failRemove: false };
@@ -3344,6 +3346,7 @@ describe.skipIf(!url)("api", () => {
             options.generate === null ? undefined : (options.generate ?? generate),
           embed: options.embed,
           embedProfile: options.embedProfile,
+          captcha: options.captcha,
           storage: options.storage === false ? undefined : storage,
           abacatepay: options.billing,
           runInBackground: (task) => {
@@ -4941,6 +4944,75 @@ describe.skipIf(!url)("api", () => {
 
         expect(capped.status).toBe(429);
         expect(await capped.json()).toEqual({ error: "Too many messages" });
+      });
+
+      it("asks for a captcha before sending a confirmation when one is configured", async () => {
+        const verdicts: (boolean | Error)[] = [];
+        const checked: [string, string | null][] = [];
+
+        const captcha: Captcha = {
+          siteKey: "site-key",
+          verify: async (token, ip) => {
+            checked.push([token, ip]);
+
+            const verdict = verdicts.shift() ?? true;
+
+            if (verdict instanceof Error) throw verdict;
+
+            return verdict;
+          },
+        };
+
+        const app = resumesApp({ captcha });
+        const visible = await profile();
+        const shown = await (await upload(app.instance, visible)).json();
+
+        await repos.talent.setSearchable(visible, true, new Date());
+        await db.delete(demoSearchUsage);
+
+        const siteKey = async (instance: typeof app.instance) =>
+          (
+            await instance.handle(new Request("http://localhost/api/candidates/contact/captcha"))
+          ).json();
+
+        expect(await siteKey(app.instance)).toEqual({ siteKey: "site-key" });
+        expect(await siteKey(resumesApp().instance)).toEqual({ siteKey: null });
+
+        const contact = (body: Record<string, string>) =>
+          app.instance.handle(
+            new Request(`http://localhost/api/candidates/${shown.id}/contact`, {
+              method: "POST",
+              headers: { "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" },
+              body: JSON.stringify({
+                name: "Rita",
+                email: "rita@empresa.example",
+                message: "Temos uma vaga que combina com você.",
+                ...body,
+              }),
+            }),
+          );
+
+        const missing = await contact({});
+
+        expect(missing.status).toBe(403);
+        expect(await missing.json()).toEqual({ error: "Captcha failed" });
+        expect(checked).toEqual([]);
+
+        verdicts.push(false);
+        expect((await contact({ captcha: "bad" })).status).toBe(403);
+
+        const logged = vi.spyOn(console, "error");
+
+        verdicts.push(new Error("turnstile down"));
+        expect((await contact({ captcha: "later" })).status).toBe(403);
+        expect(logged.mock.calls).toContainEqual([
+          "captcha verification failed",
+          { name: "Error", message: "turnstile down" },
+        ]);
+        logged.mockRestore();
+
+        expect((await contact({ captcha: "good" })).status).toBe(202);
+        expect(checked.at(-1)).toEqual(["good", "203.0.113.9"]);
       });
 
       it("forgets contact requests after 30 days and search counters after a week", async () => {

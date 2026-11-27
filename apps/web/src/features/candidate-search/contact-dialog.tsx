@@ -1,7 +1,7 @@
 import Mail01Icon from "@hugeicons/core-free-icons/Mail01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMutation } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useCallback, useId, useState } from "react";
 import { getApiClient } from "@/shared/lib/api-client";
 import { Button } from "@/shared/ui/shadcn/button";
 import {
@@ -25,8 +25,19 @@ import {
   emptyContact,
   firstName,
 } from "./contact-form";
+import { Turnstile } from "./turnstile";
 
 class ContactFailed extends Error {}
+
+const captchaQuery = {
+  queryKey: ["candidate-contact-captcha"],
+  staleTime: Number.POSITIVE_INFINITY,
+  queryFn: async () => {
+    const result = await getApiClient().api.candidates.contact.captcha.get();
+
+    return result.data?.siteKey ?? null;
+  },
+};
 
 const fields: { key: Exclude<ContactField, "message">; label: string; type: string }[] = [
   { key: "name", label: "Seu nome", type: "text" },
@@ -41,13 +52,23 @@ export function ContactDialog({ id, name }: { id: string; name: string }) {
   const formId = useId();
   const problems = contactProblems(draft);
   const person = firstName(name);
+  const captcha = useQuery({ ...captchaQuery, enabled: open });
+  const siteKey = captcha.data ?? null;
+  const [token, setToken] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [unavailable, setUnavailable] = useState(false);
+  const onUnavailable = useCallback(() => setUnavailable(true), []);
+  const needsCaptcha = siteKey !== null && token === null;
 
   const send = useMutation({
     mutationFn: async () => {
-      const result = await getApiClient().api.candidates({ id }).contact.post(contactBody(draft));
+      const result = await getApiClient()
+        .api.candidates({ id })
+        .contact.post(contactBody(draft, token));
 
       if (result.error !== null) throw new ContactFailed(contactFailure(result.status));
     },
+    onError: () => setAttempt((current) => current + 1),
   });
 
   const error = (key: ContactField) => (checked ? problems[key] : undefined);
@@ -94,7 +115,7 @@ export function ContactDialog({ id, name }: { id: string; name: string }) {
                   event.preventDefault();
                   setChecked(true);
 
-                  if (Object.keys(problems).length === 0) send.mutate();
+                  if (Object.keys(problems).length === 0 && !needsCaptcha) send.mutate();
                 }}
               >
                 {fields.map((field) => (
@@ -134,6 +155,24 @@ export function ContactDialog({ id, name }: { id: string; name: string }) {
                     </p>
                   ) : null}
                 </div>
+                {siteKey ? (
+                  <div className="grid gap-1.5">
+                    <Turnstile
+                      key={attempt}
+                      siteKey={siteKey}
+                      onToken={setToken}
+                      onUnavailable={onUnavailable}
+                    />
+                    {unavailable ? (
+                      <p className="text-sm text-destructive">
+                        Não foi possível carregar a verificação. Recarregue a página.
+                      </p>
+                    ) : null}
+                    {checked && needsCaptcha && !unavailable ? (
+                      <p className="text-sm text-destructive">Conclua a verificação acima.</p>
+                    ) : null}
+                  </div>
+                ) : null}
                 {send.error ? (
                   <p role="alert" className="text-sm text-destructive">
                     {send.error.message}
@@ -150,7 +189,7 @@ export function ContactDialog({ id, name }: { id: string; name: string }) {
                 <Button variant="ghost" onClick={() => setOpen(false)}>
                   Cancelar
                 </Button>
-                <Button type="submit" form={formId} disabled={send.isPending}>
+                <Button type="submit" form={formId} disabled={send.isPending || captcha.isPending}>
                   {send.isPending ? "Enviando…" : "Enviar mensagem"}
                 </Button>
               </>

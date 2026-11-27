@@ -4,6 +4,7 @@ import { logFailure } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import { profileCard, toProfileCard } from "../../shared/profile-card.js";
 import type { SearchQuota } from "../../shared/search-quota.js";
+import type { Captcha } from "../../shared/turnstile.js";
 import { confirmationEmail, contactEmail } from "./contact.js";
 import type { CandidatesRepository } from "./repository.js";
 
@@ -28,9 +29,26 @@ export function candidatesRoutes(
   repo: CandidatesRepository,
   quota: SearchQuota,
   embed: Embed | undefined,
-  mail: { send: (message: Message) => Promise<void>; origin: string },
+  mail: { send: (message: Message) => Promise<void>; origin: string; captcha?: Captcha },
 ) {
+  const captcha = mail.captcha;
+
+  async function passesCaptcha(token: string | undefined, request: Request) {
+    if (!captcha) return true;
+
+    if (!token) return false;
+
+    const passed = await captcha
+      .verify(token, request.headers.get("cf-connecting-ip"))
+      .catch(logFailure("captcha verification failed"));
+
+    return passed === true;
+  }
+
   return new Elysia()
+    .get("/candidates/contact/captcha", () => ({ siteKey: captcha?.siteKey ?? null }), {
+      response: { 200: t.Object({ siteKey: t.Nullable(t.String()) }) },
+    })
     .get(
       "/candidates/search",
       async ({ query, request, status }) => {
@@ -65,6 +83,10 @@ export function candidatesRoutes(
       async ({ params, body, request, status }) => {
         if (!(await quota.takeForVisitor("contact", request, contactLimits))) {
           return status(429, { error: "Too many messages" });
+        }
+
+        if (!(await passesCaptcha(body.captcha, request))) {
+          return status(403, { error: "Captcha failed" });
         }
 
         const candidate = await repo.contactTarget(params.id);
@@ -111,9 +133,11 @@ export function candidatesRoutes(
           email: t.String({ format: "email", maxLength: 255 }),
           company: t.Optional(t.String({ maxLength: 120 })),
           message: t.String({ minLength: 20, maxLength: 2_000 }),
+          captcha: t.Optional(t.String({ maxLength: 2_048 })),
         }),
         response: {
           202: t.Void(),
+          403: errorResponse,
           404: errorResponse,
           429: errorResponse,
           502: errorResponse,

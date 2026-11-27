@@ -29,9 +29,15 @@ export function contactProblems(draft: ContactDraft) {
   return problems;
 }
 
-export type ContactBody = { name: string; email: string; message: string; company?: string };
+export type ContactBody = {
+  name: string;
+  email: string;
+  message: string;
+  company?: string;
+  captcha?: string;
+};
 
-export function contactBody(draft: ContactDraft) {
+export function contactBody(draft: ContactDraft, captcha: string | null) {
   const body: ContactBody = {
     name: draft.name.trim(),
     email: draft.email.trim(),
@@ -42,10 +48,13 @@ export function contactBody(draft: ContactDraft) {
 
   if (company) body.company = company;
 
+  if (captcha) body.captcha = captcha;
+
   return body;
 }
 
 const failures = new Map([
+  [403, "Não conseguimos confirmar que você não é um robô. Tente de novo."],
   [404, "Esta pessoa saiu da busca de candidatos."],
   [429, "Limite de mensagens de hoje atingido. Tente de novo amanhã."],
 ]);
