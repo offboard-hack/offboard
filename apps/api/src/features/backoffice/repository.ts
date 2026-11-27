@@ -29,6 +29,29 @@ export function createBackofficeRepository(db: Database) {
     return Object.fromEntries((await rows).map((row) => [row.status, Number(row.count)]));
   }
 
+  async function tallyByOrg(orgIds: string[]) {
+    if (orgIds.length === 0)
+      return { members: new Map<string, number>(), cases: new Map<string, number>() };
+
+    const [memberRows, caseRows] = await Promise.all([
+      db
+        .select({ orgId: teamMembers.orgId, value: count() })
+        .from(teamMembers)
+        .where(inArray(teamMembers.orgId, orgIds))
+        .groupBy(teamMembers.orgId),
+      db
+        .select({ orgId: offboardingCases.orgId, value: count() })
+        .from(offboardingCases)
+        .where(inArray(offboardingCases.orgId, orgIds))
+        .groupBy(offboardingCases.orgId),
+    ]);
+
+    return {
+      members: new Map(memberRows.map((row) => [row.orgId, row.value])),
+      cases: new Map(caseRows.map((row) => [row.orgId, row.value])),
+    };
+  }
+
   async function latestSubscriptions(orgIds: string[]) {
     if (orgIds.length === 0) return new Map<string, LatestSubscription>();
 
@@ -116,8 +139,6 @@ export function createBackofficeRepository(db: Database) {
             name: organizations.name,
             slug: organizations.slug,
             createdAt: organizations.createdAt,
-            memberCount: sql<number>`(select count(*)::int from ${teamMembers} where ${teamMembers.orgId} = ${organizations.id})`,
-            caseCount: sql<number>`(select count(*)::int from ${offboardingCases} where ${offboardingCases.orgId} = ${organizations.id})`,
           })
           .from(organizations)
           .orderBy(asc(organizations.name))
@@ -126,13 +147,17 @@ export function createBackofficeRepository(db: Database) {
         db.select({ value: count() }).from(organizations),
       ]);
 
-      const latest = await latestSubscriptions(rows.map((row) => row.id));
+      const orgIds = rows.map((row) => row.id);
+      const latest = await latestSubscriptions(orgIds);
+      const tallies = await tallyByOrg(orgIds);
 
       return {
         total: total.value,
         items: rows.map((row) => ({
           ...row,
           createdAt: iso(row.createdAt),
+          memberCount: tallies.members.get(row.id) ?? 0,
+          caseCount: tallies.cases.get(row.id) ?? 0,
           subscription: latest.get(row.id) ?? null,
         })),
       };
@@ -241,19 +266,37 @@ export function createBackofficeRepository(db: Database) {
     },
 
     async listPlans() {
-      return db
-        .select({
-          id: plans.id,
-          name: plans.name,
-          slug: plans.slug,
-          monthlyPriceCents: plans.monthlyPriceCents,
-          maxEmployees: plans.maxEmployees,
-          perPersonPriceCents: plans.perPersonPriceCents,
-          activeOrganizations: sql<number>`(select count(*)::int from ${subscriptions} where ${subscriptions.planId} = ${plans.id} and ${subscriptions.status} = 'active')`,
-          assignedTalent: sql<number>`(select count(*)::int from ${benefitAssignments} where ${benefitAssignments.effectivePlanId} = ${plans.id})`,
-        })
-        .from(plans)
-        .orderBy(asc(plans.monthlyPriceCents));
+      const [catalogue, active, talent] = await Promise.all([
+        db
+          .select({
+            id: plans.id,
+            name: plans.name,
+            slug: plans.slug,
+            monthlyPriceCents: plans.monthlyPriceCents,
+            maxEmployees: plans.maxEmployees,
+            perPersonPriceCents: plans.perPersonPriceCents,
+          })
+          .from(plans)
+          .orderBy(asc(plans.monthlyPriceCents)),
+        db
+          .select({ planId: subscriptions.planId, value: count() })
+          .from(subscriptions)
+          .where(eq(subscriptions.status, "active"))
+          .groupBy(subscriptions.planId),
+        db
+          .select({ planId: benefitAssignments.effectivePlanId, value: count() })
+          .from(benefitAssignments)
+          .groupBy(benefitAssignments.effectivePlanId),
+      ]);
+
+      const activeByPlan = new Map(active.map((row) => [row.planId, row.value]));
+      const talentByPlan = new Map(talent.map((row) => [row.planId, row.value]));
+
+      return catalogue.map((plan) => ({
+        ...plan,
+        activeOrganizations: activeByPlan.get(plan.id) ?? 0,
+        assignedTalent: talentByPlan.get(plan.id) ?? 0,
+      }));
     },
   };
 }

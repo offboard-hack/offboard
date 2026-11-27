@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createClient, type Database } from "@offboard/db/client";
+import { inArray } from "drizzle-orm";
 import { organizations, plans } from "@offboard/db/schema";
 import { Elysia } from "elysia";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -38,6 +39,7 @@ describe.skipIf(!url)("backoffice routes", () => {
   const db = createClient(url ?? "");
   const staff: PortalAccess = { kind: "authenticated", principal: staffPrincipal };
   let orgId: string;
+  let planId: string;
 
   function get(path: string, access: PortalAccess = staff) {
     return appFor(access, db).handle(new Request(`http://api.test${path}`));
@@ -57,15 +59,22 @@ describe.skipIf(!url)("backoffice routes", () => {
 
     orgId = org.id;
 
-    await db.insert(plans).values({
-      name: "Plano Rota",
-      slug: `plan-route-${randomUUID()}`,
-      monthlyPriceCents: 100,
-      maxEmployees: 1,
-    });
+    [{ id: planId }] = await db
+      .insert(plans)
+      .values({
+        name: "Plano Rota",
+        slug: `plan-route-${randomUUID()}`,
+        monthlyPriceCents: 100,
+        maxEmployees: 1,
+      })
+      .returning({ id: plans.id });
   });
 
-  afterAll(() => db.$client.end());
+  afterAll(async () => {
+    await db.delete(organizations).where(inArray(organizations.id, [orgId]));
+    await db.delete(plans).where(inArray(plans.id, [planId]));
+    await db.$client.end();
+  });
 
   it.each([
     "/backoffice/summary",

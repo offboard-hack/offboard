@@ -13,7 +13,7 @@ import {
   talentSubscriptions,
   teamMembers,
 } from "@offboard/db/schema";
-import { sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createBackofficeRepository } from "./repository.js";
@@ -30,6 +30,7 @@ describe.skipIf(!url)("createBackofficeRepository", () => {
   let otherPlanId: string;
   let profileId: string;
   let signedInProfileId: string;
+  let bareOrgId: string;
 
   beforeAll(async () => {
     await migrate(db, {
@@ -158,7 +159,16 @@ describe.skipIf(!url)("createBackofficeRepository", () => {
     await db.insert(llmUsage).values({ profileId, day: sql`current_date`, calls: 7 });
   });
 
-  afterAll(() => db.$client.end());
+  afterAll(async () => {
+    await db.delete(talentProfiles).where(eq(talentProfiles.orgId, orgId));
+    await db.delete(invoices).where(eq(invoices.orgId, orgId));
+    await db.delete(subscriptions).where(eq(subscriptions.orgId, orgId));
+    await db.delete(offboardingCases).where(eq(offboardingCases.orgId, orgId));
+    await db.delete(teamMembers).where(eq(teamMembers.orgId, orgId));
+    await db.delete(organizations).where(inArray(organizations.id, [orgId, bareOrgId]));
+    await db.delete(plans).where(inArray(plans.id, [planId, otherPlanId]));
+    await db.$client.end();
+  });
 
   it("summarises platform totals and recurring revenue", async () => {
     const summary = await repo.summary();
@@ -200,11 +210,13 @@ describe.skipIf(!url)("createBackofficeRepository", () => {
   it("returns a null subscription for an organization without subscriptions", async () => {
     const [bare] = await db
       .insert(organizations)
-      .values({ name: `bare-${randomUUID()}`, slug: `bare-${randomUUID()}` })
+      .values({ name: `0-bare-${randomUUID()}`, slug: `bare-${randomUUID()}` })
       .returning({ id: organizations.id });
 
+    bareOrgId = bare.id;
+
     const page = await repo.listOrganizations({ limit: 100, offset: 0 });
-    const row = page.items.find((item) => item.id === bare.id);
+    const row = page.items.find((item) => item.id === bareOrgId);
 
     expect(row?.subscription).toBeNull();
   });
