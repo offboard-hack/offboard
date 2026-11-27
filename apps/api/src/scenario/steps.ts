@@ -220,42 +220,56 @@ export async function subscribeCompany(ctx: Context, admin: Admin, planSlug: str
     return "skipped" as const;
   }
 
+  const started = expectStatus(
+    await ctx.http("POST", "/billing/subscription", {
+      body: { planSlug },
+      cookie: admin.session.cookie,
+    }),
+    `Subscribing to ${planSlug}`,
+    200,
+    409,
+  );
+
+  const current = await readSubscription(ctx, admin);
+
+  if (started.status === 409 && current.status === "active") {
+    ctx.log(`company subscription already active on ${current.plan.slug}`);
+
+    return current.status;
+  }
+
   const checkout = parseBody(
     expectStatus(
-      await ctx.http("POST", "/billing/subscription", {
-        body: { planSlug },
-        cookie: admin.session.cookie,
-      }),
-      `Subscribing to ${planSlug}`,
+      await ctx.http("POST", "/billing/checkout", { cookie: admin.session.cookie }),
+      "Opening the checkout",
       200,
     ),
     "Checkout",
-    z.object({ url: z.string() }),
+    z.object({ checkoutId: z.string(), url: z.string() }),
   );
 
   ctx.log(`AbacatePay sandbox checkout: ${checkout.url}`);
-
-  const subscription = parseBody(
-    expectStatus(
-      await ctx.http("GET", "/billing/subscription", { cookie: admin.session.cookie }),
-      "Reading the subscription",
-      200,
-    ),
-    "Subscription",
-    subscriptionBody,
-  );
 
   await sendWebhook(
     ctx,
     keys.secret,
     completedEvent({
       eventId: ctx.newId(),
-      externalId: subscription.id,
-      amountCents: subscription.plan.monthlyPriceCents,
+      externalId: current.id,
+      checkoutId: checkout.checkoutId,
+      amountCents: current.plan.monthlyPriceCents,
     }),
   );
 
-  const paid = parseBody(
+  const paid = await readSubscription(ctx, admin);
+
+  ctx.log(`company subscription is ${paid.status} on ${paid.plan.slug}`);
+
+  return paid.status;
+}
+
+async function readSubscription(ctx: Context, admin: Admin) {
+  return parseBody(
     expectStatus(
       await ctx.http("GET", "/billing/subscription", { cookie: admin.session.cookie }),
       "Reading the subscription",
@@ -264,10 +278,6 @@ export async function subscribeCompany(ctx: Context, admin: Admin, planSlug: str
     "Subscription",
     subscriptionBody,
   );
-
-  ctx.log(`company subscription is ${paid.status} on ${paid.plan.slug}`);
-
-  return paid.status;
 }
 
 export async function setBenefitPolicy(

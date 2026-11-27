@@ -13,7 +13,6 @@ import {
   subscriptions,
   talentProfiles,
   teamMembers,
-  plans,
 } from "@offboard/db/schema";
 import { seedCatalog } from "@offboard/db/seed-database";
 import { eq, inArray } from "drizzle-orm";
@@ -23,12 +22,11 @@ import { createApp } from "../app.js";
 import { createRuntimeAuth } from "../features/auth/auth.js";
 import { latestCode, readOutbox } from "../shared/dev-outbox.js";
 import { createRepositories } from "../repositories.js";
-import { addDays, type Context } from "./context.js";
+import type { Context } from "./context.js";
 import { createHttp } from "./http.js";
 import { runScenario } from "./run.js";
 import { orgs, people } from "./scenarios.js";
-import { ensureOrg, sendWebhook } from "./steps.js";
-import { completedEvent } from "./webhook.js";
+import { ensureOrg } from "./steps.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const webOrigin = "http://localhost:5173";
@@ -48,6 +46,8 @@ describe.skipIf(!url)("scenario runner against the in-process API", () => {
     },
   });
 
+  let checkouts = 0;
+
   const app = createApp(webOrigin, repos, {
     auth,
     sendEmail: (message) => sender.send(message),
@@ -55,10 +55,11 @@ describe.skipIf(!url)("scenario runner against the in-process API", () => {
     abacatepayWebhookSecret: webhookSecret,
     abacatepay: {
       configured: true,
-      createSubscriptionCheckout: async () => ({
-        id: "bill_1",
-        url: "https://checkout.example.com/x",
-      }),
+      createSubscriptionCheckout: async () => {
+        checkouts += 1;
+
+        return { id: `bill_${checkouts}`, url: "https://checkout.example.com/x" };
+      },
     },
     catalog: [],
     runInBackground: () => undefined,
@@ -194,34 +195,28 @@ describe.skipIf(!url)("scenario runner against the in-process API", () => {
     expect(lines).toContain("Helena Pires Carreira Pro is active");
   });
 
-  it("activates a pending company subscription from a signed webhook", async () => {
-    const { ctx } = context();
+  it("subscribes a company through the checkout route and activates it from a signed webhook", async () => {
+    const { ctx, lines } = context({
+      ABACATEPAY_API_KEY: "sandbox-key",
+      ABACATEPAY_WEBHOOK_SECRET: webhookSecret,
+    });
+
+    await runScenario("company-payment", ctx);
+
+    expect(lines).toContain("company subscription is active on silver");
+
     const admin = await ensureOrg(ctx, orgs[1].org);
-    const [plan] = await db.select().from(plans).where(eq(plans.slug, "silver"));
-
-    const [subscription] = await db
-      .insert(subscriptions)
-      .values({
-        orgId: admin.orgId,
-        planId: plan.id,
-        status: "past_due",
-        currentPeriodStart: addDays(ctx.today(), -30),
-        currentPeriodEnd: addDays(ctx.today(), -1),
-      })
-      .returning({ id: subscriptions.id });
-
-    await sendWebhook(
-      ctx,
-      webhookSecret,
-      completedEvent({
-        eventId: ctx.newId(),
-        externalId: subscription.id,
-        amountCents: plan.monthlyPriceCents,
-      }),
-    );
-
     const reply = await ctx.http("GET", "/billing/subscription", { cookie: admin.session.cookie });
 
-    expect(reply.body).toMatchObject({ id: subscription.id, status: "active" });
+    expect(reply.body).toMatchObject({ status: "active", plan: { slug: "silver" } });
+
+    const again = context({
+      ABACATEPAY_API_KEY: "sandbox-key",
+      ABACATEPAY_WEBHOOK_SECRET: webhookSecret,
+    });
+
+    await runScenario("company-payment", again.ctx);
+
+    expect(again.lines).toContain("company subscription already active on silver");
   });
 });

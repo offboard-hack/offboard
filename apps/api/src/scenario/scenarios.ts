@@ -235,9 +235,7 @@ async function addPersonScenario(ctx: Context) {
 async function companyPaymentScenario(ctx: Context) {
   await ctx.seedCatalog();
 
-  const [admin] = await seedOrgs(ctx, [orgs[0]]);
-
-  await subscribeCompany(ctx, admin, "platinum");
+  await seedOrgs(ctx, [orgs[1]]);
 }
 
 async function careerScenario(ctx: Context) {

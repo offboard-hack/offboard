@@ -51,7 +51,7 @@ Each run prints what it did and a list of `who: email -> where to log in`.
 
 Set `ABACATEPAY_API_KEY` (a sandbox key) and `ABACATEPAY_WEBHOOK_SECRET` both on the API and in the shell that runs the scenario. The checkout is created for real in the sandbox and its URL is printed. AbacatePay cannot reach localhost, so the runner confirms by posting a signed `subscription.completed` event to `/api/billing/webhook`. Without the key, the payment steps print `skipped: ABACATEPAY_API_KEY not set` and the rest runs.
 
-The company step calls `POST /api/billing/subscription` (PR #170). Until it merges, run with the key unset or the step fails with that route's 404.
+The company step calls `POST /api/billing/subscription`, reads the issued checkout id from `POST /api/billing/checkout`, and the signed event carries that id, which activation requires.
 
 ## Backoffice
 

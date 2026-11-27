@@ -14,13 +14,17 @@ export function completedEvent(input: {
   eventId: string;
   externalId: string;
   amountCents: number;
+  checkoutId?: string;
 }) {
   return {
     id: `evt_dev_${input.eventId}`,
     event: "subscription.completed",
     data: {
       subscription: { id: `subs_dev_${input.eventId}`, amount: input.amountCents },
-      checkout: { id: `bill_dev_${input.eventId}`, externalId: input.externalId },
+      checkout: {
+        id: input.checkoutId ?? `bill_dev_${input.eventId}`,
+        externalId: input.externalId,
+      },
       payment: { id: `pay_dev_${input.eventId}` },
     },
   } satisfies WebhookEvent;

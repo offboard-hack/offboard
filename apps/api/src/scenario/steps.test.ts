@@ -94,7 +94,7 @@ it("skips company payment without the sandbox key or webhook secret", async () =
   expect(noSecret.lines[0]).toContain("ABACATEPAY_WEBHOOK_SECRET not set");
 });
 
-it("subscribes, delivers the signed payment event and reads the activated subscription", async () => {
+it("subscribes, matches the issued checkout in the signed event and reads the activated subscription", async () => {
   const subscription = (status: string) =>
     reply(200, { id: "sub-1", status, plan: { slug: "gold", monthlyPriceCents: 24900 } });
 
@@ -102,6 +102,7 @@ it("subscribes, delivers the signed payment event and reads the activated subscr
     [
       reply(200, { url: "https://checkout.example.com/1" }),
       subscription("pending"),
+      reply(200, { checkoutId: "bill_1", url: "https://checkout.example.com/1" }),
       reply(200, { ok: true }),
       subscription("active"),
     ],
@@ -112,10 +113,29 @@ it("subscribes, delivers the signed payment event and reads the activated subscr
   expect(calls).toEqual([
     "POST /billing/subscription",
     "GET /billing/subscription",
+    "POST /billing/checkout",
     "POST /billing/webhook",
     "GET /billing/subscription",
   ]);
   expect(lines).toContain("AbacatePay sandbox checkout: https://checkout.example.com/1");
+});
+
+it("leaves an already active company subscription alone", async () => {
+  const { ctx, calls, lines } = scripted(
+    [
+      reply(409, { error: "Already subscribed" }),
+      reply(200, {
+        id: "sub-1",
+        status: "active",
+        plan: { slug: "gold", monthlyPriceCents: 24900 },
+      }),
+    ],
+    { ABACATEPAY_API_KEY: "key", ABACATEPAY_WEBHOOK_SECRET: "secret" },
+  );
+
+  expect(await subscribeCompany(ctx, admin, "gold")).toBe("active");
+  expect(calls).toHaveLength(2);
+  expect(lines).toEqual(["company subscription already active on gold"]);
 });
 
 it("skips Carreira Pro without keys and reports a missing individual plan", async () => {
