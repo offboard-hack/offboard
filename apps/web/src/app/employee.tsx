@@ -20,6 +20,7 @@ import {
   employeeJourneyQuery,
   employeeStateQuery,
 } from "@/entities/employee";
+import { EmployeeAgenda } from "@/features/employee/agenda-calendar";
 import { Career } from "@/features/employee/career";
 import { Preferences } from "@/features/employee/career/preferences";
 import { ResumeCareer } from "@/features/employee/career/resume";
@@ -388,6 +389,7 @@ function DepartureContent({
     default:
       content = (
         <>
+          {screen === "hoje" ? <EmployeeAgenda account={account} journey={journey} /> : null}
           <EmployeeChecklist account={account} journey={journey} />
           <DepartureOverview journey={journey} state={state} home={screen === "hoje"} />
         </>
