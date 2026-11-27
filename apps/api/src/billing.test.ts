@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import {
   benefitAssignments,
+  benefitInvoices,
   copayProducts,
   defaultOrgId,
   invoices,
@@ -1683,6 +1684,114 @@ describe.skipIf(!url)("billing", () => {
       await copayWebhook("subscription.cancelled", null, "subs_other");
 
       expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_1" });
+    });
+  });
+
+  describe("benefit invoices", () => {
+    const period = saoPauloDate(new Date()).slice(0, 7);
+    let goldId = "";
+    let platinumId = "";
+
+    beforeEach(async () => {
+      await db.delete(benefitAssignments);
+      await db.delete(benefitInvoices);
+
+      const rows = await db.select().from(plans).orderBy(plans.monthlyPriceCents);
+
+      goldId = rows[0].id;
+      platinumId = rows[rows.length - 1].id;
+    });
+
+    async function assignPlan(planId: string, validUntil = "2099-12-31") {
+      const [profile] = await db
+        .insert(talentProfiles)
+        .values({
+          orgId: defaultOrgId,
+          personalEmail: `pessoa-${randomUUID()}@exemplo.com`,
+          name: "Pessoa Teste",
+          sponsoredUntil: "2099-12-31",
+        })
+        .returning({ id: talentProfiles.id });
+
+      await db.insert(benefitAssignments).values({
+        orgId: defaultOrgId,
+        profileId: profile.id,
+        assignedPlanId: planId,
+        effectivePlanId: planId,
+        source: "manual",
+        validUntil,
+      });
+    }
+
+    async function priceOf(planId: string) {
+      const [row] = await db.select().from(plans).where(eq(plans.id, planId));
+
+      return row.perPersonPriceCents;
+    }
+
+    const generate = () => call("/billing/benefit-invoices/generate", { method: "POST" });
+
+    it("generates a benefit invoice for the current month", async () => {
+      await assignPlan(goldId);
+      await assignPlan(goldId);
+      await assignPlan(platinumId);
+
+      const res = await generate();
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        id: expect.any(String),
+        period,
+        totalCents: (await priceOf(goldId)) * 2 + (await priceOf(platinumId)),
+        status: "draft",
+      });
+    });
+
+    it("generate is idempotent", async () => {
+      await assignPlan(goldId);
+
+      const first = await (await generate()).json();
+      const second = await (await generate()).json();
+
+      expect(second.id).toBe(first.id);
+    });
+
+    it("generate excludes expired assignments", async () => {
+      await assignPlan(goldId);
+      await assignPlan(platinumId, "2000-01-01");
+
+      expect((await (await generate()).json()).totalCents).toBe(await priceOf(goldId));
+    });
+
+    it("restricts generation to admins", async () => {
+      const res = await call("/billing/benefit-invoices/generate", {
+        method: "POST",
+        session: "rh",
+      });
+
+      expect(res.status).toBe(403);
+    });
+
+    it("lists benefit invoices by period descending", async () => {
+      await db.insert(benefitInvoices).values([
+        { orgId: defaultOrgId, period: "2026-01", totalCents: 100 },
+        { orgId: defaultOrgId, period: "2026-03", totalCents: 300 },
+      ]);
+
+      const res = await call("/billing/benefit-invoices", { session: "rh" });
+      const list = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(list.map((invoice: { period: string }) => invoice.period)).toEqual([
+        "2026-03",
+        "2026-01",
+      ]);
+    });
+
+    it("returns empty when no invoices", async () => {
+      const res = await call("/billing/benefit-invoices");
+
+      expect(await res.json()).toEqual([]);
     });
   });
 });
