@@ -973,7 +973,7 @@ describe.skipIf(!url)("ai apply runner", () => {
 
       expect(await stateOf(id)).toMatchObject({
         state: "assisted",
-        reason: "form_rejected",
+        reason: "form_errors",
         evidence: { formErrors: ["Este campo é obrigatório."] },
       });
       expect(run.submits()).toBe(0);

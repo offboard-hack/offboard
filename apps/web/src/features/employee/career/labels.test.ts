@@ -56,6 +56,7 @@ describe("career labels", () => {
       "O site da vaga recusou o envio. Confira as mensagens abaixo.",
     );
     expect(attemptReason("foreign_phone")).toContain("(+55)");
+    expect(attemptReason("form_errors")).toContain("a IA não enviou nada");
     expect(attemptReason("unknown")).toBeNull();
     expect(attemptReason(null)).toBeNull();
   });

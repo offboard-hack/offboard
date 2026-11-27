@@ -90,7 +90,7 @@ export type ProfileFields = {
 export type FormField = {
   name: string;
   type: "text" | "textarea" | "file" | "hidden" | "single_select" | "multi_select";
-  options: { label: string; value: string }[];
+  options: { label: string; value: string; freeForm?: true }[];
 };
 
 export type QuestionKind =
