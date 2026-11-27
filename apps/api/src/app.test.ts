@@ -4756,6 +4756,11 @@ describe.skipIf(!url)("api", () => {
         ]);
         expect(JSON.stringify(cards)).not.toContain("@");
 
+        const noRerank = resumesApp({ embedProfile: embedder.embed });
+        const plain = await find(noRerank.instance, "engenheira backend");
+
+        expect(plain.status).toBe(200);
+
         expect((await find(resumesApp().instance, "dev")).status).toBe(503);
         expect((await find(app.instance, "a")).status).toBe(422);
 
