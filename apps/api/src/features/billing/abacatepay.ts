@@ -36,6 +36,23 @@ export function createAbacatePayGateway(
     if (!settled) throw new Error(`AbacatePay subscription cancel failed: ${result.error}`);
   }
 
+  async function refundCheckout(chargeId: string, reason: string) {
+    const api = client({ timeout: cancelTimeoutMs, retry: { max: 0 } });
+    const result = await api.checkouts.refund(chargeId, reason);
+
+    if (!result.success) throw new Error(`AbacatePay refund failed: ${result.error}`);
+  }
+
+  async function productExternalId(productId: string) {
+    const result = await client({ timeout: cancelTimeoutMs, retry: { max: 0 } }).products.get({
+      id: productId,
+    });
+
+    if (!result.success) throw new Error(`AbacatePay product lookup failed: ${result.error}`);
+
+    return result.data.externalId;
+  }
+
   async function createSubscriptionCheckout(params: CreateSubscriptionCheckoutParams) {
     const result = await client().subscriptions.create({
       items: [{ id: params.planSlug, quantity: 1 }],
@@ -53,7 +70,13 @@ export function createAbacatePayGateway(
     return { id: result.data.id, url: result.data.url } satisfies SubscriptionCheckout;
   }
 
-  return { configured: Boolean(apiKey), createSubscriptionCheckout, cancelSubscription };
+  return {
+    configured: Boolean(apiKey),
+    createSubscriptionCheckout,
+    cancelSubscription,
+    refundCheckout,
+    productExternalId,
+  };
 }
 
 export type AbacatePayGateway = ReturnType<typeof createAbacatePayGateway>;

@@ -1,7 +1,8 @@
 import { createHmac } from "node:crypto";
 import { z } from "zod";
-import { logFailureCode } from "../../shared/error-summary.js";
+import { errorSummary, logFailureCode } from "../../shared/error-summary.js";
 import { matchesSecret } from "../../shared/machine-auth.js";
+import { careerPro } from "../../shared/career-pro.js";
 import { addMonths, saoPauloDate } from "../../shared/sao-paulo-date.js";
 import type { BillingRepository } from "./repository.js";
 
@@ -13,6 +14,8 @@ const subscriptionEvent = z.object({
     subscription: z.object({ id: z.string(), amount: z.number() }),
     checkout: z.object({ id: z.string(), externalId: z.string().nullable() }).optional(),
     payment: z.object({ id: z.string() }).optional(),
+    productId: z.string().optional(),
+    status: z.string().optional(),
   }),
 });
 
@@ -77,25 +80,25 @@ export function checkoutReferenceId(externalId: string, prefix = "") {
   return attempt === undefined || attemptToken.test(attempt) ? parsed.data : null;
 }
 
-async function cancelSuperseded(
-  gateway: SubscriptionCanceler,
-  superseded: string,
-  kept: string | null,
-) {
-  if (superseded === kept) return;
+async function cancelSuperseded(gateway: WebhookGateway, superseded: string, kept: string | null) {
+  if (superseded === kept) return false;
 
   if (!gateway.configured) {
     console.error("superseded subscription could not be canceled", { superseded, kept });
 
-    return;
+    return false;
   }
 
   try {
     await gateway.cancelSubscription(superseded);
     console.error("superseded subscription canceled", { superseded, kept });
+
+    return true;
   } catch (cause) {
     logFailureCode("superseded subscription cancellation failed")(cause);
     console.error("superseded subscription left active", { superseded, kept });
+
+    return false;
   }
 }
 
@@ -157,16 +160,95 @@ function talentPatch(name: string | undefined, event: SubscriptionEvent, talent:
   return null;
 }
 
-export type SubscriptionCanceler = {
+export type WebhookGateway = {
   configured: boolean;
   cancelSubscription(id: string): Promise<void>;
+  refundCheckout(checkoutId: string, reason: string): Promise<void>;
+  productExternalId(productId: string): Promise<string>;
 };
+
+type RefundClaims = Pick<BillingRepository, "claimRefund" | "releaseRefund">;
+
+const refundableEvents = new Set(["subscription.completed", "subscription.renewed"]);
+
+const duplicateReason = "Cobrança duplicada cancelada automaticamente";
+
+const planChangeReason = "Troca de plano não suportada cancelada automaticamente";
+
+async function refundChargeOf(
+  repos: RefundClaims,
+  gateway: WebhookGateway,
+  name: string | undefined,
+  event: SubscriptionEvent,
+  reason: string,
+) {
+  const subscriptionId = event.data.subscription.id;
+  const checkoutId = event.data.checkout?.id;
+  const paymentId = event.data.payment?.id;
+
+  if (paymentId === undefined && name === "subscription.renewed") {
+    console.error("refund needs manual action", { subscriptionId, checkoutId });
+
+    return;
+  }
+
+  const chargeId = paymentId ?? checkoutId;
+
+  if (chargeId === undefined) return;
+
+  if (!(await repos.claimRefund(chargeId, new Date()))) return;
+
+  try {
+    await gateway.refundCheckout(chargeId, reason);
+    console.error("charge refunded", { subscriptionId, checkoutId, chargeId });
+  } catch (cause) {
+    await repos.releaseRefund(chargeId);
+    console.error("refund failed", {
+      subscriptionId,
+      checkoutId,
+      chargeId,
+      ...errorSummary(cause),
+    });
+  }
+}
+
+async function refundPaidCharge(
+  repos: RefundClaims,
+  gateway: WebhookGateway,
+  name: string | undefined,
+  event: SubscriptionEvent,
+) {
+  if (name === undefined || !refundableEvents.has(name)) return;
+
+  await refundChargeOf(repos, gateway, name, event, duplicateReason);
+}
+
+async function changedProduct(gateway: WebhookGateway, event: SubscriptionEvent) {
+  const { productId, status } = event.data;
+
+  if (productId === undefined || status === "CANCELLED") return null;
+
+  try {
+    return { productId, externalId: await gateway.productExternalId(productId) };
+  } catch (cause) {
+    logFailureCode("plan change product lookup failed")(cause);
+
+    return null;
+  }
+}
+
+type ChangedProduct = NonNullable<Awaited<ReturnType<typeof changedProduct>>>;
+
+function isSold(product: ChangedProduct, expected: string) {
+  return product.productId === expected || product.externalId === expected;
+}
 
 const chargingEvents = new Set(["subscription.completed", "subscription.renewed"]);
 
 async function cancelOrphan(
   kind: "talent" | "copay",
-  gateway: SubscriptionCanceler,
+  repos: RefundClaims,
+  gateway: WebhookGateway,
   name: string | undefined,
   event: SubscriptionEvent,
 ) {
@@ -184,22 +266,51 @@ async function cancelOrphan(
 
   await gateway.cancelSubscription(event.data.subscription.id);
   console.error(`${kind} subscription of a deleted account canceled`, { event: name });
+  await refundPaidCharge(repos, gateway, name, event);
+}
+
+async function applyTalentPlanChange(
+  repos: RefundClaims,
+  gateway: WebhookGateway,
+  event: SubscriptionEvent,
+  talent: TalentTarget,
+) {
+  if (talent.providerSubscriptionId !== event.data.subscription.id) return;
+
+  const product = await changedProduct(gateway, event);
+
+  if (!product || isSold(product, careerPro.slug)) return;
+
+  console.error("talent plan change not supported", {
+    profileId: talent.profileId,
+    subscriptionId: event.data.subscription.id,
+    productId: product.productId,
+  });
+
+  if (!gateway.configured) return;
+
+  await gateway.cancelSubscription(event.data.subscription.id);
+  await refundChargeOf(repos, gateway, "subscription.plan_changed", event, planChangeReason);
 }
 
 async function applyTalentEvent(
   repos: BillingRepository,
-  gateway: SubscriptionCanceler,
+  gateway: WebhookGateway,
   name: string | undefined,
   event: SubscriptionEvent,
   deliveryId: string | null,
   talent: TalentTarget | null,
 ) {
-  if (!talent) return cancelOrphan("talent", gateway, name, event);
+  if (!talent) return cancelOrphan("talent", repos, gateway, name, event);
 
   if (isStale(name, event, talent)) {
     console.error("talent webhook ignored", { event: name });
 
     return;
+  }
+
+  if (name === "subscription.plan_changed") {
+    return applyTalentPlanChange(repos, gateway, event, talent);
   }
 
   const patch = talentPatch(name, event, talent);
@@ -283,6 +394,10 @@ export type CopayBenefits = {
     subscriptionId: string,
   ): Promise<(Omit<CopayAssignment, "copaySubscriptionId"> & { profileId: string }) | null>;
   planPriceMap(): Promise<Map<string, number>>;
+  getCopayProduct(
+    fromPlanId: string,
+    toPlanId: string,
+  ): Promise<{ abacatePayProductId: string } | null>;
   activateCopay(
     profileId: string,
     checkoutId: string,
@@ -326,11 +441,13 @@ async function copayTargetOf(benefits: CopayBenefits, providerSubscriptionId: st
 }
 
 async function rejectUnowned(
-  gateway: SubscriptionCanceler,
+  repos: RefundClaims,
+  gateway: WebhookGateway,
   name: string | undefined,
   event: SubscriptionEvent,
   profileId: string,
   reason: string,
+  ownedCheckoutId: string | null,
 ) {
   const detail = {
     event: name,
@@ -340,7 +457,7 @@ async function rejectUnowned(
     checkoutId: event.data.checkout?.id,
   };
 
-  console.error("copay payment needs refund", detail);
+  console.error("copay subscription rejected", detail);
 
   if (!gateway.configured) {
     console.error("copay subscription could not be canceled", detail);
@@ -349,11 +466,22 @@ async function rejectUnowned(
   }
 
   await gateway.cancelSubscription(event.data.subscription.id);
+
+  if (event.data.checkout?.id !== ownedCheckoutId) {
+    await refundPaidCharge(repos, gateway, name, event);
+  }
+}
+
+function ownedCheckout(
+  assignment: Pick<CopayAssignment, "copaySubscriptionId" | "copayCheckoutId">,
+) {
+  return assignment.copaySubscriptionId === null ? null : assignment.copayCheckoutId;
 }
 
 async function activateCopay(
+  repos: RefundClaims,
   benefits: CopayBenefits,
-  gateway: SubscriptionCanceler,
+  gateway: WebhookGateway,
   name: string | undefined,
   event: SubscriptionEvent,
   profileId: string,
@@ -364,17 +492,41 @@ async function activateCopay(
   const checkoutId = event.data.checkout?.id;
 
   if (checkoutId === undefined || assignment.copayCheckoutId !== checkoutId) {
-    return rejectUnowned(gateway, name, event, profileId, "checkout does not match the issued one");
+    return rejectUnowned(
+      repos,
+      gateway,
+      name,
+      event,
+      profileId,
+      "checkout does not match the issued one",
+      ownedCheckout(assignment),
+    );
   }
 
   if (assignment.copaySubscriptionId !== null) {
-    return rejectUnowned(gateway, name, event, profileId, "co-pay already owned");
+    return rejectUnowned(
+      repos,
+      gateway,
+      name,
+      event,
+      profileId,
+      "co-pay already owned",
+      ownedCheckout(assignment),
+    );
   }
 
   const prices = await benefits.planPriceMap();
 
   if (!(prices.get(targetPlanId)! > prices.get(assignment.effectivePlanId)!)) {
-    return rejectUnowned(gateway, name, event, profileId, "target is not an upgrade");
+    return rejectUnowned(
+      repos,
+      gateway,
+      name,
+      event,
+      profileId,
+      "target is not an upgrade",
+      ownedCheckout(assignment),
+    );
   }
 
   const activated = await benefits.activateCopay(profileId, checkoutId, {
@@ -388,13 +540,54 @@ async function activateCopay(
   const current = await benefits.findAssignmentByProfile(profileId);
 
   if (current?.copaySubscriptionId !== subscriptionId) {
-    await rejectUnowned(gateway, name, event, profileId, "lost the activation race");
+    await rejectUnowned(
+      repos,
+      gateway,
+      name,
+      event,
+      profileId,
+      "lost the activation race",
+      current ? ownedCheckout(current) : null,
+    );
   }
 }
 
-async function applyCopayEvent(
+async function applyCopayPlanChange(
+  repos: RefundClaims,
   benefits: CopayBenefits,
-  gateway: SubscriptionCanceler,
+  gateway: WebhookGateway,
+  event: SubscriptionEvent,
+  target: CopayTarget,
+) {
+  const { profileId, assignment } = target;
+  const subscriptionId = event.data.subscription.id;
+
+  const expected = await benefits.getCopayProduct(
+    assignment.assignedPlanId,
+    assignment.effectivePlanId,
+  );
+
+  const product = await changedProduct(gateway, event);
+
+  if (!expected || !product || isSold(product, expected.abacatePayProductId)) return;
+
+  console.error("copay plan change not supported", {
+    profileId,
+    subscriptionId,
+    productId: product.productId,
+  });
+
+  if (!gateway.configured) return;
+
+  await gateway.cancelSubscription(subscriptionId);
+  await benefits.revertCopay(profileId, subscriptionId);
+  await refundChargeOf(repos, gateway, "subscription.plan_changed", event, planChangeReason);
+}
+
+async function applyCopayEvent(
+  repos: RefundClaims,
+  benefits: CopayBenefits,
+  gateway: WebhookGateway,
   name: string | undefined,
   event: SubscriptionEvent,
   target: CopayTarget,
@@ -405,11 +598,28 @@ async function applyCopayEvent(
 
   if (assignment.copaySubscriptionId !== providerSubscriptionId) {
     if (name === "subscription.completed" && targetPlanId) {
-      return activateCopay(benefits, gateway, name, event, profileId, targetPlanId, assignment);
+      return activateCopay(
+        repos,
+        benefits,
+        gateway,
+        name,
+        event,
+        profileId,
+        targetPlanId,
+        assignment,
+      );
     }
 
     if (name === "subscription.renewed" || name === "subscription.trial_started") {
-      return rejectUnowned(gateway, name, event, profileId, "subscription is not the owned one");
+      return rejectUnowned(
+        repos,
+        gateway,
+        name,
+        event,
+        profileId,
+        "subscription is not the owned one",
+        ownedCheckout(assignment),
+      );
     }
 
     return;
@@ -429,6 +639,7 @@ async function applyCopayEvent(
     if (assignment.validUntil < today) {
       await gateway.cancelSubscription(providerSubscriptionId);
       await benefits.revertCopay(profileId, providerSubscriptionId);
+      await refundPaidCharge(repos, gateway, name, event);
 
       return;
     }
@@ -438,16 +649,49 @@ async function applyCopayEvent(
     return;
   }
 
+  if (name === "subscription.plan_changed") {
+    return applyCopayPlanChange(repos, benefits, gateway, event, target);
+  }
+
   if (name === "subscription.payment_failed") {
     console.error("copay payment failed", { profileId });
     await benefits.failCopayPayment(profileId, providerSubscriptionId, new Date());
   }
 }
 
+async function applyCompanyPlanChange(
+  repos: BillingRepository,
+  gateway: WebhookGateway,
+  event: SubscriptionEvent,
+  subscription: CompanyTarget & { id: string; orgId: string; planId: string },
+) {
+  if (subscription.providerSubscriptionId !== event.data.subscription.id) return;
+
+  const product = await changedProduct(gateway, event);
+
+  if (!product) return;
+
+  const planId =
+    (await repos.findPlanIdBySlug(product.externalId)) ??
+    (await repos.findPlanIdBySlug(product.productId));
+
+  if (planId === subscription.planId) return;
+
+  console.error("company plan change", {
+    subscriptionId: subscription.id,
+    productId: product.productId,
+    externalId: product.externalId,
+    known: planId !== null,
+  });
+
+  if (planId !== null)
+    await repos.updateSubscriptionPlan(subscription.orgId, subscription.id, planId);
+}
+
 export async function applyWebhookEvent(
   repos: BillingRepository,
   benefits: CopayBenefits,
-  gateway: SubscriptionCanceler,
+  gateway: WebhookGateway,
   event: SubscriptionEvent,
   deliveryId: string | null,
 ) {
@@ -465,9 +709,9 @@ export async function applyWebhookEvent(
 
     const assignment = await benefits.findAssignmentByProfile(reference.profileId);
 
-    if (!assignment) return cancelOrphan("copay", gateway, name, event);
+    if (!assignment) return cancelOrphan("copay", repos, gateway, name, event);
 
-    return applyCopayEvent(benefits, gateway, name, event, { ...reference, assignment });
+    return applyCopayEvent(repos, benefits, gateway, name, event, { ...reference, assignment });
   }
 
   if (externalId?.startsWith(talentPrefix)) {
@@ -494,7 +738,7 @@ export async function applyWebhookEvent(
 
     const copay = await copayTargetOf(benefits, event.data.subscription.id);
 
-    if (copay) return applyCopayEvent(benefits, gateway, name, event, copay);
+    if (copay) return applyCopayEvent(repos, benefits, gateway, name, event, copay);
   }
 
   const subscriptionId = externalId ? checkoutReferenceId(externalId) : null;
@@ -511,14 +755,20 @@ export async function applyWebhookEvent(
     console.error("company webhook ignored", { event: name });
 
     if (name === "subscription.completed") {
-      await cancelSuperseded(
+      const canceled = await cancelSuperseded(
         gateway,
         event.data.subscription.id,
         subscription.providerSubscriptionId,
       );
+
+      if (canceled) await refundPaidCharge(repos, gateway, name, event);
     }
 
     return;
+  }
+
+  if (name === "subscription.plan_changed") {
+    return applyCompanyPlanChange(repos, gateway, event, subscription);
   }
 
   const amount = event.data.subscription.amount;
