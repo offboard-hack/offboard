@@ -1888,12 +1888,12 @@ describe.skipIf(!url)("billing", () => {
 
     await talentWebhook("subscription.completed", talentCheckout(profileId));
 
-    expect(await repos.careerPlan.allowedBy(profileId, new Date())).toBe("individual");
+    expect((await repos.careerPlan.allowedBy(profileId, new Date())).allowedBy).toBe("individual");
 
     await talentWebhook("subscription.payment_failed", talentCheckout(profileId));
 
     expect((await talentRow(profileId)).status).toBe("past_due");
-    expect(await repos.careerPlan.allowedBy(profileId, new Date())).toBeNull();
+    expect((await repos.careerPlan.allowedBy(profileId, new Date())).allowedBy).toBeNull();
     expect(await currentSubscription()).toEqual(company);
     expect(await allInvoices()).toEqual(before);
   });
