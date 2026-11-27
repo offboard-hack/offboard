@@ -336,6 +336,31 @@ describe.skipIf(!url)("matches repository", () => {
     expect(await repository.profilesForMatching(lapsed)).toEqual([]);
   });
 
+  it("keeps matching a canceled Carreira Pro through its last paid day", async () => {
+    const lastDay = new Date("2027-01-01T02:59:59.999Z");
+    const lapsed = new Date("2027-01-01T03:00:00.000Z");
+
+    await base(profileId);
+    await repos.talent.acceptTerms(profileId);
+    await db.insert(talentSubscriptions).values({
+      profileId,
+      status: "canceled",
+      currentPeriodEnd: "2026-12-31",
+      createdAt: lapsed,
+      updatedAt: lapsed,
+    });
+    await db.update(talentProfiles).set({ sponsoredUntil: "2000-01-01" });
+
+    expect(await repository.profilesForMatching(lastDay)).toEqual([
+      { profileId, orgId: defaultOrgId, collaborator: false, individual: true },
+    ]);
+    expect(await repository.profilesForMatching(lapsed)).toEqual([]);
+
+    await db.update(talentSubscriptions).set({ currentPeriodEnd: null });
+
+    expect(await repository.profilesForMatching(lastDay)).toEqual([]);
+  });
+
   it("reads the target titles with defaults", async () => {
     expect(await repository.targetTitles(profileId)).toEqual([]);
 

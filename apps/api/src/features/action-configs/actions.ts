@@ -87,6 +87,7 @@ export async function fireActions(
   repos: Pick<ActionConfigsRepository, "getActionConfigsByPhase">,
   context: ActionContext,
   slack: SlackDelivery,
+  emailEnabled: (orgId: string) => Promise<boolean>,
 ) {
   if (!context.phase) return [] satisfies ActionResult[];
 
@@ -156,6 +157,11 @@ export async function fireActions(
           });
         }
       } else if (config.actionId.startsWith("email:")) {
+        if (!(await emailEnabled(context.orgId))) {
+          results.push({ actionId: config.actionId, success: false, error: "E-mail disabled" });
+          continue;
+        }
+
         const to = str(config.config.to);
 
         if (!to) {

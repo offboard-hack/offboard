@@ -10,6 +10,8 @@ import { verifySlackToken } from "../../shared/slack.js";
 import type { IntegrationsRepository } from "./repository.js";
 
 export const slackIntegration = "Slack";
+export const correiosIntegration = "Transportadora::Correios";
+export const emailIntegration = "E-mail";
 
 const connectionStatus = t.Union([
   t.Literal("connected"),

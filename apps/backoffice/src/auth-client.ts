@@ -3,5 +3,5 @@ import { createAuthClient } from "better-auth/react";
 
 export const authClient = createAuthClient({
   plugins: [emailOTPClient()],
-  fetchOptions: { headers: { "x-offboard-audience": "member" } },
+  fetchOptions: { headers: { "x-offboard-audience": "staff" } },
 });

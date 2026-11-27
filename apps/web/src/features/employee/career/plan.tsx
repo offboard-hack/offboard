@@ -1,7 +1,12 @@
 import { brazilTimezone } from "@offboard/employee";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { careerPlanQuery, useCopayCheckout, useUpgradeCheckout } from "@/entities/career";
+import {
+  careerPlanQuery,
+  useCancelCareerPro,
+  useCopayCheckout,
+  useUpgradeCheckout,
+} from "@/entities/career";
 import type { EmployeeAccount } from "@/entities/employee";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
@@ -9,6 +14,10 @@ import { EmployeeError, EmployeePanel } from "../ui";
 import { featureComparisonView, type TierFeatures } from "./benefit-features";
 import {
   type CareerPlan,
+  cancelConfirmLabel,
+  cancelConfirmPrompt,
+  cancelKeepLabel,
+  cancelProLabel,
   copayPaymentReceivedNote,
   paymentReceivedNote,
   planCardView,
@@ -35,6 +44,7 @@ export function PlanSection({
 }) {
   const checkout = useUpgradeCheckout(account);
   const copayCheckout = useCopayCheckout(account);
+  const cancel = useCancelCareerPro(account);
   const [openedAt] = useState(() => Date.now());
   const [today] = useState(() => dayFormat.format(new Date()));
 
@@ -60,9 +70,11 @@ export function PlanSection({
       copayPaid={copayPaid}
       upgrading={checkout.isPending || checkout.isSuccess}
       copaying={copayCheckout.isPending || copayCheckout.isSuccess}
-      error={checkout.error?.message ?? copayCheckout.error?.message}
+      error={checkout.error?.message ?? copayCheckout.error?.message ?? cancel.error?.message}
+      canceling={cancel.isPending}
       onUpgrade={() => checkout.mutate()}
       onCopay={(targetPlanId) => copayCheckout.mutate(targetPlanId)}
+      onCancel={() => cancel.mutate()}
     />
   );
 }
@@ -98,8 +110,10 @@ export function PlanCard({
   upgrading,
   copaying,
   error,
+  canceling,
   onUpgrade,
   onCopay,
+  onCancel,
 }: {
   plan: CareerPlan;
   today: string;
@@ -108,9 +122,12 @@ export function PlanCard({
   upgrading: boolean;
   copaying: boolean;
   error?: string;
+  canceling: boolean;
   onUpgrade: () => void;
   onCopay: (targetPlanId: string) => void;
+  onCancel: () => void;
 }) {
+  const [confirming, setConfirming] = useState(false);
   const view = planCardView(plan, today, paid, copayPaid);
   const { copay } = plan;
   const comparison = view.showComparison ? featureComparisonView(view.activeBenefit) : null;
@@ -170,6 +187,26 @@ export function PlanCard({
           <Button onClick={onUpgrade} disabled={upgrading}>
             {view.upgradeLabel}
           </Button>
+        </div>
+      ) : null}
+      {view.cancelable && !confirming ? (
+        <div>
+          <Button variant="outline" onClick={() => setConfirming(true)}>
+            {cancelProLabel}
+          </Button>
+        </div>
+      ) : null}
+      {view.cancelable && confirming ? (
+        <div role="alertdialog" aria-label={cancelProLabel} className="space-y-2">
+          <p className="text-sm">{cancelConfirmPrompt}</p>
+          <div className="flex gap-2">
+            <Button variant="destructive" onClick={onCancel} disabled={canceling}>
+              {cancelConfirmLabel}
+            </Button>
+            <Button variant="outline" onClick={() => setConfirming(false)} disabled={canceling}>
+              {cancelKeepLabel}
+            </Button>
+          </div>
         </div>
       ) : null}
       {view.upgrade === "unavailable" ? (

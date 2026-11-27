@@ -22,6 +22,7 @@ const profile: TalentProfile = {
   shareOutcomeWithHr: false,
   aiApplyConsentAt: null,
   aiApplyConsentVersion: null,
+  searchableAt: null,
 };
 
 const collaborator: EmployeePrincipal = {
@@ -300,12 +301,21 @@ describe("talentAccess", () => {
     expect(benefitPlan).not.toHaveBeenCalled();
   });
 
+  it("keeps a canceled Carreira Pro active until its period ends", async () => {
+    const response = await build({
+      companyActive: false,
+      individual: { status: "canceled", currentPeriodEnd: "2099-01-01" },
+    }).handle(new Request("http://localhost/active"));
+
+    expect(response.status).toBe(200);
+  });
+
   it("answers 402 once the Carreira Pro is canceled or its period ended", async () => {
     const statuses = [
       (
         await build({
           companyActive: false,
-          individual: { status: "canceled", currentPeriodEnd: "2099-01-01" },
+          individual: { status: "canceled", currentPeriodEnd: "2020-01-01" },
         }).handle(new Request("http://localhost/active"))
       ).status,
       (

@@ -44,6 +44,7 @@ function toProfile(row: Row) {
     shareOutcomeWithHr: row.shareOutcomeWithHr,
     aiApplyConsentAt: row.aiApplyConsentAt?.toISOString() ?? null,
     aiApplyConsentVersion: row.aiApplyConsentVersion,
+    searchableAt: row.searchableAt?.toISOString() ?? null,
   } satisfies TalentProfile;
 }
 
@@ -88,6 +89,7 @@ export function createTalentRepository(db: Database) {
               shareOutcomeWithHr: sql<boolean>`false`.as("share_outcome_with_hr"),
               aiApplyConsentAt: sql<null>`null::timestamp`.as("ai_apply_consent_at"),
               aiApplyConsentVersion: sql<null>`null::varchar`.as("ai_apply_consent_version"),
+              searchableAt: sql<null>`null::timestamp`.as("searchable_at"),
               createdAt: sql<Date>`now()`.as("created_at"),
               updatedAt: sql<Date>`now()`.as("updated_at"),
             })
@@ -145,6 +147,7 @@ export function createTalentRepository(db: Database) {
             shareOutcomeWithHr: sql<boolean>`false`.as("share_outcome_with_hr"),
             aiApplyConsentAt: sql<null>`null::timestamp`.as("ai_apply_consent_at"),
             aiApplyConsentVersion: sql<null>`null::varchar`.as("ai_apply_consent_version"),
+            searchableAt: sql<null>`null::timestamp`.as("searchable_at"),
             createdAt: at.as("created_at"),
             updatedAt: at.as("updated_at"),
           })
@@ -278,6 +281,16 @@ export function createTalentRepository(db: Database) {
     return toProfile(row);
   }
 
+  async function setSearchable(id: string, searchable: boolean, now: Date) {
+    const [row] = await db
+      .update(talentProfiles)
+      .set({ searchableAt: searchable ? now : null, updatedAt: now })
+      .where(eq(talentProfiles.id, id))
+      .returning();
+
+    return toProfile(row);
+  }
+
   async function setAiApplyConsent(id: string, accept: boolean, now: Date) {
     return db.transaction(async (tx) => {
       const [row] = await tx
@@ -323,6 +336,7 @@ export function createTalentRepository(db: Database) {
     findById,
     acceptTerms,
     setConsent,
+    setSearchable,
     setAiApplyConsent,
   };
 }

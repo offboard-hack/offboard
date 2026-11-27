@@ -67,18 +67,23 @@ type CheckoutRequest = {
 describe("abacatepay gateway", () => {
   let requestBody = "";
   let requestAuthorization = "";
+  let requestPath = "";
   let responseStatus = 200;
   let responseBody = "";
+  let lookupBody = "";
 
   const server = createServer((req, res) => {
     requestAuthorization = req.headers.authorization ?? "";
+    requestPath = req.url ?? "";
     requestBody = "";
     req.on("data", (chunk) => {
       requestBody += String(chunk);
     });
     req.on("end", () => {
-      res.writeHead(responseStatus, { "content-type": "application/json" });
-      res.end(responseBody);
+      const lookup = requestPath.startsWith("/v2/subscriptions/get");
+
+      res.writeHead(lookup ? 200 : responseStatus, { "content-type": "application/json" });
+      res.end(lookup ? lookupBody : responseBody);
     });
   });
 
@@ -142,6 +147,71 @@ describe("abacatepay gateway", () => {
       completionUrl: "http://done",
       retryPolicy: { maxRetry: 3, retryEvery: 1 },
     });
+  });
+
+  it("cancels a subscription by its id", async () => {
+    responseStatus = 200;
+    responseBody = JSON.stringify({
+      success: true,
+      data: { id: "subs_1", status: "CANCELLED" },
+      error: null,
+    });
+
+    await expect(
+      createAbacatePayGateway("secret-key", base).cancelSubscription("subs_1"),
+    ).resolves.toBeUndefined();
+    expect(requestPath).toBe("/v2/subscriptions/cancel");
+    expect(JSON.parse(requestBody)).toEqual({ id: "subs_1" });
+  });
+
+  it("treats a subscription already cancelled at AbacatePay as cancelled", async () => {
+    responseStatus = 400;
+    responseBody = JSON.stringify({ success: false, data: null, error: "already cancelled" });
+    lookupBody = JSON.stringify({
+      success: true,
+      data: { id: "subs_1", status: "CANCELLED" },
+      error: null,
+    });
+
+    await expect(
+      createAbacatePayGateway("secret-key", base).cancelSubscription("subs_1"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("treats a subscription AbacatePay does not know as cancelled", async () => {
+    responseStatus = 400;
+    responseBody = JSON.stringify({ success: false, data: null, error: "Subscription not found" });
+    lookupBody = JSON.stringify({ success: false, data: null, error: "Subscription not found" });
+
+    await expect(
+      createAbacatePayGateway("secret-key", base).cancelSubscription("subs_1"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("fails when the subscription is still live or the lookup fails", async () => {
+    responseStatus = 400;
+    responseBody = JSON.stringify({ success: false, data: null, error: "unavailable" });
+    lookupBody = JSON.stringify({
+      success: true,
+      data: { id: "subs_1", status: "ACTIVE" },
+      error: null,
+    });
+
+    await expect(
+      createAbacatePayGateway("secret-key", base).cancelSubscription("subs_1"),
+    ).rejects.toThrow("AbacatePay subscription cancel failed: unavailable");
+
+    lookupBody = JSON.stringify({ success: false, data: null, error: "Internal error" });
+
+    await expect(
+      createAbacatePayGateway("secret-key", base).cancelSubscription("subs_1"),
+    ).rejects.toThrow("AbacatePay subscription cancel failed: unavailable");
+  });
+
+  it("throws when the key is missing", async () => {
+    await expect(createAbacatePayGateway(undefined).cancelSubscription("subs_1")).rejects.toThrow(
+      "ABACATEPAY_API_KEY is not configured",
+    );
   });
 
   it("throws when AbacatePay rejects the checkout", async () => {
@@ -217,15 +287,25 @@ describe.skipIf(!url)("billing", () => {
   const db = createClient(url ?? "");
   const repos = createRepositories(db);
 
-  const abacate = createServer((_req, res) => {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(
-      JSON.stringify({
-        success: true,
-        data: { id: "bill_test", url: "https://pay.example/bill_test" },
-        error: null,
-      }),
-    );
+  const abacateCalls: string[] = [];
+
+  const abacate = createServer((req, res) => {
+    let received = "";
+
+    req.on("data", (chunk) => {
+      received += String(chunk);
+    });
+    req.on("end", () => {
+      abacateCalls.push(`${req.url} ${received}`);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          success: true,
+          data: { id: "bill_test", url: "https://pay.example/bill_test" },
+          error: null,
+        }),
+      );
+    });
   });
 
   let app = createApp(webOrigin, repos, { auth, sendEmail: () => Promise.resolve() });
@@ -318,6 +398,7 @@ describe.skipIf(!url)("billing", () => {
 
   beforeEach(async () => {
     await seedDatabase(db, testSeedFixtures);
+    abacateCalls.length = 0;
     subscriptionId = (await currentSubscription()).id;
   });
 
@@ -617,9 +698,7 @@ describe.skipIf(!url)("billing", () => {
 
       return { id: `bill_${issued.length}`, url: `https://pay.example/bill_${issued.length}` };
     },
-    async cancelSubscription() {
-      throw new Error("not implemented in stub");
-    },
+    cancelSubscription: async () => undefined,
   };
 
   const stubApp = createApp(webOrigin, repos, {
@@ -1271,9 +1350,17 @@ describe.skipIf(!url)("billing", () => {
 
     await talentWebhook("subscription.cancelled", talent);
 
-    expect((await talentRow(profileId)).status).toBe("canceled");
+    expect(await talentRow(profileId)).toEqual({
+      status: "canceled",
+      providerSubscriptionId: "subs_t",
+      currentPeriodEnd: monthAfter(monthAfter(today)),
+    });
     expect(await currentSubscription()).toEqual(company);
     expect(await allInvoices()).toEqual(before);
+
+    await talentWebhook("subscription.cancelled", talent);
+
+    expect((await talentRow(profileId)).currentPeriodEnd).toBe(monthAfter(monthAfter(today)));
   });
 
   it("renews from today when the Carreira Pro period has no end or already ended", async () => {
@@ -1391,17 +1478,18 @@ describe.skipIf(!url)("billing", () => {
 
     try {
       const responses = [
-        await talentWebhook("subscription.completed", talentCheckout(missingId)),
-        await talentWebhook("subscription.completed", talentCheckout(withoutRow)),
-        await talentWebhook("subscription.completed", {
+        await talentWebhook("subscription.plan_changed", talentCheckout(missingId)),
+        await talentWebhook("subscription.payment_failed", talentCheckout(withoutRow)),
+        await talentWebhook("subscription.cancelled", {
           checkout: { id: "bill_talent", externalId: "talent:not-a-uuid" },
         }),
       ];
 
       expect(responses.map((res) => res.status)).toEqual([200, 200, 200]);
       expect(logged).toHaveBeenCalledWith("talent webhook ignored", {
-        event: "subscription.completed",
+        event: "subscription.payment_failed",
       });
+      expect(abacateCalls).toEqual([]);
       expect(await db.select().from(talentSubscriptions)).toEqual([]);
     } finally {
       logged.mockRestore();
@@ -1425,6 +1513,95 @@ describe.skipIf(!url)("billing", () => {
     });
     expect(await currentSubscription()).toEqual(company);
     expect(await allInvoices()).toEqual(before);
+  });
+
+  it("cancels the subscription of a checkout paid after the account was deleted", async () => {
+    const logged = vi.spyOn(console, "error");
+    const withoutRow = await talentProfile();
+    const talent = { subscription: { id: "subs_gone", amount: 7900 } };
+
+    try {
+      for (const event of ["subscription.completed", "subscription.renewed"]) {
+        abacateCalls.length = 0;
+
+        const response = await talentWebhook(event, { ...talentCheckout(missingId), ...talent });
+
+        expect(response.status).toBe(200);
+        expect(abacateCalls).toEqual(['/v2/subscriptions/cancel {"id":"subs_gone"}']);
+        expect(logged).toHaveBeenCalledWith("talent subscription of a deleted account canceled", {
+          event,
+        });
+      }
+
+      abacateCalls.length = 0;
+      await talentWebhook("subscription.completed", { ...talentCheckout(withoutRow), ...talent });
+
+      expect(abacateCalls).toEqual(['/v2/subscriptions/cancel {"id":"subs_gone"}']);
+      expect(await db.select().from(talentSubscriptions)).toEqual([]);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("only logs a checkout paid after the account was deleted when billing is not configured", async () => {
+    const logged = vi.spyOn(console, "error");
+
+    const withoutBilling = createApp(webOrigin, repos, {
+      auth,
+      sendEmail: () => Promise.resolve(),
+      abacatepayWebhookSecret: webhookSecret,
+    });
+
+    try {
+      const response = await withoutBilling.handle(
+        new Request(`http://localhost/api/billing/webhook?webhookSecret=${webhookSecret}`, {
+          method: "POST",
+          body: JSON.stringify({
+            event: "subscription.completed",
+            data: eventData({
+              ...talentCheckout(missingId),
+              subscription: { id: "subs_gone", amount: 7900 },
+            }),
+          }),
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(logged).toHaveBeenCalledWith(
+        "talent webhook for a deleted account could not be canceled",
+        { event: "subscription.completed" },
+      );
+      expect(abacateCalls).toEqual([]);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("keeps a canceled Carreira Pro canceled when renewals and failures arrive late", async () => {
+    const profileId = await pendingTalent();
+    const today = saoPauloDate(new Date());
+    const talent = { ...talentCheckout(profileId), subscription: { id: "subs_t", amount: 7900 } };
+
+    await talentWebhook("subscription.completed", talent);
+    await talentWebhook("subscription.cancelled", talent);
+
+    const end = monthAfter(today);
+
+    await talentWebhook("subscription.payment_failed", talent);
+
+    expect(await talentRow(profileId)).toEqual({
+      status: "canceled",
+      providerSubscriptionId: "subs_t",
+      currentPeriodEnd: end,
+    });
+
+    await talentWebhook("subscription.renewed", talent);
+
+    expect(await talentRow(profileId)).toEqual({
+      status: "canceled",
+      providerSubscriptionId: "subs_t",
+      currentPeriodEnd: monthAfter(end),
+    });
   });
 
   it("ignores events of a replaced Carreira Pro subscription", async () => {

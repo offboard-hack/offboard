@@ -1,4 +1,5 @@
 import { Elysia, t } from "elysia";
+import { logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import type { ObjectStorage } from "../../shared/object-storage.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
@@ -15,6 +16,7 @@ const exportResponse = t.Object({
     shareOutcomeWithHr: t.Boolean(),
     aiApplyConsentAt: nullable,
     aiApplyConsentVersion: nullable,
+    searchableAt: nullable,
     firstSignedInAt: nullable,
     createdAt: nullable,
   }),
@@ -155,10 +157,16 @@ const exportResponse = t.Object({
   ]),
 });
 
+type SubscriptionGateway = {
+  configured: boolean;
+  cancelSubscription(id: string): Promise<void>;
+};
+
 export function accountRoutes(
   repos: AccountRepository,
   talentAccess: TalentAccessPlugin,
   storage: ObjectStorage | undefined,
+  gateway: SubscriptionGateway,
 ) {
   return new Elysia()
     .use(talentAccess)
@@ -181,6 +189,22 @@ export function accountRoutes(
     .delete(
       "/me",
       async ({ me, status }) => {
+        const subscriptionId = await repos.cancelableSubscription(me.id);
+
+        if (subscriptionId !== null) {
+          if (!gateway.configured) return status(503, { error: "Billing not configured" });
+
+          try {
+            await gateway.cancelSubscription(subscriptionId);
+          } catch (cause) {
+            logFailureCode("Carreira Pro cancellation failed")(cause);
+
+            return status(502, { error: "Could not cancel Carreira Pro; try again" });
+          }
+
+          await repos.markSubscriptionCanceled(me.id, subscriptionId);
+        }
+
         if (storage) {
           try {
             await storage.removePrefix(`resumes/${me.id}/`);

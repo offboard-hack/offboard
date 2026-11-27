@@ -20,6 +20,7 @@ const talentSubscriptionColumns = {
   profileId: talentSubscriptions.profileId,
   providerSubscriptionId: talentSubscriptions.providerSubscriptionId,
   currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
+  status: talentSubscriptions.status,
 };
 
 const invoiceColumns = {
@@ -351,7 +352,7 @@ export function createBillingRepository(db: Database) {
   async function updateTalentSubscription(
     profileId: string,
     patch: {
-      status: TalentSubscriptionStatus;
+      status?: TalentSubscriptionStatus;
       providerSubscriptionId?: string;
       currentPeriodEnd?: string;
     },

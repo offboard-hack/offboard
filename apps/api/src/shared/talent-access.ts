@@ -60,7 +60,7 @@ export function talentAccess(deps: {
 
         if (access.kind === "authenticated") return status(403, { error: "Forbidden" });
 
-        if (access.kind === "forbidden") return status(401, { error: "Unauthorized" });
+        if (access.kind !== "talent") return status(401, { error: "Unauthorized" });
 
         const me = await deps.talent.findById(access.profile.id);
 

@@ -2,7 +2,6 @@ import { createHmac } from "node:crypto";
 import { z } from "zod";
 import { matchesSecret } from "../../shared/machine-auth.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
-import type { AbacatePayGateway } from "./abacatepay.js";
 import type { BillingRepository } from "./repository.js";
 
 const subscriptionEvent = z.object({
@@ -74,6 +73,7 @@ async function talentSubscriptionOf(repos: BillingRepository, externalId: string
 
 type TalentTarget = {
   profileId: string;
+  status: "pending" | "active" | "past_due" | "canceled";
   providerSubscriptionId: string | null;
   currentPeriodEnd: string | null;
 };
@@ -111,6 +111,8 @@ function talentPatch(name: string | undefined, event: SubscriptionEvent, talent:
         ? talent.currentPeriodEnd
         : today;
 
+    if (talent.status === "canceled") return { currentPeriodEnd: addOneMonth(from) } as const;
+
     return {
       status: "active",
       providerSubscriptionId,
@@ -118,25 +120,52 @@ function talentPatch(name: string | undefined, event: SubscriptionEvent, talent:
     } as const;
   }
 
-  if (name === "subscription.payment_failed") return { status: "past_due" } as const;
+  if (name === "subscription.payment_failed") {
+    return talent.status === "canceled" ? null : ({ status: "past_due" } as const);
+  }
 
   if (name === "subscription.cancelled") return { status: "canceled" } as const;
 
   return null;
 }
 
+export type SubscriptionCanceler = {
+  configured: boolean;
+  cancelSubscription(id: string): Promise<void>;
+};
+
+const chargingEvents = new Set(["subscription.completed", "subscription.renewed"]);
+
+async function cancelOrphan(
+  gateway: SubscriptionCanceler,
+  name: string | undefined,
+  event: SubscriptionEvent,
+) {
+  if (name === undefined || !chargingEvents.has(name)) {
+    console.error("talent webhook ignored", { event: name });
+
+    return;
+  }
+
+  if (!gateway.configured) {
+    console.error("talent webhook for a deleted account could not be canceled", { event: name });
+
+    return;
+  }
+
+  await gateway.cancelSubscription(event.data.subscription.id);
+  console.error("talent subscription of a deleted account canceled", { event: name });
+}
+
 async function applyTalentEvent(
   repos: BillingRepository,
+  gateway: SubscriptionCanceler,
   name: string | undefined,
   event: SubscriptionEvent,
   deliveryId: string | null,
   talent: TalentTarget | null,
 ) {
-  if (!talent) {
-    console.error("talent webhook ignored", { event: name });
-
-    return;
-  }
+  if (!talent) return cancelOrphan(gateway, name, event);
 
   if (isStale(name, event, talent)) {
     console.error("talent webhook ignored", { event: name });
@@ -232,7 +261,7 @@ async function copayTargetOf(
 
 async function applyCopayEvent(
   benefits: CopayBenefits,
-  gateway: AbacatePayGateway,
+  gateway: SubscriptionCanceler,
   name: string | undefined,
   event: SubscriptionEvent,
   target: NonNullable<Awaited<ReturnType<typeof copayTargetOf>>>,
@@ -295,7 +324,7 @@ async function applyCopayEvent(
 export async function applyWebhookEvent(
   repos: BillingRepository,
   benefits: CopayBenefits,
-  gateway: AbacatePayGateway,
+  gateway: SubscriptionCanceler,
   event: SubscriptionEvent,
   deliveryId: string | null,
 ) {
@@ -317,13 +346,13 @@ export async function applyWebhookEvent(
   if (subscriptionId?.startsWith(talentPrefix)) {
     const talent = await talentSubscriptionOf(repos, subscriptionId);
 
-    return applyTalentEvent(repos, name, event, deliveryId, talent);
+    return applyTalentEvent(repos, gateway, name, event, deliveryId, talent);
   }
 
   if (!subscriptionId) {
     const talent = await repos.findTalentSubscriptionByProvider(event.data.subscription.id);
 
-    if (talent) return applyTalentEvent(repos, name, event, deliveryId, talent);
+    if (talent) return applyTalentEvent(repos, gateway, name, event, deliveryId, talent);
 
     const copay = await copayTargetOf(benefits, null, event.data.subscription.id);
 

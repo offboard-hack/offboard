@@ -26,6 +26,33 @@ describe("careerFailure", () => {
     ).toBe("Não foi possível abrir o pagamento. Tente de novo.");
   });
 
+  it("tells when a canceled Carreira Pro still has access", () => {
+    expect(
+      careerFailure(409, {
+        status: 409,
+        value: { error: "Carreira Pro canceled until 2026-12-26" },
+      }),
+    ).toBe("Seu Carreira Pro cancelado ainda vale até 26/12/2026.");
+  });
+
+  it("explains cancellation failures", () => {
+    expect(
+      careerFailure(502, { status: 502, value: { error: "Could not cancel Carreira Pro" } }),
+    ).toBe("Não foi possível cancelar agora. Tente de novo.");
+    expect(
+      careerFailure(502, {
+        status: 502,
+        value: { error: "Could not cancel Carreira Pro; try again" },
+      }),
+    ).toBe("Não foi possível cancelar agora. Tente de novo.");
+    expect(careerFailure(409, { status: 409, value: { error: "No active Carreira Pro" } })).toBe(
+      "Você não tem um Carreira Pro ativo.",
+    );
+    expect(careerFailure(503, { status: 503, value: { error: "Billing not configured" } })).toBe(
+      "Indisponível no momento.",
+    );
+  });
+
   it("falls back to the status when the reason is unknown", () => {
     expect(careerFailure(429, { status: 429, value: { error: "Something else" } })).toBe(
       "Limite diário de uso da IA atingido. Tente de novo amanhã.",

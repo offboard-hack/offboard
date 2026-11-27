@@ -56,7 +56,28 @@ function line(parts: (string | null)[]) {
   return parts.filter((part) => part !== null && part !== "").join(" · ");
 }
 
-export function profileEmbeddingText(content: ResumeContent) {
+export type ProfileText = {
+  headline: { text: string };
+  summary: { text: string };
+  experiences: readonly {
+    role: string;
+    company: string;
+    start: string;
+    end: string | null;
+    bullets: readonly { text: string }[];
+  }[];
+  education: readonly {
+    degree: string;
+    institution: string;
+    start: string | null;
+    end: string | null;
+  }[];
+  skills: readonly { name: string }[];
+  languages: readonly { name: string; level: string | null }[];
+  contact: { city: string | null };
+};
+
+export function profileEmbeddingText(content: ProfileText) {
   return [
     content.headline.text,
     content.summary.text,

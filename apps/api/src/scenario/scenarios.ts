@@ -1,14 +1,28 @@
 import type { ScenarioName } from "./args.js";
 import { addDays, type Context } from "./context.js";
 import {
+  draftAiApply,
+  improveWithAi,
+  recordApplications,
+  rejectJobs,
+  saveAnswers,
+} from "./steps-career.js";
+import {
+  configureActions,
+  connectIntegrations,
+  expectManualBenefit,
+  manageEquipment,
+  overrideBenefit,
+} from "./steps-hr.js";
+import {
   addPerson,
   addTeamMember,
   completeChecklist,
   ensureOrg,
+  ensureResume,
   listJobs,
   openCareer,
   readBenefit,
-  rehearseAiApply,
   saveResume,
   savePreferences,
   setBenefitPolicy,
@@ -17,6 +31,7 @@ import {
   subscribeCompany,
   submitExitSurvey,
   upgradeCareerPro,
+  type Admin,
   type OrgSpec,
   type PersonSpec,
   type Role,
@@ -94,6 +109,13 @@ export const people = {
     department: "Marketing",
     email: "helena.colaboradora@aurora.example.com",
     deadlineInDays: 10,
+  },
+  nina: {
+    name: "Nina Castro",
+    role: "Gerente de produto",
+    department: "Produto",
+    email: "nina.colaboradora@aurora.example.com",
+    deadlineInDays: 12,
   },
   gustavo: {
     name: "Gustavo Ribeiro",
@@ -206,22 +228,24 @@ async function orgsScenario(ctx: Context) {
   await seedOrgs(ctx, orgs);
 }
 
+const benefitPolicy = {
+  defaultPlanSlug: "silver",
+  durationMonths: 6,
+  rules: [
+    {
+      id: "tecnologia-gold",
+      field: "department",
+      operator: "equals",
+      value: "Tecnologia",
+      planSlug: "gold",
+    },
+  ],
+} as const;
+
 async function addPersonScenario(ctx: Context) {
   const admin = await auroraAdmin(ctx);
 
-  await setBenefitPolicy(ctx, admin, {
-    defaultPlanSlug: "silver",
-    durationMonths: 6,
-    rules: [
-      {
-        id: "tecnologia-gold",
-        field: "department",
-        operator: "equals",
-        value: "Tecnologia",
-        planSlug: "gold",
-      },
-    ],
-  });
+  await setBenefitPolicy(ctx, admin, { ...benefitPolicy, rules: [...benefitPolicy.rules] });
 
   for (const spec of [people.marina, people.rafael]) {
     const person = await addPerson(ctx, admin, spec);
@@ -246,10 +270,78 @@ async function careerScenario(ctx: Context) {
 
   await saveResume(ctx, collaborator, helenaResume);
   await savePreferences(ctx, collaborator, helenaPreferences);
+  await improveWithAi(ctx, collaborator);
   await listJobs(ctx, collaborator);
-  rehearseAiApply(ctx);
   await setCareerSponsoredUntil(ctx, admin, person, addDays(ctx.today(), -10));
   await upgradeCareerPro(ctx, collaborator, profileId);
+  await draftAiApply(ctx, collaborator, "Analista de Marketing Pleno");
+}
+
+async function helenaCollaborator(ctx: Context, admin: Admin) {
+  const person = await addPerson(ctx, admin, people.helena);
+  const collaborator = await signInCollaborator(ctx, person);
+
+  await openCareer(ctx, collaborator);
+
+  return collaborator;
+}
+
+async function applicationsScenario(ctx: Context) {
+  const admin = await auroraAdmin(ctx);
+  const collaborator = await helenaCollaborator(ctx, admin);
+
+  await ensureResume(ctx, collaborator, helenaResume);
+  await recordApplications(ctx, collaborator);
+}
+
+async function answersScenario(ctx: Context) {
+  const admin = await auroraAdmin(ctx);
+  const collaborator = await helenaCollaborator(ctx, admin);
+
+  await saveAnswers(ctx, collaborator);
+  await rejectJobs(ctx, collaborator);
+}
+
+async function benefitsManualScenario(ctx: Context) {
+  const admin = await auroraAdmin(ctx);
+  const policy = { ...benefitPolicy, rules: [...benefitPolicy.rules] };
+
+  await setBenefitPolicy(ctx, admin, policy);
+
+  const person = await addPerson(ctx, admin, people.marina);
+  const collaborator = await signInCollaborator(ctx, person);
+
+  await openCareer(ctx, collaborator);
+  await overrideBenefit(ctx, admin, person.name, "platinum");
+  await setBenefitPolicy(ctx, admin, { ...policy, defaultPlanSlug: "gold" });
+  await openCareer(ctx, collaborator);
+  await expectManualBenefit(ctx, admin, person.name);
+  await setBenefitPolicy(ctx, admin, policy);
+}
+
+async function equipmentScenario(ctx: Context) {
+  const admin = await auroraAdmin(ctx);
+  const person = await addPerson(ctx, admin, people.nina);
+
+  await manageEquipment(ctx, admin, person);
+}
+
+async function integrationsScenario(ctx: Context) {
+  const admin = await auroraAdmin(ctx);
+
+  await connectIntegrations(ctx, admin);
+}
+
+async function checklistActionsScenario(ctx: Context) {
+  const admin = await auroraAdmin(ctx);
+  const person = await addPerson(ctx, admin, people.nina);
+  const receiver = await ctx.startReceiver();
+
+  try {
+    await configureActions(ctx, admin, person, receiver);
+  } finally {
+    await receiver.close();
+  }
 }
 
 async function offboardingScenario(ctx: Context) {
@@ -264,7 +356,13 @@ async function allScenario(ctx: Context) {
   await orgsScenario(ctx);
   await addPersonScenario(ctx);
   await companyPaymentScenario(ctx);
+  await benefitsManualScenario(ctx);
   await careerScenario(ctx);
+  await applicationsScenario(ctx);
+  await answersScenario(ctx);
+  await equipmentScenario(ctx);
+  await integrationsScenario(ctx);
+  await checklistActionsScenario(ctx);
   await offboardingScenario(ctx);
 }
 
@@ -274,5 +372,11 @@ export const scenarios = {
   "company-payment": companyPaymentScenario,
   career: careerScenario,
   offboarding: offboardingScenario,
+  applications: applicationsScenario,
+  answers: answersScenario,
+  "benefits-manual": benefitsManualScenario,
+  equipment: equipmentScenario,
+  integrations: integrationsScenario,
+  "checklist-actions": checklistActionsScenario,
   all: allScenario,
 } satisfies Record<ScenarioName, (ctx: Context) => Promise<void>>;

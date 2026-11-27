@@ -314,14 +314,44 @@ export function useCopayCheckout(account: EmployeeAccount) {
   });
 }
 
-export function useResumeUpload(account: EmployeeAccount) {
+export function useCancelCareerPro(account: EmployeeAccount) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    async mutationFn() {
+      const result = await client().plan.cancel.post(undefined, {
+        headers: employeeAccessHeaders(account),
+      });
+
+      await queryClient.invalidateQueries({ queryKey: careerPlanQuery(account).queryKey });
+
+      return settle(result, "Não foi possível cancelar agora. Tente de novo.");
+    },
+  });
+}
+
+export type ResumeContentInput = Parameters<Me["resume"]["post"]>[0]["content"];
+
+export function useReadResume(account: EmployeeAccount) {
+  return useMutation({
     mutationFn: async (file: File) =>
       settle(
-        await client().resume.upload.post({ file }, { headers: employeeAccessHeaders(account) }),
-        "Não foi possível enviar o currículo. Tente novamente.",
+        await client().resume.read.post({ file }, { headers: employeeAccessHeaders(account) }),
+        "Não foi possível ler o currículo. Tente novamente.",
+      ).content,
+  });
+}
+
+export function useCreateResume(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ content, file }: { content: ResumeContentInput; file: File | null }) =>
+      settle(
+        await client().resume.post(file ? { content, file } : { content }, {
+          headers: employeeAccessHeaders(account),
+        }),
+        "Não foi possível criar o currículo. Tente novamente.",
       ),
     onSuccess(resume) {
       queryClient.setQueryData(careerResumeQuery(account).queryKey, resume);
@@ -399,6 +429,24 @@ export function useAiApplyConsent(account: EmployeeAccount) {
           { headers: employeeAccessHeaders(account) },
         ),
         "Não foi possível registrar seu consentimento.",
+      ),
+    onSuccess(profile) {
+      queryClient.setQueryData(careerProfileQuery(account).queryKey, profile);
+    },
+  });
+}
+
+export function useSetSearchable(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (searchable: boolean) =>
+      settle(
+        await client()["search-consent"].put(
+          { searchable },
+          { headers: employeeAccessHeaders(account) },
+        ),
+        "Não foi possível salvar sua escolha.",
       ),
     onSuccess(profile) {
       queryClient.setQueryData(careerProfileQuery(account).queryKey, profile);

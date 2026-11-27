@@ -46,6 +46,7 @@ describe.skipIf(!url)("career plan route", () => {
   const db = createClient(url ?? "");
   const repos = createRepositories(db);
   const checkouts: CheckoutParams[] = [];
+  const cancellations: string[] = [];
 
   const gateway = {
     configured: true,
@@ -54,8 +55,8 @@ describe.skipIf(!url)("career plan route", () => {
 
       return { id: "bill_pro", url: "https://pay.example/bill_pro" };
     },
-    async cancelSubscription() {
-      throw new Error("not implemented in stub");
+    async cancelSubscription(id: string) {
+      cancellations.push(id);
     },
   };
 
@@ -132,6 +133,7 @@ describe.skipIf(!url)("career plan route", () => {
   beforeEach(async () => {
     await seedDatabase(db, testSeedFixtures);
     checkouts.length = 0;
+    cancellations.length = 0;
   });
 
   afterAll(async () => {
@@ -224,7 +226,12 @@ describe.skipIf(!url)("career plan route", () => {
 
     expect(await (await get(profileId)).json()).toEqual({
       company: { name: null, includesAiApply: false, sponsoredUntil: "2099-12-31" },
-      individual: { plan: "carreira-pro", status: "pending", currentPeriodEnd: null },
+      individual: {
+        plan: "carreira-pro",
+        status: "pending",
+        currentPeriodEnd: null,
+        cancelable: false,
+      },
       benefit: null,
       aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
@@ -238,7 +245,12 @@ describe.skipIf(!url)("career plan route", () => {
 
     expect(await (await get(profileId)).json()).toEqual({
       company: { name: null, includesAiApply: false, sponsoredUntil: "2099-12-31" },
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2099-01-01" },
+      individual: {
+        plan: "carreira-pro",
+        status: "active",
+        currentPeriodEnd: "2099-01-01",
+        cancelable: false,
+      },
       benefit: null,
       aiApply: { allowedBy: "individual", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
@@ -343,13 +355,13 @@ describe.skipIf(!url)("career plan route", () => {
   it("restarts the checkout of a canceled or expired Carreira Pro", async () => {
     const profileId = await profile("2099-12-31");
 
-    await subscribed(profileId, "canceled", "2099-01-01");
+    await subscribed(profileId, "canceled", "2020-01-01");
 
     expect((await checkout(profileId)).status).toBe(200);
     expect(await subscription(profileId)).toEqual({
       status: "pending",
-      providerSubscriptionId: "subs_pro",
-      currentPeriodEnd: "2099-01-01",
+      providerSubscriptionId: null,
+      currentPeriodEnd: "2020-01-01",
     });
 
     await db
@@ -358,8 +370,243 @@ describe.skipIf(!url)("career plan route", () => {
       .where(eq(talentSubscriptions.profileId, profileId));
 
     expect((await checkout(profileId)).status).toBe(200);
-    expect((await subscription(profileId)).status).toBe("pending");
+    expect(await subscription(profileId)).toMatchObject({
+      status: "pending",
+      providerSubscriptionId: null,
+    });
     expect(checkouts).toHaveLength(2);
+  });
+
+  it("restarts the checkout of a canceled Carreira Pro without a period end", async () => {
+    const profileId = await profile("2099-12-31");
+
+    await subscribed(profileId, "canceled", null);
+
+    expect((await checkout(profileId)).status).toBe(200);
+  });
+
+  it("refuses a new checkout while a canceled Carreira Pro still has access", async () => {
+    const profileId = await profile("2099-12-31");
+    const today = saoPauloDate(new Date());
+
+    await subscribed(profileId, "canceled", today);
+
+    const refused = await checkout(profileId);
+
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ error: `Carreira Pro canceled until ${today}` });
+    expect(checkouts).toEqual([]);
+  });
+
+  it("keeps the provider subscription of an active Carreira Pro whose period lapsed", async () => {
+    const profileId = await profile("2099-12-31");
+
+    await subscribed(profileId, "active", "2020-01-01");
+
+    expect((await checkout(profileId)).status).toBe(200);
+    expect(await subscription(profileId)).toMatchObject({
+      status: "pending",
+      providerSubscriptionId: "subs_pro",
+    });
+  });
+
+  describe("cancel", () => {
+    const cancel = (profileId: string, target = app) =>
+      target.handle(
+        new Request("http://localhost/me/plan/cancel", {
+          method: "POST",
+          headers: { "x-test-talent-id": profileId, origin: webOrigin },
+        }),
+      );
+
+    it("cancels at AbacatePay and keeps access until the period ends", async () => {
+      const profileId = await profile("2020-01-01");
+
+      await subscribed(profileId, "active", "2099-01-01");
+
+      const response = await cancel(profileId);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ currentPeriodEnd: "2099-01-01" });
+      expect(cancellations).toEqual(["subs_pro"]);
+      expect(await subscription(profileId)).toEqual({
+        status: "canceled",
+        providerSubscriptionId: "subs_pro",
+        currentPeriodEnd: "2099-01-01",
+      });
+      expect(await (await get(profileId)).json()).toMatchObject({
+        individual: { status: "canceled", currentPeriodEnd: "2099-01-01" },
+        aiApply: { allowedBy: "individual", dailyLimit: 10 },
+        upgrade: { offered: false },
+      });
+    });
+
+    it("keeps access on the last day and offers the upgrade again the day after", async () => {
+      const profileId = await profile("2020-01-01");
+      const today = saoPauloDate(new Date());
+      const yesterday = saoPauloDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
+
+      await subscribed(profileId, "canceled", today);
+
+      expect(await (await get(profileId)).json()).toMatchObject({
+        aiApply: { allowedBy: "individual" },
+        upgrade: { offered: false },
+      });
+
+      await db
+        .update(talentSubscriptions)
+        .set({ currentPeriodEnd: yesterday })
+        .where(eq(talentSubscriptions.profileId, profileId));
+
+      expect(await (await get(profileId)).json()).toMatchObject({
+        aiApply: { allowedBy: null },
+        upgrade: { offered: true },
+      });
+    });
+
+    it("answers 409 without an active Carreira Pro", async () => {
+      const none = await profile("2099-12-31");
+
+      expect((await cancel(none)).status).toBe(409);
+      expect(await (await cancel(none)).json()).toEqual({ error: "No active Carreira Pro" });
+
+      await subscribed(none, "pending", null);
+      expect((await cancel(none)).status).toBe(409);
+
+      await db
+        .update(talentSubscriptions)
+        .set({ status: "canceled" })
+        .where(eq(talentSubscriptions.profileId, none));
+      expect((await cancel(none)).status).toBe(409);
+
+      for (const status of ["active", "past_due"] as const) {
+        await db
+          .update(talentSubscriptions)
+          .set({ status, providerSubscriptionId: null })
+          .where(eq(talentSubscriptions.profileId, none));
+        expect((await cancel(none)).status).toBe(409);
+      }
+
+      expect(cancellations).toEqual([]);
+    });
+
+    it("cancels a past-due Carreira Pro", async () => {
+      const profileId = await profile("2020-01-01");
+
+      await subscribed(profileId, "past_due", "2099-01-01");
+
+      expect((await cancel(profileId)).status).toBe(200);
+      expect(cancellations).toEqual(["subs_pro"]);
+      expect((await subscription(profileId)).status).toBe("canceled");
+    });
+
+    it("marks only the subscription it canceled", async () => {
+      const profileId = await profile("2020-01-01");
+
+      await subscribed(profileId, "active", "2099-01-01");
+      await repos.careerPlan.markCanceled(profileId, "subs_replaced", new Date());
+
+      expect((await subscription(profileId)).status).toBe("active");
+
+      await repos.careerPlan.markCanceled(profileId, "subs_pro", new Date());
+
+      expect((await subscription(profileId)).status).toBe("canceled");
+    });
+
+    it("exposes whether the plan can be canceled", async () => {
+      const profileId = await profile("2020-01-01");
+
+      await subscribed(profileId, "past_due", "2099-01-01");
+
+      expect(await (await get(profileId)).json()).toMatchObject({
+        individual: { status: "past_due", cancelable: true },
+      });
+
+      await db
+        .update(talentSubscriptions)
+        .set({ status: "canceled" })
+        .where(eq(talentSubscriptions.profileId, profileId));
+
+      expect(await (await get(profileId)).json()).toMatchObject({
+        individual: { status: "canceled", cancelable: false },
+      });
+    });
+
+    it("answers 502 and changes nothing when AbacatePay fails", async () => {
+      const logged = vi.spyOn(console, "error");
+      const profileId = await profile("2020-01-01");
+
+      await subscribed(profileId, "active", "2099-01-01");
+
+      const failing = planApp({
+        ...gateway,
+        cancelSubscription: async () => {
+          throw new TypeError("secret provider detail");
+        },
+      });
+
+      try {
+        const response = await cancel(profileId, failing);
+
+        expect(response.status).toBe(502);
+        expect(await response.json()).toEqual({ error: "Could not cancel Carreira Pro" });
+        expect(logged).toHaveBeenCalledWith("Carreira Pro cancellation failed", {
+          name: "TypeError",
+        });
+        expect(await subscription(profileId)).toEqual({
+          status: "active",
+          providerSubscriptionId: "subs_pro",
+          currentPeriodEnd: "2099-01-01",
+        });
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("answers 503 without AbacatePay and changes nothing", async () => {
+      const profileId = await profile("2020-01-01");
+
+      await subscribed(profileId, "active", "2099-01-01");
+
+      const response = await cancel(profileId, planApp({ ...gateway, configured: false }));
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: "Billing not configured" });
+      expect((await subscription(profileId)).status).toBe("active");
+    });
+
+    it("only cancels the subscription of the signed-in person", async () => {
+      const mine = await profile("2020-01-01");
+      const [, second] = await db.select({ id: offboardingCases.id }).from(offboardingCases);
+
+      const other = await repos.talent.enable({
+        orgId: defaultOrgId,
+        caseId: second.id,
+        personalEmail: "outra@exemplo.com",
+        sponsoredUntil: "2020-01-01",
+      });
+
+      if (other === "case_not_found" || other === "already_enabled" || other === "email_taken") {
+        throw new Error(other);
+      }
+
+      await subscribed(mine, "active", "2099-01-01");
+      await db.insert(talentSubscriptions).values({
+        profileId: other.id,
+        status: "active",
+        providerSubscriptionId: "subs_other",
+        currentPeriodEnd: "2099-01-01",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      expect((await cancel(mine)).status).toBe(200);
+      expect(cancellations).toEqual(["subs_pro"]);
+      expect((await subscription(other.id)).status).toBe("active");
+      expect((await cancel(other.id)).status).toBe(200);
+      expect(cancellations).toEqual(["subs_pro", "subs_other"]);
+      expect((await subscription(mine)).providerSubscriptionId).toBe("subs_pro");
+    });
   });
 
   it("refuses a second checkout while Carreira Pro is active", async () => {
@@ -427,7 +674,7 @@ describe.skipIf(!url)("career plan route", () => {
     const profileId = await profile("2099-12-31");
 
     const failing = planApp({
-      configured: true,
+      ...gateway,
       createSubscriptionCheckout: async () => {
         throw new TypeError("secret provider detail");
       },

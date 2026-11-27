@@ -40,6 +40,7 @@ export function createAccountRepository(db: Database) {
         shareOutcomeWithHr: talentProfiles.shareOutcomeWithHr,
         aiApplyConsentAt: talentProfiles.aiApplyConsentAt,
         aiApplyConsentVersion: talentProfiles.aiApplyConsentVersion,
+        searchableAt: talentProfiles.searchableAt,
         firstSignedInAt: talentProfiles.firstSignedInAt,
         createdAt: talentProfiles.createdAt,
       })
@@ -247,6 +248,7 @@ export function createAccountRepository(db: Database) {
         shareOutcomeWithHr: profile.shareOutcomeWithHr,
         aiApplyConsentAt: profile.aiApplyConsentAt?.toISOString() ?? null,
         aiApplyConsentVersion: profile.aiApplyConsentVersion,
+        searchableAt: profile.searchableAt?.toISOString() ?? null,
         firstSignedInAt: profile.firstSignedInAt?.toISOString() ?? null,
         createdAt: profile.createdAt?.toISOString() ?? null,
       },
@@ -377,6 +379,32 @@ export function createAccountRepository(db: Database) {
     return [...files, ...screenshots].map((row) => row.key);
   }
 
+  async function cancelableSubscription(profileId: string) {
+    const [row] = await db
+      .select({ id: talentSubscriptions.providerSubscriptionId })
+      .from(talentSubscriptions)
+      .where(
+        and(
+          eq(talentSubscriptions.profileId, profileId),
+          inArray(talentSubscriptions.status, ["active", "past_due", "pending"]),
+        ),
+      );
+
+    return row?.id ?? null;
+  }
+
+  async function markSubscriptionCanceled(profileId: string, providerSubscriptionId: string) {
+    await db
+      .update(talentSubscriptions)
+      .set({ status: "canceled", updatedAt: new Date() })
+      .where(
+        and(
+          eq(talentSubscriptions.profileId, profileId),
+          eq(talentSubscriptions.providerSubscriptionId, providerSubscriptionId),
+        ),
+      );
+  }
+
   async function deleteProfile(profileId: string) {
     return db.transaction(async (tx) => {
       const [deleted] = await tx
@@ -414,7 +442,7 @@ export function createAccountRepository(db: Database) {
     });
   }
 
-  return { exportData, fileKeys, deleteProfile };
+  return { exportData, fileKeys, cancelableSubscription, markSubscriptionCanceled, deleteProfile };
 }
 
 export type AccountRepository = ReturnType<typeof createAccountRepository>;

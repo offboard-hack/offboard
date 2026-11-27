@@ -34,6 +34,7 @@ describe("plan card view", () => {
       aiLine: "Inclui candidatura com IA",
       sponsorLine: "Patrocinado pela empresa até 10/03/2027",
       proLine: null,
+      cancelable: false,
       paymentNote: false,
       copayPaymentNote: false,
       statusNote: null,
@@ -88,7 +89,12 @@ describe("plan card view", () => {
     const plan: CareerPlan = {
       ...base,
       aiApply: { allowedBy: "individual", dailyLimit: 10 },
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-12-26" },
+      individual: {
+        plan: "carreira-pro",
+        status: "active",
+        currentPeriodEnd: "2026-12-26",
+        cancelable: false,
+      },
     };
 
     expect(planCardView(plan, today, false)).toMatchObject({
@@ -97,18 +103,89 @@ describe("plan card view", () => {
     });
     expect(
       planCardView(
-        { ...plan, individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null } },
+        {
+          ...plan,
+          individual: {
+            plan: "carreira-pro",
+            status: "active",
+            currentPeriodEnd: null,
+            cancelable: false,
+          },
+        },
         today,
         false,
       ).proLine,
     ).toBe("Carreira Pro ativo");
   });
 
+  it("offers cancellation from the plan's cancelable flag, not from the access state", () => {
+    const withIndividual = (
+      status: "active" | "pending" | "past_due" | "canceled",
+      cancelable: boolean,
+    ) => ({
+      ...base,
+      aiApply: { allowedBy: null, dailyLimit: 0 },
+      individual: {
+        plan: "carreira-pro" as const,
+        status,
+        currentPeriodEnd: "2026-11-01",
+        cancelable,
+      },
+    });
+
+    expect(planCardView(withIndividual("past_due", true), today, false).cancelable).toBe(true);
+    expect(planCardView(withIndividual("active", true), today, false).cancelable).toBe(true);
+    expect(planCardView(withIndividual("pending", false), today, false).cancelable).toBe(false);
+    expect(planCardView(withIndividual("canceled", false), today, false).cancelable).toBe(false);
+    expect(planCardView(base, today, false).cancelable).toBe(false);
+  });
+
+  it("shows the access end of a canceled Carreira Pro and withholds the upgrade until it passes", () => {
+    const canceled = (end: string | null) => ({
+      ...base,
+      aiApply: {
+        allowedBy: end === "2026-11-25" || end === null ? null : ("individual" as const),
+        dailyLimit: 10,
+      },
+      individual: {
+        plan: "carreira-pro" as const,
+        status: "canceled" as const,
+        currentPeriodEnd: end,
+        cancelable: false,
+      },
+    });
+
+    expect(planCardView(canceled("2026-12-26"), today, false)).toMatchObject({
+      proLine: "Carreira Pro cancelado · acesso até 26/12/2026",
+      cancelable: false,
+      upgrade: "hidden",
+    });
+    expect(planCardView(canceled(today), today, false)).toMatchObject({
+      proLine: "Carreira Pro cancelado · acesso até 26/11/2026",
+      upgrade: "hidden",
+    });
+    expect(isProActive(canceled("2026-11-25"), today)).toBe(false);
+    expect(planCardView(canceled("2026-11-25"), today, false)).toMatchObject({
+      proLine: null,
+      cancelable: false,
+      upgrade: "available",
+    });
+    expect(planCardView(canceled(null), today, false)).toMatchObject({
+      proLine: null,
+      upgrade: "available",
+    });
+  });
+
   it("hides the upgrade while a checkout is in flight and offers it again once the API allows a retry", () => {
     const pending: CareerPlan = {
       ...base,
       aiApply: { allowedBy: null, dailyLimit: 0 },
-      individual: { plan: "carreira-pro", status: "pending", currentPeriodEnd: null },
+      individual: {
+        plan: "carreira-pro",
+        status: "pending",
+        currentPeriodEnd: null,
+        cancelable: false,
+      },
     };
 
     const none: CareerPlan = { ...base, aiApply: { allowedBy: null, dailyLimit: 0 } };
@@ -132,7 +209,12 @@ describe("plan card view", () => {
     const sponsored: CareerPlan = {
       ...base,
       company: { ...base.company, sponsoredUntil: "2026-12-01" },
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-11-26" },
+      individual: {
+        plan: "carreira-pro",
+        status: "active",
+        currentPeriodEnd: "2026-11-26",
+        cancelable: false,
+      },
     };
 
     expect(planCardView(sponsored, today, false)).toMatchObject({
@@ -143,7 +225,12 @@ describe("plan card view", () => {
 
     const lapsed: CareerPlan = {
       ...sponsored,
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-11-25" },
+      individual: {
+        plan: "carreira-pro",
+        status: "active",
+        currentPeriodEnd: "2026-11-25",
+        cancelable: false,
+      },
     };
 
     expect(planCardView(lapsed, today, false)).toMatchObject({
@@ -156,7 +243,12 @@ describe("plan card view", () => {
     const plan: CareerPlan = {
       ...base,
       aiApply: { allowedBy: null, dailyLimit: 0 },
-      individual: { plan: "carreira-pro", status: "past_due", currentPeriodEnd: "2026-11-01" },
+      individual: {
+        plan: "carreira-pro",
+        status: "past_due",
+        currentPeriodEnd: "2026-11-01",
+        cancelable: false,
+      },
     };
 
     expect(planCardView(plan, today, false)).toMatchObject({
@@ -169,12 +261,22 @@ describe("plan card view", () => {
   it("polls until Carreira Pro is active", () => {
     const active: CareerPlan = {
       ...base,
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+      individual: {
+        plan: "carreira-pro",
+        status: "active",
+        currentPeriodEnd: null,
+        cancelable: false,
+      },
     };
 
     const pending: CareerPlan = {
       ...base,
-      individual: { plan: "carreira-pro", status: "pending", currentPeriodEnd: null },
+      individual: {
+        plan: "carreira-pro",
+        status: "pending",
+        currentPeriodEnd: null,
+        cancelable: false,
+      },
     };
 
     expect(isProActive(active, today)).toBe(true);
@@ -248,7 +350,12 @@ describe("plan card benefit view", () => {
   it("does not offer the upgrade for an expiring benefit when Carreira Pro is active", () => {
     const plan: CareerPlan = {
       ...withValidUntil("2026-12-20"),
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+      individual: {
+        plan: "carreira-pro",
+        status: "active",
+        currentPeriodEnd: null,
+        cancelable: false,
+      },
     };
 
     expect(planCardView(plan, today, false).upgrade).toBe("hidden");
@@ -265,7 +372,12 @@ describe("plan card benefit view", () => {
   it("shows benefit and Carreira Pro together", () => {
     const plan: CareerPlan = {
       ...benefitBase,
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2027-01-15" },
+      individual: {
+        plan: "carreira-pro",
+        status: "active",
+        currentPeriodEnd: "2027-01-15",
+        cancelable: false,
+      },
       aiApply: { allowedBy: "individual", dailyLimit: 10 },
     };
 
@@ -308,7 +420,12 @@ describe("plan card benefit view", () => {
   it("drops the upgrade prompt from the expiry warning when Carreira Pro is active", () => {
     const plan: CareerPlan = {
       ...withValidUntil("2026-12-20"),
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+      individual: {
+        plan: "carreira-pro",
+        status: "active",
+        currentPeriodEnd: null,
+        cancelable: false,
+      },
     };
 
     expect(planCardView(plan, today, false).benefitExpiryWarning).toBe(
@@ -334,7 +451,12 @@ describe("plan card benefit view", () => {
     const plan: CareerPlan = {
       ...benefitBase,
       benefit: { ...benefitBase.benefit!, planName: "Silver", aiApplyDailyLimit: 0 },
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+      individual: {
+        plan: "carreira-pro",
+        status: "active",
+        currentPeriodEnd: null,
+        cancelable: false,
+      },
     };
 
     expect(planCardView(plan, today, false).showComparison).toBe(false);
@@ -344,7 +466,12 @@ describe("plan card benefit view", () => {
     const plan: CareerPlan = {
       ...benefitBase,
       benefit: { ...benefitBase.benefit!, planName: "Platinum Premium", aiApplyDailyLimit: 25 },
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+      individual: {
+        plan: "carreira-pro",
+        status: "active",
+        currentPeriodEnd: null,
+        cancelable: false,
+      },
     };
 
     expect(planCardView(plan, today, false).showComparison).toBe(true);

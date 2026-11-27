@@ -19,6 +19,7 @@ import {
   authSession,
   authUser,
   backgroundJobs,
+  demoSearchUsage,
   benefitAssignments,
   benefitPolicies,
   checklistModels,
@@ -241,6 +242,7 @@ describe.skipIf(!url)("api", () => {
     actionId?: string;
     enabled?: boolean;
     shareOutcomeWithHr?: boolean | string;
+    searchable?: boolean;
     config?: Record<string, ConfigValue>;
     phase?: string;
     event?: string | { type: string; user?: string };
@@ -788,6 +790,7 @@ describe.skipIf(!url)("api", () => {
         email: personalEmail,
         termsAccepted: false,
         shareOutcomeWithHr: false,
+        searchable: false,
         aiApply: { eligible: false, consented: false, available: false },
         entitlement: { kind: "sponsored", until: sponsoredUntil },
       });
@@ -884,6 +887,32 @@ describe.skipIf(!url)("api", () => {
       );
 
       expect(await withdrawn.json()).toMatchObject({ shareOutcomeWithHr: false });
+
+      const findable = await asSession(
+        "talent",
+        "/me/search-consent",
+        "PUT",
+        { searchable: true },
+        asMine,
+      );
+
+      expect(await findable.json()).toMatchObject({ searchable: true, shareOutcomeWithHr: false });
+      expect((await repos.talent.findById(mine.id))?.searchableAt).toEqual(expect.any(String));
+      expect((await repos.talent.findById(other.id))?.searchableAt).toBeNull();
+
+      const hidden = await asSession(
+        "talent",
+        "/me/search-consent",
+        "PUT",
+        { searchable: false },
+        asMine,
+      );
+
+      expect(await hidden.json()).toMatchObject({ searchable: false });
+      expect((await repos.talent.findById(mine.id))?.searchableAt).toBeNull();
+      expect(
+        (await asSession("rh", "/me/search-consent", "PUT", { searchable: true })).status,
+      ).toBe(403);
 
       await repos.talent.setConsent(mine.id, true, new Date());
 
@@ -1074,7 +1103,12 @@ describe.skipIf(!url)("api", () => {
       });
       expect(await (await call(gated, "talent", "/me/plan", "GET", mine.id)).json()).toEqual({
         company: { name: "Gold", includesAiApply: false, sponsoredUntil },
-        individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+        individual: {
+          plan: "carreira-pro",
+          status: "active",
+          currentPeriodEnd: null,
+          cancelable: false,
+        },
         benefit: null,
         aiApply: { allowedBy: "individual", dailyLimit: 10 },
         upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
@@ -3131,6 +3165,24 @@ describe.skipIf(!url)("api", () => {
         failRemove: boolean;
       };
 
+      type BillingStub = {
+        configured: boolean;
+        createSubscriptionCheckout: () => Promise<{ id: string; url: string }>;
+        cancelSubscription: (id: string) => Promise<void>;
+      };
+
+      function billingStub(cancelled: string[], fail = false) {
+        return {
+          configured: true,
+          createSubscriptionCheckout: async () => ({ id: "bill", url: "https://pay.example/bill" }),
+          cancelSubscription: async (id) => {
+            if (fail) throw new Error("gateway down");
+
+            cancelled.push(id);
+          },
+        } satisfies BillingStub;
+      }
+
       type Scoring = { output: object; calls: number; prompts: string[] };
 
       const rubric = [
@@ -3192,6 +3244,7 @@ describe.skipIf(!url)("api", () => {
           draft?: object;
           embed?: Embed;
           embedProfile?: Embed;
+          billing?: BillingStub;
         } = {},
       ) {
         const store: Store = { puts: [], removed: [], prefixes: [], failRemove: false };
@@ -3292,6 +3345,7 @@ describe.skipIf(!url)("api", () => {
           embed: options.embed,
           embedProfile: options.embedProfile,
           storage: options.storage === false ? undefined : storage,
+          abacatepay: options.billing,
           runInBackground: (task) => {
             background.push(task);
           },
@@ -3371,17 +3425,10 @@ describe.skipIf(!url)("api", () => {
         );
       }
 
-      function upload(
-        instance: ReturnType<typeof resumesApp>["instance"],
-        talentId: string,
-        bytes: Uint8Array = pdf,
-        name = "cv.pdf",
-      ) {
-        const form = new FormData();
+      function upload(instance: ReturnType<typeof resumesApp>["instance"], talentId: string) {
+        const { isResume: _isResume, ...content } = draft;
 
-        form.set("file", new File([new Uint8Array(bytes)], name, { type: "application/pdf" }));
-
-        return request(instance, talentId, "/me/resume/upload", { method: "POST", body: form });
+        return create(instance, talentId, JSON.stringify(content), { bytes: pdf, name: "cv.pdf" });
       }
 
       function docx() {
@@ -3392,162 +3439,6 @@ describe.skipIf(!url)("api", () => {
           "[Content_Types].xml": new TextEncoder().encode("<Types/>"),
         });
       }
-
-      it("uploads a résumé and replaces it on the next upload", async () => {
-        const { instance, store } = resumesApp();
-        const id = await profile();
-
-        const first = await upload(instance, id);
-
-        expect(first.status).toBe(200);
-
-        const created = await first.json();
-
-        expect(created).toMatchObject({ kind: "base", score: null });
-        expect(created.content.headline.text).toBe("Engenheira de Software");
-        expect(store.puts).toHaveLength(1);
-        expect(store.puts[0].key).toMatch(new RegExp(`^resumes/${id}/[0-9a-f-]+\\.pdf$`));
-        expect(store.puts[0].contentType).toBe("application/pdf");
-
-        const second = await upload(instance, id, docx(), "cv.docx");
-
-        expect(second.status).toBe(200);
-        expect((await second.json()).id).toBe(created.id);
-        expect(store.puts[1].key).toMatch(/\.docx$/);
-        expect(store.puts[1].contentType).toBe(
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        );
-        expect(store.removed).toEqual([store.puts[0].key]);
-      });
-
-      it("keeps the new résumé when removing the previous file fails", async () => {
-        const { instance, store } = resumesApp();
-        const id = await profile();
-
-        expect((await upload(instance, id)).status).toBe(200);
-
-        store.failRemove = true;
-
-        expect((await upload(instance, id)).status).toBe(200);
-        expect(store.puts).toHaveLength(2);
-      });
-
-      it("rejects files whose bytes are not a PDF or DOCX", async () => {
-        const { instance, store } = resumesApp();
-        const id = await profile();
-
-        const html = await upload(instance, id, new TextEncoder().encode("<html></html>"));
-
-        expect(html.status).toBe(422);
-        expect(await html.json()).toEqual({ error: "Unsupported file" });
-        expect(store.puts).toEqual([]);
-      });
-
-      it("rejects an oversized docx expansion", async () => {
-        const { instance, store } = resumesApp();
-        const id = await profile();
-
-        const bomb = zipSync({
-          "word/document.xml": new Uint8Array(3_000_000).fill(0x61),
-        });
-
-        const res = await upload(instance, id, bomb, "cv.docx");
-
-        expect(res.status).toBe(422);
-        expect(await res.json()).toEqual({ error: "File too large" });
-        expect(store.puts).toEqual([]);
-      });
-
-      it("rejects files above the size limit", async () => {
-        const { instance, store } = resumesApp();
-        const id = await profile();
-        const big = new Uint8Array(5_242_881);
-
-        big.set(pdf);
-
-        expect((await upload(instance, id, big)).status).toBe(422);
-        expect(store.puts).toEqual([]);
-      });
-
-      it("cleans up the stored file when extraction fails", async () => {
-        const logged = vi.spyOn(console, "error");
-
-        const failing = resumesApp({
-          generate: async ({ prompt }) => {
-            throw leakyError(prompt);
-          },
-        });
-
-        const id = await profile();
-        const res = await upload(failing.instance, id);
-
-        expect(res.status).toBe(502);
-        expect(await res.json()).toEqual({ error: "Could not read the résumé" });
-        expect(failing.store.removed).toEqual([failing.store.puts[0].key]);
-        expect(logged.mock.calls).toEqual([
-          ["résumé extraction failed", { name: "Error", message: "gateway down" }],
-        ]);
-        logged.mockRestore();
-
-        const notResume = resumesApp({ draft: { ...draft, isResume: false } });
-        const refused = await upload(notResume.instance, id);
-
-        expect(refused.status).toBe(422);
-        expect(await refused.json()).toEqual({ error: "File is not a résumé" });
-        expect(notResume.store.removed).toEqual([notResume.store.puts[0].key]);
-        expect((await request(notResume.instance, id, "/me/resume")).status).toBe(404);
-
-        const stuck = resumesApp({ draft: { ...draft, isResume: false } });
-
-        stuck.store.failRemove = true;
-
-        expect((await upload(stuck.instance, id)).status).toBe(422);
-      });
-
-      it("cleans up the stored file when saving fails", async () => {
-        const store: string[] = [];
-
-        const instance = createApp(
-          webOrigin,
-          {
-            ...repos,
-            resumes: {
-              ...repos.resumes,
-              replaceBase: () => Promise.reject(new Error("db down")),
-            },
-          },
-          {
-            ...appOptions,
-            generateStructured: async ({ schema }) => schema.parse(draft),
-            storage: {
-              put: async () => undefined,
-              remove: async (keys) => {
-                store.push(...keys);
-              },
-              removePrefix: async () => undefined,
-              get: async () => null,
-            },
-          },
-        );
-
-        const res = await upload(instance, await profile());
-
-        expect(res.status).toBe(500);
-        expect(store).toHaveLength(1);
-      });
-
-      it("answers 503 when upload is not configured", async () => {
-        const id = await profile();
-
-        for (const options of [{ storage: false }, { generate: null }]) {
-          const { instance, store } = resumesApp(options);
-          const res = await upload(instance, id);
-
-          expect(res.status).toBe(503);
-          expect(await res.json()).toEqual({ error: "Résumé upload not configured" });
-          expect(store.puts).toEqual([]);
-        }
-      });
 
       function create(
         instance: ReturnType<typeof resumesApp>["instance"],
@@ -4778,6 +4669,7 @@ describe.skipIf(!url)("api", () => {
         const embedder = fakeEmbed();
         const app = resumesApp({ embedProfile: embedder.embed });
         const id = await profile();
+        const profileCalls = () => embedder.calls.filter((call) => call.length === 1);
 
         const created = await (await upload(app.instance, id)).json();
 
@@ -4787,7 +4679,7 @@ describe.skipIf(!url)("api", () => {
 
         expect(first.embedding).toHaveLength(1024);
         expect(first.hash).toMatch(/^[0-9a-f]{64}$/);
-        expect(embedder.calls).toEqual([
+        expect(profileCalls()).toEqual([
           [
             "Engenheira de Software\nDez anos de experiência\nDev · Acme · 2019 – atual\nFez X\nTypeScript",
           ],
@@ -4796,7 +4688,7 @@ describe.skipIf(!url)("api", () => {
         await repos.background.enqueue("embed_profile", created.id);
         await app.settle();
 
-        expect(embedder.calls).toHaveLength(1);
+        expect(profileCalls()).toHaveLength(1);
 
         const edited = await request(app.instance, id, "/me/resume", {
           method: "PATCH",
@@ -4813,10 +4705,74 @@ describe.skipIf(!url)("api", () => {
 
         await app.settle();
 
-        expect(embedder.calls).toHaveLength(2);
-        expect(embedder.calls[1][0]).toContain("Inglês (Fluente)\nRecife");
-        expect(embedder.calls[1][0]).not.toContain("maria@example.com");
+        expect(profileCalls()).toHaveLength(2);
+        expect(profileCalls()[1][0]).toContain("Inglês (Fluente)\nRecife");
+        expect(profileCalls()[1][0]).not.toContain("maria@example.com");
         expect((await profileEmbedding(id)).hash).not.toBe(first.hash);
+      });
+
+      it("finds only people who opted in to the public candidate search", async () => {
+        const embedder = fakeEmbed();
+        const app = resumesApp({ embedProfile: embedder.embed });
+        const visible = await profile();
+        const hidden = await profile("outra.pessoal@example.com", 1);
+
+        await upload(app.instance, visible);
+        await upload(app.instance, hidden);
+        await app.settle();
+        await repos.talent.setSearchable(visible, true, new Date());
+
+        const find = (instance: typeof app.instance, q: string) =>
+          instance.handle(
+            new Request(`http://localhost/api/candidates/search?q=${encodeURIComponent(q)}`),
+          );
+
+        const res = await find(app.instance, "engenheira backend");
+
+        expect(res.status).toBe(200);
+
+        const cards = await res.json();
+
+        expect(cards).toEqual([
+          {
+            id: expect.any(String),
+            name: expect.any(String),
+            headline: "Engenheira de Software",
+            summary: "Dez anos de experiência",
+            city: null,
+            match: expect.any(Number),
+            experiences: [{ role: "Dev", company: "Acme", start: "2019", end: null }],
+            skills: ["TypeScript"],
+            languages: [],
+          },
+        ]);
+        expect(JSON.stringify(cards)).not.toContain("@");
+
+        expect((await find(resumesApp().instance, "dev")).status).toBe(503);
+        expect((await find(app.instance, "a")).status).toBe(422);
+
+        const logged = vi.spyOn(console, "error");
+
+        embedder.state.fail = true;
+
+        const failed = await find(app.instance, "dev");
+
+        expect(failed.status).toBe(502);
+        expect(logged.mock.calls).toContainEqual([
+          "candidate search embedding failed",
+          { name: "Error", message: "embeddings down" },
+        ]);
+        logged.mockRestore();
+
+        await db
+          .update(demoSearchUsage)
+          .set({ searches: 2_000 })
+          .where(eq(demoSearchUsage.bucket, "candidates:all"));
+
+        const capped = await find(app.instance, "dev");
+
+        expect(capped.status).toBe(429);
+        expect(await capped.json()).toEqual({ error: "Too many searches" });
       });
 
       it("backfills profiles without a search embedding and skips what it cannot embed", async () => {
@@ -4861,6 +4817,7 @@ describe.skipIf(!url)("api", () => {
               ...repos.resumes,
               withoutProfileEmbedding: () => Promise.reject(new Error("db down")),
             },
+            demo: { ...repos.demo, stored: () => Promise.reject(new Error("demo down")) },
           },
           { ...appOptions, embedProfile: fakeEmbed().embed },
         );
@@ -4876,6 +4833,10 @@ describe.skipIf(!url)("api", () => {
         expect(logged.mock.calls).toContainEqual([
           "profile embedding backfill failed",
           { name: "Error", message: "db down" },
+        ]);
+        expect(logged.mock.calls).toContainEqual([
+          "demo embedding sync failed",
+          { name: "Error", message: "demo down" },
         ]);
         logged.mockRestore();
       });
@@ -6183,6 +6144,7 @@ describe.skipIf(!url)("api", () => {
           shareOutcomeWithHr: false,
           aiApplyConsentAt: null,
           aiApplyConsentVersion: null,
+          searchableAt: null,
           firstSignedInAt: null,
           createdAt: expect.any(String),
         });
@@ -7073,6 +7035,134 @@ describe.skipIf(!url)("api", () => {
         expect(deleted.status).toBe(204);
         expect(store.prefixes).toEqual([`resumes/${id}/`, `ai-applications/${id}/`]);
         expect((await request(instance, id, "/me")).status).toBe(403);
+      });
+
+      describe("with a Carreira Pro subscription", () => {
+        async function subscribe(
+          profileId: string,
+          status: "active" | "past_due" | "pending" | "canceled",
+          providerSubscriptionId: string | null = "subs_pro",
+        ) {
+          await db.insert(talentSubscriptions).values({
+            profileId,
+            status,
+            providerSubscriptionId,
+            currentPeriodEnd: "2099-01-01",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
+
+        it("cancels the subscription at AbacatePay before deleting", async () => {
+          for (const status of ["active", "past_due", "pending"] as const) {
+            const cancelled: string[] = [];
+            const { instance } = resumesApp({ billing: billingStub(cancelled) });
+            const id = await profile(`${status}@example.com`);
+
+            await subscribe(id, status);
+
+            expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+            expect(cancelled).toEqual(["subs_pro"]);
+            expect(await repos.talent.findById(id)).toBeUndefined();
+            expect(
+              await db
+                .select()
+                .from(talentSubscriptions)
+                .where(eq(talentSubscriptions.profileId, id)),
+            ).toEqual([]);
+          }
+        });
+
+        it("keeps the account and the subscription when AbacatePay fails", async () => {
+          const logged = vi.spyOn(console, "error");
+          const cancelled: string[] = [];
+          const { instance, store } = resumesApp({ billing: billingStub(cancelled, true) });
+          const id = await profile();
+
+          await subscribe(id, "active");
+          await upload(instance, id);
+
+          try {
+            const res = await request(instance, id, "/me", { method: "DELETE" });
+
+            expect(res.status).toBe(502);
+            expect(await res.json()).toEqual({ error: "Could not cancel Carreira Pro; try again" });
+            expect(store.prefixes).toEqual([]);
+            expect((await request(instance, id, "/me")).status).toBe(200);
+            expect(
+              (
+                await db
+                  .select({ status: talentSubscriptions.status })
+                  .from(talentSubscriptions)
+                  .where(eq(talentSubscriptions.profileId, id))
+              )[0],
+            ).toEqual({ status: "active" });
+          } finally {
+            logged.mockRestore();
+          }
+        });
+
+        it("refuses to delete when billing is not configured", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          await subscribe(id, "active");
+
+          const res = await request(instance, id, "/me", { method: "DELETE" });
+
+          expect(res.status).toBe(503);
+          expect(await res.json()).toEqual({ error: "Billing not configured" });
+          expect((await request(instance, id, "/me")).status).toBe(200);
+        });
+
+        it("deletes without calling AbacatePay when there is nothing to cancel", async () => {
+          const cancelled: string[] = [];
+          const { instance } = resumesApp({ billing: billingStub(cancelled, true) });
+          const noProvider = await profile("a@example.com");
+          const alreadyCanceled = await profile("b@example.com", 1);
+          const none = await profile("c@example.com", 2);
+
+          await subscribe(noProvider, "pending", null);
+          await subscribe(alreadyCanceled, "canceled");
+
+          for (const id of [noProvider, alreadyCanceled, none]) {
+            expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+          }
+
+          expect(cancelled).toEqual([]);
+        });
+
+        it("does not call AbacatePay again once it was canceled and a later step failed", async () => {
+          const cancelled: string[] = [];
+          const { instance, store } = resumesApp({ billing: billingStub(cancelled) });
+          const id = await profile();
+
+          await subscribe(id, "active");
+          await upload(instance, id);
+
+          store.failRemove = true;
+
+          expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(502);
+
+          store.failRemove = false;
+
+          expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+          expect(cancelled).toEqual(["subs_pro"]);
+        });
+
+        it("cancels only the subscription of the signed-in profile", async () => {
+          const cancelled: string[] = [];
+          const { instance } = resumesApp({ billing: billingStub(cancelled) });
+          const mine = await profile();
+          const other = await profile("outra@example.com", 1);
+
+          await subscribe(mine, "active", "subs_mine");
+          await subscribe(other, "active", "subs_other");
+
+          expect((await request(instance, mine, "/me", { method: "DELETE" })).status).toBe(204);
+          expect(cancelled).toEqual(["subs_mine"]);
+          expect((await request(instance, other, "/me")).status).toBe(200);
+        });
       });
 
       it("keeps the employee journey of the same person when the talent account is deleted", async () => {
@@ -8775,6 +8865,15 @@ describe.skipIf(!url)("api", () => {
     expect(await res.json()).toEqual({ name: "Test Toggle", status: "disconnected" });
   });
 
+  it("treats only a connected E-mail row as switched on", async () => {
+    expect(await repos.integrations.isConnected(defaultOrgId, "E-mail")).toBe(true);
+
+    await call("/integrations/E-mail", "PUT", { status: "disconnected" });
+
+    expect(await repos.integrations.isConnected(defaultOrgId, "E-mail")).toBe(false);
+    expect(await repos.integrations.isConnected(defaultOrgId, "Never Saved")).toBe(false);
+  });
+
   describe("Slack settings", () => {
     const slackPosts: URLSearchParams[] = [];
 
@@ -9886,6 +9985,41 @@ describe.skipIf(!url)("api", () => {
     expect(await res.json()).toEqual({ trackingCode: "XX000000000BR", tracking: null });
   });
 
+  it("hides tracking and skips the delivery check when Correios is switched off", async () => {
+    const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
+
+    trackingStatus = 200;
+    trackingBody = JSON.stringify({
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: {
+        temEventoEntrega: true,
+        eventos: [{ descricao: "Objeto entregue ao destinatário" }],
+      },
+    });
+
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const task = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    await db.update(tasks).set({ trackingCode: "OF000000000BR" }).where(eq(tasks.id, task.id));
+    await call("/integrations/Transportadora%3A%3ACorreios", "PUT", { status: "disconnected" });
+
+    const res = await trackingApp.handle(
+      new Request(`http://localhost/api/tasks/${task.id}/tracking`),
+    );
+
+    expect(await res.json()).toEqual({ trackingCode: "OF000000000BR", tracking: null });
+
+    const checked = await trackingApp.handle(
+      new Request("http://localhost/api/correios/check", {
+        headers: { authorization: `Bearer ${cronSecret}` },
+      }),
+    );
+
+    expect((await checked.json()).delivered).not.toContain(task.id);
+  });
+
   it("returns 404 for tracking on unknown task", async () => {
     const res = await app.handle(
       new Request(`http://localhost/api/tasks/${missingTaskId}/tracking`),
@@ -10121,6 +10255,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
   const employeeAuth = createAuth({
     db,
     origin: webOrigin,
+    staffEmails: new Set(),
     secret: randomUUID() + randomUUID(),
     ipAddressHeaders: ["x-test-employee-ip"],
     talent: repos.talent,

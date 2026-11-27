@@ -64,7 +64,7 @@ const catalog: Integration[] = [
     name: "E-mail",
     category: "communication",
     icon: Mail01Icon,
-    purpose: "Envia notificações e links de acesso por e-mail.",
+    purpose: "Envia os e-mails das ações do checklist. Desligado, essas ações não enviam.",
   },
   {
     name: "Sistema de folha",
@@ -109,7 +109,8 @@ const catalog: Integration[] = [
     providers: [
       {
         name: "Correios",
-        purpose: "Logística reversa, etiqueta e rastreio via API dos Correios.",
+        purpose:
+          "Rastreia a devolução pelo código dos Correios e conclui a tarefa na entrega. Desligado, o rastreio para.",
       },
     ],
   },

@@ -9,7 +9,6 @@ import { browserbaseConfig } from "./shared/ai-apply-access.js";
 import { createGenerateStructured, resolveModel } from "./shared/ai.js";
 import { workersAiEmbed, type WorkersAi } from "./shared/embed.js";
 import { r2Storage, type R2BucketLike } from "./shared/object-storage.js";
-import { parseStaffEmails } from "./shared/staff-access.js";
 import { createRepositories } from "./repositories.js";
 
 const runtimeConfig = z.object({
@@ -100,7 +99,6 @@ export function createWorkerApi(
     embedProfile: bindings.AI && workersAiEmbed(bindings.AI),
     storage: bindings.RESUMES && r2Storage(bindings.RESUMES),
     publicPageOrigin: config.data.PUBLIC_PAGE_ORIGIN,
-    backofficeStaffEmails: parseStaffEmails(config.data.BACKOFFICE_STAFF_EMAILS),
     browserbase: browserbaseConfig(
       config.data.BROWSERBASE_API_KEY,
       config.data.BROWSERBASE_PROJECT_ID,

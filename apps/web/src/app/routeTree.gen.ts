@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PortalRouteImport } from './routes/_portal'
+import { Route as BuscaCandidatoRouteImport } from './routes/busca-candidato'
 import { Route as CadastroRouteImport } from './routes/cadastro'
 import { Route as ColaboradorRouteImport } from './routes/colaborador'
 import { Route as EntrarRouteImport } from './routes/entrar'
@@ -37,6 +38,11 @@ const IndexRoute = IndexRouteImport.update({
 } as any)
 const PortalRoute = PortalRouteImport.update({
   id: '/_portal',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BuscaCandidatoRoute = BuscaCandidatoRouteImport.update({
+  id: '/busca-candidato',
+  path: '/busca-candidato',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CadastroRoute = CadastroRouteImport.update({
@@ -137,6 +143,7 @@ const PortalDesligamentosImportarRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/busca-candidato': typeof BuscaCandidatoRoute
   '/cadastro': typeof CadastroRoute
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
@@ -158,6 +165,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/busca-candidato': typeof BuscaCandidatoRoute
   '/cadastro': typeof CadastroRoute
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
@@ -181,6 +189,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_portal': typeof PortalRouteWithChildren
+  '/busca-candidato': typeof BuscaCandidatoRoute
   '/cadastro': typeof CadastroRoute
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
@@ -204,6 +213,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/busca-candidato'
     | '/cadastro'
     | '/colaborador'
     | '/entrar'
@@ -225,6 +235,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/busca-candidato'
     | '/cadastro'
     | '/colaborador'
     | '/entrar'
@@ -247,6 +258,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_portal'
+    | '/busca-candidato'
     | '/cadastro'
     | '/colaborador'
     | '/entrar'
@@ -270,6 +282,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   PortalRoute: typeof PortalRouteWithChildren
+  BuscaCandidatoRoute: typeof BuscaCandidatoRoute
   CadastroRoute: typeof CadastroRoute
   ColaboradorRoute: typeof ColaboradorRoute
   EntrarRoute: typeof EntrarRoute
@@ -291,6 +304,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof PortalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/busca-candidato': {
+      id: '/busca-candidato'
+      path: '/busca-candidato'
+      fullPath: '/busca-candidato'
+      preLoaderRoute: typeof BuscaCandidatoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cadastro': {
@@ -460,6 +480,7 @@ const PortalRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   PortalRoute: PortalRouteWithChildren,
+  BuscaCandidatoRoute: BuscaCandidatoRoute,
   CadastroRoute: CadastroRoute,
   ColaboradorRoute: ColaboradorRoute,
   EntrarRoute: EntrarRoute,

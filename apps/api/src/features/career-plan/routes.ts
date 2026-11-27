@@ -24,6 +24,7 @@ const careerPlanResponse = t.Object({
         t.Literal("canceled"),
       ]),
       currentPeriodEnd: nullableDate,
+      cancelable: t.Boolean(),
     }),
     t.Null(),
   ]),
@@ -72,6 +73,7 @@ type CareerCheckout = {
     returnUrl: string;
     completionUrl: string;
   }): Promise<{ url: string }>;
+  cancelSubscription(id: string): Promise<void>;
 };
 
 type CopayBenefits = {
@@ -163,7 +165,17 @@ export function careerPlanRoutes(
 
         const row = await repos.startCheckout(me.id, new Date());
 
-        if (!row) return status(409, { error: "Already subscribed" });
+        if (!row) {
+          const today = saoPauloDate(new Date());
+          const current = await repos.individual(me.id);
+          const end = current?.status === "canceled" ? current.currentPeriodEnd : null;
+
+          if (end !== null && today <= end) {
+            return status(409, { error: `Carreira Pro canceled until ${end}` });
+          }
+
+          return status(409, { error: "Already subscribed" });
+        }
 
         try {
           const checkout = await gateway.createSubscriptionCheckout({
@@ -249,6 +261,37 @@ export function careerPlanRoutes(
           404: errorResponse,
           409: errorResponse,
           422: errorResponse,
+          502: errorResponse,
+          503: errorResponse,
+        },
+      },
+    )
+    .post(
+      "/me/plan/cancel",
+      async ({ me, status }) => {
+        if (!gateway.configured) return status(503, { error: "Billing not configured" });
+
+        const subscription = await repos.cancelable(me.id);
+
+        if (!subscription) return status(409, { error: "No active Carreira Pro" });
+
+        try {
+          await gateway.cancelSubscription(subscription.providerSubscriptionId);
+        } catch (cause) {
+          logFailureCode("Carreira Pro cancellation failed")(cause);
+
+          return status(502, { error: "Could not cancel Carreira Pro" });
+        }
+
+        await repos.markCanceled(me.id, subscription.providerSubscriptionId, new Date());
+
+        return { currentPeriodEnd: subscription.currentPeriodEnd };
+      },
+      {
+        talent: "signed-in",
+        response: {
+          200: t.Object({ currentPeriodEnd: nullableDate }),
+          409: errorResponse,
           502: errorResponse,
           503: errorResponse,
         },

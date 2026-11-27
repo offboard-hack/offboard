@@ -431,6 +431,18 @@ export async function saveResume(ctx: Context, collaborator: Collaborator, conte
   ctx.log(`${collaborator.person.name} saved a base résumé`);
 }
 
+export async function ensureResume(ctx: Context, collaborator: Collaborator, content: Json) {
+  const existing = await ctx.http("GET", "/me/resume", { cookie: collaborator.session.cookie });
+
+  if (existing.status === 200) {
+    ctx.log(`${collaborator.person.name} already has a base résumé`);
+
+    return;
+  }
+
+  await saveResume(ctx, collaborator, content);
+}
+
 export async function savePreferences(ctx: Context, collaborator: Collaborator, preferences: Json) {
   expectStatus(
     await ctx.http("PUT", "/me/preferences", {
@@ -467,17 +479,6 @@ export async function listJobs(ctx: Context, collaborator: Collaborator) {
   );
 
   return { compatible: compatible.total, all: all.total };
-}
-
-export function rehearseAiApply(ctx: Context) {
-  const ai = ctx.env.AI_GATEWAY_API_KEY || ctx.env.ANTHROPIC_API_KEY;
-  const browser = ctx.env.BROWSERBASE_API_KEY && ctx.env.BROWSERBASE_PROJECT_ID;
-
-  ctx.log(
-    ai && browser
-      ? "skipped: AI Apply is configured but this runner does not drive it yet"
-      : "skipped: AI Apply needs an AI key and Browserbase (AI_GATEWAY_API_KEY or ANTHROPIC_API_KEY, BROWSERBASE_API_KEY, BROWSERBASE_PROJECT_ID)",
-  );
 }
 
 const accessSettings = z.object({
