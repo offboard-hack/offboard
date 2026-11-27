@@ -7,7 +7,13 @@ import File01Icon from "@hugeicons/core-free-icons/File01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMachine } from "@xstate/react";
 import { type ReactNode, useMemo, useRef, useState } from "react";
-import { useCreateResume, useReadResume } from "@/entities/career";
+import { useQuery } from "@tanstack/react-query";
+import {
+  careerProfileQuery,
+  useCreateResume,
+  useReadResume,
+  useSetSearchable,
+} from "@/entities/career";
 import type { EmployeeAccount } from "@/entities/employee";
 import { cn } from "@/shared/lib/utils";
 import { Button } from "@/shared/ui/shadcn/button";
@@ -22,6 +28,7 @@ import {
   sectionSummaries,
 } from "./resume-onboarding";
 import { SectionSheet } from "./resume-sections";
+import { SearchableSwitch } from "./search-visibility";
 
 const accept =
   ".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -130,17 +137,21 @@ export function ResumeWizard({
 }) {
   const read = useReadResume(account);
   const create = useCreateResume(account);
+  const setSearchable = useSetSearchable(account);
+  const profile = useQuery(careerProfileQuery(account));
 
   const machine = useMemo(
     () =>
       onboardingMachine({
         read: (file) => read.mutateAsync(file),
-        create: async ({ draft, file }) => {
+        create: async ({ draft, file, searchable }) => {
           await create.mutateAsync({ content: draft, file });
+
+          if (searchable !== null) await setSearchable.mutateAsync(searchable);
         },
         onCreated,
       }),
-    [read.mutateAsync, create.mutateAsync, onCreated],
+    [read.mutateAsync, create.mutateAsync, setSearchable.mutateAsync, onCreated],
   );
 
   const [snapshot, send] = useMachine(machine);
@@ -340,6 +351,10 @@ export function ResumeWizard({
           </li>
         ))}
       </ul>
+      <SearchableSwitch
+        checked={context.searchable ?? profile.data?.searchable ?? false}
+        onChange={(value) => send({ type: "searchable", value })}
+      />
       <EmployeeError message={context.error} />
       <Footer
         label="Criar currículo"

@@ -185,6 +185,7 @@ describe.skipIf(!url)("account repository", () => {
       shareOutcomeWithHr: false,
       aiApplyConsentAt: null,
       aiApplyConsentVersion: null,
+      searchableAt: null,
       firstSignedInAt: null,
       createdAt: expect.any(String),
     });
@@ -471,6 +472,7 @@ describe.skipIf(!url)("account repository", () => {
         shareOutcomeWithHr: true,
         aiApplyConsentAt: new Date("2026-11-03T10:00:00Z"),
         aiApplyConsentVersion: "2026-11-25",
+        searchableAt: new Date("2026-11-04T11:00:00Z"),
         createdAt: new Date("2026-10-31T09:00:00Z"),
       })
       .where(eq(talentProfiles.id, profileId));
@@ -483,6 +485,7 @@ describe.skipIf(!url)("account repository", () => {
       shareOutcomeWithHr: true,
       aiApplyConsentAt: "2026-11-03T10:00:00.000Z",
       aiApplyConsentVersion: "2026-11-25",
+      searchableAt: "2026-11-04T11:00:00.000Z",
       createdAt: "2026-10-31T09:00:00.000Z",
     });
   });

@@ -404,6 +404,24 @@ export function useAiApplyConsent(account: EmployeeAccount) {
   });
 }
 
+export function useSetSearchable(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (searchable: boolean) =>
+      settle(
+        await client()["search-consent"].put(
+          { searchable },
+          { headers: employeeAccessHeaders(account) },
+        ),
+        "Não foi possível salvar sua escolha.",
+      ),
+    onSuccess(profile) {
+      queryClient.setQueryData(careerProfileQuery(account).queryKey, profile);
+    },
+  });
+}
+
 export class NotAiApplicable extends Error {
   constructor() {
     super(

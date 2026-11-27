@@ -209,7 +209,11 @@ export function fileSize(bytes: number) {
 
 export type OnboardingDeps = {
   read: (file: File) => Promise<ResumeDraft>;
-  create: (input: { draft: ResumeDraft; file: File | null }) => Promise<void>;
+  create: (input: {
+    draft: ResumeDraft;
+    file: File | null;
+    searchable: boolean | null;
+  }) => Promise<void>;
   onCreated: () => void;
 };
 
@@ -218,6 +222,7 @@ type Context = {
   file: File | null;
   draft: ResumeDraft;
   section: SectionId | null;
+  searchable: boolean | null;
   error: string;
 };
 
@@ -230,6 +235,7 @@ type Event =
   | { type: "open"; section: SectionId }
   | { type: "close" }
   | { type: "save"; draft: ResumeDraft }
+  | { type: "searchable"; value: boolean }
   | { type: "create" };
 
 export function onboardingMachine(deps: OnboardingDeps) {
@@ -237,9 +243,10 @@ export function onboardingMachine(deps: OnboardingDeps) {
     input ? deps.read(input) : Promise.reject(new Error("Escolha um arquivo.")),
   );
 
-  const create = fromPromise<void, { draft: ResumeDraft; file: File | null }>(({ input }) =>
-    deps.create(input),
-  );
+  const create = fromPromise<
+    void,
+    { draft: ResumeDraft; file: File | null; searchable: boolean | null }
+  >(({ input }) => deps.create(input));
 
   return setup<Context, Event, { read: typeof read; create: typeof create }>({
     actors: { read, create },
@@ -250,6 +257,7 @@ export function onboardingMachine(deps: OnboardingDeps) {
       file: null,
       draft: emptyDraft(),
       section: null,
+      searchable: null,
       error: "",
     }),
     initial: "intro",
@@ -311,6 +319,7 @@ export function onboardingMachine(deps: OnboardingDeps) {
           open: { actions: assign({ section: ({ event }) => event.section }) },
           close: { actions: assign({ section: null }) },
           save: { actions: assign({ draft: ({ event }) => event.draft, section: null }) },
+          searchable: { actions: assign({ searchable: ({ event }) => event.value }) },
           create: [
             {
               guard: ({ context }) => !isEmptyDraft(context.draft),
@@ -328,7 +337,11 @@ export function onboardingMachine(deps: OnboardingDeps) {
       creating: {
         invoke: {
           src: "create",
-          input: ({ context }) => ({ draft: context.draft, file: context.file }),
+          input: ({ context }) => ({
+            draft: context.draft,
+            file: context.file,
+            searchable: context.searchable,
+          }),
           onDone: { target: "created", actions: () => deps.onCreated() },
           onError: {
             target: "review",

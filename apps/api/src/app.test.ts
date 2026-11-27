@@ -241,6 +241,7 @@ describe.skipIf(!url)("api", () => {
     actionId?: string;
     enabled?: boolean;
     shareOutcomeWithHr?: boolean | string;
+    searchable?: boolean;
     config?: Record<string, ConfigValue>;
     phase?: string;
     event?: string | { type: string; user?: string };
@@ -788,6 +789,7 @@ describe.skipIf(!url)("api", () => {
         email: personalEmail,
         termsAccepted: false,
         shareOutcomeWithHr: false,
+        searchable: false,
         aiApply: { eligible: false, consented: false, available: false },
         entitlement: { kind: "sponsored", until: sponsoredUntil },
       });
@@ -884,6 +886,32 @@ describe.skipIf(!url)("api", () => {
       );
 
       expect(await withdrawn.json()).toMatchObject({ shareOutcomeWithHr: false });
+
+      const findable = await asSession(
+        "talent",
+        "/me/search-consent",
+        "PUT",
+        { searchable: true },
+        asMine,
+      );
+
+      expect(await findable.json()).toMatchObject({ searchable: true, shareOutcomeWithHr: false });
+      expect((await repos.talent.findById(mine.id))?.searchableAt).toEqual(expect.any(String));
+      expect((await repos.talent.findById(other.id))?.searchableAt).toBeNull();
+
+      const hidden = await asSession(
+        "talent",
+        "/me/search-consent",
+        "PUT",
+        { searchable: false },
+        asMine,
+      );
+
+      expect(await hidden.json()).toMatchObject({ searchable: false });
+      expect((await repos.talent.findById(mine.id))?.searchableAt).toBeNull();
+      expect(
+        (await asSession("rh", "/me/search-consent", "PUT", { searchable: true })).status,
+      ).toBe(403);
 
       await repos.talent.setConsent(mine.id, true, new Date());
 
@@ -6025,6 +6053,7 @@ describe.skipIf(!url)("api", () => {
           shareOutcomeWithHr: false,
           aiApplyConsentAt: null,
           aiApplyConsentVersion: null,
+          searchableAt: null,
           firstSignedInAt: null,
           createdAt: expect.any(String),
         });
