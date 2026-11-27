@@ -38,7 +38,7 @@ export function createRepositories(db: Database) {
   return {
     offboardings: createOffboardingsRepository(db),
     integrations: createIntegrationsRepository(db),
-    actionConfigs: createActionConfigsRepository(db),
+    actionConfigs: createActionConfigsRepository(db, createAutomationRulesRepository),
     automationRules: createAutomationRulesRepository(db),
     team: createTeamRepository(db),
     equipment: createEquipmentRepository(db),

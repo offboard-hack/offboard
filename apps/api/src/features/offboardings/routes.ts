@@ -6,6 +6,7 @@ import { hasBearer } from "../../shared/machine-auth.js";
 import type { ChecklistLayout } from "../../shared/checklist.js";
 import type { DispatchAction } from "../../shared/action-dispatch.js";
 import type { InviteEmployee } from "../../shared/employee-invite.js";
+import type { FireRules } from "../../shared/rule-dispatch.js";
 import { trackPackage, type TrackingConfig } from "./correios.js";
 import type { OffboardingsRepository } from "./repository.js";
 
@@ -51,6 +52,7 @@ export function offboardingsRoutes(
   webhookSecret: string | undefined,
   inviteEmployee: InviteEmployee,
   trackingEnabled: (orgId: string) => Promise<boolean>,
+  fireRules: FireRules,
   tracking?: TrackingConfig,
 ) {
   async function checkTrackedShipments() {
@@ -88,6 +90,18 @@ export function offboardingsRoutes(
             task.stepId,
           );
         }
+
+        await fireRules("correios.delivered", {
+          orgId: task.orgId,
+          task: {
+            id: task.id,
+            title: task.title,
+            status: "done",
+            phase: task.phase ?? undefined,
+            stepId: task.stepId ?? undefined,
+          },
+          case: { id: task.caseId, name: task.caseName },
+        });
       }),
     );
 

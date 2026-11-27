@@ -8,27 +8,10 @@ import type {
 } from "@offboard/db/schema";
 import { Resend } from "resend";
 import { z } from "zod";
+import type { RuleContext } from "../../shared/rule-dispatch.js";
 import { postSlackMessage } from "../../shared/slack.js";
 
-export type RuleContext = {
-  orgId: string;
-  task?: {
-    id: string;
-    title: string;
-    status: string;
-    previousStatus?: string;
-    phase?: string;
-    stepId?: string;
-  };
-  equipment?: {
-    id: string;
-    tag?: string;
-    item?: string;
-    status: string;
-    previousStatus?: string;
-  };
-  case?: { id: string; name: string };
-};
+export type { RuleContext };
 
 export type RuleResult = { ruleId: string; matched: boolean; errors: string[] };
 

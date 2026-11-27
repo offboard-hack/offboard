@@ -59,6 +59,23 @@ export function createEquipmentRepository(db: Database) {
     return updated ?? null;
   }
 
+  async function readRuleContext(orgId: string, id: string) {
+    const [row] = await db
+      .select({
+        id: equipment.id,
+        tag: equipment.tag,
+        item: equipment.item,
+        status: equipment.status,
+        caseId: equipment.caseId,
+        caseName: offboardingCases.name,
+      })
+      .from(equipment)
+      .leftJoin(offboardingCases, eq(offboardingCases.id, equipment.caseId))
+      .where(and(eq(equipment.id, id), eq(equipment.orgId, orgId)));
+
+    return row ?? null;
+  }
+
   async function areAllCaseEquipmentReceived(orgId: string, caseId: string) {
     const rows = await db
       .select({ status: equipment.status })
@@ -240,6 +257,7 @@ export function createEquipmentRepository(db: Database) {
     importEquipment,
     listEquipment,
     updateEquipmentStatus,
+    readRuleContext,
     areAllCaseEquipmentReceived,
     createEquipment,
     assignEquipment,

@@ -18,7 +18,9 @@ const ruleColumns = {
   sourceRef: automationRules.sourceRef,
 };
 
-export function createAutomationRulesRepository(db: Database) {
+export function createAutomationRulesRepository(
+  db: Pick<Database, "select" | "insert" | "update" | "delete">,
+) {
   async function listRules(orgId: string) {
     return db
       .select(ruleColumns)

@@ -230,6 +230,30 @@ describe.skipIf(!url)("api", () => {
 
   let trackingConfig: TrackingConfig;
 
+  type Hook = {
+    task?: { id: string; status: string };
+    equipment?: { id: string; tag: string; status: string; previousStatus: string };
+    case?: { id: string; name: string };
+  };
+
+  const hooks: Hook[] = [];
+
+  const hookServer = createServer((req, res) => {
+    let body = "";
+
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+
+    req.on("end", () => {
+      hooks.push(JSON.parse(body));
+      res.writeHead(200);
+      res.end();
+    });
+  });
+
+  let hookUrl = "";
+
   const app = createApp(webOrigin, repos, appOptions);
 
   type Payload = {
@@ -326,6 +350,13 @@ describe.skipIf(!url)("api", () => {
     await new Promise<void>((resolve) => {
       trackingServer.listen(0, "127.0.0.1", resolve);
     });
+
+    await new Promise<void>((resolve) => {
+      hookServer.listen(0, "127.0.0.1", resolve);
+    });
+
+    // WARNING: listen(0) guarantees AddressInfo with a port
+    hookUrl = `http://127.0.0.1:${(hookServer.address() as AddressInfo).port}`;
 
     // WARNING: listen(0) guarantees AddressInfo with a port
     const addr = trackingServer.address() as AddressInfo;
@@ -8401,6 +8432,10 @@ describe.skipIf(!url)("api", () => {
       trackingServer.close(() => resolve());
     });
 
+    await new Promise<void>((resolve) => {
+      hookServer.close(() => resolve());
+    });
+
     await db.$client.end();
   });
 
@@ -9044,23 +9079,41 @@ describe.skipIf(!url)("api", () => {
       rules: [{ id: "cargo", field: "role", operator: "notEquals", value: "estagiario" }],
     } as const;
 
-    const known = await repos.actionConfigs.createActionConfig(defaultOrgId, {
-      actionId: "email:obsolete",
-      phase: "pre",
-      config: {},
+    const known = await repos.automationRules.createRule(defaultOrgId, {
+      name: "email:obsolete",
+      trigger: "task.status_changed",
+      conditions: {},
+      actions: [],
+      sourceRef: "email:obsolete",
     });
 
-    const unrelated = await repos.actionConfigs.createActionConfig(defaultOrgId, {
-      actionId: "email:independent",
-      phase: "pre",
-      config: {},
+    const unrelated = await repos.automationRules.createRule(defaultOrgId, {
+      name: "email:independent",
+      trigger: "task.status_changed",
+      conditions: {},
+      actions: [],
+      sourceRef: "email:independent",
     });
 
-    const unknownKind = await repos.actionConfigs.createActionConfig(defaultOrgId, {
-      actionId: "other:obsolete",
-      phase: "pre",
-      config: {},
+    const unknownKind = await repos.automationRules.createRule(defaultOrgId, {
+      name: "other:obsolete",
+      trigger: "task.status_changed",
+      conditions: {},
+      actions: [],
+      sourceRef: "other:obsolete",
     });
+
+    const custom = await repos.automationRules.createRule(defaultOrgId, {
+      name: "Custom",
+      trigger: "task.status_changed",
+      conditions: {},
+      actions: [],
+    });
+
+    const internalRules = async () =>
+      (await repos.automationRules.listRules(defaultOrgId))
+        .filter(({ sourceRef }) => sourceRef?.endsWith(":internal"))
+        .sort((a, b) => String(a.sourceRef).localeCompare(String(b.sourceRef)));
 
     const body = {
       revision: 0,
@@ -9086,10 +9139,19 @@ describe.skipIf(!url)("api", () => {
 
       expect(change).toMatchObject({ revision: 1, steps: [employeeStep, internalStep] });
       expect(action).toMatchObject({ enabled: true, phase: "second-week" });
-      expect(change.actionRows.map((config: { id: string }) => config.id)).toEqual(
-        expect.arrayContaining([unrelated.id, unknownKind.id]),
+      const rowIds = change.actionRows.map((config: { id: string }) => config.id);
+
+      expect(rowIds).toEqual(expect.arrayContaining([unrelated.id, unknownKind.id]));
+      expect(rowIds).not.toContain(custom.id);
+      expect(await repos.automationRules.getRule(defaultOrgId, known.id)).toBeNull();
+      expect(
+        await repos.automationRules.getEnabledRulesByTrigger(defaultOrgId, "task.status_changed"),
+      ).toContainEqual(
+        expect.objectContaining({
+          conditions: { "task.stepId": "onboarding-return" },
+          actions: [{ type: "email", subject: "Assunto", body: "Mensagem" }],
+        }),
       );
-      expect(await repos.actionConfigs.getActionConfig(defaultOrgId, known.id)).toBeNull();
       expect((await call("/checklist-model", "PUT", body)).status).toBe(409);
       expect(await (await call("/checklist-model")).json()).toMatchObject({
         revision: 1,
@@ -9163,10 +9225,11 @@ describe.skipIf(!url)("api", () => {
 
       expect((await call("/checklist-model", "PUT", revised)).status).toBe(200);
       expect((await call("/checklist-model", "PUT", revised)).status).toBe(409);
-      expect(await repos.actionConfigs.getActionConfig(defaultOrgId, action.id)).toBeNull();
-      expect(
-        await repos.actionConfigs.getActionConfigsByStep(defaultOrgId, "internal"),
-      ).toMatchObject([{ actionId: "slack:internal" }, { actionId: "webhook:internal" }]);
+      expect(await repos.automationRules.getRule(defaultOrgId, action.id)).toBeNull();
+      expect(await internalRules()).toMatchObject([
+        { sourceRef: "slack:internal" },
+        { sourceRef: "webhook:internal" },
+      ]);
       expect(
         (await repos.offboardings.getOffboarding(defaultOrgId, created.id))?.tasks[1]?.title,
       ).toBe(employeeStep.title);
@@ -9175,9 +9238,7 @@ describe.skipIf(!url)("api", () => {
         ...revised,
         revision: 2,
         steps: body.steps,
-        knownRowIds: (
-          await repos.actionConfigs.getActionConfigsByStep(defaultOrgId, "internal")
-        ).map(({ id }) => id),
+        knownRowIds: (await internalRules()).map(({ id }) => id),
       };
 
       expect((await call("/checklist-model", "PUT", revisedAgain)).status).toBe(200);
@@ -9192,6 +9253,12 @@ describe.skipIf(!url)("api", () => {
       ).toBe(422);
     } finally {
       await db.delete(checklistModels).where(eq(checklistModels.orgId, defaultOrgId));
+
+      await repos.automationRules.deleteRule(defaultOrgId, custom.id);
+
+      for (const { id, sourceRef } of await repos.automationRules.listRules(defaultOrgId)) {
+        if (sourceRef) await repos.automationRules.deleteRule(defaultOrgId, id);
+      }
     }
   });
 
@@ -9506,6 +9573,75 @@ describe.skipIf(!url)("api", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ...first, status: "received" });
+  });
+
+  describe("equipment status rules", () => {
+    beforeEach(() => {
+      hooks.length = 0;
+    });
+
+    async function withRule(status: string, run: () => Promise<void>) {
+      const rule = await repos.automationRules.createRule(defaultOrgId, {
+        name: "Equipment hook",
+        trigger: "equipment.status_changed",
+        conditions: { "equipment.status": status },
+        actions: [{ type: "webhook", url: hookUrl }],
+      });
+
+      try {
+        await run();
+      } finally {
+        await repos.automationRules.deleteRule(defaultOrgId, rule.id);
+      }
+    }
+
+    it("fires equipment.status_changed rules with the case and previous status", async () => {
+      const [{ person: _person, ...first }] = await (await call("/equipment")).json();
+      const next = first.status === "transit" ? "scheduled" : "transit";
+
+      await withRule(next, async () => {
+        expect((await call(`/equipment/${first.id}`, "PUT", { status: next })).status).toBe(200);
+      });
+
+      expect(hooks).toHaveLength(1);
+      expect(hooks[0]).toMatchObject({
+        equipment: { id: first.id, tag: first.tag, status: next, previousStatus: first.status },
+        case: { name: expect.any(String) },
+      });
+    });
+
+    it("fires equipment.status_changed rules for equipment without a case", async () => {
+      const created = await (
+        await call("/equipment", "POST", {
+          item: "Mouse",
+          tag: `RULE-${randomUUID()}`,
+          returnMethod: "pickup",
+        })
+      ).json();
+
+      try {
+        await withRule("received", async () => {
+          const res = await call(`/equipment/${created.id}`, "PUT", { status: "received" });
+
+          expect(res.status).toBe(200);
+        });
+
+        expect(hooks).toHaveLength(1);
+        expect(hooks[0]).not.toHaveProperty("case");
+      } finally {
+        await call(`/equipment/${created.id}`, "DELETE");
+      }
+    });
+
+    it("does not fire rules when the equipment does not exist", async () => {
+      await withRule("received", async () => {
+        const res = await call(`/equipment/${missingTaskId}`, "PUT", { status: "received" });
+
+        expect(res.status).toBe(404);
+      });
+
+      expect(hooks).toEqual([]);
+    });
   });
 
   it("returns 404 when updating unknown equipment", async () => {
@@ -11028,6 +11164,55 @@ describe.skipIf(!url)("api", () => {
     expect(body.delivered).toContain(taskWithPhase.id);
   });
 
+  it("fires correios.delivered rules with the task and case", async () => {
+    const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
+    hooks.length = 0;
+
+    trackingStatus = 200;
+    trackingBody = JSON.stringify({
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: {
+        temEventoEntrega: true,
+        eventos: [
+          {
+            descricao: "Objeto entregue ao destinatário",
+            dtHrCriado: { date: "2026-11-22 09:00:00.000000", timezone: "America/Sao_Paulo" },
+          },
+        ],
+      },
+    });
+
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const todo = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    await db
+      .update(tasks)
+      .set({ trackingCode: "GH777888999BR", phase: null })
+      .where(eq(tasks.id, todo.id));
+
+    const rule = await repos.automationRules.createRule(defaultOrgId, {
+      name: "Delivered hook",
+      trigger: "correios.delivered",
+      conditions: { "task.id": todo.id },
+      actions: [{ type: "webhook", url: hookUrl }],
+    });
+
+    try {
+      const body = await (await trackingApp.handle(cronRequest())).json();
+
+      expect(body.delivered).toContain(todo.id);
+      expect(hooks).toHaveLength(1);
+      expect(hooks[0]).toMatchObject({
+        task: { id: todo.id, status: "done" },
+        case: { id: list[0].id, name: list[0].name },
+      });
+    } finally {
+      await repos.automationRules.deleteRule(defaultOrgId, rule.id);
+    }
+  });
+
   it("includes trackingCode in task details", async () => {
     const list = await (await call("/offboardings")).json();
     const detail = await (await call(`/offboardings/${list[0].id}`)).json();
@@ -11053,6 +11238,7 @@ describe.skipIf(!url)("api", () => {
                 stepId: null,
                 trackingCode: "ZZ999999999BR",
                 caseId: randomUUID(),
+                caseName: "Gone",
               },
             ]),
         },

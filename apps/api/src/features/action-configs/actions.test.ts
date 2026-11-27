@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import { defaultOrgId } from "@offboard/db/schema";
-import { createActionConfigsRepository } from "./repository.js";
+import { createRepositories } from "../../repositories.js";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -21,7 +21,7 @@ const context: ActionContext = {
 
 describe.skipIf(!url)("fireActions", () => {
   const db = createClient(url ?? "");
-  const repos = createActionConfigsRepository(db);
+  const repos = createRepositories(db).actionConfigs;
 
   let serverUrl = "";
   const receivedRequests: { method: string; url: string; body: string }[] = [];

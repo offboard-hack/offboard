@@ -7,6 +7,7 @@ import {
   runScheduledRules,
   type EngineRepos,
 } from "./features/automation-rules/engine.js";
+import type { FireRules } from "./shared/rule-dispatch.js";
 import { saoPauloDate } from "./shared/sao-paulo-date.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 import { employeeRoutes } from "./features/employee/routes.js";
@@ -160,6 +161,10 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     equipment: repos.equipment,
     slack: { apiUrl: slackApiUrl, readToken: readSlackToken },
     emailEnabled: (orgId) => repos.integrations.isConnected(orgId, emailIntegration),
+  };
+
+  const fireRules: FireRules = async (trigger, context) => {
+    await fireRulesForTrigger(trigger, context, engineRepos);
   };
 
   const dispatchAction: DispatchAction = async (context, stepId) => {
@@ -620,6 +625,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         options.webhookSecret,
         inviteEmployee,
         (orgId) => repos.integrations.isConnected(orgId, correiosIntegration),
+        fireRules,
         options.tracking,
       ),
     )
@@ -742,7 +748,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       ),
     )
     .use(accountRoutes(repos.account, talent, options.storage, abacatepay))
-    .use(equipmentRoutes(repos.equipment, access))
+    .use(equipmentRoutes(repos.equipment, access, fireRules))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
     .use(
       integrationsRoutes(repos.integrations, access, options.slackSigningSecret, box, slackApiUrl),
