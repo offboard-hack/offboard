@@ -56,7 +56,13 @@ import { dispatchTaskAction, type DispatchAction } from "./shared/action-dispatc
 import type { ResumeContent } from "@offboard/db/schema";
 import { portalAccess } from "./shared/access.js";
 import type { GenerateStructured } from "./shared/ai.js";
-import { jobEmbeddingText, resumeEmbeddingText, textHash, type Embed } from "./shared/embed.js";
+import {
+  jobEmbeddingText,
+  profileEmbeddingText,
+  resumeEmbeddingText,
+  textHash,
+  type Embed,
+} from "./shared/embed.js";
 import { renderResumePdf } from "./shared/resume-pdf.js";
 import { secretBox } from "./shared/secret-box.js";
 import { defaultSlackApiUrl } from "./shared/slack.js";
@@ -67,6 +73,7 @@ const matchBatch = 10;
 const embedJobsLimit = 100;
 const embedBatch = 20;
 const embedSubject = "jobs";
+const profileBackfill = 100;
 const aiApplyBudgetMs = 210_000;
 
 type AppOptions = {
@@ -83,6 +90,7 @@ type AppOptions = {
   abacatepayWebhookSecret?: string;
   generateStructured?: GenerateStructured;
   embed?: Embed;
+  embedProfile?: Embed;
   catalog?: readonly CatalogSource[];
   fetchFeedImpl?: typeof fetch;
   fetchGreenhouseImpl?: typeof fetch;
@@ -261,6 +269,22 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         await matchNewJob().catch(logFailure("source match fan-out failed"));
       }
     },
+    embed_profile: async (job) => {
+      if (!options.embedProfile) return;
+
+      const resume = await repos.resumes.forProfileEmbedding(job.subject);
+
+      if (!resume) return;
+
+      const text = profileEmbeddingText(resume.content);
+      const hash = await textHash(text);
+
+      if (hash === resume.hash) return;
+
+      const [embedding] = await options.embedProfile([text]);
+
+      await repos.resumes.saveProfileEmbedding(job.subject, hash, embedding);
+    },
     score_resume: async (job) => {
       const resume = await repos.resumes.forScoring(job.subject);
 
@@ -393,6 +417,8 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
     await enqueued("compute_matches", profileId);
 
+    if (options.embedProfile) await enqueued("embed_profile", resumeId);
+
     return scoring;
   }
 
@@ -448,6 +474,13 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       .queuedIds()
       .then((ids) => repos.background.enqueueMany("ai_apply", ids))
       .catch(logFailure("AI application scheduling failed"));
+
+    if (options.embedProfile) {
+      await repos.resumes
+        .withoutProfileEmbedding(profileBackfill)
+        .then((ids) => repos.background.enqueueMany("embed_profile", ids))
+        .catch(logFailure("profile embedding backfill failed"));
+    }
   }
 
   return new Elysia({ adapter: options.adapter, prefix: "/api" })

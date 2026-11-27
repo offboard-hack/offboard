@@ -1,6 +1,12 @@
 import type { ResumeContent } from "@offboard/db/schema";
 import { describe, expect, it } from "vitest";
-import { jobEmbeddingText, resumeEmbeddingText, textHash, workersAiEmbed } from "./embed.js";
+import {
+  jobEmbeddingText,
+  profileEmbeddingText,
+  resumeEmbeddingText,
+  textHash,
+  workersAiEmbed,
+} from "./embed.js";
 
 const vector = (fill: number) => Array.from({ length: 1024 }, () => fill);
 
@@ -83,6 +89,69 @@ describe("embedding texts", () => {
         [],
       ),
     ).toBe("Backend com TypeScript.");
+  });
+});
+
+describe("profileEmbeddingText", () => {
+  it("describes the whole résumé for people search, without contact details", () => {
+    expect(
+      profileEmbeddingText({
+        ...content,
+        experiences: [
+          {
+            id: "e1",
+            role: "Tech Lead",
+            company: "Acme",
+            start: "2021",
+            end: null,
+            bullets: [{ id: "b", text: "Liderou 6 pessoas" }],
+          },
+          { id: "e2", role: "Dev", company: "Beta", start: "", end: "2020", bullets: [] },
+        ],
+        education: [
+          { id: "d1", institution: "UFPE", degree: "Computação", start: "2012", end: "2016" },
+          { id: "d2", institution: "Alura", degree: "Go", start: null, end: null },
+        ],
+        skills: [
+          { id: "k1", name: "Go" },
+          { id: "k2", name: "Kubernetes" },
+        ],
+        languages: [
+          { id: "l1", name: "Inglês", level: "Fluente" },
+          { id: "l2", name: "Espanhol", level: null },
+        ],
+        contact: {
+          email: "maria@example.com",
+          phone: "81 99999-0000",
+          city: "Recife, PE",
+          links: ["https://www.linkedin.com/in/maria"],
+        },
+      }),
+    ).toBe(
+      [
+        "Engenheira de Software",
+        "Backend com TypeScript.",
+        "Tech Lead · Acme · 2021 – atual",
+        "Liderou 6 pessoas",
+        "Dev · Beta · 2020",
+        "Computação · UFPE · 2012 – 2016",
+        "Go · Alura",
+        "Go, Kubernetes",
+        "Inglês (Fluente), Espanhol",
+        "Recife, PE",
+      ].join("\n"),
+    );
+  });
+
+  it("leaves out empty parts", () => {
+    expect(
+      profileEmbeddingText({
+        ...content,
+        summary: { id: "s", text: "" },
+        experiences: [],
+        skills: [],
+      }),
+    ).toBe("Engenheira de Software");
   });
 });
 

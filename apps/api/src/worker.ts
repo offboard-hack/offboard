@@ -95,6 +95,7 @@ export function createWorkerApi(
     abacatepayWebhookSecret: config.data.ABACATEPAY_WEBHOOK_SECRET,
     generateStructured: aiModel ? createGenerateStructured(aiModel) : undefined,
     embed: bindings.AI && workersAiEmbed(bindings.AI),
+    embedProfile: bindings.AI && workersAiEmbed(bindings.AI),
     storage: bindings.RESUMES && r2Storage(bindings.RESUMES),
     publicPageOrigin: config.data.PUBLIC_PAGE_ORIGIN,
     browserbase: browserbaseConfig(

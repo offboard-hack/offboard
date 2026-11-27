@@ -1,6 +1,6 @@
 import type { Database } from "@offboard/db/client";
 import { backgroundJobs, resumes, type ResumeScoreBreakdown } from "@offboard/db/schema";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type { ResumeContent } from "./content.js";
 
 export type ResumeView = {
@@ -157,7 +157,44 @@ export function createResumesRepository(db: Database) {
     return row?.content;
   }
 
-  return { getBase, replaceBase, updateBaseContent, forScoring, lastScoreFailed, contentOf };
+  async function forProfileEmbedding(resumeId: string) {
+    const [row] = await db
+      .select({ content: resumes.content, hash: resumes.profileEmbeddedHash })
+      .from(resumes)
+      .where(and(eq(resumes.id, resumeId), eq(resumes.kind, "base")));
+
+    return row;
+  }
+
+  async function saveProfileEmbedding(resumeId: string, hash: string, embedding: number[]) {
+    await db
+      .update(resumes)
+      .set({ profileEmbedding: embedding, profileEmbeddedHash: hash })
+      .where(and(eq(resumes.id, resumeId), eq(resumes.kind, "base")));
+  }
+
+  async function withoutProfileEmbedding(limit: number) {
+    const rows = await db
+      .select({ id: resumes.id })
+      .from(resumes)
+      .where(and(eq(resumes.kind, "base"), isNull(resumes.profileEmbeddedHash)))
+      .orderBy(resumes.id)
+      .limit(limit);
+
+    return rows.map((row) => row.id);
+  }
+
+  return {
+    getBase,
+    replaceBase,
+    updateBaseContent,
+    forScoring,
+    lastScoreFailed,
+    contentOf,
+    forProfileEmbedding,
+    saveProfileEmbedding,
+    withoutProfileEmbedding,
+  };
 }
 
 export type ResumesRepository = ReturnType<typeof createResumesRepository>;
