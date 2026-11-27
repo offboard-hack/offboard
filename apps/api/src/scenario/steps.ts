@@ -630,6 +630,8 @@ export async function submitExitSurvey(ctx: Context, admin: Admin, person: Perso
           communication: 5,
           equipmentReturn: 4,
           documents: 4,
+          comment: "Processo claro e respeitoso do início ao fim.",
+          anonymous: false,
         },
         topics: ["Respeito na comunicação", "Clareza de prazos"],
       },

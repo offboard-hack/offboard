@@ -82,5 +82,12 @@ describe.skipIf(!url)("exit survey sync", () => {
       { ...answered, recommendation: 4, topics: [] },
     );
     expect(await rows()).toMatchObject([{ npsScore: 4, topics: [] }]);
+
+    const commented = { ...answered, comment: "  Muito bom  ", anonymous: false };
+    await sync({ ...initialDeparture, feedback: answered }, commented);
+    expect((await rows())[0].responses).toMatchObject({ comment: "Muito bom", anonymous: false });
+
+    await sync({ ...initialDeparture, feedback: commented }, { ...commented, comment: "" });
+    expect((await rows())[0].responses).not.toHaveProperty("comment");
   });
 });
