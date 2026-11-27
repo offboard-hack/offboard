@@ -9160,6 +9160,7 @@ describe.skipIf(!url)("api", () => {
       returnMethod: expect.stringMatching(/^(pickup|in_person)$/),
       scheduledDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       status: expect.any(String),
+      holderEmail: null,
     });
   });
 
@@ -9228,6 +9229,7 @@ describe.skipIf(!url)("api", () => {
         returnMethod: "pickup",
         scheduledDate: null,
         status: "with_person",
+        holderEmail: null,
       });
 
       const listed = await repos.employee.listEquipmentReturns(defaultOrgId, target.id);
@@ -9397,6 +9399,292 @@ describe.skipIf(!url)("api", () => {
 
       expect(add.status).toBe(403);
       expect(remove.status).toBe(403);
+    });
+  });
+
+  describe("unassigned equipment", () => {
+    const notebook = { item: "Notebook", returnMethod: "pickup" };
+
+    async function caseWithEmails(name: string, email: string | null, personalEmail?: string) {
+      const [created] = await db
+        .insert(offboardingCases)
+        .values({
+          orgId: defaultOrgId,
+          name,
+          role: "Analista",
+          department: "Produto",
+          deadline: "2027-03-01",
+        })
+        .returning({ id: offboardingCases.id });
+
+      await db.insert(employeeAccess).values({
+        caseId: created!.id,
+        orgId: defaultOrgId,
+        email,
+        personalEmail,
+        plan: emptyEmployeePlan,
+      });
+
+      return created!.id;
+    }
+
+    async function stored(tag: string) {
+      const [row] = await db
+        .select({ id: equipment.id, caseId: equipment.caseId, holderEmail: equipment.holderEmail })
+        .from(equipment)
+        .where(eq(equipment.tag, tag));
+
+      return row!;
+    }
+
+    function register(tag: string, extra: Record<string, string> = {}) {
+      return call("/equipment", "POST", { ...notebook, tag, ...extra });
+    }
+
+    it("registers stock with no case and no e-mail", async () => {
+      const res = await register("STK-001");
+
+      expect(res.status).toBe(201);
+      expect(await stored("STK-001")).toEqual({
+        id: expect.any(String),
+        caseId: null,
+        holderEmail: null,
+      });
+
+      const listed = await (await call("/equipment")).json();
+
+      expect(listed).toContainEqual(expect.objectContaining({ tag: "STK-001", person: null }));
+      expect(await repos.employee.listEquipmentReturns(defaultOrgId)).toContainEqual(
+        expect.objectContaining({ code: "STK-001", caseId: null, person: null, model: "" }),
+      );
+    });
+
+    it("attaches new equipment to the case using that corporate or personal e-mail", async () => {
+      const corporate = await caseWithEmails("Stock Corp", "stock.corp@example.com");
+      const personal = await caseWithEmails("Stock Pessoal", null, "stock.pessoal@gmail.com");
+
+      expect((await register("STK-002", { email: "Stock.Corp@Example.com" })).status).toBe(201);
+      expect((await register("STK-003", { email: "stock.pessoal@gmail.com" })).status).toBe(201);
+      expect((await stored("STK-002")).caseId).toBe(corporate);
+      expect((await stored("STK-003")).caseId).toBe(personal);
+    });
+
+    it("keeps equipment registered for an e-mail with no case yet", async () => {
+      const res = await register("STK-004", { email: "Futuro.Colab@Example.com" });
+
+      expect(res.status).toBe(201);
+      expect(await res.json()).toEqual(
+        expect.objectContaining({ holderEmail: "futuro.colab@example.com" }),
+      );
+      expect(await stored("STK-004")).toEqual(
+        expect.objectContaining({ caseId: null, holderEmail: "futuro.colab@example.com" }),
+      );
+    });
+
+    it("refuses an e-mail shared by more than one case", async () => {
+      await caseWithEmails("Compartilha Um", "um.compartilha@example.com", "compartilha@gmail.com");
+      await caseWithEmails(
+        "Compartilha Dois",
+        "dois.compartilha@example.com",
+        "compartilha@gmail.com",
+      );
+
+      const res = await register("STK-005", { email: "compartilha@gmail.com" });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "More than one case uses this e-mail" });
+    });
+
+    it("prefers the chosen case over the e-mail", async () => {
+      const chosen = await caseWithEmails("Escolhida", "escolhida@example.com");
+
+      await register("STK-006", { caseId: chosen, email: "outra.pessoa@example.com" });
+
+      expect(await stored("STK-006")).toEqual(
+        expect.objectContaining({ caseId: chosen, holderEmail: null }),
+      );
+    });
+
+    it("assigns stock to the open case by corporate or personal e-mail", async () => {
+      const corporate = await caseWithEmails("Atribui Corp", "atribui.corp@example.com");
+      const personal = await caseWithEmails("Atribui Pessoal", null, "atribui.pessoal@gmail.com");
+      const first = await (await register("STK-010")).json();
+
+      const second = await (
+        await register("STK-011", { email: "ainda.sem.caso@example.com" })
+      ).json();
+
+      const byCorporate = await call(`/equipment/${first.id}/assign`, "POST", {
+        email: "ATRIBUI.CORP@example.com",
+      });
+
+      expect(byCorporate.status).toBe(200);
+      expect(await byCorporate.json()).toEqual({ ...first, holderEmail: null });
+      expect((await stored("STK-010")).caseId).toBe(corporate);
+
+      const byPersonal = await call(`/equipment/${second.id}/assign`, "POST", {
+        email: "atribui.pessoal@gmail.com",
+      });
+
+      expect(byPersonal.status).toBe(200);
+      expect(await stored("STK-011")).toEqual(
+        expect.objectContaining({ caseId: personal, holderEmail: null }),
+      );
+    });
+
+    it("explains why an assignment fails", async () => {
+      const target = await caseWithEmails("Falha Atribui", "falha.atribui@example.com");
+
+      await caseWithEmails("Dup Um", "dup.um@example.com", "dup.atribui@gmail.com");
+      await caseWithEmails("Dup Dois", "dup.dois@example.com", "dup.atribui@gmail.com");
+
+      const stock = await (await register("STK-020")).json();
+
+      const unknown = await call(`/equipment/${stock.id}/assign`, "POST", {
+        email: "ninguem@example.com",
+      });
+
+      expect(unknown.status).toBe(404);
+      expect(await unknown.json()).toEqual({ error: "No offboarding case uses this e-mail" });
+
+      const ambiguous = await call(`/equipment/${stock.id}/assign`, "POST", {
+        email: "dup.atribui@gmail.com",
+      });
+
+      expect(ambiguous.status).toBe(409);
+
+      await call(`/equipment/${stock.id}/assign`, "POST", { email: "falha.atribui@example.com" });
+
+      const again = await call(`/equipment/${stock.id}/assign`, "POST", {
+        email: "falha.atribui@example.com",
+      });
+
+      expect(again.status).toBe(409);
+      expect(await again.json()).toEqual({ error: "Equipment already assigned" });
+      expect((await stored("STK-020")).caseId).toBe(target);
+
+      const missing = await call(`/equipment/${missingTaskId}/assign`, "POST", {
+        email: "falha.atribui@example.com",
+      });
+
+      expect(missing.status).toBe(404);
+      expect(await missing.json()).toEqual({ error: "Equipment not found" });
+      expect(
+        (await call(`/equipment/${stock.id}/assign`, "POST", { email: "not-an-email" })).status,
+      ).toBe(422);
+    });
+
+    it("lets visualizador not assign", async () => {
+      const res = await app.handle(
+        new Request(`http://localhost/api/equipment/${missingTaskId}/assign`, {
+          method: "POST",
+          headers: {
+            "x-test-session": "visualizador",
+            origin: webOrigin,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ email: "x@example.com" }),
+        }),
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    it("attaches waiting equipment when a case is created", async () => {
+      await register("STK-030", { email: "nova.pessoa@example.com" });
+      await register("STK-031", { email: "nova.pessoa@gmail.com" });
+      await register("STK-032", { email: "outra.nova@example.com" });
+
+      const res = await call("/offboardings", "POST", {
+        name: "Nova Pessoa",
+        role: "Dev",
+        department: "Eng",
+        deadline: "2027-02-01",
+        email: "Nova.Pessoa@example.com",
+        personalEmail: "nova.pessoa@gmail.com",
+      });
+
+      const created = await res.json();
+
+      expect(res.status).toBe(201);
+      expect((await stored("STK-030")).caseId).toBe(created.id);
+      expect(await stored("STK-031")).toEqual(
+        expect.objectContaining({ caseId: created.id, holderEmail: null }),
+      );
+      expect((await stored("STK-032")).caseId).toBeNull();
+
+      const [access] = await db
+        .select({ email: employeeAccess.email, personalEmail: employeeAccess.personalEmail })
+        .from(employeeAccess)
+        .where(eq(employeeAccess.caseId, created.id));
+
+      expect(access).toEqual({
+        email: "nova.pessoa@example.com",
+        personalEmail: "nova.pessoa@gmail.com",
+      });
+    });
+
+    it("stores the personal e-mail and attaches equipment on first and later saves", async () => {
+      const withEmployees = createApp(webOrigin, repos, {
+        ...appOptions,
+        auth: { ...auth, resolveEmployee: async () => null },
+      });
+
+      const [created] = await db
+        .insert(offboardingCases)
+        .values({
+          orgId: defaultOrgId,
+          name: "Acesso Equip",
+          role: "Analista",
+          department: "Produto",
+          deadline: "2027-03-01",
+        })
+        .returning({ id: offboardingCases.id });
+
+      const caseId = created!.id;
+
+      await register("STK-040", { email: "acesso.equip@example.com" });
+      await register("STK-041", { email: "acesso.equip@gmail.com" });
+
+      const first = await call(
+        `/employee-access/${caseId}`,
+        "PUT",
+        { email: "acesso.equip@example.com", plan: emptyEmployeePlan, revision: 0 },
+        withEmployees,
+      );
+
+      expect(first.status).toBe(200);
+      expect((await stored("STK-040")).caseId).toBe(caseId);
+      expect((await stored("STK-041")).caseId).toBeNull();
+
+      const second = await call(
+        `/employee-access/${caseId}`,
+        "PUT",
+        {
+          email: "acesso.equip@example.com",
+          personalEmail: "Acesso.Equip@Gmail.com",
+          plan: emptyEmployeePlan,
+          revision: 1,
+        },
+        withEmployees,
+      );
+
+      expect(second.status).toBe(200);
+      expect(await second.json()).toEqual(
+        expect.objectContaining({ personalEmail: "acesso.equip@gmail.com" }),
+      );
+      expect((await stored("STK-041")).caseId).toBe(caseId);
+    });
+
+    it("imports equipment by the personal e-mail", async () => {
+      const target = await caseWithEmails("Importa Pessoal", null, "importa.pessoal@gmail.com");
+
+      const res = await call("/equipment/import", "POST", {
+        rows: [{ ...notebook, person: "IMPORTA.pessoal@gmail.com", tag: "STK-050" }],
+      });
+
+      expect(res.status).toBe(201);
+      expect((await stored("STK-050")).caseId).toBe(target);
     });
   });
 
@@ -11088,6 +11376,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
     expect(await (await request(target, "GET", hrCookie)).json()).toEqual({
       email,
+      personalEmail: null,
       plan: emptyEmployeePlan,
       revision: 1,
       careerSponsoredUntil: "2027-05-01",
@@ -11106,6 +11395,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     expect((await request(target, "PUT", hrCookie, { email, plan, revision: 1 })).status).toBe(200);
     expect(await (await request(target, "GET", hrCookie)).json()).toEqual({
       email,
+      personalEmail: null,
       plan,
       revision: 2,
       careerSponsoredUntil: "2027-05-01",

@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { resolveImport } from "./import.ts";
 
 const cases = [
-  { id: "c1", name: "Ana Souza", email: "ana@empresa.com" },
-  { id: "c2", name: "Bruno Lima", email: null },
-  { id: "c3", name: "Bruno Lima", email: "bruno.l@empresa.com" },
+  { id: "c1", name: "Ana Souza", email: "ana@empresa.com", personalEmail: "ana@gmail.com" },
+  { id: "c2", name: "Bruno Lima", email: null, personalEmail: null },
+  { id: "c3", name: "Bruno Lima", email: "bruno.l@empresa.com", personalEmail: null },
 ];
 
 function row(person: string, tag: string) {
@@ -14,12 +14,17 @@ function row(person: string, tag: string) {
 describe("resolveImport", () => {
   it("matches a person by e-mail or by name, ignoring case and spaces", () => {
     expect(
-      resolveImport([row(" ANA@empresa.com", "T1"), row("ana souza ", "T2")], cases, new Set()),
+      resolveImport(
+        [row(" ANA@empresa.com", "T1"), row("ana souza ", "T2"), row("Ana@Gmail.com", "T3")],
+        cases,
+        new Set(),
+      ),
     ).toEqual({
       problems: [],
       values: [
         { caseId: "c1", tag: "T1", item: "Notebook", returnMethod: "pickup" },
         { caseId: "c1", tag: "T2", item: "Notebook", returnMethod: "pickup" },
+        { caseId: "c1", tag: "T3", item: "Notebook", returnMethod: "pickup" },
       ],
     });
   });

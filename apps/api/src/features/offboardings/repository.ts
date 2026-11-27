@@ -3,12 +3,13 @@ import { and, asc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { employeeAccess, offboardingCases, subtasks, tasks } from "@offboard/db/schema";
 import { emptyEmployeePlan } from "@offboard/employee";
 
+import { attachWaitingEquipment, normalizeHolderEmail } from "../../shared/equipment-holder.js";
 import { checklistPhases, type ChecklistLayout } from "../../shared/checklist.js";
 
 function checklistTasks(
   orgId: string,
   caseId: string,
-  person: Omit<NewOffboarding, "email">,
+  person: Omit<NewOffboarding, "email" | "personalEmail">,
   layout: ChecklistLayout,
 ) {
   const ordered = checklistPhases.flatMap((phase) => layout.filter((step) => step.phase === phase));
@@ -49,7 +50,7 @@ type TaskStatus = (typeof tasks.$inferSelect)["status"];
 type NewOffboarding = Pick<
   typeof offboardingCases.$inferInsert,
   "name" | "role" | "department" | "deadline"
-> & { email: string };
+> & { email: string; personalEmail?: string };
 
 type BulkOffboardingRow = Pick<NewOffboarding, "name" | "department">;
 
@@ -149,8 +150,9 @@ export function createOffboardingsRepository(db: Database) {
     data: NewOffboarding,
     layout: ChecklistLayout = [],
   ) {
-    const { email, ...caseData } = data;
-    const normalizedEmail = email.trim().toLowerCase();
+    const { email, personalEmail, ...caseData } = data;
+    const normalizedEmail = normalizeHolderEmail(email);
+    const normalizedPersonal = personalEmail ? normalizeHolderEmail(personalEmail) : null;
 
     return db.transaction(async (tx) => {
       const [inserted] = await tx
@@ -162,8 +164,11 @@ export function createOffboardingsRepository(db: Database) {
         caseId: inserted.id,
         orgId,
         email: normalizedEmail,
+        personalEmail: normalizedPersonal,
         plan: emptyEmployeePlan,
       });
+
+      await attachWaitingEquipment(tx, orgId, inserted.id, [normalizedEmail, normalizedPersonal]);
 
       const caseTasks = checklistTasks(orgId, inserted.id, caseData, layout);
       await insertTasks(tx, caseTasks);

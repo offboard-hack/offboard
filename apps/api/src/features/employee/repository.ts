@@ -26,6 +26,7 @@ import {
 } from "@offboard/employee/departure";
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { z } from "zod";
+import { attachWaitingEquipment } from "../../shared/equipment-holder.js";
 import type { EmployeePrincipal } from "../../shared/employee-auth.js";
 
 import {
@@ -77,6 +78,7 @@ export function createEmployeeRepository(db: Database) {
     const [settings] = await db
       .select({
         email: employeeAccess.email,
+        personalEmail: employeeAccess.personalEmail,
         plan: employeeAccess.plan,
         revision: employeeAccess.revision,
         careerSponsoredUntil: employeeAccess.careerSponsoredUntil,
@@ -95,6 +97,7 @@ export function createEmployeeRepository(db: Database) {
     return settings
       ? employeeAccessSettingsSchema.parse({
           email: settings.email,
+          personalEmail: settings.personalEmail,
           plan: settings.plan ?? emptyEmployeePlan,
           revision: settings.revision ?? 0,
           careerSponsoredUntil:
@@ -169,17 +172,18 @@ export function createEmployeeRepository(db: Database) {
         if (!owned) return "missing-case";
 
         const revision = settings.revision + 1;
-        const { email, plan, careerSponsoredUntil } = settings;
+        const { email, personalEmail, plan, careerSponsoredUntil } = settings;
 
         if (settings.revision === 0) {
           const [created] = await tx
             .insert(employeeAccess)
-            .values({ orgId, caseId, email, plan, revision, careerSponsoredUntil })
+            .values({ orgId, caseId, email, personalEmail, plan, revision, careerSponsoredUntil })
             .onConflictDoNothing({ target: employeeAccess.caseId })
             .returning({ caseId: employeeAccess.caseId });
 
           if (!created) return "changed";
 
+          await attachWaitingEquipment(tx, orgId, caseId, [email, personalEmail]);
           await syncPlanEquipment(tx, orgId, caseId, plan.equipment);
 
           return email ? "email-set" : "saved";
@@ -212,6 +216,7 @@ export function createEmployeeRepository(db: Database) {
           .update(employeeAccess)
           .set({
             email,
+            personalEmail,
             plan,
             revision,
             careerSponsoredUntil,
@@ -219,6 +224,7 @@ export function createEmployeeRepository(db: Database) {
           })
           .where(and(eq(employeeAccess.orgId, orgId), eq(employeeAccess.caseId, caseId)));
 
+        await attachWaitingEquipment(tx, orgId, caseId, [email, personalEmail]);
         await syncPlanEquipment(tx, orgId, caseId, plan.equipment);
         const after = await readEquipment(tx, orgId, caseId, plan.equipment);
 
@@ -331,6 +337,7 @@ export function createEmployeeRepository(db: Database) {
       .select({
         id: equipment.id,
         caseId: equipment.caseId,
+        holderEmail: equipment.holderEmail,
         person: offboardingCases.name,
         code: equipment.tag,
         title: equipment.item,
@@ -342,7 +349,7 @@ export function createEmployeeRepository(db: Database) {
         state: employeeStates.value,
       })
       .from(equipment)
-      .innerJoin(
+      .leftJoin(
         offboardingCases,
         and(eq(offboardingCases.id, equipment.caseId), eq(offboardingCases.orgId, equipment.orgId)),
       )

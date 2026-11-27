@@ -203,6 +203,7 @@ export const employeeAccess = pgTable(
       .primaryKey()
       .references(() => offboardingCases.id, { onDelete: "cascade" }),
     email: varchar("email", { length: 255 }),
+    personalEmail: varchar("personal_email", { length: 255 }),
     plan: jsonb("plan").$type<ConfigValue>().notNull(),
     revision: integer("revision").notNull().default(1),
     grantId: uuid("grant_id").notNull().defaultRandom(),
@@ -589,9 +590,8 @@ export const equipment = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     orgId: orgIdColumn(),
-    caseId: uuid("case_id")
-      .notNull()
-      .references(() => offboardingCases.id, { onDelete: "cascade" }),
+    caseId: uuid("case_id").references(() => offboardingCases.id, { onDelete: "cascade" }),
+    holderEmail: varchar("holder_email", { length: 255 }),
     item: varchar("item", { length: 255 }).notNull(),
     tag: varchar("tag", { length: 255 }).notNull(),
     fromEmployeePlan: boolean("from_employee_plan").notNull().default(false),
@@ -604,6 +604,7 @@ export const equipment = pgTable(
   (table) => [
     index("equipment_case_id_idx").on(table.caseId),
     index("equipment_org_id_idx").on(table.orgId),
+    index("equipment_holder_email_idx").on(table.orgId, sql`lower(${table.holderEmail})`),
     uniqueIndex("equipment_org_tag_idx").on(table.orgId, table.tag),
   ],
 );
