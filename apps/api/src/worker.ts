@@ -90,6 +90,7 @@ export function createWorkerApi(
         }
       : undefined,
     slackSigningSecret: config.data.SLACK_SIGNING_SECRET,
+    secretKey: config.data.BETTER_AUTH_SECRET,
     abacatepay: createAbacatePayGateway(config.data.ABACATEPAY_API_KEY),
     abacatepayWebhookSecret: config.data.ABACATEPAY_WEBHOOK_SECRET,
     generateStructured: aiModel ? createGenerateStructured(aiModel) : undefined,

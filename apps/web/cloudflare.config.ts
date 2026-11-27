@@ -49,6 +49,8 @@ if (apiConfigured) {
 
   env.TRACKING_API_KEY = bindings.secret();
   env.TRACKING_BASE_URL = bindings.secret();
+  env.ABACATEPAY_API_KEY = bindings.secret();
+  env.ABACATEPAY_WEBHOOK_SECRET = bindings.secret();
 }
 
 export default defineConfig({

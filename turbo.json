@@ -22,8 +22,6 @@
         "RESEND_BASE_URL",
         "ABACATEPAY_API_KEY",
         "ABACATEPAY_WEBHOOK_SECRET",
-        "SLACK_API_URL",
-        "SLACK_BOT_TOKEN",
         "SLACK_SIGNING_SECRET",
         "WEBHOOK_SECRET",
         "WEB_ORIGIN"

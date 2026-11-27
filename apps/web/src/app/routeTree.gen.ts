@@ -15,6 +15,7 @@ import { Route as CadastroRouteImport } from './routes/cadastro'
 import { Route as ColaboradorRouteImport } from './routes/colaborador'
 import { Route as EntrarRouteImport } from './routes/entrar'
 import { Route as RecolocacaoRouteImport } from './routes/recolocacao'
+import { Route as PortalBeneficiosRouteImport } from './routes/_portal.beneficios'
 import { Route as PortalBensEColetaRouteImport } from './routes/_portal.bens-e-coleta'
 import { Route as PortalCandidaturasAssistidasRouteImport } from './routes/_portal.candidaturas-assistidas'
 import { Route as PortalChecklistAutomaticoRouteImport } from './routes/_portal.checklist-automatico'
@@ -57,6 +58,11 @@ const RecolocacaoRoute = RecolocacaoRouteImport.update({
   id: '/recolocacao',
   path: '/recolocacao',
   getParentRoute: () => rootRouteImport,
+} as any)
+const PortalBeneficiosRoute = PortalBeneficiosRouteImport.update({
+  id: '/beneficios',
+  path: '/beneficios',
+  getParentRoute: () => PortalRoute,
 } as any)
 const PortalBensEColetaRoute = PortalBensEColetaRouteImport.update({
   id: '/bens-e-coleta',
@@ -135,6 +141,7 @@ export interface FileRoutesByFullPath {
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
   '/recolocacao': typeof RecolocacaoRoute
+  '/beneficios': typeof PortalBeneficiosRoute
   '/bens-e-coleta': typeof PortalBensEColetaRoute
   '/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
   '/checklist-automatico': typeof PortalChecklistAutomaticoRoute
@@ -155,6 +162,7 @@ export interface FileRoutesByTo {
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
   '/recolocacao': typeof RecolocacaoRoute
+  '/beneficios': typeof PortalBeneficiosRoute
   '/bens-e-coleta': typeof PortalBensEColetaRoute
   '/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
   '/checklist-automatico': typeof PortalChecklistAutomaticoRoute
@@ -177,6 +185,7 @@ export interface FileRoutesById {
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
   '/recolocacao': typeof RecolocacaoRoute
+  '/_portal/beneficios': typeof PortalBeneficiosRoute
   '/_portal/bens-e-coleta': typeof PortalBensEColetaRoute
   '/_portal/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
   '/_portal/checklist-automatico': typeof PortalChecklistAutomaticoRoute
@@ -199,6 +208,7 @@ export interface FileRouteTypes {
     | '/colaborador'
     | '/entrar'
     | '/recolocacao'
+    | '/beneficios'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
     | '/checklist-automatico'
@@ -219,6 +229,7 @@ export interface FileRouteTypes {
     | '/colaborador'
     | '/entrar'
     | '/recolocacao'
+    | '/beneficios'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
     | '/checklist-automatico'
@@ -240,6 +251,7 @@ export interface FileRouteTypes {
     | '/colaborador'
     | '/entrar'
     | '/recolocacao'
+    | '/_portal/beneficios'
     | '/_portal/bens-e-coleta'
     | '/_portal/candidaturas-assistidas'
     | '/_portal/checklist-automatico'
@@ -308,6 +320,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/recolocacao'
       preLoaderRoute: typeof RecolocacaoRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_portal/beneficios': {
+      id: '/_portal/beneficios'
+      path: '/beneficios'
+      fullPath: '/beneficios'
+      preLoaderRoute: typeof PortalBeneficiosRouteImport
+      parentRoute: typeof PortalRoute
     }
     '/_portal/bens-e-coleta': {
       id: '/_portal/bens-e-coleta'
@@ -404,6 +423,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface PortalRouteChildren {
+  PortalBeneficiosRoute: typeof PortalBeneficiosRoute
   PortalBensEColetaRoute: typeof PortalBensEColetaRoute
   PortalCandidaturasAssistidasRoute: typeof PortalCandidaturasAssistidasRoute
   PortalChecklistAutomaticoRoute: typeof PortalChecklistAutomaticoRoute
@@ -419,6 +439,7 @@ interface PortalRouteChildren {
 }
 
 const PortalRouteChildren: PortalRouteChildren = {
+  PortalBeneficiosRoute: PortalBeneficiosRoute,
   PortalBensEColetaRoute: PortalBensEColetaRoute,
   PortalCandidaturasAssistidasRoute: PortalCandidaturasAssistidasRoute,
   PortalChecklistAutomaticoRoute: PortalChecklistAutomaticoRoute,

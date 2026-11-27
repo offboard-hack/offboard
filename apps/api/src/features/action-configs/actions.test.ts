@@ -65,6 +65,13 @@ describe.skipIf(!url)("fireActions", () => {
         return;
       }
 
+      if (req.url === "/slack-bare/chat.postMessage") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false }));
+
+        return;
+      }
+
       if (req.url === "/slack-error/chat.postMessage") {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: "channel_not_found" }));
@@ -77,8 +84,14 @@ describe.skipIf(!url)("fireActions", () => {
     });
   });
 
-  let savedBotToken: string | undefined;
-  let savedApiUrl: string | undefined;
+  let apiUrl = "";
+
+  const slack = {
+    get apiUrl() {
+      return apiUrl;
+    },
+    readToken: async () => undefined,
+  };
 
   beforeAll(async () => {
     await migrate(db, {
@@ -96,40 +109,27 @@ describe.skipIf(!url)("fireActions", () => {
         resolve();
       });
     });
-
-    savedBotToken = process.env.SLACK_BOT_TOKEN;
-    savedApiUrl = process.env.SLACK_API_URL;
-    delete process.env.SLACK_BOT_TOKEN;
   });
 
   beforeEach(async () => {
     await seedDatabase(db, testSeedFixtures);
     receivedRequests.length = 0;
-    delete process.env.SLACK_BOT_TOKEN;
-    process.env.SLACK_API_URL = `${serverUrl}/`;
+    apiUrl = `${serverUrl}/`;
   });
 
   afterAll(async () => {
     server.close();
     await db.$client.end();
-
-    if (savedBotToken != null) {
-      process.env.SLACK_BOT_TOKEN = savedBotToken;
-    }
-
-    if (savedApiUrl != null) {
-      process.env.SLACK_API_URL = savedApiUrl;
-    }
   });
 
   it("returns empty when phase is empty", async () => {
-    const results = await fireActions(repos, { ...context, phase: "" });
+    const results = await fireActions(repos, { ...context, phase: "" }, slack);
 
     expect(results).toEqual([]);
   });
 
   it("returns empty when no configs match the phase", async () => {
-    const results = await fireActions(repos, { ...context, phase: "nonexistent" });
+    const results = await fireActions(repos, { ...context, phase: "nonexistent" }, slack);
 
     expect(results).toEqual([]);
   });
@@ -141,7 +141,7 @@ describe.skipIf(!url)("fireActions", () => {
       config: { url: `${serverUrl}/hook`, method: "POST" },
     });
 
-    const results = await fireActions(repos, context);
+    const results = await fireActions(repos, context, slack);
     const webhookResult = results.find((r) => r.actionId === "webhook:test-exec");
 
     expect(webhookResult).toEqual({ actionId: "webhook:test-exec", success: true });
@@ -155,7 +155,7 @@ describe.skipIf(!url)("fireActions", () => {
       config: {},
     });
 
-    const results = await fireActions(repos, context);
+    const results = await fireActions(repos, context, slack);
     const result = results.find((r) => r.actionId === "webhook:no-url");
 
     expect(result).toEqual({ actionId: "webhook:no-url", success: false, error: "missing url" });
@@ -168,7 +168,7 @@ describe.skipIf(!url)("fireActions", () => {
       config: { url: `${serverUrl}/fail`, method: "POST" },
     });
 
-    const results = await fireActions(repos, context);
+    const results = await fireActions(repos, context, slack);
     const result = results.find((r) => r.actionId === "webhook:fail-http");
 
     expect(result).toEqual({ actionId: "webhook:fail-http", success: false, error: "HTTP 500" });
@@ -184,7 +184,7 @@ describe.skipIf(!url)("fireActions", () => {
       },
     });
 
-    const results = await fireActions(repos, context);
+    const results = await fireActions(repos, context, slack);
     const slackResult = results.find((r) => r.actionId === "slack:test-exec");
 
     expect(slackResult).toEqual({ actionId: "slack:test-exec", success: true });
@@ -200,7 +200,7 @@ describe.skipIf(!url)("fireActions", () => {
       config: { webhookUrl: `${serverUrl}/slack-default` },
     });
 
-    const results = await fireActions(repos, context);
+    const results = await fireActions(repos, context, slack);
     const result = results.find((r) => r.actionId === "slack:default-msg");
 
     expect(result).toEqual({ actionId: "slack:default-msg", success: true });
@@ -218,13 +218,13 @@ describe.skipIf(!url)("fireActions", () => {
       config: {},
     });
 
-    const results = await fireActions(repos, context);
+    const results = await fireActions(repos, context, slack);
     const result = results.find((r) => r.actionId === "slack:no-url");
 
     expect(result).toEqual({
       actionId: "slack:no-url",
       success: false,
-      error: "missing webhookUrl or botToken",
+      error: "Slack not configured",
     });
   });
 
@@ -235,7 +235,7 @@ describe.skipIf(!url)("fireActions", () => {
       config: { webhookUrl: `${serverUrl}/fail` },
     });
 
-    const results = await fireActions(repos, context);
+    const results = await fireActions(repos, context, slack);
     const result = results.find((r) => r.actionId === "slack:fail-http");
 
     expect(result).toEqual({ actionId: "slack:fail-http", success: false, error: "HTTP 500" });
@@ -252,7 +252,7 @@ describe.skipIf(!url)("fireActions", () => {
       },
     });
 
-    const results = await fireActions(repos, context);
+    const results = await fireActions(repos, context, slack);
     const result = results.find((r) => r.actionId === "slack:bot-exec");
 
     expect(result).toEqual({ actionId: "slack:bot-exec", success: true });
@@ -264,24 +264,72 @@ describe.skipIf(!url)("fireActions", () => {
     expect(params.get("text")).toBe("Bloquear acessos is now done");
   });
 
-  it("sends via bot token from env when config lacks botToken", async () => {
-    process.env.SLACK_BOT_TOKEN = "xoxb-env-token";
-
+  it("sends via the organization's bot token when the step has none", async () => {
     await repos.createActionConfig(defaultOrgId, {
-      actionId: "slack:bot-env",
+      actionId: "slack:bot-org",
       phase: "d0",
       config: {
         channel: "#ops",
       },
     });
 
-    const results = await fireActions(repos, context);
-    const result = results.find((r) => r.actionId === "slack:bot-env");
+    const tokenOrgs: string[] = [];
 
-    expect(result).toEqual({ actionId: "slack:bot-env", success: true });
+    const results = await fireActions(repos, context, {
+      apiUrl,
+      readToken: async (orgId) => {
+        tokenOrgs.push(orgId);
 
-    const apiReq = receivedRequests.find((r) => r.url === "/chat.postMessage");
-    expect(apiReq).toBeDefined();
+        return "xoxb-org-token";
+      },
+    });
+
+    const result = results.find((r) => r.actionId === "slack:bot-org");
+
+    expect(result).toEqual({ actionId: "slack:bot-org", success: true });
+    expect(tokenOrgs).toContain(defaultOrgId);
+
+    const channels = receivedRequests.flatMap((r) =>
+      r.url === "/chat.postMessage" ? [new URLSearchParams(r.body).get("channel")] : [],
+    );
+
+    expect(channels).toContain("#ops");
+  });
+
+  it("reports Slack errors that carry no error code", async () => {
+    apiUrl = `${serverUrl}/slack-bare/`;
+
+    await repos.createActionConfig(defaultOrgId, {
+      actionId: "slack:bot-bare",
+      phase: "d0",
+      config: { botToken: "xoxb-test-token", channel: "#ops" },
+    });
+
+    const results = await fireActions(repos, context, slack);
+
+    expect(results.find((r) => r.actionId === "slack:bot-bare")).toEqual({
+      actionId: "slack:bot-bare",
+      success: false,
+      error: "unknown_error",
+    });
+  });
+
+  it("reports a Slack response that is not JSON", async () => {
+    apiUrl = `${serverUrl}/slack-html/`;
+
+    await repos.createActionConfig(defaultOrgId, {
+      actionId: "slack:bot-html",
+      phase: "d0",
+      config: { botToken: "xoxb-test-token", channel: "#ops" },
+    });
+
+    const results = await fireActions(repos, context, slack);
+
+    expect(results.find((r) => r.actionId === "slack:bot-html")).toEqual({
+      actionId: "slack:bot-html",
+      success: false,
+      error: "HTTP 200",
+    });
   });
 
   it("reports missing channel when using bot token", async () => {
@@ -291,7 +339,7 @@ describe.skipIf(!url)("fireActions", () => {
       config: { botToken: "xoxb-test-token" },
     });
 
-    const results = await fireActions(repos, context);
+    const results = await fireActions(repos, context, slack);
     const result = results.find((r) => r.actionId === "slack:bot-no-channel");
 
     expect(result).toEqual({
@@ -302,7 +350,7 @@ describe.skipIf(!url)("fireActions", () => {
   });
 
   it("catches slack bot API errors", async () => {
-    process.env.SLACK_API_URL = `${serverUrl}/slack-error/`;
+    apiUrl = `${serverUrl}/slack-error/`;
 
     await repos.createActionConfig(defaultOrgId, {
       actionId: "slack:bot-api-fail",
@@ -313,11 +361,14 @@ describe.skipIf(!url)("fireActions", () => {
       },
     });
 
-    const results = await fireActions(repos, context);
+    const results = await fireActions(repos, context, slack);
     const result = results.find((r) => r.actionId === "slack:bot-api-fail");
 
-    expect(result?.success).toBe(false);
-    expect(result?.error).toContain("channel_not_found");
+    expect(result).toEqual({
+      actionId: "slack:bot-api-fail",
+      success: false,
+      error: "channel_not_found",
+    });
   });
 
   it("prefers webhookUrl over botToken when both present", async () => {
@@ -331,7 +382,7 @@ describe.skipIf(!url)("fireActions", () => {
       },
     });
 
-    const results = await fireActions(repos, context);
+    const results = await fireActions(repos, context, slack);
     const result = results.find((r) => r.actionId === "slack:both-configs");
 
     expect(result).toEqual({ actionId: "slack:both-configs", success: true });
@@ -347,7 +398,7 @@ describe.skipIf(!url)("fireActions", () => {
       config: {},
     });
 
-    const results = await fireActions(repos, context);
+    const results = await fireActions(repos, context, slack);
     const result = results.find((r) => r.actionId === "email:no-to");
 
     expect(result).toEqual({ actionId: "email:no-to", success: false, error: "missing to" });
@@ -364,7 +415,7 @@ describe.skipIf(!url)("fireActions", () => {
         config: { to: "user@example.com", subject: "Test", body: "Hello" },
       });
 
-      const results = await fireActions(repos, context);
+      const results = await fireActions(repos, context, slack);
       const result = results.find((r) => r.actionId === "email:no-key");
 
       expect(result).toEqual({
@@ -394,7 +445,7 @@ describe.skipIf(!url)("fireActions", () => {
         },
       });
 
-      const results = await fireActions(repos, context);
+      const results = await fireActions(repos, context, slack);
       const result = results.find((r) => r.actionId === "email:template");
 
       expect(result).toEqual({ actionId: "email:template", success: true });
@@ -426,7 +477,7 @@ describe.skipIf(!url)("fireActions", () => {
         config: { to: "dev@example.com" },
       });
 
-      const results = await fireActions(repos, context);
+      const results = await fireActions(repos, context, slack);
       const result = results.find((r) => r.actionId === "email:defaults");
 
       expect(result).toEqual({ actionId: "email:defaults", success: true });
@@ -458,7 +509,7 @@ describe.skipIf(!url)("fireActions", () => {
         config: { to: "fail@example.com", subject: "Test", body: "Hello" },
       });
 
-      const results = await fireActions(repos, context);
+      const results = await fireActions(repos, context, slack);
       const result = results.find((r) => r.actionId === "email:api-fail");
 
       expect(result).toEqual({
@@ -479,7 +530,7 @@ describe.skipIf(!url)("fireActions", () => {
       config: {},
     });
 
-    const results = await fireActions(repos, context);
+    const results = await fireActions(repos, context, slack);
     const result = results.find((r) => r.actionId === "unknown:thing");
 
     expect(result).toEqual({
@@ -496,7 +547,7 @@ describe.skipIf(!url)("fireActions", () => {
       config: { url: "http://127.0.0.1:1/unreachable" },
     });
 
-    const results = await fireActions(repos, context);
+    const results = await fireActions(repos, context, slack);
     const result = results.find((r) => r.actionId === "webhook:unreachable");
 
     expect(result?.success).toBe(false);
@@ -510,7 +561,7 @@ describe.skipIf(!url)("fireActions", () => {
       config: { url: `${serverUrl}/default-method` },
     });
 
-    await fireActions(repos, context);
+    await fireActions(repos, context, slack);
 
     const req = receivedRequests.find((r) => r.url === "/default-method");
     expect(req?.method).toBe("POST");

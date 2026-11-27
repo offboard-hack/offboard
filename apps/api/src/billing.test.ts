@@ -275,7 +275,11 @@ describe.skipIf(!url)("billing", () => {
       "Platinum",
       "Platinum Premium",
     ]);
-    expect(plans[1]).toMatchObject({ monthlyPriceCents: 24900, maxEmployees: 30 });
+    expect(plans[1]).toMatchObject({
+      monthlyPriceCents: 24900,
+      maxEmployees: 30,
+      perPersonPriceCents: expect.any(Number),
+    });
     expect(plans[1].features.length).toBeGreaterThan(0);
   });
 
