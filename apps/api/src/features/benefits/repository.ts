@@ -7,9 +7,9 @@ import {
   plans,
   talentProfiles,
 } from "@offboard/db/schema";
-import { aliasedTable, and, eq, gte, ne, or } from "drizzle-orm";
+import { aliasedTable, and, eq, gte, isNull } from "drizzle-orm";
 import { evaluateBenefitRules, matchesBenefitRule } from "../../shared/benefit-rules.js";
-import { addMonths, saoPauloDate } from "../../shared/sao-paulo-date.js";
+import { addMonths } from "../../shared/sao-paulo-date.js";
 
 type AssignmentSource = (typeof benefitAssignments.$inferSelect)["source"];
 
@@ -130,11 +130,19 @@ export function createBenefitRepository(db: Database) {
     return row !== undefined;
   }
 
-  async function personOfCase(orgId: string, caseId: string) {
+  async function pendingPerson(orgId: string, caseId: string, profileId: string) {
     const [row] = await db
       .select({ department: offboardingCases.department, role: offboardingCases.role })
       .from(offboardingCases)
-      .where(and(eq(offboardingCases.orgId, orgId), eq(offboardingCases.id, caseId)))
+      .innerJoin(benefitPolicies, eq(benefitPolicies.orgId, offboardingCases.orgId))
+      .leftJoin(benefitAssignments, eq(benefitAssignments.profileId, profileId))
+      .where(
+        and(
+          eq(offboardingCases.orgId, orgId),
+          eq(offboardingCases.id, caseId),
+          isNull(benefitAssignments.id),
+        ),
+      )
       .limit(1);
 
     return row;
@@ -144,6 +152,7 @@ export function createBenefitRepository(db: Database) {
     orgId: string,
     profileId: string,
     person: { department: string; role: string },
+    today: string,
   ) {
     const policy = await getPolicy(orgId);
 
@@ -162,7 +171,7 @@ export function createBenefitRepository(db: Database) {
       ? "rule"
       : "default";
 
-    const validUntil = addMonths(saoPauloDate(new Date()), policy.benefitDurationMonths);
+    const validUntil = addMonths(today, policy.benefitDurationMonths);
 
     const rows = await db
       .insert(benefitAssignments)
@@ -174,30 +183,14 @@ export function createBenefitRepository(db: Database) {
         source,
         validUntil,
       })
-      .onConflictDoUpdate({
-        target: benefitAssignments.profileId,
-        set: {
-          assignedPlanId: planId,
-          effectivePlanId: planId,
-          source,
-          validUntil,
-          updatedAt: new Date(),
-        },
-        setWhere: and(
-          ne(benefitAssignments.source, "manual"),
-          or(
-            ne(benefitAssignments.assignedPlanId, planId),
-            ne(benefitAssignments.effectivePlanId, planId),
-          ),
-        ),
-      })
+      .onConflictDoNothing({ target: benefitAssignments.profileId })
       .returning({ id: benefitAssignments.id });
 
     return rows.length > 0;
   }
 
   return {
-    personOfCase,
+    pendingPerson,
     applyBenefitPolicy,
     profileInOrg,
     getPolicy,

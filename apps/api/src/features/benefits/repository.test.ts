@@ -226,7 +226,8 @@ describe.skipIf(!url)("benefit repository", () => {
     const person = { department: "Engineering", role: "Analista" };
     const elsewhere = { department: "Vendas", role: "Vendedor" };
 
-    const expiry = (months: number) => addMonths(saoPauloDate(new Date()), months);
+    const today = saoPauloDate(new Date());
+    const expiry = (months: number) => addMonths(today, months);
 
     async function policy(months = 6) {
       const { low, high } = await twoPlans();
@@ -253,9 +254,9 @@ describe.skipIf(!url)("benefit repository", () => {
       const { low } = await policy();
       const profileId = await profile();
 
-      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, elsewhere)).toBe(
-        true,
-      );
+      expect(
+        await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, elsewhere, today),
+      ).toBe(true);
       expect(await assignmentOf(profileId)).toMatchObject({
         orgId: defaultOrgId,
         source: "default",
@@ -269,10 +270,12 @@ describe.skipIf(!url)("benefit repository", () => {
       const { high } = await policy(12);
       const profileId = await profile();
 
-      await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, {
-        department: "engineering",
-        role: "Analista",
-      });
+      await repos.benefits.applyBenefitPolicy(
+        defaultOrgId,
+        profileId,
+        { department: "engineering ", role: "Analista" },
+        today,
+      );
 
       expect(await assignmentOf(profileId)).toMatchObject({
         source: "rule",
@@ -294,10 +297,12 @@ describe.skipIf(!url)("benefit repository", () => {
       });
       const profileId = await profile();
 
-      await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, {
-        department: "Vendas",
-        role: "Gerente de Contas",
-      });
+      await repos.benefits.applyBenefitPolicy(
+        defaultOrgId,
+        profileId,
+        { department: "Vendas", role: "Gerente de Contas" },
+        today,
+      );
 
       expect(await assignmentOf(profileId)).toMatchObject({
         source: "rule",
@@ -315,12 +320,12 @@ describe.skipIf(!url)("benefit repository", () => {
       });
       const profileId = await profile();
 
-      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, elsewhere)).toBe(
-        false,
-      );
+      expect(
+        await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, elsewhere, today),
+      ).toBe(false);
       expect(await assignmentOf(profileId)).toBeUndefined();
 
-      await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, person);
+      await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, person, today);
 
       expect(await assignmentOf(profileId)).toMatchObject({
         source: "rule",
@@ -341,7 +346,9 @@ describe.skipIf(!url)("benefit repository", () => {
         validUntil: "2030-01-01",
       });
 
-      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, person)).toBe(false);
+      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, person, today)).toBe(
+        false,
+      );
       expect(await assignmentOf(profileId)).toMatchObject({
         source: "manual",
         assignedPlanId: low.id,
@@ -352,7 +359,9 @@ describe.skipIf(!url)("benefit repository", () => {
     it("assigns nothing without a policy or without a plan to give", async () => {
       const profileId = await profile();
 
-      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, person)).toBe(false);
+      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, person, today)).toBe(
+        false,
+      );
       expect(await assignmentOf(profileId)).toBeUndefined();
 
       await repos.benefits.savePolicy(defaultOrgId, {
@@ -361,7 +370,9 @@ describe.skipIf(!url)("benefit repository", () => {
         rules: [],
       });
 
-      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, person)).toBe(false);
+      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, person, today)).toBe(
+        false,
+      );
       expect(await assignmentOf(profileId)).toBeUndefined();
     });
 
@@ -369,29 +380,50 @@ describe.skipIf(!url)("benefit repository", () => {
       await policy();
       const profileId = await profile();
 
-      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, person)).toBe(true);
+      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, person, today)).toBe(
+        true,
+      );
 
       await db
         .update(benefitAssignments)
         .set({ validUntil: "2026-01-01" })
         .where(eq(benefitAssignments.profileId, profileId));
 
-      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, person)).toBe(false);
+      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, person, today)).toBe(
+        false,
+      );
       expect(await assignmentOf(profileId)).toMatchObject({ validUntil: "2026-01-01" });
     });
 
-    it("moves an automatic assignment to a different plan", async () => {
-      const { high } = await policy();
-      const profileId = await profile();
+    it("never changes an existing automatic assignment, live or expired", async () => {
+      const { low, high } = await policy();
+      const live = await profile();
+      const expired = await profile();
 
-      await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, elsewhere);
+      await repos.benefits.applyBenefitPolicy(defaultOrgId, live, elsewhere, today);
+      await repos.benefits.applyBenefitPolicy(defaultOrgId, expired, elsewhere, today);
+      await db
+        .update(benefitAssignments)
+        .set({ validUntil: "2026-01-01" })
+        .where(eq(benefitAssignments.profileId, expired));
 
-      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, person)).toBe(true);
-      expect(await assignmentOf(profileId)).toMatchObject({
-        source: "rule",
-        assignedPlanId: high.id,
-        effectivePlanId: high.id,
+      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, live, person, today)).toBe(
+        false,
+      );
+      expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, expired, person, today)).toBe(
+        false,
+      );
+      expect(await assignmentOf(live)).toMatchObject({
+        source: "default",
+        assignedPlanId: low.id,
+        validUntil: expiry(6),
       });
+      expect(await assignmentOf(expired)).toMatchObject({
+        source: "default",
+        assignedPlanId: low.id,
+        validUntil: "2026-01-01",
+      });
+      expect(high.id).not.toBe(low.id);
     });
 
     it("never applies the policy of another organization", async () => {
@@ -413,11 +445,13 @@ describe.skipIf(!url)("benefit repository", () => {
 
         const ours = await profile();
 
-        expect(await repos.benefits.applyBenefitPolicy(otherOrg, foreign.id, person)).toBe(false);
-        expect(await repos.benefits.applyBenefitPolicy(otherOrg, ours, person)).toBe(false);
-        expect(await repos.benefits.applyBenefitPolicy(defaultOrgId, foreign.id, person)).toBe(
+        expect(await repos.benefits.applyBenefitPolicy(otherOrg, foreign.id, person, today)).toBe(
           false,
         );
+        expect(await repos.benefits.applyBenefitPolicy(otherOrg, ours, person, today)).toBe(false);
+        expect(
+          await repos.benefits.applyBenefitPolicy(defaultOrgId, foreign.id, person, today),
+        ).toBe(false);
         expect(await db.select().from(benefitAssignments)).toEqual([]);
       } finally {
         await db.delete(talentProfiles).where(eq(talentProfiles.orgId, otherOrg));
@@ -425,7 +459,7 @@ describe.skipIf(!url)("benefit repository", () => {
       }
     });
 
-    it("reads the person of a case within its organization", async () => {
+    it("finds the person of a case only while the org has a policy and the profile has no row", async () => {
       const [created] = await db
         .insert(offboardingCases)
         .values({
@@ -438,8 +472,21 @@ describe.skipIf(!url)("benefit repository", () => {
         .returning({ id: offboardingCases.id });
 
       try {
-        expect(await repos.benefits.personOfCase(defaultOrgId, created.id)).toEqual(person);
-        expect(await repos.benefits.personOfCase(crypto.randomUUID(), created.id)).toBeUndefined();
+        const profileId = await profile();
+        const pending = () => repos.benefits.pendingPerson(defaultOrgId, created.id, profileId);
+
+        expect(await pending()).toBeUndefined();
+
+        await policy();
+
+        expect(await pending()).toEqual(person);
+        expect(
+          await repos.benefits.pendingPerson(crypto.randomUUID(), created.id, profileId),
+        ).toBeUndefined();
+
+        await repos.benefits.applyBenefitPolicy(defaultOrgId, profileId, person, today);
+
+        expect(await pending()).toBeUndefined();
       } finally {
         await db.delete(offboardingCases).where(eq(offboardingCases.id, created.id));
       }

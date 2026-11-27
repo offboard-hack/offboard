@@ -17,7 +17,7 @@ const fold = (text: string) =>
   text.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("pt-BR");
 
 export function matchesBenefitRule(rule: RuleCondition, person: Person) {
-  const personValue = person[rule.field];
+  const personValue = person[rule.field].trim();
   const equals = personValue.localeCompare(rule.value, "pt-BR", { sensitivity: "base" }) === 0;
 
   if (rule.operator === "equals") return equals;

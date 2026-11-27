@@ -162,27 +162,25 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     return "sent";
   };
 
-  async function applyCaseBenefit(orgId: string, caseId: string, profileId: string) {
-    const person = await repos.benefits.personOfCase(orgId, caseId);
+  async function applyCaseBenefit(orgId: string, caseId: string, profileId: string, at: Date) {
+    const person = await repos.benefits.pendingPerson(orgId, caseId, profileId);
 
-    if (person) await repos.benefits.applyBenefitPolicy(orgId, profileId, person);
+    if (person) await repos.benefits.applyBenefitPolicy(orgId, profileId, person, saoPauloDate(at));
   }
 
   const accessGranted: AccessGranted = async (orgId, caseId) => {
     try {
       const profile = await repos.talent.findByCase(orgId, caseId);
 
-      if (profile) await applyCaseBenefit(orgId, caseId, profile.id);
+      if (profile) await applyCaseBenefit(orgId, caseId, profile.id, new Date());
     } catch {
       console.error({ event: "benefit.apply_failed" });
     }
   };
 
-  const collaboratorBridged = async (me: TalentProfile, caseId: string) => {
+  const collaboratorBridged = async (me: TalentProfile, caseId: string, at: Date) => {
     try {
-      const covered = await repos.benefits.getEffectiveBenefit(me.id, saoPauloDate(new Date()));
-
-      if (!covered) await applyCaseBenefit(me.orgId, caseId, me.id);
+      await applyCaseBenefit(me.orgId, caseId, me.id, at);
     } catch {
       console.error({ event: "benefit.apply_failed" });
     }

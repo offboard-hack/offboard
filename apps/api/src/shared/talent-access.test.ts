@@ -53,7 +53,7 @@ function build(options: {
   employee?: () => Promise<EmployeePrincipal | null>;
   ensured?: TalentProfile | "email_taken";
   ensure?: (principal: { caseId: string; name: string; email: string }, at: Date) => void;
-  bridged?: (me: TalentProfile, caseId: string) => void;
+  bridged?: (me: TalentProfile, caseId: string, at: Date) => void;
 }) {
   const auth: PortalAuth = {
     handler: async () => new Response(),
@@ -84,7 +84,7 @@ function build(options: {
         },
         individualPlan: async () => options.individual ?? null,
         collaboratorBridged: options.bridged
-          ? async (me, caseId) => options.bridged?.(me, caseId)
+          ? async (me, caseId, at) => options.bridged?.(me, caseId, at)
           : undefined,
         benefitPlan: "benefit" in options ? async () => options.benefit ?? null : undefined,
         now: options.realClock ? undefined : () => now,
@@ -366,11 +366,11 @@ describe("talentAccess", () => {
     const response = await build({
       access: { kind: "forbidden" },
       employee: async () => collaborator,
-      bridged: (me, caseId) => bridged.push(`${me.id}:${caseId}`),
+      bridged: (me, caseId, at) => bridged.push(`${me.id}:${caseId}:${at.toISOString()}`),
     }).handle(new Request("http://localhost/active"));
 
     expect(response.status).toBe(200);
-    expect(bridged).toEqual(["t9:c9"]);
+    expect(bridged).toEqual([`t9:c9:${now.toISOString()}`]);
   });
 
   it("does not hand over a collaborator whose email is taken", async () => {

@@ -8204,6 +8204,30 @@ describe.skipIf(!url)("api", () => {
         });
       });
 
+      it("leaves a live assignment from the old policy alone when the policy and email change", async () => {
+        const { low, high } = await policyPlans();
+        const caseId = await importedCase();
+        const plan = emptyEmployeePlan;
+
+        await enabledProfile(caseId);
+        await access(caseId, "PUT", { email: "one@example.com", plan, revision: 0 });
+
+        const [first] = await assignmentsOf(caseId);
+
+        expect(first).toMatchObject({ source: "rule", planId: high });
+
+        await repos.benefits.savePolicy(defaultOrgId, {
+          defaultPlanId: low,
+          benefitDurationMonths: 12,
+          rules: [],
+        });
+
+        expect(
+          (await access(caseId, "PUT", { email: "two@example.com", plan, revision: 1 })).status,
+        ).toBe(200);
+        expect(await assignmentsOf(caseId)).toEqual([first]);
+      });
+
       it("keeps a manual assignment and leaves cases without a profile alone", async () => {
         const { low } = await policyPlans();
         const caseId = await importedCase();
@@ -11456,6 +11480,29 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         expect(await benefitOf(caseId)).toMatchObject([{ validUntil: "2099-01-01" }]);
       });
 
+      it("does not renew an expired automatic assignment on later requests", async () => {
+        const orgId = await organization();
+        const { high } = await policyFor(orgId, "Produto");
+        const { caseId, email } = await collaboratorCase(orgId);
+        const cookie = await authenticate(email);
+
+        await request("/me", "GET", cookie);
+        await db
+          .update(benefitAssignments)
+          .set({ validUntil: "2026-01-01" })
+          .where(eq(benefitAssignments.orgId, orgId));
+        await repos.benefits.savePolicy(orgId, {
+          defaultPlanId: null,
+          benefitDurationMonths: 12,
+          rules: [],
+        });
+        await request("/me", "GET", cookie);
+
+        expect(await benefitOf(caseId)).toMatchObject([
+          { source: "rule", planId: high, validUntil: "2026-01-01" },
+        ]);
+      });
+
       it("assigns nothing without a policy or with only another organization's", async () => {
         const orgId = await organization();
         const otherOrg = await organization();
@@ -11483,7 +11530,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
             ...repos,
             benefits: {
               ...repos.benefits,
-              getEffectiveBenefit: () => Promise.reject(new Error("db down")),
+              pendingPerson: () => Promise.reject(new Error("db down")),
             },
           },
           { auth: employeeAuth, sendEmail },
