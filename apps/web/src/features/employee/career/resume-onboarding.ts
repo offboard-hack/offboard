@@ -188,6 +188,10 @@ export function tooLong(value: string | null) {
   return (value?.length ?? 0) > textLimit;
 }
 
+export function overLimit(value: string, perLine = false) {
+  return perLine ? value.split("\n").some(tooLong) : tooLong(value);
+}
+
 export function splitLines(value: string) {
   return value
     .split("\n")
