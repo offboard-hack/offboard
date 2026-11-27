@@ -4,8 +4,8 @@ import type { StaffAccessPlugin } from "../../shared/staff-access.js";
 import type { BackofficeRepository } from "./repository.js";
 
 const pageQuery = t.Object({
-  limit: t.Optional(t.Integer({ minimum: 1, maximum: 100, default: 25 })),
-  offset: t.Optional(t.Integer({ minimum: 0, default: 0 })),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: 100 })),
+  offset: t.Optional(t.Integer({ minimum: 0 })),
 });
 
 const idParams = t.Object({ id: t.String({ format: "uuid" }) });
