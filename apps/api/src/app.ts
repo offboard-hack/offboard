@@ -50,7 +50,7 @@ import { preferencesRoutes } from "./features/preferences/routes.js";
 import type { TrackingConfig } from "./features/offboardings/correios.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
-import type { DispatchAction } from "./shared/action-dispatch.js";
+import { dispatchTaskAction, type DispatchAction } from "./shared/action-dispatch.js";
 import type { ResumeContent } from "@offboard/db/schema";
 import { portalAccess } from "./shared/access.js";
 import type { GenerateStructured } from "./shared/ai.js";
@@ -128,13 +128,21 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       await options.sendEmail(
         employeeInviteEmail({ ...invitee, email: invitee.email, origin: webOrigin }),
       );
-
-      return "sent";
     } catch {
       console.error({ event: "employee.invite_failed" });
 
       return "failed";
     }
+
+    try {
+      const changes = await repos.employee.markInviteSent(orgId, caseId);
+
+      await Promise.allSettled(changes.map((change) => dispatchTaskAction(dispatchAction, change)));
+    } catch {
+      console.error({ event: "employee.invite_task_failed" });
+    }
+
+    return "sent";
   };
 
   const companyActive = async (orgId: string) =>

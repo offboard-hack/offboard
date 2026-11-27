@@ -117,6 +117,10 @@ export function createEmployeeRepository(db: Database) {
     return invitee;
   }
 
+  function markInviteSent(orgId: string, caseId: string) {
+    return db.transaction((tx) => setWorkflowTasks(tx, orgId, caseId, ["invite"], "done"));
+  }
+
   async function saveSettings(
     orgId: string,
     caseId: string,
@@ -399,6 +403,7 @@ export function createEmployeeRepository(db: Database) {
   return {
     readSettings,
     readInvitee,
+    markInviteSent,
     saveSettings,
     withAccess,
     listEquipmentReturns,

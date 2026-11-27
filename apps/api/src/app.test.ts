@@ -7779,10 +7779,19 @@ describe.skipIf(!url)("api", () => {
       return created.id;
     }
 
+    async function inviteTask(caseId: string) {
+      const found = z
+        .object({ tasks: z.array(z.object({ title: z.string(), status: z.string() })) })
+        .parse(await (await call(`/offboardings/${caseId}`)).json());
+
+      return found.tasks.find((task) => task.title === "Enviar convite do app Offboard")?.status;
+    }
+
     it("invites the employee when HR asks for it on create", async () => {
       const res = await call("/offboardings", "POST", { ...person, invite: true });
 
       expect(res.status).toBe(201);
+      expect(await inviteTask((await res.json()).id)).toBe("done");
       expect(invitedEmails).toEqual([person.email]);
       expect(sentTexts[0]).toContain("Olá, Ana.");
       expect(sentTexts[0]).toContain("Default liberou para você");
@@ -7790,7 +7799,10 @@ describe.skipIf(!url)("api", () => {
     });
 
     it("does not invite unless HR asks for it", async () => {
-      expect((await call("/offboardings", "POST", person)).status).toBe(201);
+      const created = await call("/offboardings", "POST", person);
+
+      expect(created.status).toBe(201);
+      expect(await inviteTask((await created.json()).id)).toBe("todo");
       expect(
         (await call("/offboardings", "POST", { ...person, email: "b@example.com", invite: false }))
           .status,
@@ -7804,7 +7816,7 @@ describe.skipIf(!url)("api", () => {
       const res = await call("/offboardings", "POST", { ...person, invite: true });
 
       expect(res.status).toBe(201);
-      expect((await call(`/offboardings/${(await res.json()).id}`)).status).toBe(200);
+      expect(await inviteTask((await res.json()).id)).toBe("todo");
       expect(invitedEmails).toEqual([]);
     });
 
@@ -7842,12 +7854,35 @@ describe.skipIf(!url)("api", () => {
       expect(sent.status).toBe(200);
       expect(await sent.json()).toEqual({ sent: true });
       expect(invitedEmails).toEqual([person.email]);
+      expect(await inviteTask(created.id)).toBe("done");
 
       inviteFailures.remaining = 1;
 
       expect((await access(target, "POST")).status).toBe(502);
       expect((await access(`${await importedCase()}/invite`, "POST")).status).toBe(409);
       expect((await access(`${missingCaseId}/invite`, "POST")).status).toBe(404);
+    });
+
+    it("still reports the invite as sent when the checklist task cannot be updated", async () => {
+      const created = await (await call("/offboardings", "POST", person)).json();
+
+      const failing = createApp(
+        webOrigin,
+        {
+          ...repos,
+          employee: {
+            ...repos.employee,
+            markInviteSent: () => Promise.reject(new Error("db down")),
+          },
+        },
+        { ...appOptions, auth: { ...auth, resolveEmployee: async () => null } },
+      );
+
+      const sent = await call(`/employee-access/${created.id}/invite`, "POST", undefined, failing);
+
+      expect(sent.status).toBe(200);
+      expect(invitedEmails).toEqual([person.email]);
+      expect(await inviteTask(created.id)).toBe("todo");
     });
   });
 
