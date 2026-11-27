@@ -12,18 +12,10 @@ const styles = {
   report: "grid min-w-0 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]",
   section: "grid min-w-0 content-start gap-3 rounded-2xl border bg-card p-4 sm:p-5",
   reportHeading: "text-lg font-semibold",
-  rail: "grid min-w-0 content-start gap-5",
-  stageLabel: "text-sm font-medium",
   stageValue: "text-lg font-semibold tabular-nums",
   track: "col-span-2 h-1.5 overflow-hidden bg-muted",
   bar: "h-full bg-primary",
-  outcomes: "grid gap-3 rounded-2xl border bg-card p-4 sm:p-5",
-  outcome: "flex items-baseline justify-between gap-3",
-  outcomeDetail: "border-t pt-3",
   outcomeValue: "text-xl font-semibold text-primary",
-  job: "grid gap-1 border-t py-2 text-sm font-medium",
-  caption: "text-sm font-normal text-muted-foreground",
-  privacy: "border-t py-3 text-sm text-muted-foreground",
   feedback: "grid gap-3 rounded-2xl border bg-card p-4 sm:p-5",
   topics: "mt-2 grid max-w-3xl gap-3",
   topic: "grid grid-cols-[minmax(0,1fr)_minmax(1rem,1fr)_auto] items-center gap-2 text-sm",
@@ -33,99 +25,8 @@ const styles = {
   placementCopy: "text-sm text-muted-foreground",
 };
 
-const applicationStages: (ListMetric & { axis: string; value: number })[] = [
-  {
-    label: "Candidaturas assistidas",
-    axis: "Candidaturas",
-    value: 386,
-    icon: Calendar03Icon,
-    tone: "primary",
-  },
-  {
-    label: "Com retorno da empresa",
-    axis: "Retornos",
-    value: 121,
-    icon: UserGroupIcon,
-    tone: "primary",
-  },
-  { label: "Entrevistas", axis: "Entrevistas", value: 64, icon: Calendar03Icon, tone: "warning" },
-  { label: "Ofertas", axis: "Ofertas", value: 15, icon: Tick02Icon, tone: "success" },
-];
-
-const sharedJobs = [
-  { title: "Analista de CRM", company: "Aurora" },
-  { title: "Analista de conteúdo", company: "Nexo Digital" },
-  { title: "Analista de dados", company: "Vértice Educação" },
-];
-
 function formatNps(value: number) {
   return value > 0 ? `+${value}` : String(value);
-}
-
-export function ApplicationsPage() {
-  return (
-    <ListPage
-      title="Candidaturas assistidas"
-      breadcrumb={<ListBreadcrumb title="Candidaturas assistidas" />}
-      metrics={applicationStages}
-    >
-      <div {...classProps(styles.report)}>
-        <section aria-labelledby="application-stages" {...classProps(styles.section)}>
-          <h2 id="application-stages" {...classProps(styles.reportHeading)}>
-            Do convite à oferta
-          </h2>
-          <p className="text-sm text-muted-foreground">Totais desde junho.</p>
-          <ChartContainer className="aspect-auto h-56 w-full min-w-0" aria-hidden="true">
-            <BarChart
-              data={applicationStages}
-              margin={{ top: 24, bottom: 4 }}
-              accessibilityLayer={false}
-            >
-              <XAxis dataKey="axis" axisLine={false} tickLine={false} interval={0} />
-              <Bar
-                dataKey="value"
-                fill="var(--primary)"
-                radius={[5, 5, 0, 0]}
-                isAnimationActive={false}
-                maxBarSize={56}
-              >
-                <LabelList dataKey="value" position="top" fill="var(--foreground)" />
-              </Bar>
-            </BarChart>
-          </ChartContainer>
-        </section>
-        <div {...classProps(styles.rail)}>
-          <dl {...classProps(styles.outcomes)}>
-            <div {...classProps(styles.outcome)}>
-              <dt {...classProps(styles.stageLabel)}>Recolocações autorizadas</dt>
-              <dd {...classProps(styles.stageValue, styles.outcomeValue)}>12</dd>
-            </div>
-            <div {...classProps(styles.outcome, styles.outcomeDetail)}>
-              <dt {...classProps(styles.stageLabel)}>Pessoas com acesso ao app</dt>
-              <dd {...classProps(styles.stageValue)}>48</dd>
-            </div>
-          </dl>
-          <section aria-labelledby="shared-jobs" {...classProps(styles.section)}>
-            <h2 id="shared-jobs" {...classProps(s.subheading)}>
-              Vagas compartilhadas
-            </h2>
-            <ul role="list">
-              {sharedJobs.map(({ title, company }) => (
-                <li key={title} {...classProps(styles.job)}>
-                  {title}
-                  <span {...classProps(styles.caption)}>{company}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </div>
-      </div>
-      <p {...classProps(styles.privacy)}>
-        O RH vê somente dados agregados. Currículos, candidaturas e mensagens individuais ficam
-        privados.
-      </p>
-    </ListPage>
-  );
 }
 
 export function FeedbackPage() {
