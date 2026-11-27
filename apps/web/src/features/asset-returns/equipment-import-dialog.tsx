@@ -23,15 +23,10 @@ import {
   withProblems,
   type EquipmentCsvRow,
 } from "./equipment-csv";
-import { returnMethods } from "./equipment-form";
 
 const maxBytes = 1_000_000;
 
 const templateHref = `data:text/csv;charset=utf-8,${encodeURIComponent(equipmentCsvTemplate)}`;
-
-const methodLabels = new Map<string, string>(
-  returnMethods.map(({ value, label }) => [value, label]),
-);
 
 async function readFile(file: File) {
   if (!file.name.toLowerCase().endsWith(".csv")) return { error: "Selecione um arquivo CSV." };
@@ -118,7 +113,8 @@ export function EquipmentImportDialog() {
           </DialogTitle>
           <DialogDescription>
             Use as colunas pessoa, item, patrimonio e devolucao. Em pessoa, informe o e-mail ou o
-            nome do desligamento. Em devolucao, use coleta ou escritorio.{" "}
+            nome do desligamento. Os bens voltam pelos Correios; a coluna devolucao pode ficar em
+            branco.{" "}
             <a
               href={templateHref}
               download="modelo-bens.csv"
@@ -182,7 +178,7 @@ export function EquipmentImportDialog() {
                         <td className="px-3 py-2 font-mono text-xs">{row.tag}</td>
                         <td className="px-3 py-2">
                           {row.kind === "valid" ? (
-                            <Badge variant="secondary">{methodLabels.get(row.returnMethod)}</Badge>
+                            <Badge variant="secondary">Correios</Badge>
                           ) : (
                             <span className="text-destructive">{row.issue}</span>
                           )}

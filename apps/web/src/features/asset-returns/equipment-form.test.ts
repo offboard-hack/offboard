@@ -12,7 +12,6 @@ const valid = {
   email: "",
   item: " Notebook ",
   tag: " AUR-1 ",
-  returnMethod: "pickup",
 };
 
 describe("equipmentFormSchema", () => {
@@ -22,7 +21,6 @@ describe("equipmentFormSchema", () => {
       email: "",
       item: "Notebook",
       tag: "AUR-1",
-      returnMethod: "pickup",
     });
   });
 
@@ -32,14 +30,8 @@ describe("equipmentFormSchema", () => {
     expect(result.error?.issues[0]?.message).toBe("O patrimônio não pode ter espaços.");
   });
 
-  it("accepts stock with no case, and requires a return method", () => {
+  it("accepts stock with no case", () => {
     expect(equipmentFormSchema.safeParse({ ...valid, caseId: "" }).success).toBe(true);
-
-    const result = equipmentFormSchema.safeParse({ ...valid, returnMethod: "" });
-
-    expect(result.error?.issues.map(({ message }) => message)).toEqual([
-      "Escolha como o bem volta.",
-    ]);
   });
 
   it("normalizes the e-mail and rejects an invalid one", () => {
@@ -62,11 +54,12 @@ describe("assignFormSchema", () => {
 });
 
 describe("equipmentPayload", () => {
-  const fields = { item: "Notebook", tag: "AUR-1", returnMethod: "pickup" as const };
+  const fields = { item: "Notebook", tag: "AUR-1" };
+  const sent = { ...fields, returnMethod: "pickup" };
 
   it("sends the chosen case and drops the e-mail", () => {
     expect(equipmentPayload({ ...fields, caseId: "c1", email: "ana@empresa.com" })).toEqual({
-      ...fields,
+      ...sent,
       caseId: "c1",
       email: undefined,
     });
@@ -74,7 +67,7 @@ describe("equipmentPayload", () => {
 
   it("sends the e-mail when no case is chosen", () => {
     expect(equipmentPayload({ ...fields, caseId: "", email: "ana@empresa.com" })).toEqual({
-      ...fields,
+      ...sent,
       caseId: undefined,
       email: "ana@empresa.com",
     });
@@ -82,7 +75,7 @@ describe("equipmentPayload", () => {
 
   it("sends neither for plain stock", () => {
     expect(equipmentPayload({ ...fields, caseId: "", email: "" })).toEqual({
-      ...fields,
+      ...sent,
       caseId: undefined,
       email: undefined,
     });
@@ -96,25 +89,22 @@ describe("equipmentDefaults", () => {
       email: "",
       item: "",
       tag: "",
-      returnMethod: "pickup",
     });
   });
 
   it("maps an existing item back to the form", () => {
-    const item = { caseId: "c1", title: "Monitor", code: "AUR-2", method: "office" as const };
+    const item = { caseId: "c1", title: "Monitor", code: "AUR-2" };
 
     expect(equipmentDefaults(item)).toEqual({
       caseId: "c1",
       email: "",
       item: "Monitor",
       tag: "AUR-2",
-      returnMethod: "in_person",
     });
-    expect(equipmentDefaults({ ...item, method: "pickup" }).returnMethod).toBe("pickup");
   });
 
   it("maps an item without a case to an empty case", () => {
-    const item = { caseId: null, title: "Monitor", code: "AUR-2", method: "office" as const };
+    const item = { caseId: null, title: "Monitor", code: "AUR-2" };
 
     expect(equipmentDefaults(item).caseId).toBe("");
   });

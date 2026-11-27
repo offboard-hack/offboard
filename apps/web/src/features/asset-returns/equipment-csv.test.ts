@@ -26,13 +26,13 @@ describe("parseEquipmentCsv", () => {
           item: "Monitor LG 27",
           tag: "AUR-0413",
           kind: "valid",
-          returnMethod: "in_person",
+          returnMethod: "pickup",
         },
       ],
     });
   });
 
-  it("accepts commas, accents and an empty return method", async () => {
+  it("accepts commas, accents and an empty return column", async () => {
     const result = await parseEquipmentCsv(
       "Pessoa,Item,Patrimônio,Devolução\nAna,Celular,AUR-1,\n",
     );
@@ -48,8 +48,7 @@ describe("parseEquipmentCsv", () => {
       `Ana;${"x".repeat(256)};AUR-2;coleta`,
       "Ana;Notebook;AUR 3;coleta",
       "Ana;Notebook;AUR-4;correio",
-      "Ana;Notebook;AUR-5;Entrega no escritório",
-      "Ana;Notebook;AUR-5;coleta",
+      "Ana;Notebook;AUR-4;coleta",
     ];
 
     const { rows } = await parseEquipmentCsv(lines.join("\n"));
@@ -59,7 +58,6 @@ describe("parseEquipmentCsv", () => {
       "Preencha pessoa, item e patrimônio.",
       "Use até 255 caracteres.",
       "O patrimônio não pode ter espaços.",
-      "Na devolução, use coleta ou escritorio.",
       "valid",
       "Este patrimônio aparece mais de uma vez no arquivo.",
     ]);
