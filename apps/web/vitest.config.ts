@@ -26,6 +26,7 @@ export default defineConfig({
         "src/features/employee/career/resume-onboarding.ts",
         "src/features/candidate-search/format.ts",
         "src/features/candidate-search/contact-form.ts",
+        "src/features/employee/feedback-wizard.ts",
       ],
       thresholds: { lines: 100, functions: 100, branches: 100, statements: 100 },
     },
