@@ -101,6 +101,7 @@ export function createCareerPlanRepository(db: Database) {
       .select({
         status: talentSubscriptions.status,
         currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
+        updatedAt: talentSubscriptions.updatedAt,
       })
       .from(talentSubscriptions)
       .where(eq(talentSubscriptions.profileId, profileId));
@@ -191,7 +192,13 @@ export function createCareerPlanRepository(db: Database) {
   async function startCopayCheckout(profileId: string, now: Date) {
     const [row] = await db
       .update(benefitAssignments)
-      .set({ copayCheckoutAt: now })
+      .set({
+        copayCheckoutAt: now,
+        copayCheckoutId: null,
+        copayCheckoutUrl: null,
+        copayPriceCents: null,
+        copayTargetPlanId: null,
+      })
       .where(
         and(
           eq(benefitAssignments.profileId, profileId),
@@ -208,10 +215,40 @@ export function createCareerPlanRepository(db: Database) {
     return row ?? null;
   }
 
+  async function storeCopayCheckout(
+    profileId: string,
+    checkout: { id: string; url: string; priceCents: number; targetPlanId: string },
+  ) {
+    const rows = await db
+      .update(benefitAssignments)
+      .set({
+        copayCheckoutId: checkout.id,
+        copayCheckoutUrl: checkout.url,
+        copayPriceCents: checkout.priceCents,
+        copayTargetPlanId: checkout.targetPlanId,
+      })
+      .where(
+        and(
+          eq(benefitAssignments.profileId, profileId),
+          isNull(benefitAssignments.copaySubscriptionId),
+          isNotNull(benefitAssignments.copayCheckoutAt),
+        ),
+      )
+      .returning({ id: benefitAssignments.id });
+
+    return rows.length > 0;
+  }
+
   async function releaseCopayCheckout(profileId: string) {
     await db
       .update(benefitAssignments)
-      .set({ copayCheckoutAt: null })
+      .set({
+        copayCheckoutAt: null,
+        copayCheckoutId: null,
+        copayCheckoutUrl: null,
+        copayPriceCents: null,
+        copayTargetPlanId: null,
+      })
       .where(
         and(
           eq(benefitAssignments.profileId, profileId),
@@ -229,6 +266,7 @@ export function createCareerPlanRepository(db: Database) {
     startCheckout,
     releaseCheckout,
     startCopayCheckout,
+    storeCopayCheckout,
     releaseCopayCheckout,
   };
 }

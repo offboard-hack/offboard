@@ -176,6 +176,39 @@ describe.skipIf(!url)("benefit repository", () => {
     expect(rows[0]).toMatchObject({ effectivePlanName: high.name, source: "manual" });
   });
 
+  it("voids an open co-pay checkout when the assignment changes", async () => {
+    const { low, high } = await twoPlans();
+
+    const profileId = await assign(low.id, {
+      copayCheckoutAt: new Date(),
+      copayCheckoutId: "bill_1",
+      copayCheckoutUrl: "https://pay.example/bill_1",
+      copayPriceCents: 4000,
+      copayPeriodEnd: "2027-01-01",
+      copayPaymentFailedAt: new Date(),
+      copayTargetPlanId: high.id,
+    });
+
+    await repos.benefits.upsertAssignment({
+      orgId: defaultOrgId,
+      profileId,
+      assignedPlanId: high.id,
+      effectivePlanId: high.id,
+      source: "manual",
+      validUntil: "2099-12-31",
+    });
+
+    expect(await repos.benefits.findAssignmentByProfile(profileId)).toMatchObject({
+      copayCheckoutAt: null,
+      copayCheckoutId: null,
+      copayCheckoutUrl: null,
+      copayPriceCents: null,
+      copayPeriodEnd: null,
+      copayPaymentFailedAt: null,
+      copayTargetPlanId: null,
+    });
+  });
+
   it("makes a fresh assignment immediately eligible for a co-pay checkout", async () => {
     const { low } = await twoPlans();
     const profileId = await profile();
@@ -518,7 +551,7 @@ describe.skipIf(!url)("benefit repository", () => {
 
   async function assign(
     planId: string,
-    extra: { validUntil?: string; copaySubscriptionId?: string; effectivePlanId?: string } = {},
+    extra: Partial<typeof benefitAssignments.$inferInsert> = {},
   ) {
     const profileId = await profile();
 
@@ -528,8 +561,8 @@ describe.skipIf(!url)("benefit repository", () => {
       assignedPlanId: planId,
       effectivePlanId: extra.effectivePlanId ?? planId,
       source: "manual",
+      ...extra,
       validUntil: extra.validUntil ?? "2099-12-31",
-      copaySubscriptionId: extra.copaySubscriptionId,
     });
 
     return profileId;
@@ -557,6 +590,13 @@ describe.skipIf(!url)("benefit repository", () => {
       assignedPlanId: low.id,
       effectivePlanId: low.id,
       copaySubscriptionId: "subs_1",
+      copayCheckoutId: null,
+      copayCheckoutUrl: null,
+      copayCheckoutAt: null,
+      copayPriceCents: null,
+      copayPeriodEnd: null,
+      copayPaymentFailedAt: null,
+      copayTargetPlanId: null,
       validUntil: "2099-12-31",
     });
     expect(await repos.benefits.findAssignmentByProfile(crypto.randomUUID())).toBeNull();
@@ -599,9 +639,288 @@ describe.skipIf(!url)("benefit repository", () => {
       profileId,
       assignedPlanId: low.id,
       effectivePlanId: high.id,
+      copayCheckoutId: null,
+      copayCheckoutUrl: null,
+      copayCheckoutAt: null,
+      copayPriceCents: null,
+      copayPeriodEnd: null,
+      copayPaymentFailedAt: null,
+      copayTargetPlanId: null,
       validUntil: "2099-12-31",
     });
     expect(await repos.benefits.findAssignmentBySubscription("subs_x")).toBeNull();
+  });
+
+  describe("co-pay lifecycle", () => {
+    async function bound(extra: Partial<typeof benefitAssignments.$inferInsert> = {}) {
+      const { low } = await twoPlans();
+
+      return assign(low.id, {
+        copayCheckoutAt: new Date(),
+        copayCheckoutId: "bill_1",
+        copayCheckoutUrl: "https://pay.example/bill_1",
+        copayPriceCents: 4000,
+        ...extra,
+      });
+    }
+
+    it("activates only the issued checkout and only once", async () => {
+      const { high } = await twoPlans();
+      const profileId = await bound();
+
+      const patch = {
+        effectivePlanId: high.id,
+        copaySubscriptionId: "subs_1",
+        copayPeriodEnd: "2027-01-01",
+      };
+
+      expect(await repos.benefits.activateCopay(profileId, "bill_other", patch)).toBe(false);
+      expect(await repos.benefits.activateCopay(profileId, "bill_1", patch)).toBe(true);
+      expect(
+        await repos.benefits.activateCopay(profileId, "bill_1", {
+          ...patch,
+          copaySubscriptionId: "subs_2",
+        }),
+      ).toBe(false);
+      expect(await repos.benefits.findAssignmentByProfile(profileId)).toMatchObject({
+        effectivePlanId: high.id,
+        copaySubscriptionId: "subs_1",
+        copayCheckoutId: "bill_1",
+        copayCheckoutUrl: null,
+        copayCheckoutAt: null,
+        copayPriceCents: 4000,
+        copayPeriodEnd: "2027-01-01",
+      });
+    });
+
+    it("winds down keeping the period end, and renewing brings it back", async () => {
+      const { high } = await twoPlans();
+      const profileId = await bound();
+
+      await repos.benefits.activateCopay(profileId, "bill_1", {
+        effectivePlanId: high.id,
+        copaySubscriptionId: "subs_1",
+        copayPeriodEnd: "2027-01-01",
+      });
+
+      const at = new Date("2026-11-27T12:00:00Z");
+
+      expect(await repos.benefits.windDownCopay(profileId, "subs_x", at)).toBeNull();
+      expect(await repos.benefits.windDownCopay(profileId, "subs_1", at)).toBe("2027-01-01");
+      expect(await repos.benefits.findAssignmentByProfile(profileId)).toMatchObject({
+        copayCheckoutAt: at,
+        copayPeriodEnd: "2027-01-01",
+      });
+
+      await repos.benefits.renewCopay(profileId, "subs_1", "2027-02-01");
+
+      expect(await repos.benefits.findAssignmentByProfile(profileId)).toMatchObject({
+        copayCheckoutAt: null,
+        copayPeriodEnd: "2027-02-01",
+      });
+    });
+
+    it("falls back to one month from today, capped at valid_until, without a period end", async () => {
+      const at = new Date("2026-11-27T12:00:00Z");
+      const far = await bound({ copaySubscriptionId: "subs_far", copayCheckoutAt: null });
+
+      const near = await bound({
+        copaySubscriptionId: "subs_near",
+        copayCheckoutAt: null,
+        validUntil: "2026-12-10",
+      });
+
+      expect(await repos.benefits.windDownCopay(far, "subs_far", at)).toBe("2026-12-27");
+      expect(await repos.benefits.windDownCopay(near, "subs_near", at)).toBe("2026-12-10");
+    });
+
+    it("restores the previous state only while its own marker is still there", async () => {
+      const previous = {
+        copayCheckoutAt: null,
+        copayPeriodEnd: "2027-01-01",
+        copayPaymentFailedAt: null,
+      };
+
+      const profileId = await bound({
+        copaySubscriptionId: "subs_1",
+        copayCheckoutAt: null,
+        copayPeriodEnd: "2027-01-01",
+      });
+
+      const markedAt = new Date("2026-11-27T12:00:00Z");
+
+      await repos.benefits.windDownCopay(profileId, "subs_1", markedAt);
+      await repos.benefits.restoreCopay(profileId, "subs_x", markedAt, previous);
+
+      expect((await repos.benefits.findAssignmentByProfile(profileId))?.copayCheckoutAt).toEqual(
+        markedAt,
+      );
+
+      await repos.benefits.restoreCopay(profileId, "subs_1", markedAt, previous);
+
+      expect(await repos.benefits.findAssignmentByProfile(profileId)).toMatchObject(previous);
+    });
+
+    it("does not clobber a renewal that landed after the marking", async () => {
+      const profileId = await bound({
+        copaySubscriptionId: "subs_1",
+        copayCheckoutAt: null,
+        copayPeriodEnd: "2027-01-01",
+      });
+
+      const markedAt = new Date("2026-11-27T12:00:00Z");
+
+      await repos.benefits.windDownCopay(profileId, "subs_1", markedAt);
+      await repos.benefits.renewCopay(profileId, "subs_1", "2027-02-01");
+      await repos.benefits.restoreCopay(profileId, "subs_1", markedAt, {
+        copayCheckoutAt: null,
+        copayPeriodEnd: "2027-01-01",
+        copayPaymentFailedAt: null,
+      });
+
+      expect(await repos.benefits.findAssignmentByProfile(profileId)).toMatchObject({
+        copayCheckoutAt: null,
+        copayPeriodEnd: "2027-02-01",
+      });
+    });
+
+    it("gives a failed payment four days of grace and never shortens a later period end", async () => {
+      const at = new Date("2026-11-27T12:00:00Z");
+      const { high } = await twoPlans();
+      const owned = { effectivePlanId: high.id, copayCheckoutId: "bill_1" };
+
+      const soon = await bound({
+        ...owned,
+        copaySubscriptionId: "subs_soon",
+        copayCheckoutAt: null,
+        copayPeriodEnd: "2026-11-28",
+      });
+
+      const later = await bound({
+        ...owned,
+        copaySubscriptionId: "subs_later",
+        copayCheckoutAt: null,
+        copayPeriodEnd: "2026-12-20",
+      });
+
+      const legacy = await bound({
+        ...owned,
+        copaySubscriptionId: "subs_legacy",
+        copayCheckoutAt: null,
+      });
+
+      await repos.benefits.failCopayPayment(soon, "subs_soon", at);
+      await repos.benefits.failCopayPayment(later, "subs_later", at);
+      await repos.benefits.failCopayPayment(legacy, "subs_legacy", at);
+      await repos.benefits.failCopayPayment(legacy, "subs_x", new Date("2030-01-01T00:00:00Z"));
+
+      for (const [id, end] of [
+        [soon, "2026-12-01"],
+        [later, "2026-12-20"],
+        [legacy, "2026-12-01"],
+      ]) {
+        expect(await repos.benefits.findAssignmentByProfile(id)).toMatchObject({
+          copayCheckoutAt: at,
+          copayPaymentFailedAt: at,
+          copayPeriodEnd: end,
+          effectivePlanId: high.id,
+        });
+      }
+    });
+
+    it("clears the failed-payment marker on renewal and on a user cancel", async () => {
+      const at = new Date("2026-11-27T12:00:00Z");
+      const renewed = await bound({ copaySubscriptionId: "subs_1", copayCheckoutAt: null });
+      const canceled = await bound({ copaySubscriptionId: "subs_2", copayCheckoutAt: null });
+
+      await repos.benefits.failCopayPayment(renewed, "subs_1", at);
+      await repos.benefits.failCopayPayment(canceled, "subs_2", at);
+      await repos.benefits.renewCopay(renewed, "subs_1", "2027-01-01");
+      await repos.benefits.windDownCopay(canceled, "subs_2", at);
+
+      expect(await repos.benefits.findAssignmentByProfile(renewed)).toMatchObject({
+        copayCheckoutAt: null,
+        copayPaymentFailedAt: null,
+      });
+      expect(await repos.benefits.findAssignmentByProfile(canceled)).toMatchObject({
+        copayCheckoutAt: at,
+        copayPaymentFailedAt: null,
+      });
+    });
+
+    it("reverts to the assigned plan and clears every co-pay field", async () => {
+      const { low, high } = await twoPlans();
+
+      const profileId = await bound({
+        effectivePlanId: high.id,
+        copaySubscriptionId: "subs_1",
+        copayPeriodEnd: "2027-01-01",
+        copayPaymentFailedAt: new Date(),
+        copayTargetPlanId: high.id,
+      });
+
+      await repos.benefits.revertCopay(profileId, "subs_x");
+      expect(await repos.benefits.findAssignmentByProfile(profileId)).toMatchObject({
+        copaySubscriptionId: "subs_1",
+      });
+
+      await repos.benefits.revertCopay(profileId, "subs_1");
+      expect(await repos.benefits.findAssignmentByProfile(profileId)).toMatchObject({
+        effectivePlanId: low.id,
+        copaySubscriptionId: null,
+        copayCheckoutAt: null,
+        copayCheckoutId: null,
+        copayCheckoutUrl: null,
+        copayPriceCents: null,
+        copayPeriodEnd: null,
+        copayPaymentFailedAt: null,
+        copayTargetPlanId: null,
+      });
+    });
+
+    it("sweeps expired benefits and wound-down co-pays past their period end, only", async () => {
+      const { high } = await twoPlans();
+      const owned = { effectivePlanId: high.id, copayCheckoutId: "bill_1" };
+
+      const expired = await bound({
+        ...owned,
+        copaySubscriptionId: "subs_expired",
+        validUntil: "2000-01-01",
+      });
+
+      const canceled = await bound({
+        ...owned,
+        copaySubscriptionId: "subs_canceled",
+        copayPeriodEnd: "2026-11-26",
+      });
+
+      const failedWithoutEnd = await bound({
+        ...owned,
+        copaySubscriptionId: "subs_failed",
+        validUntil: "2026-11-26",
+      });
+
+      await bound({
+        ...owned,
+        copaySubscriptionId: "subs_future",
+        copayPeriodEnd: "2026-11-27",
+      });
+      await bound({
+        ...owned,
+        copaySubscriptionId: "subs_healthy",
+        copayCheckoutAt: null,
+        copayPeriodEnd: "2026-11-26",
+      });
+      await bound({ copaySubscriptionId: null });
+      await bound({ ...owned, copaySubscriptionId: "subs_legacy" });
+
+      const rows = await repos.benefits.expiredCopays("2026-11-27", 10);
+
+      expect(rows.map((row) => row.profileId).sort()).toEqual(
+        [expired, canceled, failedWithoutEnd].sort(),
+      );
+      expect(await repos.benefits.expiredCopays("2026-11-27", 1)).toHaveLength(1);
+    });
   });
 
   it("tallies active assignments by assigned plan price", async () => {

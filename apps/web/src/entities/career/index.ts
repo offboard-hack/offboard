@@ -372,6 +372,22 @@ export function useCopayCheckout(account: EmployeeAccount) {
   });
 }
 
+export function useCancelCopay(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    async mutationFn() {
+      const result = await client().plan["copay-cancel"].post(undefined, {
+        headers: employeeAccessHeaders(account),
+      });
+
+      await queryClient.invalidateQueries({ queryKey: careerPlanQuery(account).queryKey });
+
+      return settle(result, "Não foi possível cancelar o upgrade agora. Tente de novo.");
+    },
+  });
+}
+
 export function useCancelCareerPro(account: EmployeeAccount) {
   const queryClient = useQueryClient();
 

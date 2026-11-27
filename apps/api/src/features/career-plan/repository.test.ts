@@ -245,6 +245,7 @@ describe.skipIf(!url)("career plan repository", () => {
     expect(await repos.careerPlan.individual(profileId)).toEqual({
       status: "active",
       currentPeriodEnd: "2027-01-01",
+      updatedAt: now,
     });
   });
 
