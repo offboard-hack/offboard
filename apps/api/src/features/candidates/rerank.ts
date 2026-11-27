@@ -42,7 +42,9 @@ export function createReranker(generate: GenerateStructured) {
       system: [
         "You are a recruiter evaluating how well each candidate profile matches a search query.",
         "Score each candidate from 0 to 100 based on relevance to the query.",
-        "100 = perfect match, 0 = completely irrelevant.",
+        "Use the full range: 90-100 for strong matches, 50-89 for partial, below 50 for weak.",
+        "A candidate whose job title or core skill directly answers the query deserves 90+.",
+        "Match across languages: a query in Portuguese matches an English profile and vice-versa.",
         "Consider job titles, skills, experience descriptions, and semantic meaning.",
         "Return scores for every candidate ID provided.",
       ].join(" "),
