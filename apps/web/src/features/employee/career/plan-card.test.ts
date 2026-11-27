@@ -13,7 +13,8 @@ import {
 const base: CareerPlan = {
   company: { name: "Platinum Premium", includesAiApply: true, sponsoredUntil: "2027-03-10" },
   individual: null,
-  aiApply: { allowedBy: "company" },
+  benefit: null,
+  aiApply: { allowedBy: "company", dailyLimit: 10 },
   upgrade: { offered: true, priceCents: 7900, dailyLimit: 10 },
 };
 
@@ -36,6 +37,12 @@ describe("plan card view", () => {
       statusNote: null,
       upgrade: "hidden",
       upgradeLabel: "Fazer upgrade · R$ 79/mês",
+      benefitLine: null,
+      benefitExpiring: false,
+      benefitExpiryWarning: null,
+      activeBenefit: null,
+      showComparison: false,
+      aiApplyLine: "10 candidaturas/dia com IA",
     });
   });
 
@@ -51,7 +58,7 @@ describe("plan card view", () => {
     const plan: CareerPlan = {
       ...base,
       company: { name: null, includesAiApply: false, sponsoredUntil: "2027-03-10" },
-      aiApply: { allowedBy: null },
+      aiApply: { allowedBy: null, dailyLimit: 0 },
     };
 
     expect(planCardView(plan, today, false)).toMatchObject({
@@ -65,7 +72,7 @@ describe("plan card view", () => {
   it("marks the upgrade unavailable when billing is not offered", () => {
     const plan: CareerPlan = {
       ...base,
-      aiApply: { allowedBy: null },
+      aiApply: { allowedBy: null, dailyLimit: 0 },
       upgrade: { ...base.upgrade, offered: false },
     };
 
@@ -75,7 +82,7 @@ describe("plan card view", () => {
   it("shows Carreira Pro and hides the upgrade when it is active", () => {
     const plan: CareerPlan = {
       ...base,
-      aiApply: { allowedBy: "individual" },
+      aiApply: { allowedBy: "individual", dailyLimit: 10 },
       individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-12-26" },
     };
 
@@ -95,11 +102,11 @@ describe("plan card view", () => {
   it("hides the upgrade while a checkout is in flight and offers it again once the API allows a retry", () => {
     const pending: CareerPlan = {
       ...base,
-      aiApply: { allowedBy: null },
+      aiApply: { allowedBy: null, dailyLimit: 0 },
       individual: { plan: "carreira-pro", status: "pending", currentPeriodEnd: null },
     };
 
-    const none: CareerPlan = { ...base, aiApply: { allowedBy: null } };
+    const none: CareerPlan = { ...base, aiApply: { allowedBy: null, dailyLimit: 0 } };
 
     const inFlight: CareerPlan = { ...pending, upgrade: { ...base.upgrade, offered: false } };
 
@@ -143,7 +150,7 @@ describe("plan card view", () => {
   it("explains a past-due Carreira Pro instead of offering the upgrade", () => {
     const plan: CareerPlan = {
       ...base,
-      aiApply: { allowedBy: null },
+      aiApply: { allowedBy: null, dailyLimit: 0 },
       individual: { plan: "carreira-pro", status: "past_due", currentPeriodEnd: "2026-11-01" },
     };
 
@@ -170,5 +177,156 @@ describe("plan card view", () => {
     expect(shouldPollPlan(undefined, today)).toBe(true);
     expect(shouldPollPlan(pending, today)).toBe(true);
     expect(shouldPollPlan(active, today)).toBe(false);
+  });
+});
+
+const benefitBase: CareerPlan = {
+  company: { name: "Gold", includesAiApply: false, sponsoredUntil: "2027-03-10" },
+  individual: null,
+  benefit: {
+    planName: "Gold",
+    aiApplyDailyLimit: 3,
+    aiApplyPriority: false,
+    detailedScore: true,
+    validUntil: "2027-06-15",
+    source: "rule",
+  },
+  aiApply: { allowedBy: "benefit", dailyLimit: 3 },
+  upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
+};
+
+const withValidUntil = (validUntil: string) =>
+  ({
+    ...benefitBase,
+    benefit: { ...benefitBase.benefit!, validUntil },
+  }) satisfies CareerPlan;
+
+describe("plan card benefit view", () => {
+  it("shows benefit tier with sponsorship line", () => {
+    expect(planCardView(benefitBase, today, false)).toMatchObject({
+      benefitLine: "Gold · Patrocinado pela empresa até 15/06/2027",
+      benefitExpiring: false,
+      benefitExpiryWarning: null,
+      aiApplyLine: "3 candidaturas/dia com IA",
+      upgrade: "hidden",
+    });
+  });
+
+  it("shows expiry warning when benefit expires within 30 days", () => {
+    const view = planCardView(withValidUntil("2026-12-20"), today, false);
+
+    expect(view).toMatchObject({
+      benefitExpiring: true,
+      benefitExpiryWarning: "Seu benefício expira em 24 dias. Faça upgrade para manter o acesso.",
+      upgrade: "unavailable",
+    });
+    expect(planCardView(withValidUntil("2026-11-27"), today, false).benefitExpiryWarning).toBe(
+      "Seu benefício expira em 1 dia. Faça upgrade para manter o acesso.",
+    );
+  });
+
+  it("does not offer the upgrade for an expiring benefit when Carreira Pro is active", () => {
+    const plan: CareerPlan = {
+      ...withValidUntil("2026-12-20"),
+      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+    };
+
+    expect(planCardView(plan, today, false).upgrade).toBe("hidden");
+  });
+
+  it("hides benefit UI when benefit is lapsed", () => {
+    expect(planCardView(withValidUntil("2026-11-25"), today, false)).toMatchObject({
+      benefitLine: null,
+      benefitExpiring: false,
+      benefitExpiryWarning: null,
+    });
+  });
+
+  it("shows benefit and Carreira Pro together", () => {
+    const plan: CareerPlan = {
+      ...benefitBase,
+      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2027-01-15" },
+      aiApply: { allowedBy: "individual", dailyLimit: 10 },
+    };
+
+    const view = planCardView(plan, today, false);
+
+    expect(view.benefitLine).not.toBeNull();
+    expect(view.proLine).not.toBeNull();
+    expect(view.benefitLine).toBe("Gold · Patrocinado + upgrade pessoal");
+  });
+
+  it("falls back when allowedBy is benefit but benefit field is null", () => {
+    expect(planCardView({ ...benefitBase, benefit: null }, today, false).benefitLine).toBeNull();
+  });
+
+  it("shows priority badge text for Platinum Premium benefit", () => {
+    const plan: CareerPlan = {
+      ...benefitBase,
+      benefit: { ...benefitBase.benefit!, aiApplyPriority: true, aiApplyDailyLimit: 25 },
+      aiApply: { allowedBy: "benefit", dailyLimit: 25 },
+    };
+
+    expect(planCardView(plan, today, false).aiApplyLine).toBe(
+      "25 candidaturas/dia com IA · prioridade",
+    );
+  });
+
+  it("omits the priority text when the benefit is lapsed and says so when there is no AI apply", () => {
+    const lapsed: CareerPlan = {
+      ...withValidUntil("2026-11-25"),
+      benefit: { ...benefitBase.benefit!, validUntil: "2026-11-25", aiApplyPriority: true },
+    };
+
+    expect(planCardView(lapsed, today, false).aiApplyLine).toBe("3 candidaturas/dia com IA");
+    expect(
+      planCardView({ ...benefitBase, aiApply: { allowedBy: null, dailyLimit: 0 } }, today, false)
+        .aiApplyLine,
+    ).toBe("Sem candidatura com IA");
+  });
+
+  it("drops the upgrade prompt from the expiry warning when Carreira Pro is active", () => {
+    const plan: CareerPlan = {
+      ...withValidUntil("2026-12-20"),
+      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+    };
+
+    expect(planCardView(plan, today, false).benefitExpiryWarning).toBe(
+      "Seu benefício expira em 24 dias.",
+    );
+  });
+
+  it("exposes the active benefit and hides the comparison when the benefit is lapsed", () => {
+    const view = planCardView(withValidUntil("2026-11-25"), today, false);
+
+    expect(view.activeBenefit).toBeNull();
+    expect(view.showComparison).toBe(false);
+  });
+
+  it("shows the comparison for an active benefit without Carreira Pro", () => {
+    const view = planCardView(benefitBase, today, false);
+
+    expect(view.activeBenefit).toBe(benefitBase.benefit);
+    expect(view.showComparison).toBe(true);
+  });
+
+  it("hides the comparison when Carreira Pro matches or exceeds the benefit tier", () => {
+    const plan: CareerPlan = {
+      ...benefitBase,
+      benefit: { ...benefitBase.benefit!, planName: "Silver", aiApplyDailyLimit: 0 },
+      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+    };
+
+    expect(planCardView(plan, today, false).showComparison).toBe(false);
+  });
+
+  it("keeps the comparison when the benefit tier beats Carreira Pro", () => {
+    const plan: CareerPlan = {
+      ...benefitBase,
+      benefit: { ...benefitBase.benefit!, planName: "Platinum Premium", aiApplyDailyLimit: 25 },
+      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+    };
+
+    expect(planCardView(plan, today, false).showComparison).toBe(true);
   });
 });
