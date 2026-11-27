@@ -35,6 +35,7 @@ describe("plan card view", () => {
       sponsorLine: "Patrocinado pela empresa até 10/03/2027",
       proLine: null,
       paymentNote: false,
+      copayPaymentNote: false,
       statusNote: null,
       upgrade: "hidden",
       upgradeLabel: "Fazer upgrade · R$ 79/mês",
@@ -181,6 +182,20 @@ describe("plan card view", () => {
     expect(shouldPollPlan(undefined, today)).toBe(true);
     expect(shouldPollPlan(pending, today)).toBe(true);
     expect(shouldPollPlan(active, today)).toBe(false);
+  });
+
+  it("polls after a co-pay payment until the co-pay is active", () => {
+    const copay = {
+      offered: false,
+      targetPlanId: "x",
+      targetPlanName: "Platinum",
+      priceCents: 3000,
+    };
+
+    expect(shouldPollPlan(undefined, today, true)).toBe(true);
+    expect(shouldPollPlan(base, today, true)).toBe(true);
+    expect(shouldPollPlan({ ...base, copay: { ...copay, active: false } }, today, true)).toBe(true);
+    expect(shouldPollPlan({ ...base, copay: { ...copay, active: true } }, today, true)).toBe(false);
   });
 });
 
@@ -351,6 +366,19 @@ describe("co-pay button", () => {
       copayLabel: "Upgrade para Platinum · R$ 30/mês",
       copayActiveLabel: null,
     });
+  });
+
+  it("shows the co-pay payment note until the co-pay is active", () => {
+    const active = { ...copay, offered: false, active: true };
+
+    expect(planCardView({ ...benefitBase, copay }, today, false, true).copayPaymentNote).toBe(true);
+    expect(
+      planCardView({ ...benefitBase, copay: active }, today, false, true).copayPaymentNote,
+    ).toBe(false);
+    expect(planCardView(benefitBase, today, false, true).copayPaymentNote).toBe(true);
+    expect(planCardView({ ...benefitBase, copay }, today, false, false).copayPaymentNote).toBe(
+      false,
+    );
   });
 
   it("hides co-pay button when not offered", () => {

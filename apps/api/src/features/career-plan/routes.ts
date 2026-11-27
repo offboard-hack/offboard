@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 import { careerPro } from "../../shared/career-pro.js";
 import { logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
+import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
 import type { CareerPlanRepository } from "./repository.js";
 
@@ -78,6 +79,7 @@ type CopayBenefits = {
     assignedPlanId: string;
     effectivePlanId: string;
     copaySubscriptionId: string | null;
+    validUntil: string;
   } | null>;
   getCopayProduct(
     fromPlanId: string,
@@ -102,20 +104,20 @@ export function careerPlanRoutes(
   async function copayOf(profileId: string) {
     const assignment = await benefits.findAssignmentByProfile(profileId);
 
-    if (!assignment) return null;
+    if (!assignment || assignment.validUntil < saoPauloDate(new Date())) return null;
 
     const active = assignment.copaySubscriptionId !== null;
 
     if (active) {
       const prices = await benefits.planPriceMap();
       const names = await benefits.planNameMap();
-      const effectivePrice = prices.get(assignment.effectivePlanId) ?? 0;
-      const assignedPrice = prices.get(assignment.assignedPlanId) ?? 0;
+      const effectivePrice = prices.get(assignment.effectivePlanId)!;
+      const assignedPrice = prices.get(assignment.assignedPlanId)!;
 
       return {
         offered: false,
         targetPlanId: assignment.effectivePlanId,
-        targetPlanName: names.get(assignment.effectivePlanId) ?? "",
+        targetPlanName: names.get(assignment.effectivePlanId)!,
         priceCents: effectivePrice - assignedPrice,
         active: true,
       };
@@ -228,7 +230,7 @@ export function careerPlanRoutes(
             externalId: `copay:${me.id}:${body.targetPlanId}`,
             planSlug: product.abacatePayProductId,
             returnUrl: careerScreen,
-            completionUrl: `${careerScreen}&plano=ok`,
+            completionUrl: `${careerScreen}&copay=ok`,
           });
 
           return { url: checkout.url };

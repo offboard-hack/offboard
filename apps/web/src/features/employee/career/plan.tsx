@@ -9,6 +9,7 @@ import { EmployeeError, EmployeePanel } from "../ui";
 import { featureComparisonView, type TierFeatures } from "./benefit-features";
 import {
   type CareerPlan,
+  copayPaymentReceivedNote,
   paymentReceivedNote,
   planCardView,
   planPollInterval,
@@ -23,7 +24,15 @@ const dayFormat = new Intl.DateTimeFormat("en-CA", {
   timeZone: brazilTimezone,
 });
 
-export function PlanSection({ account, paid }: { account: EmployeeAccount; paid: boolean }) {
+export function PlanSection({
+  account,
+  paid,
+  copayPaid,
+}: {
+  account: EmployeeAccount;
+  paid: boolean;
+  copayPaid: boolean;
+}) {
   const checkout = useUpgradeCheckout(account);
   const copayCheckout = useCopayCheckout(account);
   const [openedAt] = useState(() => Date.now());
@@ -32,7 +41,9 @@ export function PlanSection({ account, paid }: { account: EmployeeAccount; paid:
   const plan = useQuery({
     ...careerPlanQuery(account),
     refetchInterval: (query) =>
-      paid && Date.now() - openedAt < planPollTimeout && shouldPollPlan(query.state.data, today)
+      (paid || copayPaid) &&
+      Date.now() - openedAt < planPollTimeout &&
+      shouldPollPlan(query.state.data, today, !paid)
         ? planPollInterval
         : false,
   });
@@ -46,6 +57,7 @@ export function PlanSection({ account, paid }: { account: EmployeeAccount; paid:
       plan={plan.data}
       today={today}
       paid={paid}
+      copayPaid={copayPaid}
       upgrading={checkout.isPending || checkout.isSuccess}
       copaying={copayCheckout.isPending || copayCheckout.isSuccess}
       error={checkout.error?.message ?? copayCheckout.error?.message}
@@ -82,6 +94,7 @@ export function PlanCard({
   plan,
   today,
   paid,
+  copayPaid,
   upgrading,
   copaying,
   error,
@@ -91,13 +104,14 @@ export function PlanCard({
   plan: CareerPlan;
   today: string;
   paid: boolean;
+  copayPaid: boolean;
   upgrading: boolean;
   copaying: boolean;
   error?: string;
   onUpgrade: () => void;
   onCopay: (targetPlanId: string) => void;
 }) {
-  const view = planCardView(plan, today, paid);
+  const view = planCardView(plan, today, paid, copayPaid);
   const { copay } = plan;
   const comparison = view.showComparison ? featureComparisonView(view.activeBenefit) : null;
 
@@ -133,6 +147,11 @@ export function PlanCard({
       {view.paymentNote ? (
         <p role="status" className="text-sm">
           {paymentReceivedNote}
+        </p>
+      ) : null}
+      {view.copayPaymentNote ? (
+        <p role="status" className="text-sm">
+          {copayPaymentReceivedNote}
         </p>
       ) : null}
       {view.statusNote ? <p className="text-sm text-destructive">{view.statusNote}</p> : null}

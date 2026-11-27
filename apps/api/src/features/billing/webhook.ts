@@ -242,14 +242,20 @@ async function applyCopayEvent(
   const owned = assignment.copaySubscriptionId === providerSubscriptionId;
 
   if (name === "subscription.completed" && targetPlanId) {
+    if (assignment.copaySubscriptionId !== null) return;
+
     const prices = await benefits.planPriceMap();
 
-    if (prices.get(targetPlanId)! > prices.get(assignment.effectivePlanId)!) {
-      await benefits.updateCopayState(profileId, {
-        effectivePlanId: targetPlanId,
-        copaySubscriptionId: providerSubscriptionId,
-      });
+    if (!(prices.get(targetPlanId)! > prices.get(assignment.effectivePlanId)!)) {
+      await gateway.cancelSubscription(providerSubscriptionId);
+
+      return;
     }
+
+    await benefits.updateCopayState(profileId, {
+      effectivePlanId: targetPlanId,
+      copaySubscriptionId: providerSubscriptionId,
+    });
 
     return;
   }
@@ -269,7 +275,10 @@ async function applyCopayEvent(
     assignment.validUntil < saoPauloDate(new Date())
   ) {
     await gateway.cancelSubscription(providerSubscriptionId);
-    await benefits.updateCopayState(profileId, { copaySubscriptionId: null });
+    await benefits.updateCopayState(profileId, {
+      effectivePlanId: assignment.assignedPlanId,
+      copaySubscriptionId: null,
+    });
 
     return;
   }

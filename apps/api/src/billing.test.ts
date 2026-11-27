@@ -1579,14 +1579,23 @@ describe.skipIf(!url)("billing", () => {
       });
     });
 
-    it("subscription.completed is noop when HR already upgraded", async () => {
+    it("cancels subscription when target is already below effective plan", async () => {
       await assign({ effectivePlanId: platinumId });
       await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
 
+      expect(cancelled).toEqual(["subs_1"]);
       expect(await assignment()).toMatchObject({
         effectivePlanId: platinumId,
         copaySubscriptionId: null,
       });
+    });
+
+    it("ignores a completed event when another subscription is already attached", async () => {
+      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_2" });
+      await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
+
+      expect(cancelled).toEqual([]);
+      expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_2" });
     });
 
     it("ignores events for unknown profiles and malformed ids", async () => {
@@ -1633,7 +1642,10 @@ describe.skipIf(!url)("billing", () => {
       await copayWebhook("subscription.renewed", `copay:${profileId}:${platinumId}`);
 
       expect(cancelled).toEqual(["subs_1"]);
-      expect(await assignment()).toMatchObject({ copaySubscriptionId: null });
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: goldId,
+        copaySubscriptionId: null,
+      });
     });
 
     it("renewal within validity is noop", async () => {

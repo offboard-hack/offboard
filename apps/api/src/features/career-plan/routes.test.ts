@@ -536,6 +536,16 @@ describe.skipIf(!url)("career plan route", () => {
       });
     });
 
+    it("reports no co-pay once the benefit assignment has expired", async () => {
+      const profileId = await profile("2099-12-31");
+
+      await assigned(profileId);
+      await registered("gold", "platinum");
+      await db.update(benefitAssignments).set({ validUntil: "2020-01-01" });
+
+      expect((await (await get(profileId)).json()).copay).toBeNull();
+    });
+
     it("does not offer the co-pay when billing is not configured", async () => {
       const profileId = await profile("2099-12-31");
 
@@ -562,7 +572,7 @@ describe.skipIf(!url)("career plan route", () => {
           externalId: `copay:${profileId}:${await planId("platinum")}`,
           planSlug: "prod_gold_platinum",
           returnUrl: `${webOrigin}/colaborador?tela=carreira`,
-          completionUrl: `${webOrigin}/colaborador?tela=carreira&plano=ok`,
+          completionUrl: `${webOrigin}/colaborador?tela=carreira&copay=ok`,
         },
       ]);
     });

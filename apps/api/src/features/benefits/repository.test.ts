@@ -176,6 +176,23 @@ describe.skipIf(!url)("benefit repository", () => {
     expect(rows[0]).toMatchObject({ effectivePlanName: high.name, source: "manual" });
   });
 
+  it("makes a fresh assignment immediately eligible for a co-pay checkout", async () => {
+    const { low } = await twoPlans();
+    const profileId = await profile();
+
+    await repos.benefits.upsertAssignment({
+      orgId: defaultOrgId,
+      profileId,
+      assignedPlanId: low.id,
+      effectivePlanId: low.id,
+      source: "default",
+      validUntil: "2099-12-31",
+    });
+
+    expect(await repos.careerPlan.startCopayCheckout(profileId, new Date())).not.toBeNull();
+    expect(await repos.careerPlan.startCopayCheckout(profileId, new Date())).toBeNull();
+  });
+
   it("returns null benefit when there is no assignment", async () => {
     expect(await repos.benefits.getEffectiveBenefit(await profile(), "2026-11-26")).toBeNull();
   });

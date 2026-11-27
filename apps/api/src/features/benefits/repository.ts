@@ -100,7 +100,7 @@ export function createBenefitRepository(db: Database) {
   async function upsertAssignment(input: AssignmentInput) {
     const [row] = await db
       .insert(benefitAssignments)
-      .values(input)
+      .values({ ...input, updatedAt: new Date(0) })
       .onConflictDoUpdate({
         target: benefitAssignments.profileId,
         set: {
