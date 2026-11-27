@@ -7,10 +7,10 @@ import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { Switch } from "@/shared/ui/shadcn/switch";
 import { EmployeeError, EmployeePanel } from "../ui";
 
-export const searchableLabel = "Deixar recrutadores me encontrarem";
+export const searchableLabel = "Aparecer na busca pública de candidatos";
 
 export const searchableHint =
-  "Quando ligado, recrutadores podem encontrar seu currículo pela busca. Você pode desligar quando quiser em Preferências.";
+  "Qualquer pessoa pode encontrar seu nome, cargo, cidade, experiências, competências e idiomas na busca de candidatos da Offboard. E-mail, telefone e links ficam ocultos. Você pode desligar quando quiser em Preferências.";
 
 export function SearchableSwitch({
   checked,

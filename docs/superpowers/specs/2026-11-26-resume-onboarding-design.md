@@ -44,7 +44,7 @@ Samuel, 2026-11-26: the landing page gets a public people search so visitors can
 
 ## Being found by recruiters
 
-Samuel, 2026-11-26: real résumés can be found only by people who opt in. The switch appears in the review step of the résumé import and stays in Preferências. A recruiter or HR account to run the search comes later.
+Samuel, 2026-11-26: real résumés can be found only by people who opt in. The switch appears in the review step of the résumé import and stays in Preferências. Samuel then dropped the planned HR account: the search is a public page, `/busca-candidato`, so the switch says the profile becomes public.
 
 - `talent_profiles.searchable_at` holds when the person opted in and is null when they have not. It is off by default. The data export includes it.
 - `PUT /me/search-consent { searchable }` sets or clears it and returns `/me`, which now carries `searchable`.
