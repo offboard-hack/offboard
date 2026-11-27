@@ -81,7 +81,7 @@ export async function updateEquipmentReceipt({
   caseId,
   code,
   received,
-}: Pick<EquipmentReturn, "caseId" | "code" | "received">) {
+}: Pick<EquipmentReturn, "code" | "received"> & { caseId: string }) {
   const { data, error } = await getApiClient()
     .api["equipment-returns"]({ caseId })
     .receipt.patch({ code, received });
@@ -100,7 +100,8 @@ export class EquipmentChangeError extends Error {
 }
 
 type EquipmentInput = {
-  caseId: string;
+  caseId?: string;
+  email?: string;
   item: string;
   tag: string;
   returnMethod: "pickup" | "in_person";
@@ -116,9 +117,20 @@ function useEquipmentChange<Variables>(change: (variables: Variables) => Promise
 }
 
 export function useSaveEquipment(id?: string) {
-  return useEquipmentChange(async ({ caseId, ...fields }: EquipmentInput) => {
+  return useEquipmentChange(async ({ caseId, email, ...fields }: EquipmentInput) => {
     const api = getApiClient().api.equipment;
-    const { error } = id ? await api({ id }).patch(fields) : await api.post({ caseId, ...fields });
+
+    const { error } = id
+      ? await api({ id }).patch(fields)
+      : await api.post({ caseId, email, ...fields });
+
+    if (error) throw new EquipmentChangeError(equipmentFailure.safeParse(error.value).data?.error);
+  });
+}
+
+export function useAssignEquipment(id: string) {
+  return useEquipmentChange(async (email: string) => {
+    const { error } = await getApiClient().api.equipment({ id }).assign.post({ email });
 
     if (error) throw new EquipmentChangeError(equipmentFailure.safeParse(error.value).data?.error);
   });
@@ -147,7 +159,7 @@ export class EquipmentImportError extends Error {
   }
 }
 
-type ImportedEquipment = Omit<EquipmentInput, "caseId"> & { person: string };
+type ImportedEquipment = Omit<EquipmentInput, "caseId" | "email"> & { person: string };
 
 export function useImportEquipment() {
   return useEquipmentChange(async (rows: ImportedEquipment[]) => {

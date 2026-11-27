@@ -76,6 +76,7 @@ import {
   type Embed,
 } from "./shared/embed.js";
 import { renderResumePdf } from "./shared/resume-pdf.js";
+import type { Captcha } from "./shared/turnstile.js";
 import { secretBox } from "./shared/secret-box.js";
 import { defaultSlackApiUrl } from "./shared/slack.js";
 
@@ -86,6 +87,9 @@ const embedJobsLimit = 100;
 const embedBatch = 20;
 const embedSubject = "jobs";
 const profileBackfill = 100;
+const dayMs = 24 * 60 * 60 * 1000;
+const contactRetentionMs = 30 * dayMs;
+const usageRetentionMs = 7 * dayMs;
 const aiApplyBudgetMs = 210_000;
 
 type AppOptions = {
@@ -103,6 +107,7 @@ type AppOptions = {
   generateStructured?: GenerateStructured;
   embed?: Embed;
   embedProfile?: Embed;
+  captcha?: Captcha;
   catalog?: readonly CatalogSource[];
   fetchFeedImpl?: typeof fetch;
   fetchGreenhouseImpl?: typeof fetch;
@@ -518,6 +523,15 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       .then((ids) => repos.background.enqueueMany("ai_apply", ids))
       .catch(logFailure("AI application scheduling failed"));
 
+    const now = Date.now();
+
+    await repos.candidates
+      .pruneContacts(new Date(now - contactRetentionMs))
+      .catch(logFailure("contact request pruning failed"));
+    await repos.searchQuota
+      .prune(new Date(now - usageRetentionMs).toISOString().slice(0, 10))
+      .catch(logFailure("search usage pruning failed"));
+
     if (options.embedProfile) {
       await syncDemoEmbeddings(repos.demo, options.embedProfile).catch(
         logFailure("demo embedding sync failed"),
@@ -673,7 +687,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         repos.candidates,
         repos.searchQuota,
         options.embedProfile,
-        { send: options.sendEmail, origin: webOrigin },
+        { send: options.sendEmail, origin: webOrigin, captcha: options.captcha },
         options.rerank,
       ),
     )

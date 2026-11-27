@@ -52,6 +52,8 @@ if (apiConfigured) {
   env.BACKOFFICE_STAFF_EMAILS = bindings.secret();
   env.ABACATEPAY_API_KEY = bindings.secret();
   env.ABACATEPAY_WEBHOOK_SECRET = bindings.secret();
+  env.TURNSTILE_SITE_KEY = bindings.secret();
+  env.TURNSTILE_SECRET_KEY = bindings.secret();
 }
 
 export default defineConfig({

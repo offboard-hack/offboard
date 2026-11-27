@@ -144,6 +144,7 @@ export function offboardingsRoutes(
           department: text,
           deadline: t.String({ format: "date" }),
           email: t.String({ format: "email" }),
+          personalEmail: t.Optional(t.String({ format: "email" })),
           invite: t.Optional(t.Boolean()),
         }),
         response: { 201: caseSummary, 409: errorResponse },

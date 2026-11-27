@@ -1,5 +1,6 @@
 import type { Database } from "@offboard/db/client";
 import { and, desc, eq } from "drizzle-orm";
+import { exitSurveyRatings } from "@offboard/employee/departure";
 import type { ConfigValue } from "@offboard/db/schema";
 import { exitSurveys, offboardingCases } from "@offboard/db/schema";
 
@@ -49,6 +50,7 @@ export function createExitSurveysRepository(db: Database) {
       db
         .select({
           npsScore: exitSurveys.npsScore,
+          responses: exitSurveys.responses,
           topics: exitSurveys.topics,
           submittedAt: exitSurveys.submittedAt,
         })
@@ -77,10 +79,34 @@ export function createExitSurveysRepository(db: Database) {
       monthCounts.set(monthKey, (monthCounts.get(monthKey) ?? 0) + 1);
     }
 
-    const activationsByMonth = [...monthCounts]
-      .sort(([a], [b]) => a - b)
-      .slice(-chartMonths)
-      .map(([key, value]) => ({ label: monthLabels[key % 12], value }));
+    const lastMonth = Math.max(...monthCounts.keys());
+    const firstMonth = Math.max(Math.min(...monthCounts.keys()), lastMonth - chartMonths + 1);
+
+    const responsesByMonth = Array.from(
+      { length: monthCounts.size === 0 ? 0 : lastMonth - firstMonth + 1 },
+      (_, index) => {
+        const key = firstMonth + index;
+
+        return { label: monthLabels[key % 12], value: monthCounts.get(key) ?? 0 };
+      },
+    );
+
+    const ratings = exitSurveyRatings.map(({ key, label }) => {
+      const values = surveys.flatMap(({ responses }) => {
+        const value = Number(responses[key]);
+
+        return Number.isInteger(value) && value >= 1 && value <= 5 ? [value] : [];
+      });
+
+      const sum = values.reduce((total, value) => total + value, 0);
+
+      return {
+        key,
+        label,
+        average: values.length === 0 ? 0 : Math.round((sum / values.length) * 10) / 10,
+        responses: values.length,
+      };
+    });
 
     const topTopics = [...topicCounts]
       .map(([label, value]) => ({ label, value }))
@@ -91,7 +117,8 @@ export function createExitSurveysRepository(db: Database) {
       averageNps: totalResponses === 0 ? 0 : Math.round((scoreSum / totalResponses) * 10) / 10,
       nps: percent(promoters, totalResponses) - percent(detractors, totalResponses),
       completionRate: percent(totalResponses, cases.length),
-      activationsByMonth,
+      ratings,
+      responsesByMonth,
       topTopics,
     };
   }

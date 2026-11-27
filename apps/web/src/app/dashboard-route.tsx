@@ -27,9 +27,20 @@ export function Dashboard() {
       }
       onDeadlineChange={(next) =>
         void navigate({
-          search: (previous) => ({ ...previous, deadline: next === "all" ? undefined : next }),
+          search: (previous) => ({
+            ...previous,
+            deadline: next === "all" ? undefined : next,
+          }),
           resetScroll: false,
         })
+      }
+      emptyAction={
+        <Link
+          to="/desligamentos"
+          className="font-medium text-primary underline-offset-4 hover:underline"
+        >
+          Adicionar desligamento
+        </Link>
       }
       renderCaseLink={(id, content, xstyle) => (
         <Link to="/desligamentos/$caseId" params={{ caseId: id }} {...classProps(xstyle)}>

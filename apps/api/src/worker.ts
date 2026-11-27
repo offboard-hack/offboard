@@ -10,6 +10,7 @@ import { createGenerateStructured, resolveModel } from "./shared/ai.js";
 import { workersAiEmbed, type WorkersAi } from "./shared/embed.js";
 import { createReranker } from "./features/candidates/rerank.js";
 import { r2Storage, type R2BucketLike } from "./shared/object-storage.js";
+import { turnstile } from "./shared/turnstile.js";
 import { createRepositories } from "./repositories.js";
 
 const runtimeConfig = z.object({
@@ -32,6 +33,8 @@ const runtimeConfig = z.object({
   BACKOFFICE_STAFF_EMAILS: z.string().optional(),
   TRACKING_API_KEY: z.string().min(1).optional(),
   TRACKING_BASE_URL: z.string().min(1).optional(),
+  TURNSTILE_SITE_KEY: z.string().min(1).optional(),
+  TURNSTILE_SECRET_KEY: z.string().min(1).optional(),
 });
 
 export type WorkerBindings = Partial<z.input<typeof runtimeConfig>> & {
@@ -100,6 +103,10 @@ export function createWorkerApi(
     embed: bindings.AI && workersAiEmbed(bindings.AI),
     embedProfile: bindings.AI && workersAiEmbed(bindings.AI),
     storage: bindings.RESUMES && r2Storage(bindings.RESUMES),
+    captcha:
+      config.data.TURNSTILE_SITE_KEY && config.data.TURNSTILE_SECRET_KEY
+        ? turnstile(config.data.TURNSTILE_SITE_KEY, config.data.TURNSTILE_SECRET_KEY)
+        : undefined,
     publicPageOrigin: config.data.PUBLIC_PAGE_ORIGIN,
     browserbase: browserbaseConfig(
       config.data.BROWSERBASE_API_KEY,

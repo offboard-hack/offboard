@@ -19,11 +19,13 @@ import {
   authSession,
   authUser,
   backgroundJobs,
+  candidateContactRequests,
   demoSearchUsage,
   benefitAssignments,
   benefitPolicies,
   checklistModels,
   defaultOrgId,
+  exitSurveys,
   employeeAccess,
   employeeStates,
   equipment,
@@ -65,7 +67,8 @@ import type { TrackingConfig } from "./features/offboardings/correios.ts";
 import { codeAudienceHeader, createAuth, createRuntimeAuth } from "./features/auth/auth.js";
 import { catalogSources, type CatalogSource } from "./features/sources/catalog.js";
 import type { GenerateStructured } from "./shared/ai.js";
-import type { Embed } from "./shared/embed.js";
+import { type Embed, textHash } from "./shared/embed.js";
+import type { Captcha } from "./shared/turnstile.js";
 import type { Rerank } from "./features/candidates/routes.js";
 import { matchScore } from "./shared/profile-card.js";
 import { diskStorage } from "./shared/disk-storage.js";
@@ -3248,6 +3251,7 @@ describe.skipIf(!url)("api", () => {
           embedProfile?: Embed;
           billing?: BillingStub;
           rerank?: Rerank;
+          captcha?: Captcha;
         } = {},
       ) {
         const store: Store = { puts: [], removed: [], prefixes: [], failRemove: false };
@@ -3347,6 +3351,7 @@ describe.skipIf(!url)("api", () => {
             options.generate === null ? undefined : (options.generate ?? generate),
           embed: options.embed,
           embedProfile: options.embedProfile,
+          captcha: options.captcha,
           storage: options.storage === false ? undefined : storage,
           abacatepay: options.billing,
           rerank: options.rerank,
@@ -4788,7 +4793,7 @@ describe.skipIf(!url)("api", () => {
         expect(await capped.json()).toEqual({ error: "Too many searches" });
       });
 
-      it("emails an opted-in candidate without exposing their address", async () => {
+      it("emails an opted-in candidate once the sender confirms their address", async () => {
         const app = resumesApp({ embedProfile: fakeEmbed().embed });
         const visible = await profile();
         const hidden = await profile("outra.pessoal@example.com", 1);
@@ -4798,33 +4803,65 @@ describe.skipIf(!url)("api", () => {
         await repos.talent.setSearchable(visible, true, new Date());
         await db.delete(demoSearchUsage);
 
-        const contact = (id: string, body: Record<string, string>) =>
+        const post = (path: string, body: Record<string, string>) =>
           app.instance.handle(
-            new Request(`http://localhost/api/candidates/${id}/contact`, {
+            new Request(`http://localhost/api${path}`, {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify(body),
             }),
           );
 
+        const contact = (id: string, body: Record<string, string>) =>
+          post(`/candidates/${id}/contact`, body);
+
+        const confirm = (token: string) => post("/candidates/contact/confirm", { token });
+
+        const lastToken = () => {
+          const match = /confirmar\?token=([\w-]+)/.exec(sentTexts.at(-1) ?? "");
+
+          return match?.[1] ?? "";
+        };
+
         const message = {
-          name: "Rita Recrutadora",
+          name: "  Rita Recrutadora ",
           email: "rita@empresa.example",
-          company: "Empresa X",
+          company: " Empresa X ",
           message: "  Temos uma vaga de backend sênior remota e seu perfil combina muito.  ",
         };
 
-        const sent = await contact(shown.id, message);
+        const requested = await contact(shown.id, message);
 
-        expect(sent.status).toBe(204);
+        expect(requested.status).toBe(202);
+        expect(invitedEmails.at(-1)).toBe("rita@empresa.example");
+        expect(sentTexts.at(-1)).toContain("A mensagem só é enviada depois que você confirmar");
+        expect(sentTexts.at(-1)).not.toContain("Temos uma vaga");
+
+        const token = lastToken();
+
+        expect(token).toMatch(/^[\w-]{43}$/);
+
+        const confirmed = await confirm(token);
+
+        expect(confirmed.status).toBe(204);
         expect(invitedEmails.at(-1)).toBe(personalEmail);
         expect(sentTexts.at(-1)).toContain("Rita Recrutadora (Empresa X) encontrou seu currículo");
         expect(sentTexts.at(-1)).toContain("\n\nTemos uma vaga de backend sênior remota");
         expect(sentTexts.at(-1)).toContain("responda direto para rita@empresa.example");
 
+        const used = await confirm(token);
+
+        expect(used.status).toBe(404);
+        expect(await used.json()).toEqual({ error: "Link expired or already used" });
+        expect((await confirm("x".repeat(43))).status).toBe(404);
+        expect((await confirm("short")).status).toBe(422);
+
         const { company: _company, ...withoutCompany } = message;
 
-        expect((await contact(shown.id, withoutCompany)).status).toBe(204);
+        expect(
+          (await contact(shown.id, { ...withoutCompany, email: "Outra@Empresa.example" })).status,
+        ).toBe(202);
+        expect((await confirm(lastToken())).status).toBe(204);
         expect(sentTexts.at(-1)).toContain("Rita Recrutadora encontrou seu currículo");
 
         expect((await contact(kept.id, message)).status).toBe(404);
@@ -4832,40 +4869,201 @@ describe.skipIf(!url)("api", () => {
         expect((await contact(shown.id, { ...message, message: "oi" })).status).toBe(422);
 
         await db.delete(demoSearchUsage);
+        await contact(shown.id, message);
+
+        const expiring = lastToken();
+
+        await db
+          .update(candidateContactRequests)
+          .set({ createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000) })
+          .where(eq(candidateContactRequests.tokenHash, await textHash(expiring)));
+
+        expect((await confirm(expiring)).status).toBe(404);
+
+        await contact(shown.id, { ...message, email: "terceira@empresa.example" });
+
+        const optedOut = lastToken();
+
+        await repos.talent.setSearchable(visible, false, new Date());
+
+        expect((await confirm(optedOut)).status).toBe(404);
+
+        await repos.talent.setSearchable(visible, true, new Date());
+        await db.delete(demoSearchUsage);
 
         const logged = vi.spyOn(console, "error");
 
         inviteFailures.remaining = 1;
 
-        const failed = await contact(shown.id, message);
+        const unconfirmed = await contact(shown.id, message);
+
+        expect(unconfirmed.status).toBe(502);
+        expect(await unconfirmed.json()).toEqual({ error: "Could not send the confirmation" });
+
+        await contact(shown.id, message);
+
+        const retried = lastToken();
+
+        inviteFailures.remaining = 1;
+
+        const failed = await confirm(retried);
 
         expect(failed.status).toBe(502);
         expect(await failed.json()).toEqual({ error: "Could not send the message" });
+        expect(logged.mock.calls).toContainEqual([
+          "candidate contact confirmation failed",
+          { name: "Error", message: "invite failed" },
+        ]);
         expect(logged.mock.calls).toContainEqual([
           "candidate contact email failed",
           { name: "Error", message: "invite failed" },
         ]);
         logged.mockRestore();
 
+        expect((await confirm(retried)).status).toBe(204);
+
         await db.delete(demoSearchUsage);
+        await contact(shown.id, message);
+
+        const busy = lastToken();
+
         await db.insert(demoSearchUsage).values({
           bucket: `contact:to:${shown.id}`,
           day: new Date().toISOString().slice(0, 10),
           searches: 5,
         });
 
+        const full = await confirm(busy);
+
+        expect(full.status).toBe(429);
+        expect(await full.json()).toEqual({ error: "Too many messages" });
+        await db.delete(demoSearchUsage);
+
+        expect((await confirm(busy)).status).toBe(204);
+
+        await db.delete(demoSearchUsage);
+
+        for (let index = 0; index < 3; index += 1) {
+          expect((await contact(shown.id, message)).status).toBe(202);
+        }
+
         expect((await contact(shown.id, message)).status).toBe(429);
 
         await db.delete(demoSearchUsage);
 
         for (let index = 0; index < 5; index += 1) {
-          await contact(kept.id, message);
+          await contact(kept.id, { ...message, email: `p${index}@empresa.example` });
         }
 
-        const capped = await contact(shown.id, message);
+        const capped = await contact(shown.id, { ...message, email: "nova@empresa.example" });
 
         expect(capped.status).toBe(429);
         expect(await capped.json()).toEqual({ error: "Too many messages" });
+      });
+
+      it("asks for a captcha before sending a confirmation when one is configured", async () => {
+        const verdicts: (boolean | Error)[] = [];
+        const checked: [string, string | null][] = [];
+
+        const captcha: Captcha = {
+          siteKey: "site-key",
+          verify: async (token, ip) => {
+            checked.push([token, ip]);
+
+            const verdict = verdicts.shift() ?? true;
+
+            if (verdict instanceof Error) throw verdict;
+
+            return verdict;
+          },
+        };
+
+        const app = resumesApp({ captcha });
+        const visible = await profile();
+        const shown = await (await upload(app.instance, visible)).json();
+
+        await repos.talent.setSearchable(visible, true, new Date());
+        await db.delete(demoSearchUsage);
+
+        const siteKey = async (instance: typeof app.instance) =>
+          (
+            await instance.handle(new Request("http://localhost/api/candidates/contact/captcha"))
+          ).json();
+
+        expect(await siteKey(app.instance)).toEqual({ siteKey: "site-key" });
+        expect(await siteKey(resumesApp().instance)).toEqual({ siteKey: null });
+
+        const contact = (body: Record<string, string>) =>
+          app.instance.handle(
+            new Request(`http://localhost/api/candidates/${shown.id}/contact`, {
+              method: "POST",
+              headers: { "content-type": "application/json", "cf-connecting-ip": "203.0.113.9" },
+              body: JSON.stringify({
+                name: "Rita",
+                email: "rita@empresa.example",
+                message: "Temos uma vaga que combina com você.",
+                ...body,
+              }),
+            }),
+          );
+
+        const missing = await contact({});
+
+        expect(missing.status).toBe(403);
+        expect(await missing.json()).toEqual({ error: "Captcha failed" });
+        expect(checked).toEqual([]);
+
+        verdicts.push(false);
+        expect((await contact({ captcha: "bad" })).status).toBe(403);
+
+        const logged = vi.spyOn(console, "error");
+
+        verdicts.push(new Error("turnstile down"));
+        expect((await contact({ captcha: "later" })).status).toBe(403);
+        expect(logged.mock.calls).toContainEqual([
+          "captcha verification failed",
+          { name: "Error", message: "turnstile down" },
+        ]);
+        logged.mockRestore();
+
+        expect((await contact({ captcha: "good" })).status).toBe(202);
+        expect(checked.at(-1)).toEqual(["good", "203.0.113.9"]);
+      });
+
+      it("forgets contact requests after 30 days and search counters after a week", async () => {
+        const app = resumesApp();
+        const resume = await (await upload(app.instance, await profile())).json();
+        const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        const dayOf = (days: number) => daysAgo(days).toISOString().slice(0, 10);
+
+        const request = (tokenHash: string, createdAt: Date) => ({
+          resumeId: resume.id,
+          name: "Rita",
+          email: "rita@empresa.example",
+          message: "Temos uma vaga que combina com você.",
+          tokenHash,
+          createdAt,
+        });
+
+        await db.delete(demoSearchUsage);
+        await db
+          .insert(candidateContactRequests)
+          .values([request("old", daysAgo(31)), request("recent", daysAgo(29))]);
+        await db.insert(demoSearchUsage).values([
+          { bucket: "contact:all", day: dayOf(8), searches: 1 },
+          { bucket: "contact:all", day: dayOf(6), searches: 1 },
+        ]);
+
+        await app.settle();
+
+        const kept = await db
+          .select({ tokenHash: candidateContactRequests.tokenHash })
+          .from(candidateContactRequests);
+
+        const days = await db.select({ day: demoSearchUsage.day }).from(demoSearchUsage);
+
+        expect(kept).toEqual([{ tokenHash: "recent" }]);
+        expect(days).toEqual([{ day: dayOf(6) }]);
       });
 
       it("backfills profiles without a search embedding and skips what it cannot embed", async () => {
@@ -9173,6 +9371,7 @@ describe.skipIf(!url)("api", () => {
       returnMethod: expect.stringMatching(/^(pickup|in_person)$/),
       scheduledDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       status: expect.any(String),
+      holderEmail: null,
     });
   });
 
@@ -9241,6 +9440,7 @@ describe.skipIf(!url)("api", () => {
         returnMethod: "pickup",
         scheduledDate: null,
         status: "with_person",
+        holderEmail: null,
       });
 
       const listed = await repos.employee.listEquipmentReturns(defaultOrgId, target.id);
@@ -9413,6 +9613,292 @@ describe.skipIf(!url)("api", () => {
     });
   });
 
+  describe("unassigned equipment", () => {
+    const notebook = { item: "Notebook", returnMethod: "pickup" };
+
+    async function caseWithEmails(name: string, email: string | null, personalEmail?: string) {
+      const [created] = await db
+        .insert(offboardingCases)
+        .values({
+          orgId: defaultOrgId,
+          name,
+          role: "Analista",
+          department: "Produto",
+          deadline: "2027-03-01",
+        })
+        .returning({ id: offboardingCases.id });
+
+      await db.insert(employeeAccess).values({
+        caseId: created!.id,
+        orgId: defaultOrgId,
+        email,
+        personalEmail,
+        plan: emptyEmployeePlan,
+      });
+
+      return created!.id;
+    }
+
+    async function stored(tag: string) {
+      const [row] = await db
+        .select({ id: equipment.id, caseId: equipment.caseId, holderEmail: equipment.holderEmail })
+        .from(equipment)
+        .where(eq(equipment.tag, tag));
+
+      return row!;
+    }
+
+    function register(tag: string, extra: Record<string, string> = {}) {
+      return call("/equipment", "POST", { ...notebook, tag, ...extra });
+    }
+
+    it("registers stock with no case and no e-mail", async () => {
+      const res = await register("STK-001");
+
+      expect(res.status).toBe(201);
+      expect(await stored("STK-001")).toEqual({
+        id: expect.any(String),
+        caseId: null,
+        holderEmail: null,
+      });
+
+      const listed = await (await call("/equipment")).json();
+
+      expect(listed).toContainEqual(expect.objectContaining({ tag: "STK-001", person: null }));
+      expect(await repos.employee.listEquipmentReturns(defaultOrgId)).toContainEqual(
+        expect.objectContaining({ code: "STK-001", caseId: null, person: null, model: "" }),
+      );
+    });
+
+    it("attaches new equipment to the case using that corporate or personal e-mail", async () => {
+      const corporate = await caseWithEmails("Stock Corp", "stock.corp@example.com");
+      const personal = await caseWithEmails("Stock Pessoal", null, "stock.pessoal@gmail.com");
+
+      expect((await register("STK-002", { email: "Stock.Corp@Example.com" })).status).toBe(201);
+      expect((await register("STK-003", { email: "stock.pessoal@gmail.com" })).status).toBe(201);
+      expect((await stored("STK-002")).caseId).toBe(corporate);
+      expect((await stored("STK-003")).caseId).toBe(personal);
+    });
+
+    it("keeps equipment registered for an e-mail with no case yet", async () => {
+      const res = await register("STK-004", { email: "Futuro.Colab@Example.com" });
+
+      expect(res.status).toBe(201);
+      expect(await res.json()).toEqual(
+        expect.objectContaining({ holderEmail: "futuro.colab@example.com" }),
+      );
+      expect(await stored("STK-004")).toEqual(
+        expect.objectContaining({ caseId: null, holderEmail: "futuro.colab@example.com" }),
+      );
+    });
+
+    it("refuses an e-mail shared by more than one case", async () => {
+      await caseWithEmails("Compartilha Um", "um.compartilha@example.com", "compartilha@gmail.com");
+      await caseWithEmails(
+        "Compartilha Dois",
+        "dois.compartilha@example.com",
+        "compartilha@gmail.com",
+      );
+
+      const res = await register("STK-005", { email: "compartilha@gmail.com" });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "More than one case uses this e-mail" });
+    });
+
+    it("prefers the chosen case over the e-mail", async () => {
+      const chosen = await caseWithEmails("Escolhida", "escolhida@example.com");
+
+      await register("STK-006", { caseId: chosen, email: "outra.pessoa@example.com" });
+
+      expect(await stored("STK-006")).toEqual(
+        expect.objectContaining({ caseId: chosen, holderEmail: null }),
+      );
+    });
+
+    it("assigns stock to the open case by corporate or personal e-mail", async () => {
+      const corporate = await caseWithEmails("Atribui Corp", "atribui.corp@example.com");
+      const personal = await caseWithEmails("Atribui Pessoal", null, "atribui.pessoal@gmail.com");
+      const first = await (await register("STK-010")).json();
+
+      const second = await (
+        await register("STK-011", { email: "ainda.sem.caso@example.com" })
+      ).json();
+
+      const byCorporate = await call(`/equipment/${first.id}/assign`, "POST", {
+        email: "ATRIBUI.CORP@example.com",
+      });
+
+      expect(byCorporate.status).toBe(200);
+      expect(await byCorporate.json()).toEqual({ ...first, holderEmail: null });
+      expect((await stored("STK-010")).caseId).toBe(corporate);
+
+      const byPersonal = await call(`/equipment/${second.id}/assign`, "POST", {
+        email: "atribui.pessoal@gmail.com",
+      });
+
+      expect(byPersonal.status).toBe(200);
+      expect(await stored("STK-011")).toEqual(
+        expect.objectContaining({ caseId: personal, holderEmail: null }),
+      );
+    });
+
+    it("explains why an assignment fails", async () => {
+      const target = await caseWithEmails("Falha Atribui", "falha.atribui@example.com");
+
+      await caseWithEmails("Dup Um", "dup.um@example.com", "dup.atribui@gmail.com");
+      await caseWithEmails("Dup Dois", "dup.dois@example.com", "dup.atribui@gmail.com");
+
+      const stock = await (await register("STK-020")).json();
+
+      const unknown = await call(`/equipment/${stock.id}/assign`, "POST", {
+        email: "ninguem@example.com",
+      });
+
+      expect(unknown.status).toBe(404);
+      expect(await unknown.json()).toEqual({ error: "No offboarding case uses this e-mail" });
+
+      const ambiguous = await call(`/equipment/${stock.id}/assign`, "POST", {
+        email: "dup.atribui@gmail.com",
+      });
+
+      expect(ambiguous.status).toBe(409);
+
+      await call(`/equipment/${stock.id}/assign`, "POST", { email: "falha.atribui@example.com" });
+
+      const again = await call(`/equipment/${stock.id}/assign`, "POST", {
+        email: "falha.atribui@example.com",
+      });
+
+      expect(again.status).toBe(409);
+      expect(await again.json()).toEqual({ error: "Equipment already assigned" });
+      expect((await stored("STK-020")).caseId).toBe(target);
+
+      const missing = await call(`/equipment/${missingTaskId}/assign`, "POST", {
+        email: "falha.atribui@example.com",
+      });
+
+      expect(missing.status).toBe(404);
+      expect(await missing.json()).toEqual({ error: "Equipment not found" });
+      expect(
+        (await call(`/equipment/${stock.id}/assign`, "POST", { email: "not-an-email" })).status,
+      ).toBe(422);
+    });
+
+    it("lets visualizador not assign", async () => {
+      const res = await app.handle(
+        new Request(`http://localhost/api/equipment/${missingTaskId}/assign`, {
+          method: "POST",
+          headers: {
+            "x-test-session": "visualizador",
+            origin: webOrigin,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ email: "x@example.com" }),
+        }),
+      );
+
+      expect(res.status).toBe(403);
+    });
+
+    it("attaches waiting equipment when a case is created", async () => {
+      await register("STK-030", { email: "nova.pessoa@example.com" });
+      await register("STK-031", { email: "nova.pessoa@gmail.com" });
+      await register("STK-032", { email: "outra.nova@example.com" });
+
+      const res = await call("/offboardings", "POST", {
+        name: "Nova Pessoa",
+        role: "Dev",
+        department: "Eng",
+        deadline: "2027-02-01",
+        email: "Nova.Pessoa@example.com",
+        personalEmail: "nova.pessoa@gmail.com",
+      });
+
+      const created = await res.json();
+
+      expect(res.status).toBe(201);
+      expect((await stored("STK-030")).caseId).toBe(created.id);
+      expect(await stored("STK-031")).toEqual(
+        expect.objectContaining({ caseId: created.id, holderEmail: null }),
+      );
+      expect((await stored("STK-032")).caseId).toBeNull();
+
+      const [access] = await db
+        .select({ email: employeeAccess.email, personalEmail: employeeAccess.personalEmail })
+        .from(employeeAccess)
+        .where(eq(employeeAccess.caseId, created.id));
+
+      expect(access).toEqual({
+        email: "nova.pessoa@example.com",
+        personalEmail: "nova.pessoa@gmail.com",
+      });
+    });
+
+    it("stores the personal e-mail and attaches equipment on first and later saves", async () => {
+      const withEmployees = createApp(webOrigin, repos, {
+        ...appOptions,
+        auth: { ...auth, resolveEmployee: async () => null },
+      });
+
+      const [created] = await db
+        .insert(offboardingCases)
+        .values({
+          orgId: defaultOrgId,
+          name: "Acesso Equip",
+          role: "Analista",
+          department: "Produto",
+          deadline: "2027-03-01",
+        })
+        .returning({ id: offboardingCases.id });
+
+      const caseId = created!.id;
+
+      await register("STK-040", { email: "acesso.equip@example.com" });
+      await register("STK-041", { email: "acesso.equip@gmail.com" });
+
+      const first = await call(
+        `/employee-access/${caseId}`,
+        "PUT",
+        { email: "acesso.equip@example.com", plan: emptyEmployeePlan, revision: 0 },
+        withEmployees,
+      );
+
+      expect(first.status).toBe(200);
+      expect((await stored("STK-040")).caseId).toBe(caseId);
+      expect((await stored("STK-041")).caseId).toBeNull();
+
+      const second = await call(
+        `/employee-access/${caseId}`,
+        "PUT",
+        {
+          email: "acesso.equip@example.com",
+          personalEmail: "Acesso.Equip@Gmail.com",
+          plan: emptyEmployeePlan,
+          revision: 1,
+        },
+        withEmployees,
+      );
+
+      expect(second.status).toBe(200);
+      expect(await second.json()).toEqual(
+        expect.objectContaining({ personalEmail: "acesso.equip@gmail.com" }),
+      );
+      expect((await stored("STK-041")).caseId).toBe(caseId);
+    });
+
+    it("imports equipment by the personal e-mail", async () => {
+      const target = await caseWithEmails("Importa Pessoal", null, "importa.pessoal@gmail.com");
+
+      const res = await call("/equipment/import", "POST", {
+        rows: [{ ...notebook, person: "IMPORTA.pessoal@gmail.com", tag: "STK-050" }],
+      });
+
+      expect(res.status).toBe(201);
+      expect((await stored("STK-050")).caseId).toBe(target);
+    });
+  });
+
   describe("equipment import", () => {
     async function freshCase(name: string, email?: string) {
       const [created] = await db
@@ -9525,7 +10011,15 @@ describe.skipIf(!url)("api", () => {
       averageNps: 6.6,
       nps: -20,
       completionRate: 100,
-      activationsByMonth: [
+      ratings: [
+        { key: "assessment", label: "Processo de desligamento", average: 3.4, responses: 5 },
+        { key: "managerSupport", label: "Apoio do gestor", average: 3.8, responses: 5 },
+        { key: "teamRespect", label: "Respeito da equipe", average: 4, responses: 5 },
+        { key: "communication", label: "Clareza da comunicação", average: 3.8, responses: 5 },
+        { key: "equipmentReturn", label: "Devolução de equipamentos", average: 3.2, responses: 5 },
+        { key: "documents", label: "Documentos e rescisão", average: 3.6, responses: 5 },
+      ],
+      responsesByMonth: [
         { label: "Jun", value: 1 },
         { label: "Jul", value: 1 },
         { label: "Ago", value: 1 },
@@ -9551,9 +10045,57 @@ describe.skipIf(!url)("api", () => {
       averageNps: 0,
       nps: 0,
       completionRate: 0,
-      activationsByMonth: [],
+      ratings: [
+        { key: "assessment", label: "Processo de desligamento", average: 0, responses: 0 },
+        { key: "managerSupport", label: "Apoio do gestor", average: 0, responses: 0 },
+        { key: "teamRespect", label: "Respeito da equipe", average: 0, responses: 0 },
+        { key: "communication", label: "Clareza da comunicação", average: 0, responses: 0 },
+        { key: "equipmentReturn", label: "Devolução de equipamentos", average: 0, responses: 0 },
+        { key: "documents", label: "Documentos e rescisão", average: 0, responses: 0 },
+      ],
+      responsesByMonth: [],
       topTopics: [],
     });
+  });
+
+  it("fills quiet months, keeps the last six and ignores invalid ratings", async () => {
+    const cases = await (await call("/offboardings")).json();
+    await db.$client.query("DELETE FROM exit_surveys");
+
+    const dated = [
+      ["2026-01-10", { assessment: 1 }],
+      ["2026-03-10", { assessment: 4, managerSupport: 6 }],
+      ["2026-06-10", { assessment: 0, managerSupport: 3.5, teamRespect: 7, communication: null }],
+      ["2026-08-20", { assessment: 5, managerSupport: 2 }],
+    ] as const;
+
+    await db.insert(exitSurveys).values(
+      dated.map(([date, responses], index) => ({
+        orgId: defaultOrgId,
+        caseId: cases[index].id,
+        npsScore: 8,
+        responses,
+        topics: [],
+        submittedAt: new Date(`${date}T12:00:00Z`),
+      })),
+    );
+
+    const body = await (await call("/exit-surveys/aggregates")).json();
+
+    expect(body.responsesByMonth).toEqual([
+      { label: "Mar", value: 1 },
+      { label: "Abr", value: 0 },
+      { label: "Mai", value: 0 },
+      { label: "Jun", value: 1 },
+      { label: "Jul", value: 0 },
+      { label: "Ago", value: 1 },
+    ]);
+
+    expect(body.ratings.slice(0, 3)).toMatchObject([
+      { key: "assessment", average: 3.3, responses: 3 },
+      { key: "managerSupport", average: 2, responses: 1 },
+      { key: "teamRespect", average: 0, responses: 0 },
+    ]);
   });
 
   it("submits and resubmits a survey for a case", async () => {
@@ -10705,6 +11247,12 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
           respect: null,
           comment: "",
           recommendation: null,
+          managerSupport: null,
+          teamRespect: null,
+          communication: null,
+          equipmentReturn: null,
+          documents: null,
+          topics: [],
         },
         examAttended: false,
         handoffCompleted: [],
@@ -11101,6 +11649,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
     expect(await (await request(target, "GET", hrCookie)).json()).toEqual({
       email,
+      personalEmail: null,
       plan: emptyEmployeePlan,
       revision: 1,
       careerSponsoredUntil: "2027-05-01",
@@ -11119,6 +11668,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     expect((await request(target, "PUT", hrCookie, { email, plan, revision: 1 })).status).toBe(200);
     expect(await (await request(target, "GET", hrCookie)).json()).toEqual({
       email,
+      personalEmail: null,
       plan,
       revision: 2,
       careerSponsoredUntil: "2027-05-01",

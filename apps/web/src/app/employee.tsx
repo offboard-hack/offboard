@@ -1,4 +1,5 @@
 import Briefcase01Icon from "@hugeicons/core-free-icons/Briefcase01Icon";
+import BookOpen01Icon from "@hugeicons/core-free-icons/BookOpen01Icon";
 import Calendar01Icon from "@hugeicons/core-free-icons/Calendar01Icon";
 import CheckListIcon from "@hugeicons/core-free-icons/CheckListIcon";
 import Contact01Icon from "@hugeicons/core-free-icons/Contact01Icon";
@@ -20,6 +21,7 @@ import {
   employeeJourneyQuery,
   employeeStateQuery,
 } from "@/entities/employee";
+import { EmployeeAgenda } from "@/features/employee/agenda-calendar";
 import { Career } from "@/features/employee/career";
 import { Preferences } from "@/features/employee/career/preferences";
 import { ResumeCareer } from "@/features/employee/career/resume";
@@ -33,6 +35,7 @@ import {
   Termination,
 } from "@/features/employee/departure";
 import { Privacy, PrivacyNotice, Profile } from "@/features/employee/privacy";
+import { Rights } from "@/features/employee/rights-view";
 import { subscribeToSessionChanges } from "@/shared/lib/session-change";
 import { ListPage, type ListMetric } from "@/shared/ui/list-page";
 import { ListPendingPage } from "@/shared/ui/list-pending-page";
@@ -65,6 +68,7 @@ type EmployeeScreen = (typeof EmployeeRoute)["types"]["fullSearchSchema"]["tela"
 const titles = {
   hoje: "Hoje",
   saida: "Minha saída",
+  direitos: "Seus direitos",
   carreira: "Carreira",
   curriculo: "Currículo",
   preferencias: "Preferências",
@@ -83,6 +87,7 @@ const navigation = [
     items: [
       { id: "hoje", icon: Home01Icon, label: "Hoje" },
       { id: "saida", icon: CheckListIcon, label: "Saída" },
+      { id: "direitos", icon: BookOpen01Icon, label: "Direitos" },
     ],
   },
   {
@@ -315,6 +320,12 @@ function EmployeeContent({
     case "carreira":
     case "curriculo":
       return <CareerContent account={account} screen={screen} />;
+    case "direitos":
+      return (
+        <EmployeeScreenPage screen={screen}>
+          <Rights />
+        </EmployeeScreenPage>
+      );
     case "preferencias":
       return <PreferencesContent account={account} />;
     default:
@@ -388,6 +399,7 @@ function DepartureContent({
     default:
       content = (
         <>
+          {screen === "hoje" ? <EmployeeAgenda account={account} journey={journey} /> : null}
           <EmployeeChecklist account={account} journey={journey} />
           <DepartureOverview journey={journey} state={state} home={screen === "hoje"} />
         </>
