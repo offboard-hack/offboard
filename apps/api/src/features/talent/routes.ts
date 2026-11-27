@@ -20,6 +20,7 @@ const meResponse = t.Object({
   email: t.String(),
   termsAccepted: t.Boolean(),
   shareOutcomeWithHr: t.Boolean(),
+  searchable: t.Boolean(),
   aiApply: t.Object({ eligible: t.Boolean(), consented: t.Boolean(), available: t.Boolean() }),
   entitlement: t.Object({
     kind: t.Union([t.Literal("sponsored"), t.Literal("individual"), t.Literal("lapsed")]),
@@ -54,6 +55,7 @@ async function toMe(profile: TalentProfile, entitlement: Entitlement, aiApply: A
     email: profile.email,
     termsAccepted: profile.termsAcceptedAt !== null,
     shareOutcomeWithHr: profile.shareOutcomeWithHr,
+    searchable: profile.searchableAt !== null,
     aiApply: {
       eligible: allowedBy !== null,
       consented: profile.aiApplyConsentAt !== null,
@@ -170,6 +172,16 @@ export function talentRoutes(
       {
         talent: "signed-in",
         body: t.Object({ shareOutcomeWithHr: t.Boolean() }),
+        response: { 200: meResponse },
+      },
+    )
+    .put(
+      "/me/search-consent",
+      async ({ me, entitlement, body }) =>
+        toMe(await repos.setSearchable(me.id, body.searchable, new Date()), entitlement, aiApply),
+      {
+        talent: "signed-in",
+        body: t.Object({ searchable: t.Boolean() }),
         response: { 200: meResponse },
       },
     )

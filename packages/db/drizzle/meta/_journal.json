@@ -162,6 +162,13 @@
       "when": 1795743045600,
       "tag": "0022_add_demo_people_search",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795743045700,
+      "tag": "0023_add_talent_search_consent",
+      "breakpoints": true
     }
   ]
 }

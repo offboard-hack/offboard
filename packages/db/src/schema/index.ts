@@ -331,6 +331,7 @@ export const talentProfiles = pgTable(
     shareOutcomeWithHr: boolean("share_outcome_with_hr").notNull().default(false),
     aiApplyConsentAt: timestamp("ai_apply_consent_at"),
     aiApplyConsentVersion: varchar("ai_apply_consent_version", { length: 20 }),
+    searchableAt: timestamp("searchable_at"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },

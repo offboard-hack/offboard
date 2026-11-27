@@ -15,6 +15,7 @@ const exportResponse = t.Object({
     shareOutcomeWithHr: t.Boolean(),
     aiApplyConsentAt: nullable,
     aiApplyConsentVersion: nullable,
+    searchableAt: nullable,
     firstSignedInAt: nullable,
     createdAt: nullable,
   }),
