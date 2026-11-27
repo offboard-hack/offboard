@@ -2,6 +2,7 @@ import { createEmployeeRepository } from "./features/employee/repository.js";
 import type { Database } from "@offboard/db/client";
 import { createOffboardingsRepository } from "./features/offboardings/repository.js";
 import { createIntegrationsRepository } from "./features/integrations/repository.js";
+import { createAutomationRulesRepository } from "./features/automation-rules/repository.js";
 import { createActionConfigsRepository } from "./features/action-configs/repository.js";
 import { createBenefitRepository } from "./features/benefits/repository.js";
 import { createBillingRepository } from "./features/billing/repository.js";
@@ -38,6 +39,7 @@ export function createRepositories(db: Database) {
     offboardings: createOffboardingsRepository(db),
     integrations: createIntegrationsRepository(db),
     actionConfigs: createActionConfigsRepository(db),
+    automationRules: createAutomationRulesRepository(db),
     team: createTeamRepository(db),
     equipment: createEquipmentRepository(db),
     exitSurveys: createExitSurveysRepository(db),
