@@ -124,6 +124,19 @@ export async function syncEquipmentSchedule(
   }
 }
 
+export async function markPosted(tx: Transaction, orgId: string, caseId: string) {
+  await tx
+    .update(equipment)
+    .set({ status: "transit", updatedAt: new Date() })
+    .where(
+      and(
+        eq(equipment.orgId, orgId),
+        eq(equipment.caseId, caseId),
+        inArray(equipment.status, ["with_person", "scheduled", "failed"]),
+      ),
+    );
+}
+
 export async function setReceipt(
   tx: Transaction,
   orgId: string,

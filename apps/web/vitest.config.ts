@@ -27,6 +27,7 @@ export default defineConfig({
         "src/features/employee/agenda.ts",
         "src/features/employee/career/resume-onboarding.ts",
         "src/features/employee/rights.ts",
+        "src/features/employee/return-status.ts",
         "src/features/candidate-search/format.ts",
         "src/features/candidate-search/contact-form.ts",
         "src/features/employee/feedback-wizard.ts",

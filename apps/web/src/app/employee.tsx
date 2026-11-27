@@ -385,7 +385,7 @@ function DepartureContent({
       content = <Handoff account={account} journey={journey} state={state} />;
       break;
     case "equipamentos":
-      content = <Equipment account={account} journey={journey} state={state} />;
+      content = <Equipment account={account} journey={journey} />;
       break;
     case "exame":
       content = <Exam account={account} journey={journey} state={state} />;
