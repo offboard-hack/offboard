@@ -70,7 +70,7 @@ export function EquipmentPending() {
 
 export function DashboardPending() {
   return (
-    <ListPendingPage title="Painel">
+    <ListPendingPage title="Painel de desligamentos">
       <div className="grid gap-4 sm:grid-cols-2">
         {[0, 1].map((chart) => (
           <div key={chart} className="grid gap-4 rounded-2xl border bg-card p-5">
@@ -85,7 +85,15 @@ export function DashboardPending() {
           </div>
         ))}
       </div>
-      <TablePlaceholder />
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <TablePlaceholder />
+        <div className="grid gap-4 rounded-2xl border bg-card p-5">
+          <Skeleton className="h-4 w-36" />
+          {[0, 1, 2, 3].map((row) => (
+            <Skeleton key={row} className="h-3 w-full" />
+          ))}
+        </div>
+      </div>
     </ListPendingPage>
   );
 }
