@@ -36,6 +36,7 @@ import {
   publicPageDailyViews,
   publicPages,
   resumes,
+  integrations,
   subscriptions,
   talentPreferences,
   talentProfiles,
@@ -43,6 +44,8 @@ import {
   tasks,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
+import { slackTokenReader } from "./features/integrations/routes.js";
+import { secretBox } from "./shared/secret-box.js";
 import {
   emptyEmployeePlan,
   employeeGrantHeader,
@@ -138,6 +141,7 @@ const appOptions = {
   cronSecret,
   webhookSecret,
   slackSigningSecret,
+  secretKey: "integration-secret-key-for-tests-0001",
   catalog: [],
   runInBackground: () => undefined,
 };
@@ -246,6 +250,7 @@ describe.skipIf(!url)("api", () => {
     event_time?: number;
     personalEmail?: string;
     sponsoredUntil?: string;
+    botToken?: string;
     item?: string;
     tag?: string;
     returnMethod?: string;
@@ -8470,6 +8475,198 @@ describe.skipIf(!url)("api", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ name: "Test Toggle", status: "disconnected" });
+  });
+
+  describe("Slack settings", () => {
+    const slackPosts: URLSearchParams[] = [];
+
+    const slackServer = createServer((req, res) => {
+      let body = "";
+
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+
+        if (req.headers.authorization === "Bearer xoxb-noteam-5678") {
+          res.end(JSON.stringify({ ok: true }));
+
+          return;
+        }
+
+        if (req.url === "/auth.test") {
+          const good = req.headers.authorization === "Bearer xoxb-good-1234";
+
+          res.end(
+            JSON.stringify(
+              good ? { ok: true, team: "Acme" } : { ok: false, error: "invalid_auth" },
+            ),
+          );
+
+          return;
+        }
+
+        slackPosts.push(new URLSearchParams(body));
+        res.end(JSON.stringify({ ok: true }));
+      });
+    });
+
+    let slackApp = app;
+
+    beforeAll(async () => {
+      await new Promise<void>((resolve) => slackServer.listen(0, resolve));
+
+      const address = slackServer.address();
+      const port = address instanceof Object ? address.port : 0;
+
+      slackApp = createApp(webOrigin, repos, {
+        ...appOptions,
+        slackApiUrl: `http://127.0.0.1:${port}/`,
+      });
+    });
+
+    afterAll(() => {
+      slackServer.close();
+    });
+
+    function slackCall(path: string, method = "GET", body?: Payload) {
+      return call(path, method, body, slackApp);
+    }
+
+    beforeEach(async () => {
+      slackPosts.length = 0;
+      await db.delete(integrations).where(eq(integrations.name, "Slack"));
+    });
+
+    it("starts unconfigured", async () => {
+      const res = await slackCall("/integrations/slack");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ configured: false, team: null, tokenHint: null });
+    });
+
+    it("saves a verified bot token without ever returning it", async () => {
+      const saved = await slackCall("/integrations/slack", "PUT", { botToken: "xoxb-good-1234" });
+
+      expect(saved.status).toBe(200);
+      expect(await saved.json()).toEqual({ configured: true, team: "Acme", tokenHint: "1234" });
+
+      const [row] = await db
+        .select({ status: integrations.status, config: integrations.config })
+        .from(integrations)
+        .where(and(eq(integrations.orgId, defaultOrgId), eq(integrations.name, "Slack")));
+
+      expect(row?.status).toBe("connected");
+      expect(JSON.stringify(row?.config)).not.toContain("xoxb-good-1234");
+
+      const listed = await (await slackCall("/integrations")).json();
+
+      expect(listed).toContainEqual({ name: "Slack", status: "connected" });
+      expect(JSON.stringify(listed)).not.toContain("xoxb");
+      expect(await (await slackCall("/integrations/slack")).json()).toEqual({
+        configured: true,
+        team: "Acme",
+        tokenHint: "1234",
+      });
+    });
+
+    it("saves a token whose workspace name Slack omits", async () => {
+      const res = await slackCall("/integrations/slack", "PUT", { botToken: "xoxb-noteam-5678" });
+
+      expect(await res.json()).toEqual({ configured: true, team: null, tokenHint: "5678" });
+    });
+
+    it("rejects a token Slack does not accept", async () => {
+      const res = await slackCall("/integrations/slack", "PUT", { botToken: "xoxb-bad-0000" });
+
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({ error: "invalid_auth" });
+      expect((await (await slackCall("/integrations/slack")).json()).configured).toBe(false);
+    });
+
+    it("rejects a token that is not a bot token", async () => {
+      expect(
+        (await slackCall("/integrations/slack", "PUT", { botToken: "xoxp-user" })).status,
+      ).toBe(422);
+    });
+
+    it("refuses to store a token without an encryption key", async () => {
+      const keyless = createApp(webOrigin, repos, { ...appOptions, secretKey: undefined });
+      const res = await call("/integrations/slack", "PUT", { botToken: "xoxb-good-1234" }, keyless);
+
+      expect(res.status).toBe(503);
+    });
+
+    it("does not let the generic toggle connect Slack", async () => {
+      expect((await slackCall("/integrations/Slack", "PUT", { status: "connected" })).status).toBe(
+        409,
+      );
+    });
+
+    it("removes the configuration", async () => {
+      await slackCall("/integrations/slack", "PUT", { botToken: "xoxb-good-1234" });
+      const res = await slackCall("/integrations/slack", "DELETE");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ configured: false, team: null, tokenHint: null });
+      expect(await (await slackCall("/integrations")).json()).toContainEqual({
+        name: "Slack",
+        status: "disconnected",
+      });
+    });
+
+    it("posts a task's Slack step with the organization's token", async () => {
+      await slackCall("/integrations/slack", "PUT", { botToken: "xoxb-good-1234" });
+
+      const [task] = await db
+        .update(tasks)
+        .set({ phase: "d0", checklistStepId: "slack-org-token" })
+        .where(
+          eq(
+            tasks.id,
+            sql`(select id from ${tasks} where ${tasks.orgId} = ${defaultOrgId} order by ${tasks.id} limit 1)`,
+          ),
+        )
+        .returning({ id: tasks.id, title: tasks.title });
+
+      const action = await repos.actionConfigs.createActionConfig(defaultOrgId, {
+        actionId: "slack:slack-org-token",
+        phase: "d0",
+        config: { channel: "#rh", message: "{{task}}: {{status}}" },
+      });
+
+      try {
+        expect(
+          (await slackCall(`/tasks/${task?.id}/status`, "PATCH", { status: "done" })).status,
+        ).toBe(200);
+
+        await vi.waitFor(() =>
+          expect(slackPosts.map((post) => Object.fromEntries(post))).toContainEqual({
+            channel: "#rh",
+            text: `${task?.title}: done`,
+          }),
+        );
+      } finally {
+        await repos.actionConfigs.deleteActionConfig(defaultOrgId, action.id);
+      }
+    });
+
+    it("reads no token for an organization without Slack", async () => {
+      const read = slackTokenReader(
+        repos.integrations,
+        secretBox("integration-secret-key-for-tests-0001"),
+      );
+
+      expect(await read(otherOrgId)).toBeUndefined();
+    });
+
+    it("reads no token without an encryption key", async () => {
+      await slackCall("/integrations/slack", "PUT", { botToken: "xoxb-good-1234" });
+
+      expect(await slackTokenReader(repos.integrations, undefined)(defaultOrgId)).toBeUndefined();
+    });
   });
 
   it("lists equipment with the person name", async () => {

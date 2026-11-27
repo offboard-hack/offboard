@@ -141,6 +141,13 @@
       "when": 1795740000014,
       "tag": "0019_add_benefit_plans",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795743045510,
+      "tag": "0020_integration_config",
+      "breakpoints": true
     }
   ]
 }

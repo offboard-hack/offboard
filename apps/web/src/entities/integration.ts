@@ -1,5 +1,6 @@
 import type { ApiClient, Treaty } from "@offboard/api-client";
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
+import { z } from "zod";
 import { getApiClient } from "@/shared/lib/api-client";
 
 export type IntegrationRow = Treaty.Data<ApiClient["api"]["integrations"]["get"]>[number];
@@ -54,5 +55,58 @@ export function useToggleIntegration() {
       }
     },
     onSettled: () => client.invalidateQueries(integrationsQuery),
+  });
+}
+
+export type SlackSettings = Treaty.Data<ApiClient["api"]["integrations"]["slack"]["get"]>;
+
+async function readSlackSettings({ signal }: { signal: AbortSignal }) {
+  const { data, error } = await getApiClient().api.integrations.slack.get({ fetch: { signal } });
+
+  if (error) throw new Error("Failed to fetch Slack settings");
+
+  return data;
+}
+
+export const slackSettingsQuery = queryOptions({
+  queryKey: ["integrations", "slack"],
+  queryFn: readSlackSettings,
+});
+
+const slackFailure = z.object({ error: z.string() });
+
+export class SlackSettingsError extends Error {
+  constructor(readonly code: string | undefined) {
+    super("Failed to save Slack settings");
+  }
+}
+
+function useSlackMutation<Variables>(mutationFn: (variables: Variables) => Promise<SlackSettings>) {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn,
+    onSuccess: (settings) => client.setQueryData(slackSettingsQuery.queryKey, settings),
+    onSettled: () => client.invalidateQueries(integrationsQuery),
+  });
+}
+
+export function useSaveSlack() {
+  return useSlackMutation(async (botToken: string) => {
+    const { data, error } = await getApiClient().api.integrations.slack.put({ botToken });
+
+    if (error) throw new SlackSettingsError(slackFailure.safeParse(error.value).data?.error);
+
+    return data;
+  });
+}
+
+export function useRemoveSlack() {
+  return useSlackMutation<void>(async () => {
+    const { data, error } = await getApiClient().api.integrations.slack.delete();
+
+    if (error) throw new SlackSettingsError(slackFailure.safeParse(error.value).data?.error);
+
+    return data;
   });
 }
