@@ -2,12 +2,15 @@ import { createWorkerApi, type WorkerBindings } from "@offboard/api/worker";
 import start from "@tanstack/react-start/server-entry";
 import { env, waitUntil } from "cloudflare:workers";
 import { z } from "zod";
+import { backofficeIndexPath, routeForHost } from "./src/app/backoffice-host";
 import { cronSchedules } from "./src/cron-schedules";
 import { apiTransport } from "./src/shared/lib/api-transport.server";
 
 declare global {
   namespace Cloudflare {
-    interface Env extends WorkerBindings {}
+    interface Env extends WorkerBindings {
+      ASSETS: Fetcher;
+    }
   }
 }
 
@@ -32,7 +35,15 @@ function cronTask(cron: string) {
 
 export default {
   fetch(request: Request) {
-    if (new URL(request.url).pathname.startsWith("/api/")) {
+    const route = routeForHost(request, env.BACKOFFICE_ORIGIN);
+
+    if (route === "not-found") return new Response(null, { status: 404 });
+
+    if (route === "backoffice") {
+      return env.ASSETS.fetch(new Request(new URL(backofficeIndexPath, request.url), request));
+    }
+
+    if (route === "api" || new URL(request.url).pathname.startsWith("/api/")) {
       return handleApi(request);
     }
 
