@@ -71,7 +71,6 @@ describe.skipIf(!url)("scenario runner against the in-process API", () => {
         return { id, url: `https://checkout.example.com/pay/${id}` };
       },
       refundCheckout: () => Promise.resolve(),
-      productExternalId: () => Promise.resolve("prod_x"),
       cancelSubscription: async () => undefined,
     },
     catalog: [],

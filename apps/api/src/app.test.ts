@@ -3176,7 +3176,6 @@ describe.skipIf(!url)("api", () => {
         createSubscriptionCheckout: () => Promise<{ id: string; url: string }>;
         cancelSubscription: (id: string) => Promise<void>;
         refundCheckout: () => Promise<void>;
-        productExternalId: () => Promise<string>;
       };
 
       function billingStub(cancelled: string[], fail = false) {
@@ -3189,7 +3188,6 @@ describe.skipIf(!url)("api", () => {
             cancelled.push(id);
           },
           refundCheckout: async () => undefined,
-          productExternalId: async () => "prod_x",
         } satisfies BillingStub;
       }
 
