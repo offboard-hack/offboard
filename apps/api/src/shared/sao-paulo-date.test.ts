@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { saoPauloDate, saoPauloDayStart } from "./sao-paulo-date.js";
+import { addMonths, saoPauloDate, saoPauloDayStart } from "./sao-paulo-date.js";
 
 describe("saoPauloDate", () => {
   it("turns the day at 03:00 UTC", () => {
@@ -17,5 +17,14 @@ describe("saoPauloDayStart", () => {
     expect(saoPauloDayStart(new Date("2026-11-24T03:00:00.000Z"))).toEqual(
       new Date("2026-11-24T03:00:00.000Z"),
     );
+  });
+});
+
+describe("addMonths", () => {
+  it("clamps month-end dates to the last day of the target month", () => {
+    expect(addMonths("2027-01-31", 1)).toBe("2027-02-28");
+    expect(addMonths("2027-03-31", 1)).toBe("2027-04-30");
+    expect(addMonths("2027-01-15", 1)).toBe("2027-02-15");
+    expect(addMonths("2028-01-31", 1)).toBe("2028-02-29");
   });
 });

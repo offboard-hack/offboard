@@ -19,6 +19,8 @@ import {
   authSession,
   authUser,
   backgroundJobs,
+  benefitAssignments,
+  benefitPolicies,
   checklistModels,
   defaultOrgId,
   employeeAccess,
@@ -55,7 +57,7 @@ import {
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { status } from "elysia";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createApp } from "./app.ts";
 import type { TrackingConfig } from "./features/offboardings/correios.ts";
@@ -68,7 +70,7 @@ import type { ObjectStorage } from "./shared/object-storage.js";
 import { zipSync } from "fflate";
 import { PDFArray, PDFDocument, PDFRawStream, decodePDFRawStream } from "pdf-lib";
 import type { PortalAuth } from "./shared/portal-auth.js";
-import { saoPauloDate } from "./shared/sao-paulo-date.js";
+import { addMonths, saoPauloDate } from "./shared/sao-paulo-date.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const webOrigin = "http://localhost:5173";
@@ -8252,6 +8254,182 @@ describe.skipIf(!url)("api", () => {
       expect(await (await access(target)).json()).toMatchObject({ email: "c@example.com" });
     });
 
+    describe("benefit when HR grants access", () => {
+      async function policyPlans() {
+        const rows = await db.select().from(plans).orderBy(asc(plans.monthlyPriceCents));
+
+        const low = rows[0].id;
+        const high = rows[rows.length - 1].id;
+
+        await repos.benefits.savePolicy(defaultOrgId, {
+          defaultPlanId: low,
+          benefitDurationMonths: 3,
+          rules: [
+            { id: "ops", field: "department", operator: "equals", value: "Ops", planId: high },
+          ],
+        });
+
+        return { low, high };
+      }
+
+      async function assignmentsOf(caseId: string) {
+        return db
+          .select({
+            source: benefitAssignments.source,
+            planId: benefitAssignments.effectivePlanId,
+            validUntil: benefitAssignments.validUntil,
+          })
+          .from(benefitAssignments)
+          .innerJoin(talentProfiles, eq(talentProfiles.id, benefitAssignments.profileId))
+          .where(eq(talentProfiles.caseId, caseId));
+      }
+
+      async function enabledProfile(caseId: string) {
+        await repos.talent.enable({
+          orgId: defaultOrgId,
+          caseId,
+          personalEmail: `hr-${randomUUID()}@example.com`,
+          sponsoredUntil: "2099-01-01",
+        });
+      }
+
+      afterEach(async () => {
+        await db.delete(benefitAssignments);
+        await db.delete(benefitPolicies);
+      });
+
+      it("assigns the benefit of the matching rule to an existing profile", async () => {
+        const { high } = await policyPlans();
+        const caseId = await importedCase();
+
+        await enabledProfile(caseId);
+
+        expect(await assignmentsOf(caseId)).toEqual([]);
+
+        const plan = emptyEmployeePlan;
+
+        expect(
+          (await access(caseId, "PUT", { email: "ops@example.com", plan, revision: 0 })).status,
+        ).toBe(200);
+
+        const [assigned] = await assignmentsOf(caseId);
+
+        expect(assigned).toMatchObject({
+          source: "rule",
+          planId: high,
+          validUntil: addMonths(saoPauloDate(new Date()), 3),
+        });
+      });
+
+      it("leaves a live assignment from the old policy alone when the policy and email change", async () => {
+        const { low, high } = await policyPlans();
+        const caseId = await importedCase();
+        const plan = emptyEmployeePlan;
+
+        await enabledProfile(caseId);
+        await access(caseId, "PUT", { email: "one@example.com", plan, revision: 0 });
+
+        const [first] = await assignmentsOf(caseId);
+
+        expect(first).toMatchObject({ source: "rule", planId: high });
+
+        await repos.benefits.savePolicy(defaultOrgId, {
+          defaultPlanId: low,
+          benefitDurationMonths: 12,
+          rules: [],
+        });
+
+        expect(
+          (await access(caseId, "PUT", { email: "two@example.com", plan, revision: 1 })).status,
+        ).toBe(200);
+        expect(await assignmentsOf(caseId)).toEqual([first]);
+      });
+
+      it("keeps a manual assignment and leaves cases without a profile alone", async () => {
+        const { low } = await policyPlans();
+        const caseId = await importedCase();
+
+        await enabledProfile(caseId);
+
+        const [profile] = await db
+          .select({ id: talentProfiles.id })
+          .from(talentProfiles)
+          .where(eq(talentProfiles.caseId, caseId));
+
+        await repos.benefits.upsertAssignment({
+          orgId: defaultOrgId,
+          profileId: profile.id,
+          assignedPlanId: low,
+          effectivePlanId: low,
+          source: "manual",
+          validUntil: "2030-01-01",
+        });
+
+        const plan = emptyEmployeePlan;
+
+        await access(caseId, "PUT", { email: "manual@example.com", plan, revision: 0 });
+
+        expect(await assignmentsOf(caseId)).toEqual([
+          { source: "manual", planId: low, validUntil: "2030-01-01" },
+        ]);
+
+        const bare = await importedCase();
+
+        expect(
+          (await access(bare, "PUT", { email: "bare@example.com", plan, revision: 0 })).status,
+        ).toBe(200);
+        expect(await assignmentsOf(bare)).toEqual([]);
+      });
+
+      it("does not apply another organization's policy", async () => {
+        await policyPlans();
+        const caseId = await importedCase();
+
+        await enabledProfile(caseId);
+        await db
+          .insert(organizations)
+          .values({ id: otherOrgId, name: "Org B", slug: "org-b" })
+          .onConflictDoNothing();
+        await db.update(benefitPolicies).set({ orgId: otherOrgId });
+
+        const plan = emptyEmployeePlan;
+
+        expect(
+          (await access(caseId, "PUT", { email: "iso@example.com", plan, revision: 0 })).status,
+        ).toBe(200);
+        expect(await assignmentsOf(caseId)).toEqual([]);
+      });
+
+      it("still saves the access when the benefit cannot be assigned", async () => {
+        await policyPlans();
+        const caseId = await importedCase();
+
+        await enabledProfile(caseId);
+
+        const failing = createApp(
+          webOrigin,
+          {
+            ...repos,
+            benefits: {
+              ...repos.benefits,
+              applyBenefitPolicy: () => Promise.reject(new Error("db down")),
+            },
+          },
+          { ...appOptions, auth: { ...auth, resolveEmployee: async () => null } },
+        );
+
+        const response = await call(
+          `/employee-access/${caseId}`,
+          "PUT",
+          { email: "down@example.com", plan: emptyEmployeePlan, revision: 0 },
+          failing,
+        );
+
+        expect(response.status).toBe(200);
+        expect(await assignmentsOf(caseId)).toEqual([]);
+      });
+    });
+
     it("sends the invite again on request", async () => {
       const created = await (await call("/offboardings", "POST", person)).json();
       const target = `${created.id}/invite`;
@@ -11418,6 +11596,149 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       expect(await profilesOf(caseId)).toHaveLength(1);
 
       expect((await request("/offboardings", "GET", cookie)).status).toBe(401);
+    });
+
+    describe("benefit on the first bridge", () => {
+      async function policyFor(orgId: string, department: string) {
+        const rows = await db.select().from(plans).orderBy(asc(plans.monthlyPriceCents));
+
+        const low = rows[0].id;
+        const high = rows[rows.length - 1].id;
+
+        await repos.benefits.savePolicy(orgId, {
+          defaultPlanId: low,
+          benefitDurationMonths: 3,
+          rules: [
+            { id: "r", field: "department", operator: "equals", value: department, planId: high },
+          ],
+        });
+
+        return { low, high };
+      }
+
+      function benefitOf(caseId: string) {
+        return db
+          .select({
+            orgId: benefitAssignments.orgId,
+            source: benefitAssignments.source,
+            planId: benefitAssignments.effectivePlanId,
+            validUntil: benefitAssignments.validUntil,
+          })
+          .from(benefitAssignments)
+          .innerJoin(talentProfiles, eq(talentProfiles.id, benefitAssignments.profileId))
+          .where(eq(talentProfiles.caseId, caseId));
+      }
+
+      afterEach(async () => {
+        await db.delete(benefitAssignments);
+        await db.delete(benefitPolicies);
+      });
+
+      it("gives the rule plan before the first career request is answered", async () => {
+        const orgId = await organization();
+        const { high } = await policyFor(orgId, "Produto");
+        const { caseId, email } = await collaboratorCase(orgId);
+        const cookie = await authenticate(email);
+
+        expect(await benefitOf(caseId)).toEqual([]);
+
+        const me = await request("/me", "GET", cookie);
+
+        expect(me.status).toBe(200);
+        expect(await benefitOf(caseId)).toEqual([
+          {
+            orgId,
+            source: "rule",
+            planId: high,
+            validUntil: addMonths(saoPauloDate(new Date()), 3),
+          },
+        ]);
+      });
+
+      it("gives the default plan and keeps valid_until on later requests", async () => {
+        const orgId = await organization();
+        const { low } = await policyFor(orgId, "Vendas");
+        const { caseId, email } = await collaboratorCase(orgId);
+        const cookie = await authenticate(email);
+
+        await request("/me", "GET", cookie);
+
+        expect(await benefitOf(caseId)).toMatchObject([{ source: "default", planId: low }]);
+
+        await db
+          .update(benefitAssignments)
+          .set({ validUntil: "2099-01-01" })
+          .where(eq(benefitAssignments.orgId, orgId));
+        await request("/me", "GET", cookie);
+
+        expect(await benefitOf(caseId)).toMatchObject([{ validUntil: "2099-01-01" }]);
+      });
+
+      it("does not renew an expired automatic assignment on later requests", async () => {
+        const orgId = await organization();
+        const { high } = await policyFor(orgId, "Produto");
+        const { caseId, email } = await collaboratorCase(orgId);
+        const cookie = await authenticate(email);
+
+        await request("/me", "GET", cookie);
+        await db
+          .update(benefitAssignments)
+          .set({ validUntil: "2026-01-01" })
+          .where(eq(benefitAssignments.orgId, orgId));
+        await repos.benefits.savePolicy(orgId, {
+          defaultPlanId: null,
+          benefitDurationMonths: 12,
+          rules: [],
+        });
+        await request("/me", "GET", cookie);
+
+        expect(await benefitOf(caseId)).toMatchObject([
+          { source: "rule", planId: high, validUntil: "2026-01-01" },
+        ]);
+      });
+
+      it("assigns nothing without a policy or with only another organization's", async () => {
+        const orgId = await organization();
+        const otherOrg = await organization();
+
+        await policyFor(otherOrg, "Produto");
+
+        const { caseId, email } = await collaboratorCase(orgId);
+        const cookie = await authenticate(email);
+
+        expect((await request("/me", "GET", cookie)).status).toBe(200);
+        expect(await benefitOf(caseId)).toEqual([]);
+      });
+
+      it("serves the collaborator even when the benefit cannot be assigned", async () => {
+        const orgId = await organization();
+
+        await policyFor(orgId, "Produto");
+
+        const { caseId, email } = await collaboratorCase(orgId);
+        const cookie = await authenticate(email);
+
+        const failing = createApp(
+          webOrigin,
+          {
+            ...repos,
+            benefits: {
+              ...repos.benefits,
+              pendingPerson: () => Promise.reject(new Error("db down")),
+            },
+          },
+          { auth: employeeAuth, sendEmail },
+        );
+
+        const response = await failing.handle(
+          new Request(`${webOrigin}/api/me`, {
+            headers: { cookie, origin: webOrigin, [employeeGrantHeader]: grants.get(cookie) ?? "" },
+          }),
+        );
+
+        expect(response.status).toBe(200);
+        expect(await benefitOf(caseId)).toEqual([]);
+      });
     });
 
     it("creates the profile once", async () => {

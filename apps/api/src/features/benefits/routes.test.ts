@@ -16,7 +16,7 @@ import { createRepositories } from "../../repositories.js";
 import { portalAccess } from "../../shared/access.js";
 import type { PortalAuth } from "../../shared/portal-auth.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
-import { addMonths, benefitRoutes } from "./routes.js";
+import { benefitRoutes } from "./routes.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const webOrigin = "http://localhost:5173";
@@ -127,12 +127,6 @@ describe.skipIf(!url)("benefit routes", () => {
 
     return date.toISOString().slice(0, 10);
   }
-
-  it("clamps month-end dates to the last day of the target month", () => {
-    expect(addMonths("2027-01-31", 1)).toBe("2027-02-28");
-    expect(addMonths("2027-03-31", 1)).toBe("2027-04-30");
-    expect(addMonths("2027-01-15", 1)).toBe("2027-02-15");
-  });
 
   it("hides policies and assignments from other organizations", async () => {
     const { low } = await planIds();

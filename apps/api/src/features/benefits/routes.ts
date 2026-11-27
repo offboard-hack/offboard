@@ -3,7 +3,7 @@ import { z } from "zod";
 import { benefitRuleSchema } from "../../shared/benefit-rules.js";
 import type { PortalAccessPlugin } from "../../shared/access.js";
 import { errorResponse } from "../../shared/http.js";
-import { saoPauloDate } from "../../shared/sao-paulo-date.js";
+import { addMonths, saoPauloDate } from "../../shared/sao-paulo-date.js";
 import type { BenefitRepository } from "./repository.js";
 
 const defaultDurationMonths = 6;
@@ -39,16 +39,6 @@ const assignmentRow = t.Object({
 });
 
 const idRow = t.Object({ id: t.String() });
-
-export function addMonths(date: string, months: number) {
-  const result = new Date(`${date}T00:00:00Z`);
-  const day = result.getUTCDate();
-  result.setUTCMonth(result.getUTCMonth() + months);
-
-  if (result.getUTCDate() !== day) result.setUTCDate(0);
-
-  return result.toISOString().slice(0, 10);
-}
 
 export function benefitRoutes(repos: BenefitRepository, access: PortalAccessPlugin) {
   return new Elysia()

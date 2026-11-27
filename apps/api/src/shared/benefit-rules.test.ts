@@ -26,6 +26,23 @@ describe("matchesBenefitRule", () => {
     ).toBe(true);
   });
 
+  it("ignores surrounding whitespace in the person's value", () => {
+    const person = { department: "Engenharia ", role: " Gerente" };
+
+    expect(
+      matchesBenefitRule({ field: "department", operator: "equals", value: "Engenharia" }, person),
+    ).toBe(true);
+    expect(
+      matchesBenefitRule(
+        { field: "department", operator: "notEquals", value: "Engenharia" },
+        person,
+      ),
+    ).toBe(false);
+    expect(
+      matchesBenefitRule({ field: "role", operator: "contains", value: "gerente" }, person),
+    ).toBe(true);
+  });
+
   it("equals does not partial-match", () => {
     expect(
       matchesBenefitRule(
