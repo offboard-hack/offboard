@@ -7978,6 +7978,15 @@ describe.skipIf(!url)("api", () => {
       logged.mockRestore();
     });
 
+    it("runs scheduled automation rules on drain", async () => {
+      const app = sourcesApp([]);
+      const cronRules = vi.spyOn(repos.automationRules, "getAllCronRules");
+
+      expect(await app.drainNow()).toEqual({ processed: 0, failed: 0 });
+      expect(cronRules).toHaveBeenCalledTimes(1);
+      cronRules.mockRestore();
+    });
+
     it("completes ingest jobs of missing or disabled sources without fetching", async () => {
       const app = sourcesApp([]);
 

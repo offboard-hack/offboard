@@ -543,6 +543,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     await sweepExpiredCopays();
     await repos.aiApply.sweepStale(new Date()).catch(logFailure("AI application sweep failed"));
     await scheduleSources();
+    await runScheduledRules(engineRepos);
     await repos.aiApply
       .queuedIds()
       .then((ids) => repos.background.enqueueMany("ai_apply", ids))
