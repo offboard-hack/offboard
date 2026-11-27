@@ -76,6 +76,27 @@ export const ratingSchema = z.union([
 export const responseOptions = ["Sim", "Em parte", "Não"] as const;
 const responseSchema = z.enum(responseOptions);
 
+export const exitSurveyRatings = [
+  { key: "assessment", label: "Processo de desligamento" },
+  { key: "managerSupport", label: "Apoio do gestor" },
+  { key: "teamRespect", label: "Respeito da equipe" },
+  { key: "communication", label: "Clareza da comunicação" },
+  { key: "equipmentReturn", label: "Devolução de equipamentos" },
+  { key: "documents", label: "Documentos e rescisão" },
+] as const;
+
+export type ExitSurveyRatingKey = (typeof exitSurveyRatings)[number]["key"];
+
+export const feedbackTopics = [
+  "Respeito na comunicação",
+  "Clareza de prazos",
+  "Devolução de equipamentos",
+  "Apoio emocional",
+  "Acesso a benefícios",
+] as const;
+
+const optionalRating = ratingSchema.nullable().default(null);
+
 const feedbackSchema = z.object({
   anonymous: z.boolean(),
   assessment: ratingSchema.nullable(),
@@ -83,6 +104,12 @@ const feedbackSchema = z.object({
   respect: responseSchema.nullable(),
   comment: z.string().trim().max(800),
   recommendation: z.number().int().min(0).max(10).nullable(),
+  managerSupport: optionalRating,
+  teamRespect: optionalRating,
+  communication: optionalRating,
+  equipmentReturn: optionalRating,
+  documents: optionalRating,
+  topics: z.array(z.enum(feedbackTopics)).max(feedbackTopics.length).default([]),
 });
 
 export const feedbackFormSchema = feedbackSchema

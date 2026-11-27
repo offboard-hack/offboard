@@ -37,6 +37,7 @@ import {
   syncDepartureTasks,
   type ChecklistChange,
 } from "./checklist.js";
+import { syncExitSurvey } from "./exit-survey.js";
 import {
   allReceived,
   currentBooking,
@@ -317,6 +318,8 @@ export function createEmployeeRepository(db: Database) {
               next.booking,
             );
           }
+
+          await syncExitSurvey(tx, orgId, principal.caseId, previous, next);
 
           return syncDepartureTasks(tx, orgId, principal.caseId, previous, next);
         },

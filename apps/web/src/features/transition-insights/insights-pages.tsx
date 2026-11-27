@@ -31,7 +31,16 @@ function formatNps(value: number) {
 
 export function FeedbackPage() {
   const { data } = useSuspenseQuery(exitSurveyAggregatesQuery);
-  const { totalResponses, averageNps, nps, completionRate, activationsByMonth, topTopics } = data;
+
+  const {
+    totalResponses,
+    averageNps,
+    nps,
+    completionRate,
+    ratings,
+    activationsByMonth,
+    topTopics,
+  } = data;
 
   const feedbackMetrics: ListMetric[] = [
     { label: "Respostas", value: String(totalResponses), icon: UserGroupIcon, tone: "primary" },
@@ -92,6 +101,25 @@ export function FeedbackPage() {
           </p>
         </section>
       </div>
+      <section aria-labelledby="feedback-ratings" {...classProps(styles.feedback)}>
+        <h2 id="feedback-ratings" {...classProps(styles.reportHeading)}>
+          Nota média por pergunta
+        </h2>
+        <p {...classProps(styles.placementCopy)}>Escala de 1 a 5, média das respostas recebidas.</p>
+        <ul role="list" {...classProps(styles.topics)}>
+          {ratings.map(({ key, label, average, responses }) => (
+            <li key={key} {...classProps(styles.topic)}>
+              <span>{label}</span>
+              <div {...classProps(styles.track, styles.topicTrack)} aria-hidden="true">
+                <div {...classProps(styles.bar)} style={{ width: `${(average / 5) * 100}%` }} />
+              </div>
+              <span {...classProps(styles.topicValue)}>
+                {responses === 0 ? "—" : average.toLocaleString("pt-BR")}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
       <section aria-labelledby="feedback-topics" {...classProps(styles.feedback)}>
         <h2 id="feedback-topics" {...classProps(styles.reportHeading)}>
           O que aparece nos feedbacks
