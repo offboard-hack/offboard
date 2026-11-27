@@ -10,8 +10,13 @@ import {
   seedCohortProfiles,
   seedTalentProfiles,
 } from "../src/talent-profile.fixture.ts";
-import { seedApplications, seedCohortApplications } from "../src/application.fixture.ts";
+import {
+  interviewStart,
+  seedApplications,
+  seedCohortApplications,
+} from "../src/application.fixture.ts";
 import { seedJobs } from "../src/job.fixture.ts";
+import { publicToken, saoPauloDaysEndingToday } from "../src/public-page.fixture.ts";
 import {
   aiApplications,
   answerQuestions,
@@ -1352,5 +1357,34 @@ describe("normalizeQuestion", () => {
     expect(normalizeQuestion("Aviso: ")).toBe("aviso");
     expect(normalizeQuestion("Aviso, ; … ")).toBe("aviso");
     expect(normalizeQuestion("Você é PcD (pessoa)?")).toBe("voce e pcd (pessoa)");
+  });
+});
+
+describe("interviewStart", () => {
+  it("returns a Date at 10:00 São Paulo time for the given day offset", () => {
+    const result = interviewStart(2);
+
+    expect(result).toBeInstanceOf(Date);
+    expect(result.toISOString()).toMatch(/T13:00:00\.000Z/);
+  });
+});
+
+describe("saoPauloDaysEndingToday", () => {
+  it("returns the requested number of YYYY-MM-DD strings ending at today", () => {
+    const days = saoPauloDaysEndingToday(3);
+
+    expect(days).toHaveLength(3);
+
+    for (const d of days) expect(d).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe("publicToken", () => {
+  it("returns a base64url string of 32 characters", () => {
+    const token = publicToken();
+
+    expect(token).toBeTypeOf("string");
+    expect(token.length).toBe(32);
+    expect(publicToken()).not.toBe(token);
   });
 });
