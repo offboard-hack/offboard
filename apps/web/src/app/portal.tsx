@@ -87,7 +87,7 @@ const navigationGroups: {
     to: keyof FileRoutesByTo;
     label: string;
     icon: string;
-    subject?: "Team" | "Integrations";
+    subject?: "Team" | "Integrations" | "Billing";
   }[];
 }[] = [
   {
@@ -147,6 +147,12 @@ const navigationGroups: {
         label: "Planos e gastos",
         subject: "Integrations",
         icon: "M5 3h14v18l-3-2-4 2-4-2-3 2zM9 8h6m-6 4h6",
+      },
+      {
+        to: "/beneficios",
+        label: "Benefícios",
+        subject: "Billing",
+        icon: "M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z",
       },
     ],
   },
