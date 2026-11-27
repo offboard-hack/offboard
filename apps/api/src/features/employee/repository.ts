@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "@offboard/db/client";
 import {
+  authRateLimit,
   authSession,
   authUser,
   employeeAccess,
@@ -64,6 +65,9 @@ type EmployeeData = {
   saveState(next: EmployeeState): ReturnType<typeof saveState>;
 };
 
+const invitesPerCase = 3;
+const inviteWindowMs = 24 * 60 * 60 * 1000;
+
 export function createEmployeeRepository(db: Database) {
   async function readSettings(orgId: string, caseId: string) {
     const [settings] = await db
@@ -115,6 +119,30 @@ export function createEmployeeRepository(db: Database) {
       .where(and(eq(offboardingCases.orgId, orgId), eq(offboardingCases.id, caseId)));
 
     return invitee;
+  }
+
+  async function claimInvite(caseId: string) {
+    const now = Date.now();
+    const expired = sql`${authRateLimit.lastRequest} <= ${now - inviteWindowMs}`;
+
+    const [row] = await db
+      .insert(authRateLimit)
+      .values({
+        id: randomUUID(),
+        key: `offboard:employee-invite:${caseId}`,
+        count: 1,
+        lastRequest: now,
+      })
+      .onConflictDoUpdate({
+        target: authRateLimit.key,
+        set: {
+          count: sql`case when ${expired} then 1 else ${authRateLimit.count} + 1 end`,
+          lastRequest: sql`case when ${expired} then ${now} else ${authRateLimit.lastRequest} end`,
+        },
+      })
+      .returning({ count: authRateLimit.count });
+
+    return row.count <= invitesPerCase;
   }
 
   function markInviteSent(orgId: string, caseId: string) {
@@ -403,6 +431,7 @@ export function createEmployeeRepository(db: Database) {
   return {
     readSettings,
     readInvitee,
+    claimInvite,
     markInviteSent,
     saveSettings,
     withAccess,

@@ -127,6 +127,8 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
       if (!invitee.email) return "no-email";
 
+      if (!(await repos.employee.claimInvite(caseId))) return "rate-limited";
+
       await options.sendEmail(
         employeeInviteEmail({ ...invitee, email: invitee.email, origin: webOrigin }),
       );

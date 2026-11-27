@@ -7864,6 +7864,37 @@ describe.skipIf(!url)("api", () => {
       expect((await access(`${missingCaseId}/invite`, "POST")).status).toBe(404);
     });
 
+    it("sends at most three invites per case a day", async () => {
+      const response = await call("/offboardings", "POST", { ...person, invite: true });
+      const created = await response.json();
+      const target = `${created.id}/invite`;
+
+      expect(
+        (
+          await access(created.id, "PUT", {
+            email: "outro@example.com",
+            plan: emptyEmployeePlan,
+            revision: 1,
+          })
+        ).status,
+      ).toBe(200);
+      expect((await access(target, "POST")).status).toBe(200);
+
+      const limited = await access(target, "POST");
+
+      expect(limited.status).toBe(429);
+      expect(await limited.json()).toEqual({ error: "Too many invites" });
+      expect(invitedEmails).toEqual([person.email, "outro@example.com", "outro@example.com"]);
+
+      await db
+        .update(authRateLimit)
+        .set({ lastRequest: Date.now() - 24 * 60 * 60 * 1000 })
+        .where(eq(authRateLimit.key, `offboard:employee-invite:${created.id}`));
+
+      expect((await access(target, "POST")).status).toBe(200);
+      expect(invitedEmails).toHaveLength(4);
+    });
+
     it("still reports the invite as sent when the checklist task cannot be updated", async () => {
       const created = await (await call("/offboardings", "POST", person)).json();
 
