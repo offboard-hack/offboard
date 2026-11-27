@@ -1,6 +1,6 @@
 import { Analytics01Icon, StarIcon, Tick02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { exitSurveyAggregatesQuery } from "@/entities/exit-survey";
+import { exitSurveyAggregatesQuery, exitSurveyCommentsQuery } from "@/entities/exit-survey";
 import { talentAggregatesQuery } from "@/entities/talent-aggregates";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import type { ListMetric } from "@/shared/ui/list-page";
@@ -8,7 +8,14 @@ import { Bar, BarChart, LabelList, XAxis } from "recharts";
 import { ChartContainer } from "@/shared/ui/shadcn/chart";
 import { classProps } from "../../shared/lib/class-props";
 import { portalStyles as s } from "../../shared/ui/surface.styles";
-import { barWidth, formatNps, placementSummary, responsesLabel } from "./feedback-view";
+import {
+  barWidth,
+  commentAuthorLabel,
+  commentMonthLabel,
+  formatNps,
+  placementSummary,
+  responsesLabel,
+} from "./feedback-view";
 
 const styles = {
   report: "grid min-w-0 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]",
@@ -24,11 +31,13 @@ const styles = {
   topicTrack: "col-auto",
   topicValue: "text-right font-medium tabular-nums",
   placement: "grid gap-3 self-start rounded-2xl border bg-card p-4 sm:p-5",
+  comment: "grid gap-1 border-b pb-3 text-sm last:border-b-0",
   placementCopy: "text-sm text-muted-foreground",
 };
 
 export function FeedbackPage() {
   const { data } = useSuspenseQuery(exitSurveyAggregatesQuery);
+  const { data: comments } = useSuspenseQuery(exitSurveyCommentsQuery);
   const talent = useQuery(talentAggregatesQuery);
 
   const placement = placementSummary({
@@ -153,6 +162,28 @@ export function FeedbackPage() {
             </li>
           ))}
         </ul>
+      </section>
+      <section aria-labelledby="feedback-comments" {...classProps(styles.feedback)}>
+        <h2 id="feedback-comments" {...classProps(styles.reportHeading)}>
+          Comentários
+        </h2>
+        {comments.length === 0 ? (
+          <p {...classProps(styles.placementCopy)}>
+            Nenhum comentário ainda. Eles aparecem aqui quando colaboradores escreverem na pesquisa
+            de saída.
+          </p>
+        ) : (
+          <ul role="list" {...classProps(styles.topics)}>
+            {comments.map(({ comment, month, author }, index) => (
+              <li key={index} {...classProps(styles.comment)}>
+                <p>{comment}</p>
+                <p {...classProps(styles.placementCopy)}>
+                  {commentAuthorLabel(author)} · {commentMonthLabel(month)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </ListPage>
   );

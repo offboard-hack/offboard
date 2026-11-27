@@ -27,6 +27,12 @@ const ratingAverage = t.Object({
   responses: t.Integer(),
 });
 
+const comment = t.Object({
+  comment: t.String(),
+  month: t.String(),
+  author: t.Nullable(t.Object({ name: t.String(), department: t.String() })),
+});
+
 const aggregates = t.Object({
   totalResponses: t.Integer(),
   averageNps: t.Number(),
@@ -60,6 +66,10 @@ export function exitSurveysRoutes(repos: ExitSurveysRepository, access: PortalAc
         response: aggregates,
       },
     )
+    .get("/exit-surveys/comments", ({ principal }) => repos.listComments(principal.orgId), {
+      permit: ["read", "ExitSurveys"],
+      response: t.Array(comment),
+    })
     .post(
       "/exit-surveys",
       async ({ body, principal, set, status }) => {
