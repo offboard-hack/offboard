@@ -9,9 +9,12 @@ import {
   authRateLimit,
   authUser,
   benefitAssignments,
+  copayProducts,
   integrations,
+  jobs,
   offboardingCases,
   organizations,
+  plans,
   subscriptions,
   talentProfiles,
   teamMembers,
@@ -30,6 +33,7 @@ import { createHttp } from "./http.js";
 import { startReceiver } from "./receiver.js";
 import { runScenario } from "./run.js";
 import { orgs, people } from "./scenarios.js";
+import { findCandidates } from "./steps-rehearsal.js";
 import { ensureOrg, signIn } from "./steps.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -51,7 +55,7 @@ describe.skipIf(!url)("scenario runner against the in-process API", () => {
     },
   });
 
-  let checkouts = 0;
+  const issued: string[] = [];
 
   const app = createApp(webOrigin, repos, {
     auth,
@@ -61,9 +65,10 @@ describe.skipIf(!url)("scenario runner against the in-process API", () => {
     abacatepay: {
       configured: true,
       createSubscriptionCheckout: async () => {
-        checkouts += 1;
+        const id = `bill_${issued.length + 1}`;
+        issued.push(id);
 
-        return { id: `bill_${checkouts}`, url: "https://checkout.example.com/x" };
+        return { id, url: `https://checkout.example.com/pay/${id}` };
       },
       cancelSubscription: async () => undefined,
     },
@@ -126,6 +131,9 @@ describe.skipIf(!url)("scenario runner against the in-process API", () => {
         Object.values(people).map((person) => person.email),
       ),
     );
+
+    await db.delete(copayProducts);
+    await db.delete(jobs).where(inArray(jobs.sourceKey, ["scenario-co:1001", "scenario-co:1002"]));
 
     if (ids.length > 0) {
       await db.delete(actionConfigs).where(inArray(actionConfigs.orgId, ids));
@@ -272,5 +280,87 @@ describe.skipIf(!url)("scenario runner against the in-process API", () => {
     await runScenario("company-payment", again.ctx);
 
     expect(again.lines).toContain("company subscription already active on silver");
+  });
+  it("pays, repeats and cancels the benefit co-pay through a signed webhook with the issued bill id", async () => {
+    const env = {
+      ABACATEPAY_API_KEY: "sandbox-key",
+      ABACATEPAY_WEBHOOK_SECRET: webhookSecret,
+    };
+
+    await db.delete(benefitAssignments);
+
+    const none = context(env);
+
+    await runScenario("benefit-copay", none.ctx);
+
+    expect(none.lines.some((line) => line.includes("has no co-pay on offer"))).toBe(true);
+
+    const planRows = await db.select({ id: plans.id, slug: plans.slug }).from(plans);
+    const idOf = (slug: string) => planRows.find((row) => row.slug === slug)!.id;
+
+    await db.insert(copayProducts).values({
+      fromPlanId: idOf("silver"),
+      toPlanId: idOf("gold"),
+      abacatePayProductId: "prod_x",
+    });
+
+    const first = context(env);
+    const before = issued.length;
+
+    await runScenario("benefit-copay", first.ctx);
+
+    expect(issued.slice(before)).toHaveLength(1);
+    expect(first.lines).toContain("Marina Lopes co-pay is active and the benefit is now Gold");
+    expect(
+      first.lines.some((line) => /canceled the co-pay; Gold stays until \d{4}-/.test(line)),
+    ).toBe(true);
+    expect(first.lines).toContain(
+      `AbacatePay sandbox checkout: https://checkout.example.com/pay/${issued.at(-1)}`,
+    );
+
+    const second = context(env);
+
+    await runScenario("benefit-copay", second.ctx);
+
+    expect(
+      second.lines.some((line) => line.startsWith("Marina Lopes co-pay already canceled until")),
+    ).toBe(true);
+    expect(issued.slice(before)).toHaveLength(1);
+  });
+
+  it("skips the AI Apply rehearsal without keys and picks only open Greenhouse jobs", async () => {
+    const { ctx, lines } = context();
+
+    await runScenario("ai-apply-rehearsal", ctx);
+
+    expect(lines).toContain("skipped: AI not configured");
+
+    await db.insert(jobs).values([
+      {
+        origin: "external",
+        source: "greenhouse",
+        sourceKey: "scenario-co:1001",
+        title: "Engenheira de plataforma",
+        company: "Acme",
+        url: "https://boards.greenhouse.io/acme/jobs/1001",
+      },
+      {
+        origin: "external",
+        source: "greenhouse",
+        sourceKey: "scenario-co:1002",
+        title: "Vaga encerrada",
+        company: "Acme",
+        url: "https://boards.greenhouse.io/acme/jobs/1002",
+        closedAt: new Date(),
+      },
+    ]);
+
+    const cookie = (await signIn(ctx, "employee", people.helena.email)).cookie;
+    const found = await findCandidates(ctx, cookie);
+
+    const titles = found.map((job) => job.title);
+
+    expect(titles).toContain("Engenheira de plataforma");
+    expect(titles).not.toContain("Vaga encerrada");
   });
 });

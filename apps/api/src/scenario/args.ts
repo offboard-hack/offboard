@@ -9,6 +9,8 @@ export const scenarioNames = [
   "applications",
   "answers",
   "benefits-manual",
+  "benefit-copay",
+  "ai-apply-rehearsal",
   "equipment",
   "integrations",
   "checklist-actions",
