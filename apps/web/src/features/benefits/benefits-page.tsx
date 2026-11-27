@@ -145,14 +145,14 @@ export function BenefitsPage() {
           tone: "warning",
         },
         {
-          label: "Atribuições ativas",
+          label: "Total de atribuições",
           value: assignments.length,
           icon: UserGroupIcon,
           tone: "success",
         },
         {
           label: "Duração padrão",
-          value: `${policy.benefitDurationMonths} meses`,
+          value: `${policy.benefitDurationMonths} ${policy.benefitDurationMonths === 1 ? "mês" : "meses"}`,
           icon: Tick02Icon,
           tone: "primary",
         },
@@ -378,13 +378,23 @@ function PolicyCard({
                             const next = ruleOperatorOptions.find((item) => item.value === value);
 
                             if (next) {
-                              operator.handleChange(
+                              const prev = operator.state.value;
+
+                              const nextOp =
                                 next.value === "notEquals"
                                   ? "notEquals"
                                   : next.value === "contains"
                                     ? "contains"
-                                    : "equals",
-                              );
+                                    : "equals";
+
+                              operator.handleChange(nextOp);
+
+                              if (
+                                rule.field === "department" &&
+                                (prev === "contains") !== (nextOp === "contains")
+                              ) {
+                                form.setFieldValue(`rules[${index}].value`, "");
+                              }
                             }
                           }}
                         />
