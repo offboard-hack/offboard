@@ -43,6 +43,8 @@ const browserEndpoints = new Set([
 
 const nativeEndpoints = new Set([codeRequestPath, codeSignInPath, "/sign-out"]);
 const codeEndpoints = new Set([codeRequestPath, codeSignInPath]);
+const linkPaths = new Set([verifyPath, "/sign-in/magic-link"]);
+const employeeCookie = "offboard-colaborador";
 
 export const codeAudienceHeader = "x-offboard-audience";
 
@@ -264,143 +266,152 @@ export function createAuth({
     });
   }
 
-  const auth = betterAuth({
-    appName: "Offboard",
-    baseURL: origin,
-    basePath: authPath,
-    secret,
-    database: drizzleAdapter(db, { provider: "pg", schema }),
-    trustedOrigins: [origin],
-    advanced: {
-      useSecureCookies: origin.startsWith("https:"),
-      ipAddress: { ipAddressHeaders },
-    },
-    rateLimit: { enabled: true, storage: "database" },
-    session: {
-      expiresIn: 12 * 60 * 60,
-      updateAge: 60 * 60,
-      additionalFields: {
-        memberId: { type: "string", required: false, input: false },
-        employeeCaseId: { type: "string", required: false, input: false },
-        employeeGrantId: { type: "string", required: false, input: false },
-        talentProfileId: { type: "string", required: false, input: false },
+  const buildAuth = (cookiePrefix: string) =>
+    betterAuth({
+      appName: "Offboard",
+      baseURL: origin,
+      basePath: authPath,
+      secret,
+      database: drizzleAdapter(db, { provider: "pg", schema }),
+      trustedOrigins: [origin],
+      advanced: {
+        cookiePrefix,
+        useSecureCookies: origin.startsWith("https:"),
+        ipAddress: { ipAddressHeaders },
       },
-    },
-    hooks: {
-      before: createAuthMiddleware(async (context) => {
-        if (context.path === verifyPath && !callbackQuery.safeParse(context.query).success) {
-          throw context.redirect(`${origin}/entrar?error=INVALID_TOKEN`);
-        }
-
-        if (context.path === codeRequestPath || context.path === codeSignInPath) {
-          const scope = codeScope.getStore();
-          const parsed = otpEmail.safeParse(context.body);
-
-          if (scope && parsed.success) {
-            if (scope.audience === "member") scope.member = await findMember(parsed.data.email);
-            else scope.grant = await findEmployee(parsed.data.email);
-          }
-        }
-
-        if (context.path === codeSignInPath) requireCodeSubject();
-      }),
-    },
-    databaseHooks: {
-      user: {
-        create: {
-          async before(user, context) {
-            if (context?.path === codeSignInPath) {
-              const subject = requireCodeSubject();
-              const name = subject.audience === "member" ? subject.member.name : subject.grant.name;
-
-              return { data: { name, image: null } };
-            }
-
-            const profileId = callbackContext.parse(context).query.token;
-            const invitee = await talent.findForSignIn(user.email, profileId);
-
-            return invitee ? { data: { name: invitee.name } } : false;
-          },
-        },
-      },
+      rateLimit: { enabled: true, storage: "database" },
       session: {
-        create: {
-          async before(session, context) {
-            if (context?.path === codeSignInPath) {
-              const subject = requireCodeSubject();
+        expiresIn: 12 * 60 * 60,
+        updateAge: 60 * 60,
+        additionalFields: {
+          memberId: { type: "string", required: false, input: false },
+          employeeCaseId: { type: "string", required: false, input: false },
+          employeeGrantId: { type: "string", required: false, input: false },
+          talentProfileId: { type: "string", required: false, input: false },
+        },
+      },
+      hooks: {
+        before: createAuthMiddleware(async (context) => {
+          if (context.path === verifyPath && !callbackQuery.safeParse(context.query).success) {
+            throw context.redirect(`${origin}/entrar?error=INVALID_TOKEN`);
+          }
 
-              return {
-                data:
-                  subject.audience === "member"
-                    ? { memberId: subject.member.id }
-                    : {
-                        employeeCaseId: subject.grant.caseId,
-                        employeeGrantId: subject.grant.grantId,
-                      },
-              };
+          if (context.path === codeRequestPath || context.path === codeSignInPath) {
+            const scope = codeScope.getStore();
+            const parsed = otpEmail.safeParse(context.body);
+
+            if (scope && parsed.success) {
+              if (scope.audience === "member") scope.member = await findMember(parsed.data.email);
+              else scope.grant = await findEmployee(parsed.data.email);
             }
+          }
 
-            const profileId = callbackContext.parse(context).query.token;
+          if (context.path === codeSignInPath) requireCodeSubject();
+        }),
+      },
+      databaseHooks: {
+        user: {
+          create: {
+            async before(user, context) {
+              if (context?.path === codeSignInPath) {
+                const subject = requireCodeSubject();
 
-            const [user] = await db
-              .select({ email: authUser.email })
-              .from(authUser)
-              .where(and(eq(authUser.id, session.userId), eq(authUser.emailVerified, true)));
+                const name =
+                  subject.audience === "member" ? subject.member.name : subject.grant.name;
 
-            if (!user) return false;
+                return { data: { name, image: null } };
+              }
 
-            const invitee = await talent.findForSignIn(user.email, profileId);
+              const profileId = callbackContext.parse(context).query.token;
+              const invitee = await talent.findForSignIn(user.email, profileId);
 
-            return invitee ? { data: { talentProfileId: invitee.id } } : false;
+              return invitee ? { data: { name: invitee.name } } : false;
+            },
           },
-          async after(session) {
-            const created = talentSession.safeParse(session);
+        },
+        session: {
+          create: {
+            async before(session, context) {
+              if (context?.path === codeSignInPath) {
+                const subject = requireCodeSubject();
 
-            if (created.success) await talent.markSignedIn(created.data.talentProfileId);
+                return {
+                  data:
+                    subject.audience === "member"
+                      ? { memberId: subject.member.id }
+                      : {
+                          employeeCaseId: subject.grant.caseId,
+                          employeeGrantId: subject.grant.grantId,
+                        },
+                };
+              }
+
+              const profileId = callbackContext.parse(context).query.token;
+
+              const [user] = await db
+                .select({ email: authUser.email })
+                .from(authUser)
+                .where(and(eq(authUser.id, session.userId), eq(authUser.emailVerified, true)));
+
+              if (!user) return false;
+
+              const invitee = await talent.findForSignIn(user.email, profileId);
+
+              return invitee ? { data: { talentProfileId: invitee.id } } : false;
+            },
+            async after(session) {
+              const created = talentSession.safeParse(session);
+
+              if (created.success) await talent.markSignedIn(created.data.talentProfileId);
+            },
           },
         },
       },
-    },
-    plugins: [
-      emailOTP({
-        expiresIn: codeLifetimeSeconds,
-        allowedAttempts: 3,
-        storeOTP: {
-          async hash(otp) {
-            const scope = codeScope.getStore();
+      plugins: [
+        emailOTP({
+          expiresIn: codeLifetimeSeconds,
+          allowedAttempts: 3,
+          storeOTP: {
+            async hash(otp) {
+              const scope = codeScope.getStore();
 
-            const binding =
-              scope?.audience === "member"
-                ? `member-otp:${scope.member?.id ?? "unassigned"}`
-                : `employee-otp:${scope?.grant?.grantId ?? "unassigned"}`;
+              const binding =
+                scope?.audience === "member"
+                  ? `member-otp:${scope.member?.id ?? "unassigned"}`
+                  : `employee-otp:${scope?.grant?.grantId ?? "unassigned"}`;
 
-            return createHmac("sha256", secret).update(`offboard:${binding}:${otp}`).digest("hex");
+              return createHmac("sha256", secret)
+                .update(`offboard:${binding}:${otp}`)
+                .digest("hex");
+            },
           },
-        },
-        async sendVerificationOTP({ email, otp, type }) {
-          if (type === "sign-in" && sendCode && (await codeRecipient(email))) {
-            await sendCode({ email, code: otp });
-          }
-        },
-      }),
-      magicLink({
-        expiresIn: signInLinkMinutes * 60,
-        storeToken: "hashed",
-        async generateToken(email) {
-          const invitee = await talent.findForSignIn(email);
+          async sendVerificationOTP({ email, otp, type }) {
+            if (type === "sign-in" && sendCode && (await codeRecipient(email))) {
+              await sendCode({ email, code: otp });
+            }
+          },
+        }),
+        magicLink({
+          expiresIn: signInLinkMinutes * 60,
+          storeToken: "hashed",
+          async generateToken(email) {
+            const invitee = await talent.findForSignIn(email);
 
-          return `t.${invitee?.id ?? "uninvited"}.${randomBytes(32).toString("base64url")}`;
-        },
-        async sendMagicLink({ email, token, url }) {
-          const link = linkToken.safeParse(token);
+            return `t.${invitee?.id ?? "uninvited"}.${randomBytes(32).toString("base64url")}`;
+          },
+          async sendMagicLink({ email, token, url }) {
+            const link = linkToken.safeParse(token);
 
-          if (link.success && (await talent.findForSignIn(email, link.data))) {
-            await sendLink({ email, url });
-          }
-        },
-      }),
-    ],
-  });
+            if (link.success && (await talent.findForSignIn(email, link.data))) {
+              await sendLink({ email, url });
+            }
+          },
+        }),
+      ],
+    });
+
+  const memberAuth = buildAuth("better-auth");
+  const employeeAuth = buildAuth(employeeCookie);
 
   return {
     async handler(request) {
@@ -456,6 +467,18 @@ export function createAuth({
         return new Response(null, { status: 404 });
       }
 
+      const employeeSignOut =
+        path === "/sign-out" &&
+        (request.headers.get(codeAudienceHeader) === "employee" ||
+          Boolean(request.headers.get("cookie")?.includes(`${employeeCookie}.session_token=`)));
+
+      const auth =
+        codeAudience === "member" ||
+        linkPaths.has(path) ||
+        (path === "/sign-out" && !employeeSignOut)
+          ? memberAuth
+          : employeeAuth;
+
       const scope: CodeScope = { audience: codeAudience, grant: null, member: undefined };
 
       const response = await codeScope.run(scope, async () => {
@@ -480,7 +503,7 @@ export function createAuth({
       return new Response(response.body, { status: response.status, headers });
     },
     async resolvePrincipal(headers) {
-      const session = await auth.api.getSession({ headers });
+      const session = await memberAuth.api.getSession({ headers });
 
       if (!session) return { kind: "anonymous" };
 
@@ -507,7 +530,7 @@ export function createAuth({
       return member ? { kind: "authenticated", principal: member } : { kind: "forbidden" };
     },
     async resolveEmployee(headers) {
-      const session = await auth.api.getSession({ headers });
+      const session = await employeeAuth.api.getSession({ headers });
 
       if (
         !session?.user.emailVerified ||
