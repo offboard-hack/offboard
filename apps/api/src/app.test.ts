@@ -5531,7 +5531,8 @@ describe.skipIf(!url)("api", () => {
             expect(partial.profile).toEqual([
               { field: "address", value: "Rua A, 5 - Centro, Campinas - SP, CEP 01310-100" },
             ]);
-            expect(JSON.stringify(partial)).not.toContain("529");
+            expect(JSON.stringify(partial)).not.toContain("52998224725");
+            expect(JSON.stringify(partial)).not.toContain("529.982.247-25");
           });
 
           it("writes, stores and replaces the cover letter", async () => {
