@@ -259,6 +259,8 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
   const library = new Map<string, string>();
   const modelLibrary: { question: string; answer: string }[] = [];
 
+  const accepted: DraftInput["library"] = [];
+
   for (const entry of input.library) {
     const normalized = normalizeQuestion(entry.question);
     const digits = entry.answer.replace(/\D/g, "");
@@ -272,6 +274,8 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
     }
 
     if (!library.has(normalized)) library.set(normalized, entry.answer);
+
+    accepted.push(entry);
 
     if (
       !entry.sensitive &&
@@ -287,10 +291,10 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
   const within = (small: Set<string>, large: Set<string>) =>
     [...small].every((item) => large.has(item));
 
-  for (const entry of input.library) {
+  for (const entry of accepted) {
     const topic = topicOf(entry.question);
 
-    if (topic === undefined || !library.has(normalizeQuestion(entry.question))) continue;
+    if (topic === undefined) continue;
 
     const parts = entry.answer.split(";");
 
@@ -528,5 +532,24 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
     );
   }
 
-  return settled.map((item) => item.answer ?? validate(item.question));
+  const answers = settled.map((item) => item.answer ?? validate(item.question));
+
+  const consented = input.questions.every((question, index) => {
+    if (topicOf(question.label) !== "consent") return true;
+
+    const chosen = answers[index].value;
+    const option = question.fields[0]?.options.find((item) => item.value === chosen);
+
+    return option !== undefined && canonicalValue("consent", option.label) === "yes";
+  });
+
+  if (consented) return answers;
+
+  return answers.map((answer, index) => {
+    const question = input.questions[index];
+
+    return answer.status === "suggested" && topicOf(question.label) !== "consent"
+      ? draft(question, question.sensitive ? "sensitive" : "blank")
+      : answer;
+  });
 }

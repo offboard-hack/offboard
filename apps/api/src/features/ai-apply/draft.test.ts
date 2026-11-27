@@ -779,6 +779,59 @@ describe("draftAnswers", () => {
         expect(find(answers, "multi")).toMatchObject({ value: ["2", "4"], status: "suggested" });
       });
 
+      it("drops the demographic suggestions when this form's D&I consent is not yes", async () => {
+        const consent = select(
+          "consent",
+          "Consentimento - Diversidade e Inclusão (D&I)",
+          options("Sim. Eu concordo", "Não. Eu não concordo"),
+          true,
+        );
+
+        const run = (answer: string) =>
+          draftAnswers(
+            fake([]).generate,
+            input([consent, race, relatives], {
+              library: [...saved, { question: "Consentimento D&I", answer, sensitive: true }],
+            }),
+          );
+
+        const refused = await run("Não. Eu não concordo");
+        const given = await run("Sim, concordo");
+
+        const unanswered = await draftAnswers(
+          fake([]).generate,
+          input([consent, race], { library: saved }),
+        );
+
+        expect(refused.map(({ status }) => status)).toEqual(["suggested", "sensitive", "blank"]);
+        expect(refused[0].value).toBe("2");
+        expect(given.map(({ status }) => status)).toEqual(["suggested", "suggested", "suggested"]);
+        expect(unanswered.map(({ status }) => status)).toEqual(["sensitive", "sensitive"]);
+      });
+
+      it("reads topics only from saved answers that pass the filters", async () => {
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([relatives], {
+            library: [
+              {
+                question: "Você tem parentes trabalhando na empresa?",
+                answer: "Não 52998224725",
+                sensitive: false,
+              },
+              {
+                question: "Você tem parentes trabalhando na empresa?",
+                answer: "Sim",
+                sensitive: false,
+              },
+            ],
+            fields: fieldsOf({ cpf: { value: "52998224725", share: false } }),
+          }),
+        );
+
+        expect(answers[0]).toMatchObject({ value: "1", status: "suggested" });
+      });
+
       it("ignores a saved answer the profile withholds", async () => {
         const { generate } = fake([]);
 

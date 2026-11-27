@@ -8,6 +8,7 @@ describe("finds the topic of a question", () => {
     ["Do you have any relatives currently working at Bees Brasil?", "relative"],
     ["Contato com pessoas que já trabalham na empresa", "relative"],
     ["Você tem parentes na empresa?", "relative"],
+    ["Você tem algum familiar trabalhando aqui?", "relative"],
     ["DIVERSITY: Which pronoun is right for you? (Pronouns relate to gender identity)", "pronoun"],
     ["What is your sexual orientation?", "orientation"],
     ["Qual a sua orientação sexual?", "orientation"],
@@ -33,6 +34,12 @@ describe("finds the topic of a question", () => {
     "Você é cisgênero?",
     "Consentimento LGPD para tratamento dos dados pessoais",
     "I consent to a background check",
+    "Você tem algum familiar com deficiência?",
+    "Do you have relatives who are public officials (PEP)?",
+    "Possui parente que é pessoa politicamente exposta?",
+    "Você é PEP?",
+    "Algum familiar seu é casado?",
+    "Você conhece alguém da empresa com deficiência?",
   ])("leaves %s without a topic", (label) => {
     expect(topicOf(label)).toBeUndefined();
   });
@@ -93,6 +100,14 @@ describe("reads an option as a canonical value", () => {
     ["orientation", "Gay or Lesbian"],
     ["race", "Negra (preta ou parda)"],
     ["gender", "Mulher cisgênero"],
+    ["relative", "Não sei"],
+    ["relative", "Não tenho certeza"],
+    ["disability", "Não se aplica"],
+    ["trans", "N/A"],
+    ["consent", "Talvez"],
+    ["relative", "I don't know"],
+    ["orientation", "Homossexual"],
+    ["orientation", "Homosexual"],
   ] as const)("does not read %s: %s", (topic, label) => {
     expect(canonicalValue(topic, label)).toBeUndefined();
   });

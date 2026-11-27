@@ -19,12 +19,6 @@ const topics: [Topic, RegExp][] = [
     "consent",
     /^(?=.*(?<![a-z0-9])(?:consentimento|consent\w*))(?=.*(?:diversidade|diversity|d ?& ?i\b|inclusao|inclusion|demografic|demographic))/,
   ],
-  [
-    "relative",
-    word(
-      "parentes?|familiares?|relatives?|family members?|conhece alguem|pessoas que (?:ja )?trabalham",
-    ),
-  ],
   ["pronoun", word("pronomes?|pronouns?")],
   ["orientation", word("orientacao sexual|sexual orientation")],
   ["trans", word("pessoa trans|transgen\\w*|transexual")],
@@ -32,6 +26,22 @@ const topics: [Topic, RegExp][] = [
   ["race", word("racas?|etnias?|etnic\\w*|race|ethnicity|skin colou?r|cor da pele")],
   ["disability", word("deficiencias?|pcd|disabilit\\w*")],
 ];
+
+const kin = word("familiar(?:es)?|parentes?|relatives?|family members?|conjuge|spouse");
+
+const workplace = word(
+  "trabalh\\w*|work\\w*|employ\\w*|empresa|company|companhia|colaborador\\w*|funcionari\\w*",
+);
+
+const acquaintance = word("conhece alguem|pessoas que (?:ja )?trabalham");
+
+const publicOffice = word(
+  "politicamente expost\\w*|pep|public officials?|government\\w*|governo|servidor\\w* public\\w*|agentes? public\\w*",
+);
+
+const uncertain = word(
+  "nao sei|nao tenho certeza|nao se aplica|n/a|not sure|unsure|(?:i )?(?:do not|don.t) know|not applicable|talvez|maybe",
+);
 
 const decline: Values = [
   [
@@ -73,7 +83,7 @@ const values: Record<Topic, Values> = {
     ["pansexual", word("pansexual")],
     ["asexual", word("assexual|asexual")],
     ["lesbian", word("lesbica|lesbian")],
-    ["gay", word("gay|homossexual|homosexual")],
+    ["gay", word("gay")],
     ["straight", word("heterossexual|heterosexual|hetero|straight")],
   ],
   gender: [
@@ -107,11 +117,23 @@ const values: Record<Topic, Values> = {
 export const topicOf = (label: string) => {
   const normalized = normalizeQuestion(label);
 
-  return topics.find(([, pattern]) => pattern.test(normalized))?.[0];
+  if (publicOffice.test(normalized)) return undefined;
+
+  const found = topics.find(([, pattern]) => pattern.test(normalized))?.[0];
+
+  if (kin.test(normalized)) {
+    return found === undefined && workplace.test(normalized) ? "relative" : undefined;
+  }
+
+  if (acquaintance.test(normalized)) return found === undefined ? "relative" : undefined;
+
+  return found;
 };
 
 export const canonicalValue = (topic: Topic, text: string) => {
   const normalized = normalizeQuestion(text);
+
+  if (uncertain.test(normalized)) return undefined;
 
   const matched = new Set(
     values[topic].flatMap(([value, pattern]) => (pattern.test(normalized) ? [value] : [])),
