@@ -1228,7 +1228,11 @@ describe.skipIf(!url)("ai apply route", () => {
         ["POST", runPath(id)],
       ];
 
-      const offPlan = build({ allowedBy: async () => null, generate: fakeModel().generate });
+      const offPlan = build({
+        allowedBy: async () => ({ allowedBy: null, dailyLimit: 0 }),
+        generate: fakeModel().generate,
+      });
+
       const off = build({ generate: null });
 
       for (const [method, path, body] of routes) {
@@ -1262,7 +1266,7 @@ describe.skipIf(!url)("ai apply route", () => {
       await repos.talent.setAiApplyConsent(profileId, false, new Date());
 
       const closed = build({
-        allowedBy: async () => null,
+        allowedBy: async () => ({ allowedBy: null, dailyLimit: 0 }),
         generate: null,
         storage: files.storage,
       });
@@ -2496,7 +2500,10 @@ describe.skipIf(!url)("ai apply route", () => {
 
         await repos.talent.setAiApplyConsent(profileId, false, new Date());
 
-        const closed = build({ allowedBy: async () => null, generate: null });
+        const closed = build({
+          allowedBy: async () => ({ allowedBy: null, dailyLimit: 0 }),
+          generate: null,
+        });
 
         expect((await closed.call(profileId, checkPath(first), { sent: true })).status).toBe(200);
         expect((await closed.call(profileId, checkPath(second), { sent: false })).status).toBe(200);

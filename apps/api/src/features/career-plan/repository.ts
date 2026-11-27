@@ -91,7 +91,9 @@ export function createCareerPlanRepository(db: Database) {
   }
 
   async function allowedBy(profileId: string, now: Date) {
-    return (await plan(profileId, now))?.aiApply.allowedBy ?? null;
+    const p = await plan(profileId, now);
+
+    return { allowedBy: p?.aiApply.allowedBy ?? null, dailyLimit: p?.aiApply.dailyLimit ?? 0 };
   }
 
   async function individual(profileId: string) {
@@ -189,15 +191,15 @@ export function createCareerPlanRepository(db: Database) {
   async function startCopayCheckout(profileId: string, now: Date) {
     const [row] = await db
       .update(benefitAssignments)
-      .set({ updatedAt: now })
+      .set({ copayCheckoutAt: now })
       .where(
         and(
           eq(benefitAssignments.profileId, profileId),
           gte(benefitAssignments.validUntil, saoPauloDate(now)),
           isNull(benefitAssignments.copaySubscriptionId),
           or(
-            isNull(benefitAssignments.updatedAt),
-            lt(benefitAssignments.updatedAt, new Date(now.getTime() - checkoutRetryMs)),
+            isNull(benefitAssignments.copayCheckoutAt),
+            lt(benefitAssignments.copayCheckoutAt, new Date(now.getTime() - checkoutRetryMs)),
           ),
         ),
       )
@@ -209,7 +211,7 @@ export function createCareerPlanRepository(db: Database) {
   async function releaseCopayCheckout(profileId: string) {
     await db
       .update(benefitAssignments)
-      .set({ updatedAt: new Date(0) })
+      .set({ copayCheckoutAt: null })
       .where(
         and(
           eq(benefitAssignments.profileId, profileId),

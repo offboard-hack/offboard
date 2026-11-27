@@ -1,0 +1,1 @@
+ALTER TABLE "benefit_assignments" ADD COLUMN "copay_checkout_at" timestamp;

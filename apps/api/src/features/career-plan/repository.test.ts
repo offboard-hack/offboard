@@ -150,7 +150,10 @@ describe.skipIf(!url)("career plan repository", () => {
       aiApply: { allowedBy: "individual", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
-    expect(await repos.careerPlan.allowedBy(profileId, now)).toBe("individual");
+    expect(await repos.careerPlan.allowedBy(profileId, now)).toEqual({
+      allowedBy: "individual",
+      dailyLimit: 10,
+    });
 
     const [top] = await db
       .select({ id: plans.id })
@@ -166,7 +169,10 @@ describe.skipIf(!url)("career plan repository", () => {
       createdAt: new Date("2099-01-01T00:00:00Z"),
     });
 
-    expect(await repos.careerPlan.allowedBy(profileId, now)).toBe("company");
+    expect(await repos.careerPlan.allowedBy(profileId, now)).toEqual({
+      allowedBy: "company",
+      dailyLimit: 10,
+    });
 
     await db.delete(subscriptions).where(eq(subscriptions.orgId, defaultOrgId));
 
@@ -196,7 +202,10 @@ describe.skipIf(!url)("career plan repository", () => {
       currentPeriodEnd: "2026-12-01",
     });
 
-    expect(await repos.careerPlan.allowedBy(profileId, now)).toBeNull();
+    expect(await repos.careerPlan.allowedBy(profileId, now)).toEqual({
+      allowedBy: null,
+      dailyLimit: 0,
+    });
   });
 
   it("ignores collaborator access recorded under another organization", async () => {
@@ -270,6 +279,78 @@ describe.skipIf(!url)("career plan repository", () => {
     expect(expired?.benefit).toBeNull();
   });
 
+  describe("co-pay checkout guard", () => {
+    const hour = 60 * 60 * 1000;
+
+    async function assignment() {
+      const { profileId } = await profile("2026-11-30");
+      const [gold] = await db.select({ id: plans.id }).from(plans).where(eq(plans.slug, "gold"));
+
+      await db.insert(benefitAssignments).values({
+        profileId,
+        assignedPlanId: gold.id,
+        effectivePlanId: gold.id,
+        source: "manual",
+        validUntil: "2099-12-31",
+      });
+
+      return profileId;
+    }
+
+    it("starts right after the assignment is created or edited", async () => {
+      const profileId = await assignment();
+
+      await db
+        .update(benefitAssignments)
+        .set({ updatedAt: new Date() })
+        .where(eq(benefitAssignments.profileId, profileId));
+
+      expect(await repos.careerPlan.startCopayCheckout(profileId, new Date())).not.toBeNull();
+    });
+
+    it("refuses a second checkout within the hour and allows it afterwards", async () => {
+      const profileId = await assignment();
+      const started = new Date("2026-11-26T15:00:00Z");
+
+      expect(await repos.careerPlan.startCopayCheckout(profileId, started)).not.toBeNull();
+      expect(
+        await repos.careerPlan.startCopayCheckout(
+          profileId,
+          new Date(started.getTime() + hour - 1),
+        ),
+      ).toBeNull();
+      expect(
+        await repos.careerPlan.startCopayCheckout(
+          profileId,
+          new Date(started.getTime() + hour + 1),
+        ),
+      ).not.toBeNull();
+    });
+
+    it("allows a new checkout after release without touching updated_at", async () => {
+      const profileId = await assignment();
+
+      const [before] = await db
+        .select({ updatedAt: benefitAssignments.updatedAt })
+        .from(benefitAssignments)
+        .where(eq(benefitAssignments.profileId, profileId));
+
+      expect(await repos.careerPlan.startCopayCheckout(profileId, new Date())).not.toBeNull();
+      expect(await repos.careerPlan.startCopayCheckout(profileId, new Date())).toBeNull();
+
+      await repos.careerPlan.releaseCopayCheckout(profileId);
+
+      expect(await repos.careerPlan.startCopayCheckout(profileId, new Date())).not.toBeNull();
+
+      const [after] = await db
+        .select({ updatedAt: benefitAssignments.updatedAt })
+        .from(benefitAssignments)
+        .where(eq(benefitAssignments.profileId, profileId));
+
+      expect(after.updatedAt).toEqual(before.updatedAt);
+    });
+  });
+
   it("has no benefit without an assignment", async () => {
     const { profileId } = await profile("2026-11-30");
 
@@ -280,6 +361,9 @@ describe.skipIf(!url)("career plan repository", () => {
     const missing = "00000000-0000-4000-8000-000000000001";
 
     expect(await repos.careerPlan.plan(missing, now)).toBeUndefined();
-    expect(await repos.careerPlan.allowedBy(missing, now)).toBeNull();
+    expect(await repos.careerPlan.allowedBy(missing, now)).toEqual({
+      allowedBy: null,
+      dailyLimit: 0,
+    });
   });
 });

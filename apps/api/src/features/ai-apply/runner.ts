@@ -26,7 +26,10 @@ import { stuckMs, type AiApplyRepository } from "./repository.js";
 
 export type RunnerDeps = {
   repo: AiApplyRepository;
-  allowedBy: (profileId: string, now: Date) => Promise<AllowedBy>;
+  allowedBy: (
+    profileId: string,
+    now: Date,
+  ) => Promise<{ allowedBy: AllowedBy; dailyLimit: number }>;
   browserbase: ReturnType<typeof createBrowserbase> | undefined;
   openPage: (connectUrl: string) => Promise<Page>;
   storage: ObjectStorage | undefined;
@@ -115,9 +118,11 @@ async function refusal(run: Runnable, deps: RunnerDeps, at: Date) {
 
   if (profile.consentAt === null) return cancelled("consent_withdrawn");
 
+  const standing = await deps.allowedBy(run.attempt.profileId, at);
+
   const access = aiApplyAccess(
     { aiApplyConsentAt: profile.consentAt.toISOString() },
-    await deps.allowedBy(run.attempt.profileId, at),
+    standing.allowedBy,
   );
 
   if (access !== "allowed") return cancelled("not_allowed");
