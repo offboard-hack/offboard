@@ -49,6 +49,7 @@ if (apiConfigured) {
 
   env.TRACKING_API_KEY = bindings.secret();
   env.TRACKING_BASE_URL = bindings.secret();
+  env.BACKOFFICE_STAFF_EMAILS = bindings.secret();
 }
 
 export default defineConfig({

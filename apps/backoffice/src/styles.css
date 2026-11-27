@@ -1,0 +1,126 @@
+:root {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #1c1c1c;
+  background: #f7f7f8;
+}
+
+body {
+  margin: 0;
+}
+
+header {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  padding: 12px 24px;
+  background: #fff;
+  border-bottom: 1px solid #e4e4e7;
+}
+
+nav[aria-label="Seções"] {
+  display: flex;
+  gap: 8px;
+}
+
+main {
+  padding: 24px;
+  overflow-x: auto;
+}
+
+button {
+  font: inherit;
+  padding: 6px 12px;
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+
+button[aria-current="page"] {
+  background: #1c1c1c;
+  color: #fff;
+}
+
+button.link {
+  border: none;
+  padding: 0;
+  background: none;
+  color: #1d4ed8;
+  text-align: left;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+th,
+td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e4e4e7;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.stats div {
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+}
+
+.stats dt {
+  color: #71717a;
+  font-size: 13px;
+}
+
+.stats dd {
+  margin: 4px 0 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.pager {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.muted {
+  color: #71717a;
+}
+
+.signin {
+  max-width: 360px;
+  margin: 15vh auto;
+  padding: 24px;
+  background: #fff;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+}
+
+.signin label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.signin input {
+  font: inherit;
+  padding: 8px;
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+}
