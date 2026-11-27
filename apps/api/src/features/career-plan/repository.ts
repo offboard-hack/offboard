@@ -91,7 +91,9 @@ export function createCareerPlanRepository(db: Database) {
   }
 
   async function allowedBy(profileId: string, now: Date) {
-    return (await plan(profileId, now))?.aiApply.allowedBy ?? null;
+    const p = await plan(profileId, now);
+
+    return { allowedBy: p?.aiApply.allowedBy ?? null, dailyLimit: p?.aiApply.dailyLimit ?? 0 };
   }
 
   async function individual(profileId: string) {

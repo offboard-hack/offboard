@@ -35,7 +35,6 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { greenhouseKey } from "../../shared/ai-apply-access.js";
-import { careerPro } from "../../shared/career-pro.js";
 import { uniqueViolation } from "../../shared/http.js";
 import { saoPauloDayStart } from "../../shared/sao-paulo-date.js";
 import { type ProfileFill, toPreferences } from "../../shared/talent-preferences.js";
@@ -341,6 +340,7 @@ export function createAiApplyRepository(db: Database) {
     confirmation: Confirmation,
     now: Date,
     save: { answer: SaveAnswer; profile: SaveProfile },
+    dailyLimit: number,
   ) {
     const since = new Date(now.getTime() - expiry);
 
@@ -367,7 +367,7 @@ export function createAiApplyRepository(db: Database) {
               ),
             );
 
-          if (sent.count >= careerPro.aiDailyLimit) return "daily_limit" as const;
+          if (sent.count >= dailyLimit) return "daily_limit" as const;
         }
 
         const rows = await tx

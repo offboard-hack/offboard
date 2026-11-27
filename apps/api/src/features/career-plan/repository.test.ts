@@ -150,7 +150,10 @@ describe.skipIf(!url)("career plan repository", () => {
       aiApply: { allowedBy: "individual", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
-    expect(await repos.careerPlan.allowedBy(profileId, now)).toBe("individual");
+    expect(await repos.careerPlan.allowedBy(profileId, now)).toEqual({
+      allowedBy: "individual",
+      dailyLimit: 10,
+    });
 
     const [top] = await db
       .select({ id: plans.id })
@@ -166,7 +169,10 @@ describe.skipIf(!url)("career plan repository", () => {
       createdAt: new Date("2099-01-01T00:00:00Z"),
     });
 
-    expect(await repos.careerPlan.allowedBy(profileId, now)).toBe("company");
+    expect(await repos.careerPlan.allowedBy(profileId, now)).toEqual({
+      allowedBy: "company",
+      dailyLimit: 10,
+    });
 
     await db.delete(subscriptions).where(eq(subscriptions.orgId, defaultOrgId));
 
@@ -196,7 +202,10 @@ describe.skipIf(!url)("career plan repository", () => {
       currentPeriodEnd: "2026-12-01",
     });
 
-    expect(await repos.careerPlan.allowedBy(profileId, now)).toBeNull();
+    expect(await repos.careerPlan.allowedBy(profileId, now)).toEqual({
+      allowedBy: null,
+      dailyLimit: 0,
+    });
   });
 
   it("ignores collaborator access recorded under another organization", async () => {
@@ -280,6 +289,9 @@ describe.skipIf(!url)("career plan repository", () => {
     const missing = "00000000-0000-4000-8000-000000000001";
 
     expect(await repos.careerPlan.plan(missing, now)).toBeUndefined();
-    expect(await repos.careerPlan.allowedBy(missing, now)).toBeNull();
+    expect(await repos.careerPlan.allowedBy(missing, now)).toEqual({
+      allowedBy: null,
+      dailyLimit: 0,
+    });
   });
 });
