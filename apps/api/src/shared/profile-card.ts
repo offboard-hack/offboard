@@ -2,6 +2,14 @@ import { t } from "elysia";
 import type { ProfileText } from "./embed.js";
 
 const skillLimit = 8;
+const floor = 0.3;
+const ceiling = 0.75;
+
+export function matchScore(distance: number) {
+  const similarity = 1 - distance;
+
+  return Math.min(100, Math.max(0, Math.round(((similarity - floor) / (ceiling - floor)) * 100)));
+}
 
 export const profileCard = t.Object({
   id: t.String(),
@@ -29,7 +37,7 @@ export function toProfileCard(id: string, name: string, content: ProfileText, di
     headline: content.headline.text,
     summary: content.summary.text,
     city: content.contact.city,
-    match: Math.max(0, Math.round((1 - distance) * 100)),
+    match: matchScore(distance),
     experiences: content.experiences
       .slice(0, 2)
       .map(({ role, company, start, end }) => ({ role, company, start, end })),

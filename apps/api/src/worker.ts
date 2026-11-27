@@ -8,6 +8,7 @@ import { emailProvider, type CloudflareEmailBinding } from "./features/auth/emai
 import { browserbaseConfig } from "./shared/ai-apply-access.js";
 import { createGenerateStructured, resolveModel } from "./shared/ai.js";
 import { workersAiEmbed, type WorkersAi } from "./shared/embed.js";
+import { createReranker } from "./features/candidates/rerank.js";
 import { r2Storage, type R2BucketLike } from "./shared/object-storage.js";
 import { turnstile } from "./shared/turnstile.js";
 import { createRepositories } from "./repositories.js";
@@ -98,6 +99,7 @@ export function createWorkerApi(
     abacatepay: createAbacatePayGateway(config.data.ABACATEPAY_API_KEY),
     abacatepayWebhookSecret: config.data.ABACATEPAY_WEBHOOK_SECRET,
     generateStructured: aiModel ? createGenerateStructured(aiModel) : undefined,
+    rerank: aiModel ? createReranker(createGenerateStructured(aiModel)) : undefined,
     embed: bindings.AI && workersAiEmbed(bindings.AI),
     embedProfile: bindings.AI && workersAiEmbed(bindings.AI),
     storage: bindings.RESUMES && r2Storage(bindings.RESUMES),

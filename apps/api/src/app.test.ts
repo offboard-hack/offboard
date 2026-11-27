@@ -69,6 +69,8 @@ import { catalogSources, type CatalogSource } from "./features/sources/catalog.j
 import type { GenerateStructured } from "./shared/ai.js";
 import { type Embed, textHash } from "./shared/embed.js";
 import type { Captcha } from "./shared/turnstile.js";
+import type { Rerank } from "./features/candidates/routes.js";
+import { matchScore } from "./shared/profile-card.js";
 import { diskStorage } from "./shared/disk-storage.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
 import { zipSync } from "fflate";
@@ -3248,6 +3250,7 @@ describe.skipIf(!url)("api", () => {
           embed?: Embed;
           embedProfile?: Embed;
           billing?: BillingStub;
+          rerank?: Rerank;
           captcha?: Captcha;
         } = {},
       ) {
@@ -3351,6 +3354,7 @@ describe.skipIf(!url)("api", () => {
           captcha: options.captcha,
           storage: options.storage === false ? undefined : storage,
           abacatepay: options.billing,
+          rerank: options.rerank,
           runInBackground: (task) => {
             background.push(task);
           },
@@ -4718,7 +4722,11 @@ describe.skipIf(!url)("api", () => {
 
       it("finds only people who opted in to the public candidate search", async () => {
         const embedder = fakeEmbed();
-        const app = resumesApp({ embedProfile: embedder.embed });
+
+        const fakeRerank: Rerank = async (_query, candidates) =>
+          candidates.map((c) => ({ ...c, match: matchScore(c.distance) }));
+
+        const app = resumesApp({ embedProfile: embedder.embed, rerank: fakeRerank });
         const visible = await profile();
         const hidden = await profile("outra.pessoal@example.com", 1);
 
@@ -4752,6 +4760,11 @@ describe.skipIf(!url)("api", () => {
           },
         ]);
         expect(JSON.stringify(cards)).not.toContain("@");
+
+        const noRerank = resumesApp({ embedProfile: embedder.embed });
+        const plain = await find(noRerank.instance, "engenheira backend");
+
+        expect(plain.status).toBe(200);
 
         expect((await find(resumesApp().instance, "dev")).status).toBe(503);
         expect((await find(app.instance, "a")).status).toBe(422);
