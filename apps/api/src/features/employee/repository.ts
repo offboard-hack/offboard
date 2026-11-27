@@ -337,6 +337,7 @@ export function createEmployeeRepository(db: Database) {
         status: equipment.status,
         returnMethod: equipment.returnMethod,
         scheduledDate: equipment.scheduledDate,
+        fromEmployeePlan: equipment.fromEmployeePlan,
         plan: employeeAccess.plan,
         state: employeeStates.value,
       })

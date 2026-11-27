@@ -246,6 +246,10 @@ describe.skipIf(!url)("api", () => {
     event_time?: number;
     personalEmail?: string;
     sponsoredUntil?: string;
+    item?: string;
+    tag?: string;
+    returnMethod?: string;
+    caseId?: string;
   };
 
   function call(
@@ -8514,6 +8518,206 @@ describe.skipIf(!url)("api", () => {
     const res = await call(`/equipment/${missingTaskId}`, "PUT", { status: "invalid" });
 
     expect(res.status).toBe(422);
+  });
+
+  describe("manual equipment", () => {
+    async function anyCase() {
+      const [row] = await db
+        .select({ id: offboardingCases.id, name: offboardingCases.name })
+        .from(offboardingCases)
+        .where(eq(offboardingCases.orgId, defaultOrgId))
+        .orderBy(asc(offboardingCases.name))
+        .limit(1);
+
+      return row!;
+    }
+
+    function addItem(caseId: string, tag: string) {
+      return call("/equipment", "POST", { caseId, item: "Notebook", tag, returnMethod: "pickup" });
+    }
+
+    it("adds an item to a case and lists it as editable", async () => {
+      const target = await anyCase();
+      const res = await addItem(target.id, "MAN-001");
+
+      expect(res.status).toBe(201);
+      expect(await res.json()).toEqual({
+        id: expect.any(String),
+        item: "Notebook",
+        tag: "MAN-001",
+        returnMethod: "pickup",
+        scheduledDate: null,
+        status: "with_person",
+      });
+
+      const listed = await repos.employee.listEquipmentReturns(defaultOrgId, target.id);
+
+      expect(listed).toContainEqual(
+        expect.objectContaining({ code: "MAN-001", person: target.name, fromEmployeePlan: false }),
+      );
+    });
+
+    it("refuses an asset tag already in use", async () => {
+      const target = await anyCase();
+
+      await addItem(target.id, "MAN-002");
+
+      const res = await addItem(target.id, "MAN-002");
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "Asset tag already in use" });
+    });
+
+    it("refuses a case from another organization", async () => {
+      const res = await addItem(missingCaseId, "MAN-003");
+
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: "Case not found" });
+    });
+
+    it("rejects a blank item or a tag with spaces", async () => {
+      const target = await anyCase();
+
+      expect(
+        (
+          await call("/equipment", "POST", {
+            caseId: target.id,
+            item: "  ",
+            tag: "MAN-004",
+            returnMethod: "pickup",
+          })
+        ).status,
+      ).toBe(422);
+      expect((await addItem(target.id, "MAN 004")).status).toBe(422);
+    });
+
+    it("edits a manual item", async () => {
+      const target = await anyCase();
+      const created = await (await addItem(target.id, "MAN-005")).json();
+
+      const res = await call(`/equipment/${created.id}`, "PATCH", {
+        item: "Monitor",
+        tag: "MAN-005B",
+        returnMethod: "in_person",
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        ...created,
+        item: "Monitor",
+        tag: "MAN-005B",
+        returnMethod: "in_person",
+      });
+    });
+
+    it("refuses an edit to a tag already in use", async () => {
+      const target = await anyCase();
+
+      await addItem(target.id, "MAN-006");
+
+      const created = await (await addItem(target.id, "MAN-007")).json();
+
+      const res = await call(`/equipment/${created.id}`, "PATCH", {
+        item: "Notebook",
+        tag: "MAN-006",
+        returnMethod: "pickup",
+      });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "Asset tag already in use" });
+    });
+
+    it("removes a manual item", async () => {
+      const target = await anyCase();
+      const created = await (await addItem(target.id, "MAN-008")).json();
+
+      expect((await call(`/equipment/${created.id}`, "DELETE")).status).toBe(204);
+      expect((await call(`/equipment/${created.id}`, "DELETE")).status).toBe(404);
+    });
+
+    it("leaves items from the employee plan to the plan", async () => {
+      const target = await anyCase();
+
+      const [planned] = await db
+        .insert(equipment)
+        .values({
+          orgId: defaultOrgId,
+          caseId: target.id,
+          item: "Celular",
+          tag: "PLAN-001",
+          returnMethod: "pickup",
+          status: "with_person",
+          fromEmployeePlan: true,
+        })
+        .returning({ id: equipment.id });
+
+      const edit = await call(`/equipment/${planned!.id}`, "PATCH", {
+        item: "Outro",
+        tag: "PLAN-001",
+        returnMethod: "pickup",
+      });
+
+      expect(edit.status).toBe(409);
+      expect(await edit.json()).toEqual({ error: "Equipment comes from the employee plan" });
+      expect((await call(`/equipment/${planned!.id}`, "DELETE")).status).toBe(409);
+    });
+
+    it("rethrows database errors other than a tag clash", async () => {
+      const target = await anyCase();
+      const created = await (await addItem(target.id, "MAN-011")).json();
+
+      await expect(
+        repos.equipment.updateEquipment(defaultOrgId, created.id, {
+          item: "x".repeat(300),
+          tag: "MAN-011",
+          returnMethod: "pickup",
+        }),
+      ).rejects.toThrow();
+    });
+
+    it("answers 404 for an unknown item", async () => {
+      const edit = await call(`/equipment/${missingTaskId}`, "PATCH", {
+        item: "Notebook",
+        tag: "MAN-009",
+        returnMethod: "pickup",
+      });
+
+      expect(edit.status).toBe(404);
+      expect(await edit.json()).toEqual({ error: "Equipment not found" });
+    });
+
+    it("lets visualizador neither add nor remove items", async () => {
+      const headers = {
+        "x-test-session": "visualizador",
+        origin: webOrigin,
+        "content-type": "application/json",
+      };
+
+      const target = await anyCase();
+
+      const add = await app.handle(
+        new Request("http://localhost/api/equipment", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            caseId: target.id,
+            item: "X",
+            tag: "MAN-010",
+            returnMethod: "pickup",
+          }),
+        }),
+      );
+
+      const remove = await app.handle(
+        new Request(`http://localhost/api/equipment/${missingTaskId}`, {
+          method: "DELETE",
+          headers,
+        }),
+      );
+
+      expect(add.status).toBe(403);
+      expect(remove.status).toBe(403);
+    });
   });
 
   it("lists exit surveys with case names, newest first", async () => {

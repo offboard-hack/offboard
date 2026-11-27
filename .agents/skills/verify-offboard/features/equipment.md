@@ -5,6 +5,7 @@ The inventory shows offboarding equipment, its current return status, and instru
 ## Sub-features
 
 - `inventory` shows equipment, asset tag, person, and return status.
+- `manual-items` adds, edits, and removes items with **Adicionar bem**, **Editar**, and **Remover**. Items from the employee plan show `Plano da pessoa` and are changed in the case.
 - `status-filter` filters the inventory and survives reload.
 - `shipments` shows tracking codes from cases and loads carrier updates separately.
 - `collection-guide` explains the return workflow.
