@@ -10,4 +10,5 @@ export type TalentProfile = {
   shareOutcomeWithHr: boolean;
   aiApplyConsentAt: string | null;
   aiApplyConsentVersion: string | null;
+  searchableAt: string | null;
 };

@@ -18,6 +18,7 @@ import { Switch } from "@/shared/ui/shadcn/switch";
 import { Textarea } from "@/shared/ui/shadcn/textarea";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "../ui";
 import { RejectionsSection } from "./dismiss-job";
+import { SearchVisibility } from "./search-visibility";
 import { JobPreferencesSection } from "./job-preferences";
 import {
   type AddressDraft,
@@ -99,7 +100,12 @@ function ProfileSection({ account }: { account: EmployeeAccount }) {
 
   const fields = preferences.data.profileFields;
 
-  return <ProfileForm account={account} fields={fields} />;
+  return (
+    <div className="space-y-5">
+      <SearchVisibility account={account} />
+      <ProfileForm account={account} fields={fields} />
+    </div>
+  );
 }
 
 function ProfileForm({

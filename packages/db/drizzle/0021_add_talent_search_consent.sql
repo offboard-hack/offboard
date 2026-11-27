@@ -1,0 +1,1 @@
+ALTER TABLE "talent_profiles" ADD COLUMN "searchable_at" timestamp;

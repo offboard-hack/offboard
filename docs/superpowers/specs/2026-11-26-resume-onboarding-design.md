@@ -41,3 +41,12 @@ Samuel, 2026-11-26: the landing page gets a public people search so visitors can
 - `GET /api/demo/search?q=` is public. It embeds the query with the same `bge-m3` model and returns the six nearest cards with a match percentage.
 - `demo_search_usage` caps each visitor (by a hash of `cf-connecting-ip`) at 30 searches a day, and everyone together at 2,000 a day, which keeps Workers AI inside the free allocation.
 - The landing section is plain HTML and JavaScript in the static page. It builds results with `textContent`, never HTML.
+
+## Being found by recruiters
+
+Samuel, 2026-11-26: real résumés can be found only by people who opt in. The switch appears in the review step of the résumé import and stays in Preferências. A recruiter or HR account to run the search comes later.
+
+- `talent_profiles.searchable_at` holds when the person opted in and is null when they have not. It is off by default. The data export includes it.
+- `PUT /me/search-consent { searchable }` sets or clears it and returns `/me`, which now carries `searchable`.
+- In the wizard the switch starts untouched. It shows the current choice and is saved only after Criar currículo, so redoing a résumé never changes an earlier choice by itself.
+- Any future search over `resumes.profile_embedding` must join `talent_profiles` and require `searchable_at is not null`.

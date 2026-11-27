@@ -22,6 +22,7 @@ const profile: TalentProfile = {
   shareOutcomeWithHr: false,
   aiApplyConsentAt: null,
   aiApplyConsentVersion: null,
+  searchableAt: null,
 };
 
 const collaborator: EmployeePrincipal = {

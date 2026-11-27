@@ -48,7 +48,7 @@ const file = new File(["%PDF-1.4"], "curriculo.pdf", { type: "application/pdf" }
 
 function start(deps: Partial<Parameters<typeof onboardingMachine>[0]> = {}) {
   const reads: File[] = [];
-  const creates: { draft: ResumeDraft; file: File | null }[] = [];
+  const creates: { draft: ResumeDraft; file: File | null; searchable: boolean | null }[] = [];
   const created: true[] = [];
 
   const actor = createActor(
@@ -235,9 +235,10 @@ describe("résumé onboarding machine", () => {
     expect(actor.getSnapshot().matches({ reading: "read" })).toBe(true);
     actor.send({ type: "continue" });
 
+    actor.send({ type: "searchable", value: true });
     actor.send({ type: "create" });
     await waitFor(actor, (snapshot) => snapshot.status === "done");
-    expect(creates).toEqual([{ draft: edited, file }]);
+    expect(creates).toEqual([{ draft: edited, file, searchable: true }]);
     expect(created).toEqual([true]);
   });
 
@@ -289,7 +290,11 @@ describe("résumé onboarding machine", () => {
     actor.send({ type: "create" });
     await waitFor(actor, (snapshot) => snapshot.status === "done");
     expect(creates).toEqual([
-      { draft: expect.objectContaining({ headline: { id: "h", text: "Dev" } }), file: null },
+      {
+        draft: expect.objectContaining({ headline: { id: "h", text: "Dev" } }),
+        file: null,
+        searchable: null,
+      },
     ]);
   });
 

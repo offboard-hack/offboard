@@ -185,6 +185,7 @@ describe.skipIf(!url)("account repository", () => {
       shareOutcomeWithHr: false,
       aiApplyConsentAt: null,
       aiApplyConsentVersion: null,
+      searchableAt: null,
       firstSignedInAt: null,
       createdAt: expect.any(String),
     });
