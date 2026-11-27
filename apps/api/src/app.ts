@@ -655,7 +655,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     .use(
       integrationsRoutes(repos.integrations, access, options.slackSigningSecret, box, slackApiUrl),
     )
-    .use(benefitRoutes(repos.benefits, access))
+    .use(benefitRoutes(repos.benefits, access, abacatepay))
     .use(
       billingRoutes(
         repos.billing,
