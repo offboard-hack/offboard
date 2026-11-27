@@ -109,7 +109,8 @@ const catalog: Integration[] = [
     providers: [
       {
         name: "Correios",
-        purpose: "Logística reversa, etiqueta e rastreio via API dos Correios.",
+        purpose:
+          "Rastreia a devolução pelo código dos Correios e conclui a tarefa na entrega. Desligado, o rastreio para.",
       },
     ],
   },

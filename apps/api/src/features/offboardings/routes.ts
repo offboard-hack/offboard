@@ -50,6 +50,7 @@ export function offboardingsRoutes(
   cronSecret: string | undefined,
   webhookSecret: string | undefined,
   inviteEmployee: InviteEmployee,
+  trackingEnabled: (orgId: string) => Promise<boolean>,
   tracking?: TrackingConfig,
 ) {
   async function checkTrackedShipments() {
@@ -58,7 +59,7 @@ export function offboardingsRoutes(
 
     const results = await Promise.allSettled(
       tracked.map(async (task) => {
-        if (!tracking) return;
+        if (!tracking || !(await trackingEnabled(task.orgId))) return;
 
         // WARNING: getTrackedTasks guarantees non-null trackingCode
         const result = await trackPackage(task.trackingCode as string, tracking);
@@ -317,7 +318,7 @@ export function offboardingsRoutes(
           return { trackingCode: null, tracking: null };
         }
 
-        if (!tracking) {
+        if (!tracking || !(await trackingEnabled(principal.orgId))) {
           return { trackingCode: row.trackingCode, tracking: null };
         }
 

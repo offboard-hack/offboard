@@ -18,6 +18,7 @@ import { fetchFeed } from "./features/sources/sources.js";
 import { exitSurveysRoutes } from "./features/exit-surveys/routes.js";
 import { insightsRoutes } from "./features/insights/routes.js";
 import {
+  correiosIntegration,
   emailIntegration,
   integrationsRoutes,
   slackTokenReader,
@@ -555,6 +556,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         options.cronSecret,
         options.webhookSecret,
         inviteEmployee,
+        (orgId) => repos.integrations.isConnected(orgId, correiosIntegration),
         options.tracking,
       ),
     )

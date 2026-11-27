@@ -9894,6 +9894,41 @@ describe.skipIf(!url)("api", () => {
     expect(await res.json()).toEqual({ trackingCode: "XX000000000BR", tracking: null });
   });
 
+  it("hides tracking and skips the delivery check when Correios is switched off", async () => {
+    const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
+
+    trackingStatus = 200;
+    trackingBody = JSON.stringify({
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: {
+        temEventoEntrega: true,
+        eventos: [{ descricao: "Objeto entregue ao destinatário" }],
+      },
+    });
+
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const task = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    await db.update(tasks).set({ trackingCode: "OF000000000BR" }).where(eq(tasks.id, task.id));
+    await call("/integrations/Transportadora%3A%3ACorreios", "PUT", { status: "disconnected" });
+
+    const res = await trackingApp.handle(
+      new Request(`http://localhost/api/tasks/${task.id}/tracking`),
+    );
+
+    expect(await res.json()).toEqual({ trackingCode: "OF000000000BR", tracking: null });
+
+    const checked = await trackingApp.handle(
+      new Request("http://localhost/api/correios/check", {
+        headers: { authorization: `Bearer ${cronSecret}` },
+      }),
+    );
+
+    expect((await checked.json()).delivered).not.toContain(task.id);
+  });
+
   it("returns 404 for tracking on unknown task", async () => {
     const res = await app.handle(
       new Request(`http://localhost/api/tasks/${missingTaskId}/tracking`),
