@@ -190,10 +190,13 @@ export function accountRoutes(
       "/me",
       async ({ me, status }) => {
         const subscriptionId = await repos.cancelableSubscription(me.id);
+        const copayId = await repos.copaySubscriptionId(me.id);
+
+        if ((subscriptionId !== null || copayId !== null) && !gateway.configured) {
+          return status(503, { error: "Billing not configured" });
+        }
 
         if (subscriptionId !== null) {
-          if (!gateway.configured) return status(503, { error: "Billing not configured" });
-
           try {
             await gateway.cancelSubscription(subscriptionId);
           } catch (cause) {
@@ -203,6 +206,16 @@ export function accountRoutes(
           }
 
           await repos.markSubscriptionCanceled(me.id, subscriptionId);
+        }
+
+        if (copayId !== null) {
+          try {
+            await gateway.cancelSubscription(copayId);
+          } catch (cause) {
+            logFailureCode("Benefit upgrade cancellation failed")(cause);
+
+            return status(502, { error: "Could not cancel the benefit upgrade; try again" });
+          }
         }
 
         if (storage) {

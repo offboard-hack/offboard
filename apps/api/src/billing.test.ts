@@ -1,6 +1,6 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import {
@@ -20,6 +20,7 @@ import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
 import { eq } from "drizzle-orm";
 import { Elysia } from "elysia";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.ts";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
@@ -283,6 +284,41 @@ describe("abacatepay gateway cancel", () => {
     await expect(createAbacatePayGateway(undefined).cancelSubscription("subs_1")).rejects.toThrow(
       "ABACATEPAY_API_KEY is not configured",
     );
+  });
+});
+
+describe("abacatepay gateway cancel timeout", () => {
+  const sockets = new Set<Socket>();
+  const server = createServer(() => undefined);
+  let base = "";
+
+  beforeAll(async () => {
+    server.on("connection", (socket) => {
+      sockets.add(socket);
+    });
+
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+
+    base = `http://127.0.0.1:${z.object({ port: z.number() }).parse(server.address()).port}/v`;
+  });
+
+  afterAll(async () => {
+    for (const socket of sockets) socket.destroy();
+
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+    });
+  });
+
+  it("gives up on a cancel that never answers", async () => {
+    const started = Date.now();
+
+    await expect(
+      createAbacatePayGateway("secret-key", base, 20).cancelSubscription("subs_1"),
+    ).rejects.toThrow("AbacatePay subscription cancel failed");
+    expect(Date.now() - started).toBeLessThan(10_000);
   });
 });
 
@@ -2241,6 +2277,7 @@ describe.skipIf(!url)("billing", () => {
         await copayWebhook("subscription.completed", "copay:");
 
         expect(logged).toHaveBeenCalledTimes(2);
+        expect(cancelled).toEqual(["subs_1"]);
         expect(await assignment()).toMatchObject({ effectivePlanId: goldId });
       } finally {
         logged.mockRestore();
@@ -2254,6 +2291,19 @@ describe.skipIf(!url)("billing", () => {
       expect(await assignment()).toMatchObject({
         effectivePlanId: goldId,
         copaySubscriptionId: null,
+      });
+    });
+
+    it("ignores a redelivered completion of the subscription it already owns", async () => {
+      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+
+      const res = await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
+
+      expect(res.status).toBe(200);
+      expect(cancelled).toEqual([]);
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
       });
     });
 
@@ -2330,6 +2380,344 @@ describe.skipIf(!url)("billing", () => {
       await copayWebhook("subscription.cancelled", null, "subs_other");
 
       expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_1" });
+    });
+  });
+
+  describe("co-pay of a deleted account", () => {
+    const cancelled: string[] = [];
+    let configured = true;
+
+    const orphanApp = createApp(webOrigin, repos, {
+      auth,
+      sendEmail: () => Promise.resolve(),
+      abacatepay: {
+        get configured() {
+          return configured;
+        },
+        createSubscriptionCheckout: () => Promise.resolve({ id: "bill_x", url: "https://x" }),
+        async cancelSubscription(id: string) {
+          cancelled.push(id);
+        },
+      },
+      abacatepayWebhookSecret: webhookSecret,
+    });
+
+    beforeEach(() => {
+      cancelled.length = 0;
+      configured = true;
+    });
+
+    function deliver(event: string, externalId: string) {
+      return orphanApp.handle(
+        new Request(`http://localhost/api/billing/webhook?webhookSecret=${webhookSecret}`, {
+          method: "POST",
+          body: JSON.stringify({
+            id: randomUUID(),
+            event,
+            apiVersion: 2,
+            data: {
+              subscription: { id: "subs_orphan", amount: 1000 },
+              checkout: { id: "bill_1", externalId },
+            },
+          }),
+        }),
+      );
+    }
+
+    const reference = `copay:${missingId}:${missingId}`;
+
+    it.each(["subscription.completed", "subscription.renewed"])(
+      "cancels the subscription of %s when the assignment is gone",
+      async (event) => {
+        const logged = vi.spyOn(console, "error");
+
+        try {
+          expect((await deliver(event, reference)).status).toBe(200);
+          expect(cancelled).toEqual(["subs_orphan"]);
+          expect(logged).toHaveBeenCalledWith("copay subscription of a deleted account canceled", {
+            event,
+          });
+        } finally {
+          logged.mockRestore();
+        }
+      },
+    );
+
+    it("ignores events that do not charge", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      try {
+        await deliver("subscription.cancelled", reference);
+
+        expect(cancelled).toEqual([]);
+        expect(logged).toHaveBeenCalledWith("copay webhook ignored", {
+          event: "subscription.cancelled",
+        });
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("logs when the gateway is not configured", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      configured = false;
+
+      try {
+        await deliver("subscription.completed", reference);
+
+        expect(cancelled).toEqual([]);
+        expect(logged).toHaveBeenCalledWith(
+          "copay webhook for a deleted account could not be canceled",
+          { event: "subscription.completed" },
+        );
+      } finally {
+        logged.mockRestore();
+      }
+    });
+  });
+
+  describe("co-pay expiry sweep", () => {
+    const cancelled: string[] = [];
+    const failing = new Set<string>();
+    let configured = true;
+
+    const abacatepay = {
+      get configured() {
+        return configured;
+      },
+      createSubscriptionCheckout: () => Promise.resolve({ id: "bill_x", url: "https://x" }),
+      async cancelSubscription(id: string) {
+        if (failing.has(id)) throw new Error("gateway down");
+
+        cancelled.push(id);
+      },
+    };
+
+    const sweepApp = createApp(webOrigin, repos, {
+      auth,
+      sendEmail: () => Promise.resolve(),
+      cronSecret: "sweep-secret",
+      catalog: [],
+      abacatepay,
+    });
+
+    let goldId = "";
+    let platinumId = "";
+
+    beforeEach(async () => {
+      cancelled.length = 0;
+      failing.clear();
+      configured = true;
+      await db.delete(benefitAssignments);
+
+      const rows = await db.select().from(plans).orderBy(plans.monthlyPriceCents);
+
+      goldId = rows[0].id;
+      platinumId = rows[rows.length - 1].id;
+    });
+
+    async function upgraded(
+      subscription: string | null,
+      validUntil: string,
+      effectivePlanId = platinumId,
+    ) {
+      const [profile] = await db
+        .insert(talentProfiles)
+        .values({
+          orgId: defaultOrgId,
+          personalEmail: `pessoa-${randomUUID()}@exemplo.com`,
+          name: "Pessoa Teste",
+          sponsoredUntil: "2099-12-31",
+        })
+        .returning({ id: talentProfiles.id });
+
+      await db.insert(benefitAssignments).values({
+        orgId: defaultOrgId,
+        profileId: profile.id,
+        assignedPlanId: goldId,
+        effectivePlanId,
+        source: "manual",
+        validUntil,
+        copaySubscriptionId: subscription,
+        copayCheckoutAt: subscription === null ? null : new Date(),
+      });
+
+      return profile.id;
+    }
+
+    async function stateOf(profileId: string) {
+      const [row] = await db
+        .select()
+        .from(benefitAssignments)
+        .where(eq(benefitAssignments.profileId, profileId));
+
+      return row;
+    }
+
+    function drainWith(instance: { handle: (request: Request) => Promise<Response> }) {
+      return instance.handle(
+        new Request("http://localhost/api/background/drain", {
+          method: "POST",
+          headers: { authorization: "Bearer sweep-secret" },
+        }),
+      );
+    }
+
+    const drainNow = () => drainWith(sweepApp);
+
+    it("cancels expired co-pay subscriptions and restores the assigned plan", async () => {
+      const today = saoPauloDate(new Date());
+      const yesterday = saoPauloDate(new Date(Date.now() - 86_400_000));
+      const expired = await upgraded("subs_expired", yesterday);
+      const endsToday = await upgraded("subs_today", today);
+      const future = await upgraded("subs_future", "2099-12-31");
+      const plain = await upgraded(null, yesterday, goldId);
+
+      expect((await drainNow()).status).toBe(200);
+      expect(cancelled).toEqual(["subs_expired"]);
+      expect(await stateOf(expired)).toMatchObject({
+        copaySubscriptionId: null,
+        effectivePlanId: goldId,
+        copayCheckoutAt: null,
+      });
+      expect(await stateOf(endsToday)).toMatchObject({ copaySubscriptionId: "subs_today" });
+      expect(await stateOf(future)).toMatchObject({ copaySubscriptionId: "subs_future" });
+      expect(await stateOf(plain)).toMatchObject({ copaySubscriptionId: null });
+    });
+
+    it("sweeps at most 20 per tick and is idempotent", async () => {
+      const profiles = await db
+        .insert(talentProfiles)
+        .values(
+          Array.from({ length: 25 }, () => ({
+            orgId: defaultOrgId,
+            personalEmail: `pessoa-${randomUUID()}@exemplo.com`,
+            name: "Pessoa Teste",
+            sponsoredUntil: "2099-12-31",
+          })),
+        )
+        .returning({ id: talentProfiles.id });
+
+      const ids = profiles.map((profile) => profile.id);
+
+      await db.insert(benefitAssignments).values(
+        ids.map((profileId, index) => ({
+          orgId: defaultOrgId,
+          profileId,
+          assignedPlanId: goldId,
+          effectivePlanId: platinumId,
+          source: "manual",
+          validUntil: "2000-01-01",
+          copaySubscriptionId: `subs_${index}`,
+        })) satisfies (typeof benefitAssignments.$inferInsert)[],
+      );
+
+      await drainNow();
+
+      expect(cancelled).toHaveLength(20);
+
+      await drainNow();
+
+      expect(cancelled).toHaveLength(25);
+      expect(new Set(cancelled).size).toBe(25);
+
+      await drainNow();
+
+      expect(cancelled).toHaveLength(25);
+
+      for (const id of ids) {
+        expect(await stateOf(id)).toMatchObject({
+          copaySubscriptionId: null,
+          effectivePlanId: goldId,
+        });
+      }
+    });
+
+    it("keeps a failing subscription for the next tick without blocking the others", async () => {
+      const logged = vi.spyOn(console, "error");
+      const broken = await upgraded("subs_broken", "2000-01-01");
+      const fine = await upgraded("subs_fine", "2000-01-01");
+
+      failing.add("subs_broken");
+
+      try {
+        expect((await drainNow()).status).toBe(200);
+        expect(cancelled).toEqual(["subs_fine"]);
+        expect(await stateOf(broken)).toMatchObject({
+          copaySubscriptionId: "subs_broken",
+          effectivePlanId: platinumId,
+        });
+        expect(await stateOf(fine)).toMatchObject({ copaySubscriptionId: null });
+        expect(logged).toHaveBeenCalledWith("co-pay expiry cancellation failed", expect.anything());
+
+        failing.clear();
+        await drainNow();
+
+        expect(cancelled).toEqual(["subs_fine", "subs_broken"]);
+        expect(await stateOf(broken)).toMatchObject({
+          copaySubscriptionId: null,
+          effectivePlanId: goldId,
+        });
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("still runs the other drain work when the sweep fails", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      await upgraded("subs_broken", "2000-01-01");
+      failing.add("subs_broken");
+      await repos.background.enqueue("score_resume", randomUUID());
+
+      try {
+        const res = await drainNow();
+
+        expect(res.status).toBe(200);
+        expect((await res.json()).processed).toBeGreaterThanOrEqual(1);
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("survives a failing lookup of expired subscriptions", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      const broken = createApp(
+        webOrigin,
+        {
+          ...repos,
+          benefits: {
+            ...repos.benefits,
+            expiredCopays: () => Promise.reject(new Error("db down")),
+          },
+        },
+        {
+          auth,
+          sendEmail: () => Promise.resolve(),
+          cronSecret: "sweep-secret",
+          catalog: [],
+          abacatepay,
+        },
+      );
+
+      try {
+        expect((await drainWith(broken)).status).toBe(200);
+        expect(logged).toHaveBeenCalledWith("co-pay expiry sweep failed", expect.anything());
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("leaves everything alone when billing is not configured", async () => {
+      const expired = await upgraded("subs_expired", "2000-01-01");
+
+      configured = false;
+
+      expect((await drainNow()).status).toBe(200);
+      expect(cancelled).toEqual([]);
+      expect(await stateOf(expired)).toMatchObject({ copaySubscriptionId: "subs_expired" });
     });
   });
 

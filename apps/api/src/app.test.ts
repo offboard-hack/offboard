@@ -7456,6 +7456,111 @@ describe.skipIf(!url)("api", () => {
         });
       });
 
+      describe("with a benefit upgrade", () => {
+        async function upgrade(
+          profileId: string,
+          copaySubscriptionId: string | null = "subs_copay",
+        ) {
+          const rows = await db.select().from(plans).orderBy(plans.monthlyPriceCents);
+
+          await db.insert(benefitAssignments).values({
+            orgId: defaultOrgId,
+            profileId,
+            assignedPlanId: rows[0].id,
+            effectivePlanId: rows[rows.length - 1].id,
+            source: "manual",
+            validUntil: "2099-12-31",
+            copaySubscriptionId,
+          });
+        }
+
+        it("cancels the upgrade at AbacatePay before deleting", async () => {
+          const cancelled: string[] = [];
+          const { instance } = resumesApp({ billing: billingStub(cancelled) });
+          const id = await profile();
+
+          await upgrade(id);
+
+          expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+          expect(cancelled).toEqual(["subs_copay"]);
+          expect(await repos.talent.findById(id)).toBeUndefined();
+        });
+
+        it("cancels both the upgrade and Carreira Pro", async () => {
+          const cancelled: string[] = [];
+          const { instance } = resumesApp({ billing: billingStub(cancelled) });
+          const id = await profile();
+
+          await upgrade(id);
+          await db.insert(talentSubscriptions).values({
+            profileId: id,
+            status: "active",
+            providerSubscriptionId: "subs_pro",
+            currentPeriodEnd: "2099-01-01",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+
+          expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+          expect(cancelled).toEqual(["subs_pro", "subs_copay"]);
+        });
+
+        it("keeps the account when AbacatePay fails", async () => {
+          const logged = vi.spyOn(console, "error");
+          const cancelled: string[] = [];
+          const { instance } = resumesApp({ billing: billingStub(cancelled, true) });
+          const id = await profile();
+
+          await upgrade(id);
+
+          try {
+            const res = await request(instance, id, "/me", { method: "DELETE" });
+
+            expect(res.status).toBe(502);
+            expect(await res.json()).toEqual({
+              error: "Could not cancel the benefit upgrade; try again",
+            });
+            expect((await request(instance, id, "/me")).status).toBe(200);
+            expect(
+              await db
+                .select()
+                .from(benefitAssignments)
+                .where(eq(benefitAssignments.profileId, id)),
+            ).toHaveLength(1);
+          } finally {
+            logged.mockRestore();
+          }
+        });
+
+        it("refuses to delete when billing is not configured", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          await upgrade(id);
+
+          const res = await request(instance, id, "/me", { method: "DELETE" });
+
+          expect(res.status).toBe(503);
+          expect(await res.json()).toEqual({ error: "Billing not configured" });
+          expect((await request(instance, id, "/me")).status).toBe(200);
+        });
+
+        it("deletes without calling AbacatePay when there is no upgrade to cancel", async () => {
+          const cancelled: string[] = [];
+          const { instance } = resumesApp({ billing: billingStub(cancelled, true) });
+          const without = await profile("a@example.com");
+          const noUpgrade = await profile("b@example.com", 1);
+
+          await upgrade(noUpgrade, null);
+
+          for (const id of [without, noUpgrade]) {
+            expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+          }
+
+          expect(cancelled).toEqual([]);
+        });
+      });
+
       it("keeps the employee journey of the same person when the talent account is deleted", async () => {
         const { instance } = resumesApp();
         const id = await profile();

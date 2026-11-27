@@ -6,6 +6,7 @@ import {
   applicationPackages,
   applications,
   authUser,
+  benefitAssignments,
   employeeAccess,
   employeeStates,
   interviews,
@@ -393,6 +394,15 @@ export function createAccountRepository(db: Database) {
     return row?.id ?? null;
   }
 
+  async function copaySubscriptionId(profileId: string) {
+    const [row] = await db
+      .select({ id: benefitAssignments.copaySubscriptionId })
+      .from(benefitAssignments)
+      .where(eq(benefitAssignments.profileId, profileId));
+
+    return row?.id ?? null;
+  }
+
   async function markSubscriptionCanceled(profileId: string, providerSubscriptionId: string) {
     await db
       .update(talentSubscriptions)
@@ -442,7 +452,14 @@ export function createAccountRepository(db: Database) {
     });
   }
 
-  return { exportData, fileKeys, cancelableSubscription, markSubscriptionCanceled, deleteProfile };
+  return {
+    exportData,
+    fileKeys,
+    cancelableSubscription,
+    copaySubscriptionId,
+    markSubscriptionCanceled,
+    deleteProfile,
+  };
 }
 
 export type AccountRepository = ReturnType<typeof createAccountRepository>;

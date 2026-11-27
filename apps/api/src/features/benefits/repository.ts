@@ -9,7 +9,7 @@ import {
   plans,
   talentProfiles,
 } from "@offboard/db/schema";
-import { aliasedTable, and, count, desc, eq, gte, isNull, sql } from "drizzle-orm";
+import { aliasedTable, and, count, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { evaluateBenefitRules, matchesBenefitRule } from "../../shared/benefit-rules.js";
 import { addMonths, saoPauloDate } from "../../shared/sao-paulo-date.js";
 
@@ -270,6 +270,40 @@ export function createBenefitRepository(db: Database) {
     return row ?? null;
   }
 
+  async function expiredCopays(today: string, limit: number) {
+    return db
+      .select({
+        profileId: benefitAssignments.profileId,
+        copaySubscriptionId: sql<string>`${benefitAssignments.copaySubscriptionId}`,
+      })
+      .from(benefitAssignments)
+      .where(
+        and(
+          isNotNull(benefitAssignments.copaySubscriptionId),
+          lt(benefitAssignments.validUntil, today),
+        ),
+      )
+      .orderBy(benefitAssignments.validUntil)
+      .limit(limit);
+  }
+
+  async function clearExpiredCopay(profileId: string, copaySubscriptionId: string) {
+    await db
+      .update(benefitAssignments)
+      .set({
+        copaySubscriptionId: null,
+        effectivePlanId: benefitAssignments.assignedPlanId,
+        copayCheckoutAt: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(benefitAssignments.profileId, profileId),
+          eq(benefitAssignments.copaySubscriptionId, copaySubscriptionId),
+        ),
+      );
+  }
+
   async function tallyActiveAssignments(orgId: string) {
     const [row] = await db
       .select({
@@ -328,6 +362,8 @@ export function createBenefitRepository(db: Database) {
     findAssignmentByProfile,
     updateCopayState,
     findAssignmentBySubscription,
+    expiredCopays,
+    clearExpiredCopay,
     tallyActiveAssignments,
     createBenefitInvoice,
     listBenefitInvoices,
