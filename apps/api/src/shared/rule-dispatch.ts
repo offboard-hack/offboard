@@ -21,3 +21,28 @@ export type RuleContext = {
 };
 
 export type FireRules = (trigger: RuleTrigger, context: RuleContext) => Promise<void>;
+
+export async function fireTaskStatusChanged(
+  fire: FireRules,
+  task: {
+    orgId: string;
+    taskId: string;
+    taskTitle: string;
+    status: string;
+    phase: string | null;
+    stepId: string | null;
+  },
+) {
+  if (!task.phase) return;
+
+  await fire("task.status_changed", {
+    orgId: task.orgId,
+    task: {
+      id: task.taskId,
+      title: task.taskTitle,
+      status: task.status,
+      phase: task.phase,
+      stepId: task.stepId ?? undefined,
+    },
+  });
+}

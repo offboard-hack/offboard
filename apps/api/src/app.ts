@@ -7,7 +7,7 @@ import {
   runScheduledRules,
   type EngineRepos,
 } from "./features/automation-rules/engine.js";
-import type { FireRules } from "./shared/rule-dispatch.js";
+import { fireTaskStatusChanged, type FireRules } from "./shared/rule-dispatch.js";
 import { saoPauloDate } from "./shared/sao-paulo-date.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 import { employeeRoutes } from "./features/employee/routes.js";
@@ -70,7 +70,6 @@ import { preferencesRoutes } from "./features/preferences/routes.js";
 import { trackPackage, type TrackingConfig } from "./features/offboardings/correios.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
-import { dispatchTaskAction, type DispatchAction } from "./shared/action-dispatch.js";
 import type { ResumeContent } from "@offboard/db/schema";
 import { portalAccess } from "./shared/access.js";
 import type { GenerateStructured } from "./shared/ai.js";
@@ -167,23 +166,6 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     await fireRulesForTrigger(trigger, context, engineRepos);
   };
 
-  const dispatchAction: DispatchAction = async (context, stepId) => {
-    await fireRulesForTrigger(
-      "task.status_changed",
-      {
-        orgId: context.orgId,
-        task: {
-          id: context.taskId,
-          title: context.taskTitle,
-          status: context.status,
-          phase: context.phase,
-          stepId: stepId ?? undefined,
-        },
-      },
-      engineRepos,
-    );
-  };
-
   const inviteEmployee: InviteEmployee = async (orgId, caseId) => {
     try {
       const invitee = await repos.employee.readInvitee(orgId, caseId);
@@ -206,7 +188,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     try {
       const changes = await repos.employee.markInviteSent(orgId, caseId);
 
-      await Promise.allSettled(changes.map((change) => dispatchTaskAction(dispatchAction, change)));
+      await Promise.allSettled(changes.map((change) => fireTaskStatusChanged(fireRules, change)));
     } catch {
       console.error({ event: "employee.invite_task_failed" });
     }
@@ -606,7 +588,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         access,
         options.auth.resolveEmployee,
         webOrigin,
-        dispatchAction,
+        fireRules,
         inviteEmployee,
         accessGranted,
         async (orgId, code) =>
@@ -619,7 +601,6 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       offboardingsRoutes(
         repos.offboardings,
         access,
-        dispatchAction,
         repos.actionConfigs.readChecklist,
         options.cronSecret,
         options.webhookSecret,

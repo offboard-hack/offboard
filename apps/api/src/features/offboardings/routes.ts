@@ -4,9 +4,8 @@ import type { PortalAccessPlugin } from "../../shared/access.js";
 import { errorResponse, uniqueViolation } from "../../shared/http.js";
 import { hasBearer } from "../../shared/machine-auth.js";
 import type { ChecklistLayout } from "../../shared/checklist.js";
-import type { DispatchAction } from "../../shared/action-dispatch.js";
 import type { InviteEmployee } from "../../shared/employee-invite.js";
-import type { FireRules } from "../../shared/rule-dispatch.js";
+import { fireTaskStatusChanged, type FireRules } from "../../shared/rule-dispatch.js";
 import { trackPackage, type TrackingConfig } from "./correios.js";
 import type { OffboardingsRepository } from "./repository.js";
 
@@ -46,7 +45,6 @@ const text = t.String({ minLength: 1 });
 export function offboardingsRoutes(
   repos: OffboardingsRepository,
   access: PortalAccessPlugin,
-  dispatchAction: DispatchAction,
   readChecklist: (orgId: string) => Promise<{ steps: ChecklistLayout }>,
   cronSecret: string | undefined,
   webhookSecret: string | undefined,
@@ -78,18 +76,14 @@ export function offboardingsRoutes(
           await repos.markEquipmentReturned(task.orgId, task.caseId);
         }
 
-        if (task.phase) {
-          await dispatchAction(
-            {
-              orgId: task.orgId,
-              taskId: task.id,
-              taskTitle: task.title,
-              status: "done",
-              phase: task.phase,
-            },
-            task.stepId,
-          );
-        }
+        await fireTaskStatusChanged(fireRules, {
+          orgId: task.orgId,
+          taskId: task.id,
+          taskTitle: task.title,
+          status: "done",
+          phase: task.phase,
+          stepId: task.stepId,
+        });
 
         await fireRules("correios.delivered", {
           orgId: task.orgId,
@@ -232,18 +226,14 @@ export function offboardingsRoutes(
 
         const action = await repos.getTaskAction(orgId, params.id);
 
-        if (action?.phase) {
-          dispatchAction(
-            {
-              orgId,
-              taskId: params.id,
-              taskTitle: updated.title,
-              status: body.status,
-              phase: action.phase,
-            },
-            action.stepId,
-          ).catch(() => {});
-        }
+        fireTaskStatusChanged(fireRules, {
+          orgId,
+          taskId: params.id,
+          taskTitle: updated.title,
+          status: body.status,
+          phase: action?.phase ?? null,
+          stepId: action?.stepId ?? null,
+        }).catch(() => {});
 
         return updated;
       },
@@ -284,18 +274,14 @@ export function offboardingsRoutes(
 
         const action = await repos.getTaskAction(orgId, params.taskId);
 
-        if (action?.phase) {
-          dispatchAction(
-            {
-              orgId,
-              taskId: params.taskId,
-              taskTitle: updated.title,
-              status: "done",
-              phase: action.phase,
-            },
-            action.stepId,
-          ).catch(() => {});
-        }
+        fireTaskStatusChanged(fireRules, {
+          orgId,
+          taskId: params.taskId,
+          taskTitle: updated.title,
+          status: "done",
+          phase: action?.phase ?? null,
+          stepId: action?.stepId ?? null,
+        }).catch(() => {});
 
         return { accepted: true };
       },
