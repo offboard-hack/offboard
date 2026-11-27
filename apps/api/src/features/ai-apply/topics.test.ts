@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { canonicalValue, topicOf } from "./topics.js";
+import { canonicalValues, type Topic, topicOf } from "./topics.js";
+
+const canonicalValue = (topic: Topic, text: string) => {
+  const read = canonicalValues(topic, text);
+
+  return read === undefined ? undefined : [...read].join(";");
+};
 
 describe("finds the topic of a question", () => {
   it.each([
@@ -136,6 +142,14 @@ describe("reads an option as a canonical value", () => {
     ["consent", "Sim. Eu concordo com a coleta", "yes"],
     ["consent", "Não. Eu não concordo com a coleta", "no"],
     ["trans", "Prefiro não responder", "decline"],
+    ["gender", "Mulher cisgênero", "cis;female"],
+    ["gender", "Homem trans", "trans;male"],
+    ["gender", "Prefiro não informar meu gênero, mulher", "decline"],
+    [
+      "disability",
+      "Deficiência Mental/Psicossocial (ex: Transtorno do Espectro Autista...)",
+      "mental;autism",
+    ],
     ["trans", "I don't wish to answer", "decline"],
     ["relative", "I do not want to disclose", "decline"],
     ["relative", "I don't have relatives here", "no"],
@@ -158,10 +172,8 @@ describe("reads an option as a canonical value", () => {
     ["race", "Outra"],
     ["relative", "Eu e esta pessoa estudamos juntos."],
     ["disability", "Sim"],
-    ["disability", "Deficiência Mental/Psicossocial (ex: Transtorno do Espectro Autista...)"],
     ["orientation", "Gay or Lesbian"],
     ["race", "Negra (preta ou parda)"],
-    ["gender", "Mulher cisgênero"],
     ["relative", "Não sei"],
     ["relative", "Não tenho certeza"],
     ["disability", "Não se aplica"],

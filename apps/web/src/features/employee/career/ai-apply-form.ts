@@ -111,7 +111,10 @@ export function answerNote(draft: DraftAnswer | undefined) {
   return {
     source: draft?.source ? sources[draft.source] : null,
     inferred: draft?.inferred ?? false,
-    attention: attention[draft?.status ?? "blank"],
+    attention:
+      draft?.status === "suggested" && draft.source === "profile"
+        ? "Sugerida a partir das suas preferências de diversidade. Confira antes de enviar."
+        : attention[draft?.status ?? "blank"],
   };
 }
 

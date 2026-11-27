@@ -902,6 +902,81 @@ describe("draftAnswers", () => {
         expect(answers[0]).toMatchObject({ value: "1", status: "suggested" });
       });
 
+      it("suggests from the diversity data declared in the profile", async () => {
+        const combined = select(
+          "combined",
+          "Identidade de gênero",
+          options("Mulher", "Mulher cisgênero", "Mulher trans", "Homem cisgênero"),
+          true,
+        );
+
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([combined, gender, race], {
+            library: saved,
+            fields: fieldsOf({
+              gender: { value: "female;cis", share: true },
+              race: { value: "brown", share: true },
+            }),
+          }),
+        );
+
+        expect(answers).toEqual([
+          {
+            questionId: "combined",
+            value: "2",
+            source: "profile",
+            inferred: false,
+            status: "suggested",
+          },
+          {
+            questionId: "gender",
+            value: ["1", "4"],
+            source: "profile",
+            inferred: false,
+            status: "suggested",
+          },
+          {
+            questionId: "race",
+            value: "3",
+            source: "profile",
+            inferred: false,
+            status: "suggested",
+          },
+        ]);
+      });
+
+      it("withholds every question of a topic the person chose not to share", async () => {
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([race, { ...race, id: "exact", label: "Raça/cor" }], {
+            library: saved,
+            fields: fieldsOf({ race: { value: "white", share: false } }),
+          }),
+        );
+
+        expect(answers.map(({ value, status }) => [value, status])).toEqual([
+          [null, "not_shared"],
+          [null, "not_shared"],
+        ]);
+      });
+
+      it("stays blank when a declared value only fits a more specific option", async () => {
+        const combinedOnly = select(
+          "combinedOnly",
+          "Gênero",
+          options("Mulher cisgênero", "Mulher trans"),
+          true,
+        );
+
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([combinedOnly], { fields: fieldsOf({ gender: { value: "female", share: true } }) }),
+        );
+
+        expect(answers[0]).toMatchObject({ value: null, status: "sensitive" });
+      });
+
       it("ignores a saved answer the profile withholds", async () => {
         const { generate } = fake([]);
 

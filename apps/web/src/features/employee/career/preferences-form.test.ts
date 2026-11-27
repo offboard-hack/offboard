@@ -27,6 +27,11 @@ const empty: Fields = {
   cpf: blank,
   birthDate: blank,
   address: blank,
+  gender: blank,
+  race: blank,
+  orientation: blank,
+  disability: blank,
+  pronoun: blank,
 };
 
 const address = {

@@ -6625,6 +6625,11 @@ describe.skipIf(!url)("api", () => {
             cpf: emptyField,
             birthDate: emptyField,
             address: emptyField,
+            gender: emptyField,
+            race: emptyField,
+            orientation: emptyField,
+            disability: emptyField,
+            pronoun: emptyField,
           },
         };
 

@@ -18,6 +18,7 @@ import { Switch } from "@/shared/ui/shadcn/switch";
 import { Textarea } from "@/shared/ui/shadcn/textarea";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "../ui";
 import { RejectionsSection } from "./dismiss-job";
+import { DiversitySection } from "./diversity";
 import { JobPreferencesSection } from "./job-preferences";
 import {
   type AddressDraft,
@@ -35,10 +36,11 @@ import {
 } from "./preferences-form";
 import { useUnsavedGuard } from "./use-unsaved-guard";
 
-export type PreferencesSection = "perfil" | "vagas" | "respostas" | "dispensadas";
+export type PreferencesSection = "perfil" | "diversidade" | "vagas" | "respostas" | "dispensadas";
 
 const sections = [
   { id: "perfil", label: "Perfil" },
+  { id: "diversidade", label: "Diversidade" },
   { id: "vagas", label: "Vagas que procuro" },
   { id: "respostas", label: "Respostas salvas" },
   { id: "dispensadas", label: "Vagas dispensadas" },
@@ -77,6 +79,7 @@ export function Preferences({
         ))}
       </nav>
       {section === "perfil" ? <ProfileSection account={account} /> : null}
+      {section === "diversidade" ? <DiversitySection account={account} /> : null}
       {section === "vagas" ? <JobPreferencesSection account={account} /> : null}
       {section === "respostas" ? <AnswersSection account={account} /> : null}
       {section === "dispensadas" ? <RejectionsSection account={account} /> : null}
