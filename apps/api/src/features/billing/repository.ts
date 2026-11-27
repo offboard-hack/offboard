@@ -380,20 +380,18 @@ export function createBillingRepository(db: Database) {
     });
   }
 
-  async function claimRefund(checkoutId: string, now: Date) {
+  async function claimRefund(chargeId: string, now: Date) {
     const rows = await db
       .insert(billingWebhookEvents)
-      .values({ id: `refund:${checkoutId}`, receivedAt: now })
+      .values({ id: `refund:${chargeId}`, receivedAt: now })
       .onConflictDoNothing()
       .returning({ id: billingWebhookEvents.id });
 
     return rows.length > 0;
   }
 
-  async function releaseRefund(checkoutId: string) {
-    await db
-      .delete(billingWebhookEvents)
-      .where(eq(billingWebhookEvents.id, `refund:${checkoutId}`));
+  async function releaseRefund(chargeId: string) {
+    await db.delete(billingWebhookEvents).where(eq(billingWebhookEvents.id, `refund:${chargeId}`));
   }
 
   async function findPlanIdBySlug(slug: string) {

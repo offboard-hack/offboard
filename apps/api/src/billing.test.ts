@@ -231,45 +231,20 @@ describe("abacatepay gateway", () => {
     responseBody = JSON.stringify({ success: true, data: { id: "bill_1" }, error: null });
 
     await expect(
-      createAbacatePayGateway("secret-key", base).refundCheckout("bill_1", "Motivo"),
+      createAbacatePayGateway("secret-key", base).refundCheckout("char_1", "Motivo"),
     ).resolves.toBeUndefined();
     expect(requestPath).toBe("/v2/checkouts/refund");
-    expect(JSON.parse(requestBody)).toEqual({ id: "bill_1", reason: "Motivo" });
+    expect(JSON.parse(requestBody)).toEqual({ id: "char_1", reason: "Motivo" });
     expect(requestAuthorization).toBe("Bearer secret-key");
   });
 
-  it("treats a checkout already refunded at AbacatePay as refunded", async () => {
-    responseStatus = 400;
-    responseBody = JSON.stringify({ success: false, data: null, error: "already refunded" });
-    lookupBody = JSON.stringify({
-      success: true,
-      data: { id: "bill_1", status: "REFUNDED" },
-      error: null,
-    });
-
-    await expect(
-      createAbacatePayGateway("secret-key", base).refundCheckout("bill_1", "Motivo"),
-    ).resolves.toBeUndefined();
-  });
-
-  it("fails the refund when the checkout is not refunded or the lookup fails", async () => {
+  it("fails the refund when AbacatePay rejects it", async () => {
     responseStatus = 400;
     responseBody = JSON.stringify({ success: false, data: null, error: "unavailable" });
-    lookupBody = JSON.stringify({
-      success: true,
-      data: { id: "bill_1", status: "PAID" },
-      error: null,
-    });
 
     await expect(
-      createAbacatePayGateway("secret-key", base).refundCheckout("bill_1", "Motivo"),
-    ).rejects.toThrow("AbacatePay checkout refund failed: unavailable");
-
-    lookupBody = JSON.stringify({ success: false, data: null, error: "Internal error" });
-
-    await expect(
-      createAbacatePayGateway("secret-key", base).refundCheckout("bill_1", "Motivo"),
-    ).rejects.toThrow("AbacatePay checkout refund failed: unavailable");
+      createAbacatePayGateway("secret-key", base).refundCheckout("char_1", "Motivo"),
+    ).rejects.toThrow("AbacatePay refund failed: unavailable");
   });
 
   it("throws on refund when the key is missing", async () => {
@@ -3441,7 +3416,7 @@ describe.skipIf(!url)("billing", () => {
     const duplicateReason = "Cobrança duplicada cancelada automaticamente";
     const planChangeReason = "Troca de plano não suportada cancelada automaticamente";
     const cancels: string[] = [];
-    const refunds: { checkoutId: string; reason: string }[] = [];
+    const refunds: { chargeId: string; reason: string }[] = [];
     const products = new Map<string, string>();
     let refundFailure = false;
     let configured = true;
@@ -3452,10 +3427,10 @@ describe.skipIf(!url)("billing", () => {
         return configured;
       },
       cancelSubscription: async (id: string) => void cancels.push(id),
-      refundCheckout: async (checkoutId: string, reason: string) => {
+      refundCheckout: async (chargeId: string, reason: string) => {
         if (refundFailure) throw new Error("refund down");
 
-        refunds.push({ checkoutId, reason });
+        refunds.push({ chargeId, reason });
       },
       productExternalId: async (productId: string) => {
         const found = products.get(productId);
@@ -3535,7 +3510,7 @@ describe.skipIf(!url)("billing", () => {
         await deliver("subscription.completed", stale());
 
         expect(cancels).toEqual(["subs_stale"]);
-        expect(refunds).toEqual([{ checkoutId: "bill_old", reason: duplicateReason }]);
+        expect(refunds).toEqual([{ chargeId: "bill_old", reason: duplicateReason }]);
       });
 
       it("refunds a stale checkout only once when the event is delivered again", async () => {
@@ -3605,19 +3580,29 @@ describe.skipIf(!url)("billing", () => {
         await bind({ status: "pending", checkoutId: "bill_live", providerSubscriptionId: null });
         refundFailure = true;
 
-        await expect(deliver("subscription.completed", stale())).resolves.toBeUndefined();
+        const paid = { ...stale(), payment: { id: "pay_old" } };
+
+        await expect(deliver("subscription.completed", paid)).resolves.toBeUndefined();
 
         expect(logged).toHaveBeenCalledWith("refund failed", {
           subscriptionId: "subs_stale",
           checkoutId: "bill_old",
+          chargeId: "pay_old",
           name: "Error",
           message: "refund down",
         });
 
         refundFailure = false;
-        await deliver("subscription.completed", stale());
+        await deliver("subscription.completed", paid);
 
-        expect(refunds).toEqual([{ checkoutId: "bill_old", reason: duplicateReason }]);
+        expect(refunds).toEqual([{ chargeId: "pay_old", reason: duplicateReason }]);
+      });
+
+      it("refunds the payment of the event instead of the checkout", async () => {
+        await bind({ status: "pending", checkoutId: "bill_live", providerSubscriptionId: null });
+        await deliver("subscription.completed", { ...stale(), payment: { id: "pay_old" } });
+
+        expect(refunds).toEqual([{ chargeId: "pay_old", reason: duplicateReason }]);
       });
 
       describe("plan_changed", () => {
@@ -3737,12 +3722,27 @@ describe.skipIf(!url)("billing", () => {
         "refunds %s of a deleted account",
         async (name) => {
           reference = `talent:${missingId}`;
-          await deliver(name, event("subs_orphan", "bill_orphan"));
+          await deliver(name, {
+            ...event("subs_orphan", "bill_orphan"),
+            payment: { id: "pay_orphan" },
+          });
 
           expect(cancels).toEqual(["subs_orphan"]);
-          expect(refunds).toEqual([{ checkoutId: "bill_orphan", reason: duplicateReason }]);
+          expect(refunds).toEqual([{ chargeId: "pay_orphan", reason: duplicateReason }]);
         },
       );
+
+      it("never refunds the checkout of a deleted account's renewal without a payment", async () => {
+        reference = `talent:${missingId}`;
+        await deliver("subscription.renewed", event("subs_orphan", "bill_orphan"));
+
+        expect(cancels).toEqual(["subs_orphan"]);
+        expect(refunds).toEqual([]);
+        expect(logged).toHaveBeenCalledWith("refund needs manual action", {
+          subscriptionId: "subs_orphan",
+          checkoutId: "bill_orphan",
+        });
+      });
 
       it("does not refund an event that charges nothing for a deleted account", async () => {
         reference = `talent:${missingId}`;
@@ -3787,7 +3787,7 @@ describe.skipIf(!url)("billing", () => {
           await deliver("subscription.plan_changed", changed("prod_other"));
 
           expect(cancels).toEqual(["subs_pro"]);
-          expect(refunds).toEqual([{ checkoutId: "bill_pro", reason: planChangeReason }]);
+          expect(refunds).toEqual([{ chargeId: "bill_pro", reason: planChangeReason }]);
           expect(logCalls("talent plan change not supported")).toHaveLength(1);
         });
 
@@ -3902,7 +3902,7 @@ describe.skipIf(!url)("billing", () => {
         await deliver("subscription.completed", event("subs_stray", "bill_stray"));
 
         expect(cancels).toEqual(["subs_stray"]);
-        expect(refunds).toEqual([{ checkoutId: "bill_stray", reason: duplicateReason }]);
+        expect(refunds).toEqual([{ chargeId: "bill_stray", reason: duplicateReason }]);
         expect(logCalls("copay subscription rejected")).toHaveLength(1);
       });
 
@@ -3911,21 +3911,46 @@ describe.skipIf(!url)("billing", () => {
         await deliver("subscription.completed", event("subs_1", "bill_1"));
 
         expect(cancels).toEqual(["subs_1"]);
-        expect(refunds).toEqual([{ checkoutId: "bill_1", reason: duplicateReason }]);
+        expect(refunds).toEqual([{ chargeId: "bill_1", reason: duplicateReason }]);
       });
 
       it("refunds a stray renewal but not a stray trial", async () => {
         await seed({ effectivePlanId: platinumId, copaySubscriptionId: "subs_2" });
-        await deliver("subscription.renewed", event("subs_stray", "bill_stray"));
+        await deliver("subscription.renewed", {
+          ...event("subs_stray", "bill_stray"),
+          payment: { id: "pay_stray" },
+        });
         await deliver("subscription.trial_started", event("subs_trial", "bill_trial"));
 
         expect(cancels).toEqual(["subs_stray", "subs_trial"]);
-        expect(refunds).toEqual([{ checkoutId: "bill_stray", reason: duplicateReason }]);
+        expect(refunds).toEqual([{ chargeId: "pay_stray", reason: duplicateReason }]);
+      });
+
+      it("skips a stray renewal without a payment and logs it for manual action", async () => {
+        await seed({ effectivePlanId: platinumId, copaySubscriptionId: "subs_2" });
+        await deliver("subscription.renewed", event("subs_stray", "bill_stray"));
+
+        expect(cancels).toEqual(["subs_stray"]);
+        expect(refunds).toEqual([]);
+        expect(logged).toHaveBeenCalledWith("refund needs manual action", {
+          subscriptionId: "subs_stray",
+          checkoutId: "bill_stray",
+        });
+      });
+
+      it("falls back to the checkout when a stray completed has no payment", async () => {
+        await seed();
+        await deliver("subscription.completed", event("subs_stray", "bill_stray"));
+
+        expect(refunds).toEqual([{ chargeId: "bill_stray", reason: duplicateReason }]);
       });
 
       it("never refunds the checkout of the owned subscription", async () => {
         await seed({ effectivePlanId: platinumId, copaySubscriptionId: "subs_2" });
-        await deliver("subscription.renewed", event("subs_stray", "bill_1"));
+        await deliver("subscription.renewed", {
+          ...event("subs_stray", "bill_1"),
+          payment: { id: "pay_stray" },
+        });
         await deliver("subscription.completed", event("subs_dup", "bill_1"));
 
         expect(cancels).toEqual(["subs_stray", "subs_dup"]);
@@ -3975,20 +4000,26 @@ describe.skipIf(!url)("billing", () => {
           copaySubscriptionId: "subs_1",
           validUntil: "2020-01-01",
         });
-        await deliver("subscription.renewed", event("subs_1", "bill_renewal"));
+        await deliver("subscription.renewed", {
+          ...event("subs_1", "bill_renewal"),
+          payment: { id: "pay_renewal" },
+        });
 
         expect(cancels).toEqual(["subs_1"]);
-        expect(refunds).toEqual([{ checkoutId: "bill_renewal", reason: duplicateReason }]);
+        expect(refunds).toEqual([{ chargeId: "pay_renewal", reason: duplicateReason }]);
       });
 
       it.each(["subscription.completed", "subscription.renewed"])(
         "refunds %s of a deleted account",
         async (name) => {
           profileId = missingId;
-          await deliver(name, event("subs_orphan", "bill_orphan"));
+          await deliver(name, {
+            ...event("subs_orphan", "bill_orphan"),
+            payment: { id: "pay_orphan" },
+          });
 
           expect(cancels).toEqual(["subs_orphan"]);
-          expect(refunds).toEqual([{ checkoutId: "bill_orphan", reason: duplicateReason }]);
+          expect(refunds).toEqual([{ chargeId: "pay_orphan", reason: duplicateReason }]);
         },
       );
 
@@ -4036,7 +4067,7 @@ describe.skipIf(!url)("billing", () => {
           await deliver("subscription.plan_changed", changed("prod_other"));
 
           expect(cancels).toEqual(["subs_1"]);
-          expect(refunds).toEqual([{ checkoutId: "bill_1", reason: planChangeReason }]);
+          expect(refunds).toEqual([{ chargeId: "bill_1", reason: planChangeReason }]);
           expect(await assignment()).toMatchObject({
             effectivePlanId: goldId,
             copaySubscriptionId: null,

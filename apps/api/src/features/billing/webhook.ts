@@ -175,26 +175,38 @@ const duplicateReason = "Cobrança duplicada cancelada automaticamente";
 
 const planChangeReason = "Troca de plano não suportada cancelada automaticamente";
 
-async function refundCheckoutOf(
+async function refundChargeOf(
   repos: RefundClaims,
   gateway: WebhookGateway,
+  name: string | undefined,
   event: SubscriptionEvent,
   reason: string,
 ) {
+  const subscriptionId = event.data.subscription.id;
   const checkoutId = event.data.checkout?.id;
+  const paymentId = event.data.payment?.id;
 
-  if (checkoutId === undefined) return;
+  if (paymentId === undefined && name === "subscription.renewed") {
+    console.error("refund needs manual action", { subscriptionId, checkoutId });
 
-  if (!(await repos.claimRefund(checkoutId, new Date()))) return;
+    return;
+  }
+
+  const chargeId = paymentId ?? checkoutId;
+
+  if (chargeId === undefined) return;
+
+  if (!(await repos.claimRefund(chargeId, new Date()))) return;
 
   try {
-    await gateway.refundCheckout(checkoutId, reason);
-    console.error("charge refunded", { subscriptionId: event.data.subscription.id, checkoutId });
+    await gateway.refundCheckout(chargeId, reason);
+    console.error("charge refunded", { subscriptionId, checkoutId, chargeId });
   } catch (cause) {
-    await repos.releaseRefund(checkoutId);
+    await repos.releaseRefund(chargeId);
     console.error("refund failed", {
-      subscriptionId: event.data.subscription.id,
+      subscriptionId,
       checkoutId,
+      chargeId,
       ...errorSummary(cause),
     });
   }
@@ -208,7 +220,7 @@ async function refundPaidCharge(
 ) {
   if (name === undefined || !refundableEvents.has(name)) return;
 
-  await refundCheckoutOf(repos, gateway, event, duplicateReason);
+  await refundChargeOf(repos, gateway, name, event, duplicateReason);
 }
 
 async function changedProduct(gateway: WebhookGateway, event: SubscriptionEvent) {
@@ -278,7 +290,7 @@ async function applyTalentPlanChange(
   if (!gateway.configured) return;
 
   await gateway.cancelSubscription(event.data.subscription.id);
-  await refundCheckoutOf(repos, gateway, event, planChangeReason);
+  await refundChargeOf(repos, gateway, "subscription.plan_changed", event, planChangeReason);
 }
 
 async function applyTalentEvent(
@@ -569,7 +581,7 @@ async function applyCopayPlanChange(
 
   await gateway.cancelSubscription(subscriptionId);
   await benefits.revertCopay(profileId, subscriptionId);
-  await refundCheckoutOf(repos, gateway, event, planChangeReason);
+  await refundChargeOf(repos, gateway, "subscription.plan_changed", event, planChangeReason);
 }
 
 async function applyCopayEvent(
