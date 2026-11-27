@@ -225,14 +225,16 @@ export function offboardingsRoutes(
         if (!updated) return status(404, { error: "Task not found" });
 
         const action = await repos.getTaskAction(orgId, params.id);
+        const phase = action ? action.phase : null;
+        const stepId = action ? action.stepId : null;
 
         fireTaskStatusChanged(fireRules, {
           orgId,
           taskId: params.id,
           taskTitle: updated.title,
           status: body.status,
-          phase: action?.phase ?? null,
-          stepId: action?.stepId ?? null,
+          phase,
+          stepId,
         }).catch(() => {});
 
         return updated;
@@ -273,14 +275,16 @@ export function offboardingsRoutes(
         if (!updated) return status(404, { error: "Task not found" });
 
         const action = await repos.getTaskAction(orgId, params.taskId);
+        const phase = action ? action.phase : null;
+        const stepId = action ? action.stepId : null;
 
         fireTaskStatusChanged(fireRules, {
           orgId,
           taskId: params.taskId,
           taskTitle: updated.title,
           status: "done",
-          phase: action?.phase ?? null,
-          stepId: action?.stepId ?? null,
+          phase,
+          stepId,
         }).catch(() => {});
 
         return { accepted: true };

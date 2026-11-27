@@ -9391,6 +9391,12 @@ describe.skipIf(!url)("api", () => {
           return;
         }
 
+        if (req.headers.authorization === "Bearer xoxb-noerror-0000") {
+          res.end(JSON.stringify({ ok: false }));
+
+          return;
+        }
+
         if (req.url === "/auth.test") {
           const good = req.headers.authorization === "Bearer xoxb-good-1234";
 
@@ -9571,6 +9577,15 @@ describe.skipIf(!url)("api", () => {
 
       expect(res.status).toBe(422);
       expect(await res.json()).toEqual({ error: "HTTP 502" });
+    });
+
+    it("reports unknown_error when Slack returns ok:false without error field", async () => {
+      const res = await slackCall("/integrations/slack", "PUT", {
+        botToken: "xoxb-noerror-0000",
+      });
+
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({ error: "unknown_error" });
     });
   });
 
