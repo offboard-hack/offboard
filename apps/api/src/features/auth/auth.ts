@@ -325,6 +325,7 @@ export function createAuth({
           employeeCaseId: { type: "string", required: false, input: false },
           employeeGrantId: { type: "string", required: false, input: false },
           talentProfileId: { type: "string", required: false, input: false },
+          staffEmail: { type: "string", required: false, input: false },
         },
       },
       hooks: {
