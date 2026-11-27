@@ -40,6 +40,8 @@ describe("plan card view", () => {
       benefitLine: null,
       benefitExpiring: false,
       benefitExpiryWarning: null,
+      activeBenefit: null,
+      showComparison: false,
       aiApplyLine: "10 candidaturas/dia com IA",
     });
   });
