@@ -682,6 +682,7 @@ export const subscriptionStatusEnum = pgEnum("subscription_status", [
   "past_due",
   "canceled",
   "trialing",
+  "pending",
 ]);
 
 export const invoiceStatusEnum = pgEnum("invoice_status", [

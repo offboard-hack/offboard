@@ -6,7 +6,9 @@ import {
   subscriptions,
   talentSubscriptions,
 } from "@offboard/db/schema";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { checkoutRetryMs } from "../../shared/career-pro.js";
+import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 
 type InvoiceStatus = (typeof invoices.$inferSelect)["status"];
 
@@ -74,6 +76,78 @@ export function createBillingRepository(db: Database) {
       .limit(1);
 
     return row ?? null;
+  }
+
+  async function startSubscription(orgId: string, planSlug: string, now: Date) {
+    return db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${orgId}))`);
+
+      const [plan] = await tx
+        .select({ id: plans.id, slug: plans.slug })
+        .from(plans)
+        .where(eq(plans.slug, planSlug));
+
+      if (!plan) return { outcome: "unknown_plan" } as const;
+
+      const [current] = await tx
+        .select({
+          id: subscriptions.id,
+          status: subscriptions.status,
+          updatedAt: subscriptions.updatedAt,
+        })
+        .from(subscriptions)
+        .where(eq(subscriptions.orgId, orgId))
+        .orderBy(desc(subscriptions.createdAt))
+        .limit(1);
+
+      if (current && current.status !== "canceled" && current.status !== "pending") {
+        return { outcome: "subscribed" } as const;
+      }
+
+      if (
+        current?.status === "pending" &&
+        current.updatedAt !== null &&
+        current.updatedAt.getTime() > now.getTime() - checkoutRetryMs
+      ) {
+        return { outcome: "in_progress" } as const;
+      }
+
+      const today = saoPauloDate(now);
+
+      const patch = {
+        planId: plan.id,
+        status: "pending",
+        currentPeriodStart: today,
+        currentPeriodEnd: today,
+        updatedAt: now,
+      } as const;
+
+      if (current) {
+        await tx.update(subscriptions).set(patch).where(eq(subscriptions.id, current.id));
+
+        return { outcome: "started", id: current.id, planSlug: plan.slug } as const;
+      }
+
+      const [created] = await tx
+        .insert(subscriptions)
+        .values({ orgId, ...patch, createdAt: now })
+        .returning({ id: subscriptions.id });
+
+      return { outcome: "started", id: created.id, planSlug: plan.slug } as const;
+    });
+  }
+
+  async function releaseSubscription(orgId: string, id: string) {
+    await db
+      .update(subscriptions)
+      .set({ updatedAt: new Date(0) })
+      .where(
+        and(
+          eq(subscriptions.id, id),
+          eq(subscriptions.orgId, orgId),
+          eq(subscriptions.status, "pending"),
+        ),
+      );
   }
 
   async function listInvoices(orgId: string) {
@@ -226,6 +300,8 @@ export function createBillingRepository(db: Database) {
   return {
     listPlans,
     getSubscription,
+    startSubscription,
+    releaseSubscription,
     listInvoices,
     findOpenInvoice,
     getSubscriptionById,

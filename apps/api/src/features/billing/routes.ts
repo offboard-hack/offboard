@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import type { PortalAccessPlugin } from "../../shared/access.js";
+import { logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import type { AbacatePayGateway } from "./abacatepay.js";
 import type { BillingRepository } from "./repository.js";
@@ -22,6 +23,7 @@ const subscriptionRow = t.Object({
     t.Literal("past_due"),
     t.Literal("canceled"),
     t.Literal("trialing"),
+    t.Literal("pending"),
   ]),
   currentPeriodStart: t.String(),
   currentPeriodEnd: t.String(),
@@ -52,6 +54,8 @@ export function billingRoutes(
   webOrigin: string,
   webhookSecret: string | undefined,
 ) {
+  const planScreen = `${webOrigin}/planos-e-gastos?aba=plano`;
+
   return new Elysia()
     .use(access)
     .get("/billing/plans", () => repos.listPlans(), {
@@ -86,8 +90,8 @@ export function billingRoutes(
         const checkout = await gateway.createSubscriptionCheckout({
           externalId: subscription.id,
           planSlug: subscription.plan.slug,
-          returnUrl: `${webOrigin}/planos-e-gastos`,
-          completionUrl: `${webOrigin}/planos-e-gastos`,
+          returnUrl: planScreen,
+          completionUrl: `${planScreen}&plano=ok`,
         });
 
         return { checkoutId: checkout.id, url: checkout.url };
@@ -95,6 +99,51 @@ export function billingRoutes(
       {
         permit: ["manage", "Billing"],
         response: { 200: checkoutResponse, 404: errorResponse, 503: errorResponse },
+      },
+    )
+    .post(
+      "/billing/subscription",
+      async ({ principal, body, status }) => {
+        if (!gateway.configured) return status(503, { error: "Payments are not configured" });
+
+        const started = await repos.startSubscription(principal.orgId, body.planSlug, new Date());
+
+        if (started.outcome === "unknown_plan") return status(422, { error: "Unknown plan" });
+
+        if (started.outcome === "subscribed") {
+          return status(409, { error: "Already subscribed" });
+        }
+
+        if (started.outcome === "in_progress") {
+          return status(409, { error: "A checkout is already in progress" });
+        }
+
+        try {
+          const checkout = await gateway.createSubscriptionCheckout({
+            externalId: started.id,
+            planSlug: started.planSlug,
+            returnUrl: planScreen,
+            completionUrl: `${planScreen}&plano=ok`,
+          });
+
+          return { url: checkout.url };
+        } catch (cause) {
+          logFailureCode("Company plan checkout failed")(cause);
+          await repos.releaseSubscription(principal.orgId, started.id);
+
+          return status(502, { error: "Could not start the checkout" });
+        }
+      },
+      {
+        permit: ["manage", "Billing"],
+        body: t.Object({ planSlug: t.String() }),
+        response: {
+          200: t.Object({ url: t.String() }),
+          409: errorResponse,
+          422: errorResponse,
+          502: errorResponse,
+          503: errorResponse,
+        },
       },
     )
     .post(

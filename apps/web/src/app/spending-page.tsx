@@ -53,7 +53,7 @@ export function SpendingPage() {
           ))}
         </TabsList>
         <TabsContent value="plano">
-          <PlansTab />
+          <PlansTab paid={search.plano === "ok"} />
         </TabsContent>
         <TabsContent value="beneficios">
           <BenefitsTab />

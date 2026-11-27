@@ -7,6 +7,8 @@ import {
   defaultOrgId,
   invoices,
   offboardingCases,
+  organizations,
+  plans,
   subscriptions,
   talentSubscriptions,
 } from "@offboard/db/schema";
@@ -37,7 +39,7 @@ const auth: PortalAuth = {
         name: "Test Member",
         email: "member@example.com",
         role,
-        orgId: defaultOrgId,
+        orgId: headers.get("x-test-org") ?? defaultOrgId,
       },
     });
   },
@@ -526,6 +528,242 @@ describe.skipIf(!url)("billing", () => {
 
     return created.id;
   }
+
+  const otherOrgId = "00000000-0000-4000-8000-0000000000b1";
+
+  type SubscribeCheckout = {
+    externalId: string;
+    planSlug: string;
+    returnUrl: string;
+    completionUrl: string;
+  };
+
+  const checkouts: SubscribeCheckout[] = [];
+  let gatewayFailure = false;
+
+  const stubGateway = {
+    configured: true,
+    async createSubscriptionCheckout(params: SubscribeCheckout) {
+      if (gatewayFailure) throw new Error("gateway down");
+
+      checkouts.push(params);
+
+      return { id: "bill_new", url: "https://pay.example/bill_new" };
+    },
+  };
+
+  const subscribeApp = createApp(webOrigin, repos, {
+    auth,
+    sendEmail: () => Promise.resolve(),
+    abacatepay: stubGateway,
+    abacatepayWebhookSecret: webhookSecret,
+  });
+
+  function subscribe(
+    body: { planSlug?: string },
+    init: { session?: string; org?: string; target?: typeof app } = {},
+  ) {
+    const headers = new Headers({ origin: webOrigin, "content-type": "application/json" });
+
+    if (init.session) headers.set("x-test-session", init.session);
+
+    if (init.org) headers.set("x-test-org", init.org);
+
+    return (init.target ?? subscribeApp).handle(
+      new Request("http://localhost/api/billing/subscription", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      }),
+    );
+  }
+
+  async function subscriptionsOf(orgId: string) {
+    return db.select().from(subscriptions).where(eq(subscriptions.orgId, orgId));
+  }
+
+  async function planId(slug: string) {
+    const [row] = await db.select({ id: plans.id }).from(plans).where(eq(plans.slug, slug));
+
+    return row.id;
+  }
+
+  describe("company self-serve subscription", () => {
+    beforeEach(async () => {
+      checkouts.length = 0;
+      gatewayFailure = false;
+      await db.delete(subscriptions);
+    });
+
+    it("creates a pending subscription and returns the checkout url", async () => {
+      const res = await subscribe({ planSlug: "silver" });
+      const [created] = await subscriptionsOf(defaultOrgId);
+      const today = saoPauloDate(new Date());
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ url: "https://pay.example/bill_new" });
+      expect(created).toMatchObject({
+        status: "pending",
+        planId: await planId("silver"),
+        currentPeriodStart: today,
+        currentPeriodEnd: today,
+      });
+      expect(checkouts).toEqual([
+        {
+          externalId: created.id,
+          planSlug: "silver",
+          returnUrl: `${webOrigin}/planos-e-gastos?aba=plano`,
+          completionUrl: `${webOrigin}/planos-e-gastos?aba=plano&plano=ok`,
+        },
+      ]);
+
+      const current = await (await call("/billing/subscription", { session: "rh" })).json();
+
+      expect(current).toMatchObject({ status: "pending", plan: { slug: "silver" } });
+    });
+
+    it("grants no entitlements while pending", async () => {
+      const profileId = await talentProfile();
+
+      await subscribe({ planSlug: "platinum-premium" });
+
+      const standing = () => repos.careerPlan.plan(profileId, new Date());
+
+      expect((await standing())?.company.includesAiApply).toBe(false);
+      expect((await standing())?.aiApply.allowedBy).toBeNull();
+
+      await db.update(subscriptions).set({ status: "active" });
+
+      expect((await standing())?.company.includesAiApply).toBe(true);
+    });
+
+    it("lets a canceled company subscribe again, reusing its row", async () => {
+      await subscribe({ planSlug: "silver" });
+      await db.update(subscriptions).set({ status: "canceled" });
+
+      const res = await subscribe({ planSlug: "gold" });
+      const rows = await subscriptionsOf(defaultOrgId);
+
+      expect(res.status).toBe(200);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ status: "pending", planId: await planId("gold") });
+    });
+
+    it("rejects a company that already pays", async () => {
+      await db.insert(subscriptions).values({
+        orgId: defaultOrgId,
+        planId: await planId("gold"),
+        status: "active",
+        currentPeriodStart: "2026-11-01",
+        currentPeriodEnd: "2026-12-01",
+      });
+
+      const res = await subscribe({ planSlug: "platinum" });
+
+      expect(res.status).toBe(409);
+      expect(checkouts).toEqual([]);
+      expect((await subscriptionsOf(defaultOrgId))[0].status).toBe("active");
+    });
+
+    it("rejects a second checkout within the hour and allows it afterwards", async () => {
+      expect((await subscribe({ planSlug: "silver" })).status).toBe(200);
+      expect((await subscribe({ planSlug: "gold" })).status).toBe(409);
+      expect(checkouts).toHaveLength(1);
+
+      await db.update(subscriptions).set({ updatedAt: new Date(Date.now() - 61 * 60_000) });
+
+      expect((await subscribe({ planSlug: "gold" })).status).toBe(200);
+      expect(checkouts.map((checkout) => checkout.planSlug)).toEqual(["silver", "gold"]);
+      expect(await subscriptionsOf(defaultOrgId)).toHaveLength(1);
+    });
+
+    it("treats a pending subscription without a timestamp as stale", async () => {
+      await subscribe({ planSlug: "silver" });
+      await db.update(subscriptions).set({ updatedAt: null });
+
+      expect((await subscribe({ planSlug: "silver" })).status).toBe(200);
+    });
+
+    it("rejects unknown plan slugs", async () => {
+      expect((await subscribe({ planSlug: "diamond" })).status).toBe(422);
+      expect((await subscribe({})).status).toBe(422);
+      expect(await subscriptionsOf(defaultOrgId)).toEqual([]);
+    });
+
+    it("releases the guard and answers 502 when the gateway fails", async () => {
+      gatewayFailure = true;
+
+      expect((await subscribe({ planSlug: "silver" })).status).toBe(502);
+
+      gatewayFailure = false;
+
+      expect((await subscribe({ planSlug: "silver" })).status).toBe(200);
+      expect(await subscriptionsOf(defaultOrgId)).toHaveLength(1);
+    });
+
+    it("answers 503 when AbacatePay is not configured", async () => {
+      const res = await subscribe({ planSlug: "silver" }, { target: unconfigured });
+
+      expect(res.status).toBe(503);
+      expect(await subscriptionsOf(defaultOrgId)).toEqual([]);
+    });
+
+    it("restricts subscribing to admins", async () => {
+      expect((await subscribe({ planSlug: "silver" }, { session: "rh" })).status).toBe(403);
+    });
+
+    it("never touches another organization's subscription", async () => {
+      await db
+        .insert(organizations)
+        .values({ id: otherOrgId, name: "Org B", slug: "org-b-billing" })
+        .onConflictDoNothing();
+      await db.delete(subscriptions).where(eq(subscriptions.orgId, otherOrgId));
+      await db.insert(subscriptions).values({
+        orgId: defaultOrgId,
+        planId: await planId("gold"),
+        status: "active",
+        currentPeriodStart: "2026-11-01",
+        currentPeriodEnd: "2026-12-01",
+      });
+
+      const res = await subscribe({ planSlug: "silver" }, { org: otherOrgId });
+      const [own] = await subscriptionsOf(defaultOrgId);
+      const [other] = await subscriptionsOf(otherOrgId);
+
+      expect(res.status).toBe(200);
+      expect(own).toMatchObject({ status: "active", planId: await planId("gold") });
+      expect(other).toMatchObject({ status: "pending", planId: await planId("silver") });
+      expect(checkouts[0].externalId).toBe(other.id);
+
+      await db.delete(subscriptions).where(eq(subscriptions.orgId, otherOrgId));
+    });
+
+    it("still pays an existing pending subscription through /billing/checkout", async () => {
+      await subscribe({ planSlug: "silver" });
+
+      const res = await call("/billing/checkout", { method: "POST" });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        checkoutId: "bill_test",
+        url: "https://pay.example/bill_test",
+      });
+    });
+
+    it("activates a pending subscription when the payment completes", async () => {
+      await subscribe({ planSlug: "silver" });
+      subscriptionId = (await currentSubscription()).id;
+
+      expect((await webhook("subscription.completed")).status).toBe(200);
+
+      const today = saoPauloDate(new Date());
+      const activated = await currentSubscription();
+
+      expect(activated.status).toBe("active");
+      expect(activated.currentPeriodEnd > today).toBe(true);
+      expect((await allInvoices()).map((invoice) => invoice.status)).toEqual(["paid"]);
+    });
+  });
 
   async function pendingTalent(index = 0) {
     const profileId = await talentProfile(index);

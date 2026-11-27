@@ -7,6 +7,7 @@ export default defineConfig({
       provider: "v8",
       include: [
         "src/features/checklist/action-config.ts",
+        "src/features/billing/plan-view.ts",
         "src/app/spending-tabs.ts",
         "src/entities/benefits-summary.ts",
         "src/features/benefits/policy-form.ts",
