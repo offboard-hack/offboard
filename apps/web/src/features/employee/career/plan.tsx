@@ -6,6 +6,7 @@ import type { EmployeeAccount } from "@/entities/employee";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
 import { EmployeeError, EmployeePanel } from "../ui";
+import { featureComparisonView, type TierFeatures } from "./benefit-features";
 import {
   type CareerPlan,
   paymentReceivedNote,
@@ -51,6 +52,29 @@ export function PlanSection({ account, paid }: { account: EmployeeAccount; paid:
   );
 }
 
+function tierFeatureLines(tier: TierFeatures) {
+  return [
+    tier.score === "detailed" ? "Pontuação detalhada" : "Pontuação numérica",
+    tier.aiApplyLimit > 0
+      ? `${tier.aiApplyLimit} candidaturas/dia com IA`
+      : "Sem candidatura com IA",
+    ...(tier.aiApplyPriority ? ["Prioridade na fila"] : []),
+  ];
+}
+
+function FeatureList({ title, tier }: { title: string; tier: TierFeatures }) {
+  return (
+    <div className="space-y-1">
+      <p className="text-sm font-medium">{title}</p>
+      <ul className="list-disc pl-5 text-sm text-muted-foreground">
+        {tierFeatureLines(tier).map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function PlanCard({
   plan,
   today,
@@ -67,6 +91,7 @@ export function PlanCard({
   onUpgrade: () => void;
 }) {
   const view = planCardView(plan, today, paid);
+  const comparison = featureComparisonView(plan.benefit);
 
   return (
     <EmployeePanel title="Seu plano">
@@ -76,7 +101,31 @@ export function PlanCard({
           {view.aiLine}
         </Badge>
         {view.proLine ? <Badge variant="status-success">{view.proLine}</Badge> : null}
+        {view.aiApplyLine ? <Badge variant="status-success">{view.aiApplyLine}</Badge> : null}
       </div>
+      {view.benefitLine ? (
+        <p className="text-sm text-muted-foreground">{view.benefitLine}</p>
+      ) : null}
+      {view.benefitExpiryWarning ? (
+        <p role="status" className="text-sm text-amber-600 dark:text-amber-400">
+          {view.benefitExpiryWarning}
+        </p>
+      ) : null}
+      {comparison ? (
+        <div className="space-y-3">
+          <FeatureList title={`Incluído no ${comparison.current.name}`} tier={comparison.current} />
+          {comparison.next ? (
+            <FeatureList title={`No ${comparison.next.name}`} tier={comparison.next} />
+          ) : null}
+          {comparison.copayLabel ? (
+            <div>
+              <Button variant="outline" disabled>
+                {comparison.copayLabel} · Em breve
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {view.sponsorLine ? (
         <p className="text-sm text-muted-foreground">{view.sponsorLine}</p>
       ) : null}
