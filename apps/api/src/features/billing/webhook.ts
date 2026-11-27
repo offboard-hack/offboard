@@ -242,7 +242,11 @@ async function applyCopayEvent(
   const owned = assignment.copaySubscriptionId === providerSubscriptionId;
 
   if (name === "subscription.completed" && targetPlanId) {
-    if (assignment.copaySubscriptionId !== null) return;
+    if (assignment.copaySubscriptionId !== null) {
+      await gateway.cancelSubscription(providerSubscriptionId);
+
+      return;
+    }
 
     const prices = await benefits.planPriceMap();
 

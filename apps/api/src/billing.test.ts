@@ -1590,11 +1590,11 @@ describe.skipIf(!url)("billing", () => {
       });
     });
 
-    it("ignores a completed event when another subscription is already attached", async () => {
+    it("cancels incoming subscription when another is already attached", async () => {
       await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_2" });
       await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
 
-      expect(cancelled).toEqual([]);
+      expect(cancelled).toEqual(["subs_1"]);
       expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_2" });
     });
 
