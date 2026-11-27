@@ -16,6 +16,7 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, type ErrorComponentProps } from "@tanstack/react-router";
 import { useCallback, type ReactNode } from "react";
 import { applicationsSummaryQuery } from "@/entities/career";
+import { todayAtWorkspace } from "@/entities/offboarding";
 import {
   type EmployeeAccount,
   employeeJourneyQuery,
@@ -23,6 +24,7 @@ import {
 } from "@/entities/employee";
 import { EmployeeAgenda } from "@/features/employee/agenda-calendar";
 import { Career } from "@/features/employee/career";
+import { isDeadlineOverdue } from "@/features/employee/deadline-overdue";
 import { Preferences } from "@/features/employee/career/preferences";
 import { ResumeCareer } from "@/features/employee/career/resume";
 import {
@@ -355,7 +357,7 @@ function DepartureContent({
     {
       label: "Prazo da rescisão",
       icon: Calendar01Icon,
-      tone: "primary",
+      tone: isDeadlineOverdue(journey.deadline, todayAtWorkspace()) ? "danger" : "primary",
       value: employeeDate(journey.deadline, dateFormat),
     },
     {
