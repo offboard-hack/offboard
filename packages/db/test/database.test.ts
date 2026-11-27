@@ -26,6 +26,7 @@ import {
   jobRejections,
   jobSources,
   jobs,
+  plans,
   llmUsage,
   offboardingCases,
   publicPageDailyViews,
@@ -37,9 +38,11 @@ import {
   talentProfiles,
   tasks,
 } from "../src/schema/index.ts";
+import { seedPlans } from "../src/billing.fixture.ts";
+import { seedJobSources } from "../src/job-source.fixture.ts";
 import { commonQuestions } from "../src/preferences.fixture.ts";
 import { normalizeQuestion } from "../src/question.ts";
-import { seedCases, seedDatabase, testSeedFixtures } from "../src/seed-database.ts";
+import { seedCases, seedCatalog, seedDatabase, testSeedFixtures } from "../src/seed-database.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 
@@ -86,6 +89,38 @@ it.skipIf(!url)("seeds the database with the example cases and tasks", async () 
     expect(await db.select().from(tasks)).toHaveLength(
       seedCases.reduce((sum, entry) => sum + entry.tasks.length, 0),
     );
+  } finally {
+    await db.$client.end();
+  }
+});
+
+it.skipIf(!url)("seeds the catalog twice without duplicating or wiping data", async () => {
+  const db = createClient(url ?? "");
+
+  try {
+    await migrate(db, { migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)) });
+    await seedCatalog(db);
+    await seedCatalog(db);
+
+    const catalog = await db.select().from(jobs).where(eq(jobs.source, "seed"));
+    expect(catalog).toHaveLength(seedJobs.length);
+    expect(await db.select().from(plans)).toHaveLength(seedPlans.length);
+    expect(await db.select().from(jobSources)).toHaveLength(seedJobSources.length);
+  } finally {
+    await db.$client.end();
+  }
+});
+
+it.skipIf(!url)("seeds the full development data twice", async () => {
+  const db = createClient(url ?? "");
+
+  try {
+    await migrate(db, { migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)) });
+    await seedDatabase(db);
+    await seedDatabase(db);
+
+    expect(await db.select().from(offboardingCases)).toHaveLength(seedCases.length);
+    expect(await db.select().from(plans)).toHaveLength(seedPlans.length);
   } finally {
     await db.$client.end();
   }

@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { z } from "zod";
+import { appendToOutbox, outboxPath } from "../../shared/dev-outbox.js";
 
 type EmailMessage = {
   to: string;
@@ -17,6 +18,8 @@ export interface CloudflareEmailBinding {
 }
 
 export const emailProvider = z.enum(["resend", "cloudflare"]).default("resend");
+
+const localEmailProvider = z.enum(["resend", "cloudflare", "console"]).default("resend");
 
 const resendConfig = z.object({
   AUTH_EMAIL_FROM: z.string().min(1),
@@ -47,11 +50,29 @@ function createCloudflareSender(from: string, binding: CloudflareEmailBinding) {
   } satisfies EmailSender;
 }
 
+function createConsoleSender(env: Record<string, string | undefined>) {
+  if (env.NODE_ENV === "production" || env.VERCEL === "1") {
+    throw new Error("EMAIL_PROVIDER=console is only available in local development");
+  }
+
+  const path = outboxPath(env);
+
+  return {
+    async send(message) {
+      appendToOutbox(path, { to: message.to, subject: message.subject, text: message.text });
+      console.info(`[offboard dev email] to=${message.to} subject=${message.subject}`);
+      console.info(message.text);
+    },
+  } satisfies EmailSender;
+}
+
 export function createEmailSender(
   env: Record<string, string | undefined>,
   cloudflare?: CloudflareEmailBinding,
 ) {
-  const provider = emailProvider.parse(env.EMAIL_PROVIDER);
+  const provider = localEmailProvider.parse(env.EMAIL_PROVIDER);
+
+  if (provider === "console") return createConsoleSender(env);
 
   if (provider === "resend") return createResendSender(resendConfig.parse(env));
 
