@@ -22,6 +22,7 @@ import {
   emptyExperience,
   experienceProblem,
   listLimit,
+  overLimit,
   type ResumeDraft,
   type SectionId,
   splitLines,
@@ -53,6 +54,7 @@ function Field({
   placeholder,
   multiline,
   rows,
+  perLine,
 }: {
   label: string;
   value: string;
@@ -60,9 +62,10 @@ function Field({
   placeholder?: string;
   multiline?: boolean;
   rows?: number;
+  perLine?: boolean;
 }) {
   const id = useId();
-  const long = tooLong(value);
+  const long = overLimit(value, perLine);
 
   const control = {
     id,
@@ -205,6 +208,7 @@ function ExperiencesEditor({ draft, set }: Editor) {
           <Field
             label="Conquistas e responsabilidades"
             multiline
+            perLine
             value={experience.bullets.map((bullet) => bullet.text).join("\n")}
             onChange={(value) =>
               update(index, {
@@ -287,6 +291,7 @@ function SkillsEditor({ draft, set }: Editor) {
     <Field
       label="Competências"
       multiline
+      perLine
       rows={10}
       placeholder={"Go\nKubernetes\nGestão de pessoas"}
       value={text}
@@ -380,6 +385,7 @@ function ContactEditor({ draft, set }: Editor) {
       <Field
         label="Links"
         multiline
+        perLine
         placeholder={"https://www.linkedin.com/in/voce\nhttps://github.com/voce"}
         value={links}
         onChange={(value) => {

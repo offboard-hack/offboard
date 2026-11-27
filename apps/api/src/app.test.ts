@@ -3505,6 +3505,13 @@ describe.skipIf(!url)("api", () => {
         expect(store.puts).toHaveLength(1);
         expect(store.removed).toEqual([store.puts[0].key]);
 
+        const asJson = await request(instance, id, "/me/resume", {
+          method: "POST",
+          json: { content: reviewed },
+        });
+
+        expect(asJson.status).toBe(200);
+
         const docxFile = await create(instance, id, JSON.stringify(reviewed), {
           bytes: docx(),
           name: "cv.docx",

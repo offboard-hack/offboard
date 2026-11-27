@@ -9,6 +9,7 @@ import {
   fileSize,
   isEmptyDraft,
   onboardingMachine,
+  overLimit,
   readingChecks,
   type ResumeDraft,
   sectionSummaries,
@@ -197,6 +198,9 @@ describe("résumé onboarding content", () => {
     expect(tooLong("a".repeat(2_000))).toBe(false);
     expect(tooLong("a".repeat(2_001))).toBe(true);
     expect(tooLong(null)).toBe(false);
+    expect(overLimit(`${"a".repeat(1_500)}\n${"b".repeat(1_500)}`, true)).toBe(false);
+    expect(overLimit(`${"a".repeat(1_500)}\n${"b".repeat(1_500)}`)).toBe(true);
+    expect(overLimit("a".repeat(2_001), true)).toBe(true);
   });
 });
 
