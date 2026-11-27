@@ -259,17 +259,20 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
   const library = new Map<string, string>();
   const modelLibrary: { question: string; answer: string }[] = [];
 
-  for (const entry of input.library) {
-    const normalized = normalizeQuestion(entry.question);
+  const usable = (entry: DraftInput["library"][number]) => {
     const digits = entry.answer.replace(/\D/g, "");
 
-    if (
-      entry.answer.trim() === "" ||
-      blocked(normalized) ||
-      hidden.some((secret) => digits.includes(secret))
-    ) {
-      continue;
-    }
+    return (
+      entry.answer.trim() !== "" &&
+      !blocked(normalizeQuestion(entry.question)) &&
+      !hidden.some((secret) => digits.includes(secret))
+    );
+  };
+
+  for (const entry of input.library) {
+    if (!usable(entry)) continue;
+
+    const normalized = normalizeQuestion(entry.question);
 
     if (!library.has(normalized)) library.set(normalized, entry.answer);
 
@@ -290,7 +293,7 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
   for (const entry of input.library) {
     const topic = topicOf(entry.question);
 
-    if (topic === undefined || !library.has(normalizeQuestion(entry.question))) continue;
+    if (topic === undefined || !usable(entry)) continue;
 
     const parts = entry.answer.split(";");
 
@@ -344,6 +347,23 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
       : undefined;
   };
 
+  const consentWithheld = () =>
+    input.questions.some((question) => {
+      const [field] = question.fields;
+
+      if (topicOf(question.label) !== "consent" || field === undefined) return false;
+
+      const answer = fromLibrary(question) ?? fromTopic(question);
+
+      const given = [answer?.value].flat();
+
+      return field.options.some((option) => {
+        const read = canonicalValue("consent", option.label);
+
+        return given.includes(option.value) && (read === "no" || read === "decline");
+      });
+    });
+
   const fromTopic = (question: FormQuestion) => {
     const topic = topicOf(question.label);
     const [field] = question.fields;
@@ -353,6 +373,8 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
     const wanted = topicAnswers.get(topic);
 
     if (wanted === undefined || wanted === null) return undefined;
+
+    if (topic !== "consent" && topic !== "relative" && consentWithheld()) return undefined;
 
     const matches = [...wanted].map((value) =>
       field.options.filter((option) => canonicalValue(topic, option.label) === value),

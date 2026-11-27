@@ -14,6 +14,10 @@ type Values = [string, RegExp][];
 
 const word = (pattern: string) => new RegExp(`(?<![a-z0-9])(?:${pattern})(?![a-z0-9])`);
 
+const thirdParty = word("familiar(?:es)?|parentes?|relatives?|family members?|conjuge|spouse");
+
+const workplace = /(?:trabalh|work|employ|empresa|company|companhia)/;
+
 const topics: [Topic, RegExp][] = [
   [
     "consent",
@@ -21,8 +25,8 @@ const topics: [Topic, RegExp][] = [
   ],
   [
     "relative",
-    word(
-      "parentes?|familiares?|relatives?|family members?|conhece alguem|pessoas que (?:ja )?trabalham",
+    new RegExp(
+      `^(?=.*${workplace.source})(?=.*${word("parentes?|familiares?|relatives?|family members?|conhece alguem|pessoas que (?:ja )?trabalham").source})`,
     ),
   ],
   ["pronoun", word("pronomes?|pronouns?")],
@@ -52,6 +56,10 @@ const answered: Values = [
   ["yes", word("sim|yes|concordo|i agree|i consent|aceito")],
 ];
 
+const unsure = word(
+  "nao sei|nao tenho certeza|nao se aplica|nao sei informar|not sure|unsure|n ?/ ?a|i do not know|i don.t know",
+);
+
 const startsWith = (values: Values) =>
   values.map(
     ([value, pattern]) => [value, new RegExp(`^(?:${pattern.source})`)] satisfies [string, RegExp],
@@ -73,7 +81,7 @@ const values: Record<Topic, Values> = {
     ["pansexual", word("pansexual")],
     ["asexual", word("assexual|asexual")],
     ["lesbian", word("lesbica|lesbian")],
-    ["gay", word("gay|homossexual|homosexual")],
+    ["gay", word("gay")],
     ["straight", word("heterossexual|heterosexual|hetero|straight")],
   ],
   gender: [
@@ -107,7 +115,13 @@ const values: Record<Topic, Values> = {
 export const topicOf = (label: string) => {
   const normalized = normalizeQuestion(label);
 
-  return topics.find(([, pattern]) => pattern.test(normalized))?.[0];
+  const own = normalizeQuestion(label.replace(/\([^)]*\)/g, " "));
+  const found = topics.filter(([, pattern]) => pattern.test(own));
+  const [first] = found;
+
+  if (found.length !== 1 || first === undefined) return undefined;
+
+  return first[0] !== "relative" && thirdParty.test(normalized) ? undefined : first[0];
 };
 
 export const canonicalValue = (topic: Topic, text: string) => {
@@ -118,6 +132,8 @@ export const canonicalValue = (topic: Topic, text: string) => {
   );
 
   if (matched.has("decline")) return "decline";
+
+  if (unsure.test(normalized)) return undefined;
 
   return matched.size === 1 ? [...matched][0] : undefined;
 };

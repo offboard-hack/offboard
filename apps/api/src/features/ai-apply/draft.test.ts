@@ -779,6 +779,187 @@ describe("draftAnswers", () => {
         expect(find(answers, "multi")).toMatchObject({ value: ["2", "4"], status: "suggested" });
       });
 
+      it("does not suggest answers about other people", async () => {
+        const family = select(
+          "family",
+          "Você tem algum familiar com deficiência?",
+          options("Sim", "Não"),
+          true,
+        );
+
+        const pep = select(
+          "pep",
+          "Do you have relatives who are public officials (PEP)?",
+          options("Yes", "No"),
+        );
+
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([family, pep], {
+            library: [
+              { question: "Você é PcD?", answer: "Não", sensitive: true },
+              ...saved,
+              { question: "Você tem parentes na empresa?", answer: "Não", sensitive: false },
+            ],
+          }),
+        );
+
+        expect(answers[0]).toMatchObject({ value: null, status: "sensitive" });
+        expect(answers[1]).toMatchObject({ value: null, status: "blank" });
+      });
+
+      it("still suggests the relatives answer for workplace wording", async () => {
+        const worker = select(
+          "worker",
+          "Você tem parentes que trabalham na empresa?",
+          options("Sim", "Não"),
+        );
+
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([worker], {
+            library: [
+              { question: "Você tem parentes na empresa?", answer: "Não", sensitive: false },
+            ],
+          }),
+        );
+
+        expect(answers[0]).toMatchObject({ value: "2", status: "suggested" });
+      });
+
+      it("does not read an unsure answer as no", async () => {
+        const trans = select(
+          "trans",
+          "Você se identifica como pessoa trans?",
+          options("Sim", "Não"),
+          true,
+        );
+
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([trans], {
+            library: [{ question: "Pessoa trans", answer: "Não sei", sensitive: true }],
+          }),
+        );
+
+        expect(answers[0]).toMatchObject({ value: null, status: "sensitive" });
+      });
+
+      it("does not read homossexual as gay", async () => {
+        const orientation = select(
+          "orientation",
+          "Qual a sua orientação sexual?",
+          options("Gay", "Heterossexual"),
+          true,
+        );
+
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([orientation], {
+            library: [
+              {
+                question: "What is your sexual orientation?",
+                answer: "Homossexual",
+                sensitive: true,
+              },
+            ],
+          }),
+        );
+
+        expect(answers[0]).toMatchObject({ value: null, status: "sensitive" });
+      });
+
+      describe("diversity consent", () => {
+        const consent = (id: string) =>
+          select(
+            id,
+            "Consentimento - Diversidade e Inclusão (D&I)",
+            options(
+              "Sim. Eu concordo com a coleta",
+              "Não. Eu não concordo com a coleta",
+              "Prefiro não responder",
+            ),
+            true,
+          );
+
+        const consentSaved = (answer: string) => ({
+          question: "Consentimento - Diversidade e Inclusão (D&I)",
+          answer,
+          sensitive: true,
+        });
+
+        it("suggests demographic answers when consent is given", async () => {
+          const answers = await draftAnswers(
+            fake([]).generate,
+            input([consent("consent"), race], {
+              library: [...saved, consentSaved("Sim. Eu concordo com a coleta")],
+            }),
+          );
+
+          expect(answers[0]).toMatchObject({ value: "1", status: "filled" });
+          expect(answers[1]).toMatchObject({ value: "2", status: "suggested" });
+        });
+
+        it.each(["Não. Eu não concordo com a coleta", "Prefiro não responder"])(
+          "does not suggest them when the answer is %s",
+          async (answer) => {
+            const answers = await draftAnswers(
+              fake([]).generate,
+              input([consent("consent"), race, relatives], {
+                library: [...saved, consentSaved(answer)],
+              }),
+            );
+
+            expect(answers[1]).toMatchObject({ value: null, status: "sensitive" });
+            expect(answers[2]).toMatchObject({ value: "2", status: "suggested" });
+          },
+        );
+
+        it("suggests demographic answers when the form's consent has no saved answer", async () => {
+          const answers = await draftAnswers(
+            fake([]).generate,
+            input([consent("consent"), race], { library: saved }),
+          );
+
+          expect(answers[0]).toMatchObject({ value: null, status: "sensitive" });
+          expect(answers[1]).toMatchObject({ value: "2", status: "suggested" });
+        });
+
+        it("reads a suggested consent answer from another form", async () => {
+          const other = select(
+            "consent",
+            "Consentimento D&I - diversidade",
+            options("Yes, I consent", "No, I do not consent"),
+            true,
+          );
+
+          const answers = await draftAnswers(
+            fake([]).generate,
+            input([other, race], {
+              library: [...saved, consentSaved("Não concordo")],
+            }),
+          );
+
+          expect(answers[1]).toMatchObject({ value: null, status: "sensitive" });
+        });
+      });
+
+      it("skips a saved entry with a blank answer or hidden digits", async () => {
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([race], {
+            library: [
+              { question: "Raça/cor", answer: "Branca", sensitive: true },
+              { question: "Raça/cor", answer: "Parda 52998224725", sensitive: true },
+              { question: "Raça/cor", answer: " ", sensitive: true },
+            ],
+            fields: fieldsOf({ cpf: { value: "52998224725", share: false } }),
+          }),
+        );
+
+        expect(answers[0]).toMatchObject({ value: "2", status: "suggested" });
+      });
+
       it("ignores a saved answer the profile withholds", async () => {
         const { generate } = fake([]);
 

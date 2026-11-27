@@ -8,6 +8,7 @@ describe("finds the topic of a question", () => {
     ["Do you have any relatives currently working at Bees Brasil?", "relative"],
     ["Contato com pessoas que já trabalham na empresa", "relative"],
     ["Você tem parentes na empresa?", "relative"],
+    ["Você tem parentes que trabalham na empresa?", "relative"],
     ["DIVERSITY: Which pronoun is right for you? (Pronouns relate to gender identity)", "pronoun"],
     ["What is your sexual orientation?", "orientation"],
     ["Qual a sua orientação sexual?", "orientation"],
@@ -33,6 +34,14 @@ describe("finds the topic of a question", () => {
     "Você é cisgênero?",
     "Consentimento LGPD para tratamento dos dados pessoais",
     "I consent to a background check",
+    "Você tem algum familiar com deficiência?",
+    "Seus familiares têm alguma deficiência (PcD)?",
+    "Does a family member of yours have a disability?",
+    "Seu cônjuge se identifica como pessoa trans?",
+    "Do you have relatives who are public officials (PEP)?",
+    "Você tem algum parente que seja pessoa politicamente exposta?",
+    "Qual o seu gênero e raça?",
+    "Qual a sua raça, deficiência ou orientação sexual?",
   ])("leaves %s without a topic", (label) => {
     expect(topicOf(label)).toBeUndefined();
   });
@@ -80,6 +89,7 @@ describe("reads an option as a canonical value", () => {
     ["trans", "I don't wish to answer", "decline"],
     ["relative", "I do not want to disclose", "decline"],
     ["relative", "I don't have relatives here", "no"],
+    ["orientation", "Prefiro não dizer", "decline"],
   ] as const)("%s: %s → %s", (topic, label, value) => {
     expect(canonicalValue(topic, label)).toBe(value);
   });
@@ -93,6 +103,13 @@ describe("reads an option as a canonical value", () => {
     ["orientation", "Gay or Lesbian"],
     ["race", "Negra (preta ou parda)"],
     ["gender", "Mulher cisgênero"],
+    ["orientation", "Homossexual"],
+    ["orientation", "Homosexual"],
+    ["trans", "Não sei"],
+    ["trans", "Não tenho certeza"],
+    ["disability", "Não se aplica"],
+    ["relative", "Not sure"],
+    ["race", "N/A"],
   ] as const)("does not read %s: %s", (topic, label) => {
     expect(canonicalValue(topic, label)).toBeUndefined();
   });
