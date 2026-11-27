@@ -29,6 +29,12 @@ const topics: [Topic, RegExp][] = [
 
 const kin = word("familiar(?:es)?|parentes?|relatives?|family members?|conjuge|spouse");
 
+const thirdParty = word(
+  "familia|family|familiar(?:es)?|parentes?|relatives?|family members?|filh[oa]s?|child(?:ren)?|dependentes?|dependents?|esposa|marido|companheir[oa]|partner|spouse|conjuge|(?:seus|meus|teus|os|your|my) pais|parents?|mae|pai|irma[os]?|siblings?|netos?|neta|avos?|tios?|tias?|membros? do seu lar|household|cuida(?:r)? de alguem|care for|responda pelo",
+);
+
+const relativeVeto = word("concorrentes?|competitors?|fornecedor\\w*|suppliers?|orgaos? publicos?");
+
 const workplace = word(
   "trabalh\\w*|work\\w*|employ\\w*|empresa|company|companhia|colaborador\\w*|funcionari\\w*",
 );
@@ -40,7 +46,7 @@ const publicOffice = word(
 );
 
 const uncertain = word(
-  "nao sei|nao tenho certeza|nao se aplica|n/a|not sure|unsure|(?:i )?(?:do not|don.t) know|not applicable|talvez|maybe",
+  "nao sei|nao tenho certeza|nao se aplica|nao aplicavel|nao tenho como (?:saber|informar)|nao tenho conhecimento|nao lembro|nao que eu saiba|nao sou obrigad[oa] a responder|nao possuo essa informacao|(?:i )?(?:do not|don.t) (?:remember|have this information)|n/a|not sure|unsure|(?:i )?(?:do not|don.t) know|not applicable|talvez|maybe",
 );
 
 const decline: Values = [
@@ -119,15 +125,19 @@ export const topicOf = (label: string) => {
 
   if (publicOffice.test(normalized)) return undefined;
 
-  const found = topics.find(([, pattern]) => pattern.test(normalized))?.[0];
+  const own = normalizeQuestion(label.replace(/\?\s*\([^)]*\)[\s\p{P}]*$/u, "?"));
+  const found = topics.flatMap(([name, pattern]) => (pattern.test(own) ? [name] : []));
 
-  if (kin.test(normalized)) {
-    return found === undefined && workplace.test(normalized) ? "relative" : undefined;
-  }
+  if (found.includes("consent")) return "consent";
 
-  if (acquaintance.test(normalized)) return found === undefined ? "relative" : undefined;
+  const topic = found.includes("pronoun") ? "pronoun" : found.length > 1 ? undefined : found[0];
+  const open = found.length === 0 && !relativeVeto.test(normalized);
 
-  return found;
+  if (kin.test(normalized)) return open && workplace.test(normalized) ? "relative" : undefined;
+
+  if (acquaintance.test(normalized)) return open ? "relative" : undefined;
+
+  return thirdParty.test(normalized) ? undefined : topic;
 };
 
 export const canonicalValue = (topic: Topic, text: string) => {

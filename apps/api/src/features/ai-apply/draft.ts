@@ -548,8 +548,16 @@ export async function draftAnswers(generate: GenerateStructured, input: DraftInp
   return answers.map((answer, index) => {
     const question = input.questions[index];
 
-    return answer.status === "suggested" && topicOf(question.label) !== "consent"
-      ? draft(question, question.sensitive ? "sensitive" : "blank")
-      : answer;
+    const topic = topicOf(question.label);
+
+    const withheld =
+      answer.status === "suggested"
+        ? topic !== "consent"
+        : answer.status === "filled" &&
+          topic !== undefined &&
+          topic !== "consent" &&
+          topic !== "relative";
+
+    return withheld ? draft(question, question.sensitive ? "sensitive" : "blank") : answer;
   });
 }
