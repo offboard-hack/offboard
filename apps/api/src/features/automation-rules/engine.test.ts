@@ -127,11 +127,11 @@ describe.skipIf(!url)("automation rules engine", () => {
     offboardings: repos.offboardings,
     equipment: {
       updateEquipmentStatus: repos.equipment.updateEquipmentStatus,
-      areAllCaseEquipmentReceived: async (caseId) => {
+      areAllCaseEquipmentReceived: async (orgId, caseId) => {
         const rows = await db
           .select({ status: equipment.status })
           .from(equipment)
-          .where(eq(equipment.caseId, caseId));
+          .where(and(eq(equipment.orgId, orgId), eq(equipment.caseId, caseId)));
 
         return rows.length > 0 && rows.every((row) => row.status === "received");
       },

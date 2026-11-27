@@ -55,7 +55,7 @@ export type EngineRepos = {
       id: string,
       status: (typeof equipment.$inferSelect)["status"],
     ) => Promise<{ id: string } | null>;
-    areAllCaseEquipmentReceived: (caseId: string) => Promise<boolean>;
+    areAllCaseEquipmentReceived: (orgId: string, caseId: string) => Promise<boolean>;
   };
   runCorreiosCheck?: (orgId: string) => Promise<void>;
   slack: {
@@ -140,7 +140,7 @@ export async function matchesConditions(
       path === "case.allEquipmentReceived"
         ? String(
             context.case !== undefined &&
-              (await repos.equipment.areAllCaseEquipmentReceived(context.case.id)),
+              (await repos.equipment.areAllCaseEquipmentReceived(context.orgId, context.case.id)),
           )
         : values.get(path);
 
@@ -250,12 +250,15 @@ async function sendEmail(action: RuleAction, context: RuleContext, repos: Engine
 
   if (!apiKey) return fail("RESEND_API_KEY not configured");
 
-  const { error } = await new Resend(apiKey).emails.send({
-    from: "Offboard <onboarding@resend.dev>",
-    to,
-    subject: renderTemplate(text(action.subject) ?? "Offboard", context),
-    html: renderTemplate(text(action.body) ?? "", context),
-  });
+  const { error } = await new Resend(apiKey).emails.send(
+    {
+      from: "Offboard <onboarding@resend.dev>",
+      to,
+      subject: renderTemplate(text(action.subject) ?? "Offboard", context),
+      html: renderTemplate(text(action.body) ?? "", context),
+    },
+    { signal: AbortSignal.timeout(10_000) },
+  );
 
   return error ? fail(error.message) : succeed();
 }
