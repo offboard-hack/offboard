@@ -32,6 +32,10 @@ const webhookSchema = z.object({
 export const stepFormSchema = z.object({
   title: z.string().trim().min(1, "Informe o nome da etapa.").max(120, "Use até 120 caracteres."),
   deadlineOffset: z.number().int().min(-90).max(90).nullable(),
+  deadlineTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Informe um horário válido.")
+    .nullable(),
   rules: z.array(stepRuleSchema),
   email: emailSchema.nullable(),
   slack: slackSchema.nullable(),
@@ -44,6 +48,7 @@ export function sameStepSettings(previous: StepSettings, next: StepSettings) {
   return (
     previous.title === next.title &&
     previous.deadlineOffset === next.deadlineOffset &&
+    previous.deadlineTime === next.deadlineTime &&
     previous.rules.length === next.rules.length &&
     previous.rules.every((rule, index) => {
       const other = next.rules[index];

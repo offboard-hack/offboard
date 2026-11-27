@@ -24,7 +24,7 @@ function checklistTasks(
           return operator === "equals" ? matches : !matches;
         }) ?? true,
     )
-    .map(({ id, title, team, phase, deadlineOffset }, position) => {
+    .map(({ id, title, team, phase, deadlineOffset, deadlineTime }, position) => {
       let dueDate: string | null = null;
 
       if (deadlineOffset != null) {
@@ -33,7 +33,19 @@ function checklistTasks(
         dueDate = date.toISOString().slice(0, 10);
       }
 
-      return { orgId, caseId, title, team, phase, position, dueDate, checklistStepId: id };
+      const dueTime = dueDate && deadlineTime ? deadlineTime : null;
+
+      return {
+        orgId,
+        caseId,
+        title,
+        team,
+        phase,
+        position,
+        dueDate,
+        dueTime,
+        checklistStepId: id,
+      };
     });
 }
 

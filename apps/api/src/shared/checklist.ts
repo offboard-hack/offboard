@@ -28,6 +28,11 @@ const checklistStepSchema = z.object({
   team: z.enum(checklistTeams),
   phase: z.enum(checklistPhases),
   deadlineOffset: z.number().int().min(-90).max(90).nullable().optional(),
+  deadlineTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+    .nullable()
+    .optional(),
   rules: z.array(stepRuleSchema).optional(),
 });
 

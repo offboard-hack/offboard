@@ -197,6 +197,7 @@ export function EmployeeChecklist({
               {item.dueDate ? (
                 <time className="block text-sm text-muted-foreground" dateTime={item.dueDate}>
                   Prazo até {employeeDate(item.dueDate, dayFormat)}
+                  {item.dueTime ? ` às ${item.dueTime}` : ""}
                 </time>
               ) : null}
             </span>

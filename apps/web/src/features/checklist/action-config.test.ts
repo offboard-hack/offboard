@@ -136,6 +136,7 @@ describe("mergeStepSettings", () => {
     const settings = {
       title: "Nome atualizado",
       deadlineOffset: null,
+      deadlineTime: null,
       rules: [],
       email: null,
       slack: null,

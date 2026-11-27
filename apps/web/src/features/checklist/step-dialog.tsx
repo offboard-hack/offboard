@@ -129,6 +129,7 @@ export function StepDialog({
     defaultValues: {
       title: step?.title ?? "",
       deadlineOffset: step?.deadlineOffset ?? null,
+      deadlineTime: step?.deadlineTime ?? null,
       rules: step?.rules ?? [],
       email: step?.email ?? null,
       slack: step?.slack ?? null,
@@ -228,6 +229,38 @@ export function StepDialog({
                   </div>
                 </div>
               )}
+            </form.Field>
+            <form.Field name="deadlineTime">
+              {(field) => {
+                const error = field.state.meta.errors[0]?.message;
+
+                return (
+                  <div className="grid content-start gap-2">
+                    <Label htmlFor={`${id}-time`}>Horário do prazo (Brasília)</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id={`${id}-time`}
+                        type="time"
+                        value={field.state.value ?? ""}
+                        onChange={(event) => {
+                          const raw = event.currentTarget.value;
+                          field.handleChange(raw === "" ? null : raw);
+                        }}
+                        aria-invalid={Boolean(error)}
+                        className="h-11 max-w-40"
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {field.state.value == null ? "Sem horário definido" : "Aparece na agenda"}
+                      </span>
+                    </div>
+                    {error && (
+                      <p role="alert" className="text-destructive">
+                        {error}
+                      </p>
+                    )}
+                  </div>
+                );
+              }}
             </form.Field>
             <section aria-labelledby={`${id}-rules`} className="grid gap-3">
               <form.Field name="rules">

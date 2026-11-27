@@ -67,7 +67,7 @@ function taskItems(checklist: EmployeeJourney["checklist"]) {
             id: `task-${task.id}`,
             kind: "task" as const,
             day: task.dueDate,
-            time: "",
+            time: task.dueTime ?? "",
             title: task.title,
             detail: task.description ?? "",
             done: task.status === "done",

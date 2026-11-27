@@ -26,6 +26,7 @@ const placementSchema = z.object({
 const storedStepSchema = placementSchema.extend({
   ...stepFormSchema.shape,
   deadlineOffset: stepFormSchema.shape.deadlineOffset.optional(),
+  deadlineTime: stepFormSchema.shape.deadlineTime.optional(),
   rules: stepFormSchema.shape.rules.optional(),
   email: stepFormSchema.shape.email.optional(),
   slack: stepFormSchema.shape.slack.optional(),
