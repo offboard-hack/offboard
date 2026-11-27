@@ -5,7 +5,15 @@ export type CareerPlan = {
     status: "pending" | "active" | "past_due" | "canceled";
     currentPeriodEnd: string | null;
   } | null;
-  aiApply: { allowedBy: "company" | "individual" | "benefit" | null };
+  benefit: {
+    planName: string;
+    aiApplyDailyLimit: number;
+    aiApplyPriority: boolean;
+    detailedScore: boolean;
+    validUntil: string;
+    source: "default" | "rule" | "manual";
+  } | null;
+  aiApply: { allowedBy: "company" | "individual" | "benefit" | null; dailyLimit: number };
   upgrade: { offered: boolean; priceCents: number; dailyLimit: number };
 };
 
@@ -74,8 +82,30 @@ function proLabel(individual: CareerPlan["individual"], active: boolean) {
     : "Carreira Pro ativo";
 }
 
+function benefitLine(benefit: CareerPlan["benefit"], proActive: boolean) {
+  if (!benefit) return null;
+
+  return proActive
+    ? `${benefit.planName} · Patrocinado + upgrade pessoal`
+    : `${benefit.planName} · Patrocinado pela empresa até ${planDate(benefit.validUntil)}`;
+}
+
+function benefitExpiryNote(days: number) {
+  return `Seu benefício expira em ${days} ${days === 1 ? "dia" : "dias"}. Faça upgrade para manter o acesso.`;
+}
+
+function aiApplyLabel(dailyLimit: number, priority: boolean) {
+  if (dailyLimit === 0) return "Sem candidatura com IA";
+
+  return `${dailyLimit} candidaturas/dia com IA${priority ? " · prioridade" : ""}`;
+}
+
 export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
-  const { company, individual, aiApply, upgrade } = plan;
+  const { company, individual, aiApply, upgrade, benefit } = plan;
+
+  const activeBenefit = benefit !== null && benefit.validUntil >= today ? benefit : null;
+  const benefitDays = activeBenefit ? daysUntil(activeBenefit.validUntil, today) : null;
+  const benefitExpiring = benefitDays !== null && benefitDays <= sponsorshipWarningDays;
 
   const sponsorshipEnding =
     aiApply.allowedBy === "company" &&
@@ -90,7 +120,7 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
     !paid &&
     !pastDue &&
     !checkoutPending &&
-    (aiApply.allowedBy === null || sponsorshipEnding);
+    (aiApply.allowedBy === null || sponsorshipEnding || benefitExpiring);
 
   return {
     companyPlan: company.name ?? "Sua empresa não tem plano",
@@ -104,5 +134,10 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
     proLine: proLabel(individual, proActive),
     upgrade: upgradeState(wantsUpgrade, upgrade.offered),
     upgradeLabel: `Fazer upgrade · ${planPrice(upgrade.priceCents)}`,
+    benefitLine: benefitLine(activeBenefit, proActive),
+    benefitExpiring,
+    benefitExpiryWarning:
+      benefitDays !== null && benefitExpiring ? benefitExpiryNote(benefitDays) : null,
+    aiApplyLine: aiApplyLabel(aiApply.dailyLimit, activeBenefit?.aiApplyPriority === true),
   };
 }
