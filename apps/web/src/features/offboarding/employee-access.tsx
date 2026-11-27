@@ -123,6 +123,10 @@ const settingsSchema = z
       .string()
       .trim()
       .pipe(z.email("Informe um e-mail válido.").or(z.literal(""))),
+    personalEmail: z
+      .string()
+      .trim()
+      .pipe(z.email("Informe um e-mail válido.").or(z.literal(""))),
     careerSponsoredUntil: optionalDate,
     company: shortText,
     officeAddress: z.string().trim().max(350),
@@ -178,7 +182,8 @@ const settingsSchema = z
   });
 
 const fields = [
-  { key: "email", label: "E-mail para acesso", type: "email" },
+  { key: "email", label: "E-mail corporativo (acesso)", type: "email" },
+  { key: "personalEmail", label: "E-mail pessoal", type: "email" },
   { key: "careerSponsoredUntil", label: "Carreira patrocinada até", type: "date" },
   { key: "company", label: "Empresa", type: "text" },
   { key: "lastDay", label: "Último dia de trabalho", type: "date" },
@@ -316,6 +321,7 @@ function AccessForm({
   const form = useForm({
     defaultValues: {
       email: baseline.email ?? "",
+      personalEmail: baseline.personalEmail ?? "",
       careerSponsoredUntil: baseline.careerSponsoredUntil,
       company: plan.company ?? "",
       lastDay: plan.lastDay ?? "",
@@ -386,6 +392,7 @@ function AccessForm({
 
       const next = employeeAccessSchema.parse({
         email: parsed.email || null,
+        personalEmail: parsed.personalEmail || null,
         plan: nextPlan,
         revision: baseline.revision,
         careerSponsoredUntil: sponsorshipToSave(parsed.careerSponsoredUntil, baseline),

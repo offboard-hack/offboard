@@ -21,6 +21,7 @@ const equipmentRow = t.Object({
   returnMethod,
   scheduledDate: t.Nullable(t.String()),
   status: equipmentStatus,
+  holderEmail: t.Nullable(t.String()),
 });
 
 const manualEquipment = t.Object({
@@ -41,9 +42,14 @@ const equipmentErrors = {
   missing: [404, "Equipment not found"],
   plan: [409, "Equipment comes from the employee plan"],
   "duplicate-tag": [409, "Asset tag already in use"],
+  "unknown-email": [404, "No offboarding case uses this e-mail"],
+  "ambiguous-email": [409, "More than one case uses this e-mail"],
+  assigned: [409, "Equipment already assigned"],
 } as const satisfies Record<EquipmentFailure, readonly [404 | 409, string]>;
 
-const equipmentListRow = t.Composite([equipmentRow, t.Object({ person: t.String() })]);
+const equipmentListRow = t.Composite([equipmentRow, t.Object({ person: t.Nullable(t.String()) })]);
+
+const holderEmail = t.String({ format: "email", maxLength: 255 });
 
 export function equipmentRoutes(repos: EquipmentRepository, access: PortalAccessPlugin) {
   return new Elysia()
@@ -70,8 +76,8 @@ export function equipmentRoutes(repos: EquipmentRepository, access: PortalAccess
     )
     .post(
       "/equipment",
-      async ({ body: { caseId, ...data }, principal, status }) => {
-        const created = await repos.createEquipment(principal.orgId, caseId, data);
+      async ({ body, principal, status }) => {
+        const created = await repos.createEquipment(principal.orgId, body);
 
         if ("failure" in created) {
           const [code, error] = equipmentErrors[created.failure];
@@ -83,8 +89,34 @@ export function equipmentRoutes(repos: EquipmentRepository, access: PortalAccess
       },
       {
         permit: ["update", "Offboarding"],
-        body: t.Composite([manualEquipment, t.Object({ caseId: t.String({ format: "uuid" }) })]),
+        body: t.Composite([
+          manualEquipment,
+          t.Object({
+            caseId: t.Optional(t.String({ format: "uuid" })),
+            email: t.Optional(holderEmail),
+          }),
+        ]),
         response: { 201: equipmentRow, 404: errorResponse, 409: errorResponse },
+      },
+    )
+    .post(
+      "/equipment/:id/assign",
+      async ({ params, body, principal, status }) => {
+        const assigned = await repos.assignEquipment(principal.orgId, params.id, body.email);
+
+        if ("failure" in assigned) {
+          const [code, error] = equipmentErrors[assigned.failure];
+
+          return status(code, { error });
+        }
+
+        return assigned.row;
+      },
+      {
+        permit: ["update", "Offboarding"],
+        params: t.Object({ id: t.String({ format: "uuid" }) }),
+        body: t.Object({ email: holderEmail }),
+        response: { 200: equipmentRow, 404: errorResponse, 409: errorResponse },
       },
     )
     .post(
