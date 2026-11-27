@@ -4,6 +4,7 @@ import { seedCatalog } from "@offboard/db/seed-database";
 import { latestCode, outboxPath, readOutbox } from "../shared/dev-outbox.js";
 import { assertLocalTargets, parseArgs } from "./args.js";
 import { createHttp } from "./http.js";
+import { startReceiver } from "./receiver.js";
 import { runScenario } from "./run.js";
 
 const args = parseArgs(process.argv.slice(2));
@@ -33,6 +34,7 @@ try {
       return code;
     },
     seedCatalog: () => seedCatalog(db),
+    startReceiver,
     newId: randomUUID,
     today: () => new Date().toISOString().slice(0, 10),
     log: (line) => console.log(line),
