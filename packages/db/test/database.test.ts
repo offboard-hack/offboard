@@ -1405,15 +1405,7 @@ it.skipIf(!url)(
       const seeded = await seedAutomationRules(db, defaultOrgId);
 
       expect(seeded).toHaveLength(defaultAutomationRules.length);
-      expect(seeded.map((rule) => rule.trigger).sort()).toEqual([
-        "correios.delivered",
-        "correios.delivered",
-        "equipment.status_changed",
-        "schedule.cron",
-      ]);
-      expect(seeded.find((rule) => rule.trigger === "schedule.cron")?.cronSchedule).toBe(
-        "0 */4 * * *",
-      );
+      expect(seeded.map((rule) => rule.trigger)).toEqual(["equipment.status_changed"]);
 
       const row = { orgId: defaultOrgId, name: "x", trigger: "task.status_changed" as const };
 

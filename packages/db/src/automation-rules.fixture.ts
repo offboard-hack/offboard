@@ -5,18 +5,6 @@ type RuleRow = typeof automationRules.$inferInsert;
 
 export const defaultAutomationRules: readonly Omit<RuleRow, "orgId">[] = [
   {
-    name: "Correios entregue → equipamento recebido",
-    trigger: "correios.delivered",
-    conditions: {},
-    actions: [{ type: "update_equipment", set: { status: "received" } }],
-  },
-  {
-    name: "Correios entregue → tarefa concluída",
-    trigger: "correios.delivered",
-    conditions: {},
-    actions: [{ type: "update_task", set: { status: "done" } }],
-  },
-  {
     name: "Todo equipamento devolvido → notificar RH",
     trigger: "equipment.status_changed",
     conditions: {
@@ -31,16 +19,9 @@ export const defaultAutomationRules: readonly Omit<RuleRow, "orgId">[] = [
       },
     ],
   },
-  {
-    name: "Verificar rastreios Correios",
-    trigger: "schedule.cron",
-    conditions: {},
-    actions: [{ type: "correios_check" }],
-    cronSchedule: "0 */4 * * *",
-  },
 ];
 
-export const seedAutomationRules = (db: Database, orgId: string) =>
+export const seedAutomationRules = (db: Pick<Database, "insert">, orgId: string) =>
   db
     .insert(automationRules)
     .values(defaultAutomationRules.map((rule) => ({ ...rule, orgId })))
