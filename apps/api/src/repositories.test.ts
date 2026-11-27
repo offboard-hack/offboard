@@ -784,6 +784,17 @@ describe.skipIf(!url)("multi-tenant isolation", () => {
     });
   });
 
+  it("reports whether all of a case's equipment was received within the organization", async () => {
+    expect(await repos.equipment.areAllCaseEquipmentReceived(orgA, caseB)).toBe(false);
+
+    await repos.equipment.updateEquipmentStatus(orgB, equipmentB, "transit");
+    expect(await repos.equipment.areAllCaseEquipmentReceived(orgB, caseB)).toBe(false);
+
+    await repos.equipment.updateEquipmentStatus(orgB, equipmentB, "received");
+    expect(await repos.equipment.areAllCaseEquipmentReceived(orgB, caseB)).toBe(true);
+    expect(await repos.equipment.areAllCaseEquipmentReceived(orgA, caseB)).toBe(false);
+  });
+
   it("scopes exit surveys to the organization", async () => {
     expect((await repos.exitSurveys.listSurveys(orgB)).map(({ caseName }) => caseName)).toEqual([
       "Case B",

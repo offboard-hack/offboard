@@ -275,7 +275,7 @@ it("fails when the checklist has no task or the action never fires", async () =>
     );
 
     const silent = scripted([
-      reply(200, [{ id: "act-1", actionId: "webhook:point" }]),
+      reply(200, [{ id: "act-1", name: "webhook:point" }]),
       reply(200, { id: "act-1" }),
       action,
       reply(200, {
@@ -287,7 +287,7 @@ it("fails when the checklist has no task or the action never fires", async () =>
     await expect(configureActions(silent.ctx, admin, person, receiver, 50)).rejects.toThrow(
       'The webhook action did not fire for "Fechar ponto e banco de horas"',
     );
-    expect(silent.calls[1]).toBe("PUT /action-configs/act-1");
+    expect(silent.calls[1]).toBe("PUT /automation-rules/act-1");
   } finally {
     await receiver.close();
   }

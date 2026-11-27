@@ -267,6 +267,10 @@ describe.skipIf(!url)("api", () => {
     tag?: string;
     returnMethod?: string;
     caseId?: string;
+    trigger?: string;
+    conditions?: Record<string, string>;
+    actions?: object[];
+    cronSchedule?: string | null;
   };
 
   function call(
@@ -9439,10 +9443,11 @@ describe.skipIf(!url)("api", () => {
         )
         .returning({ id: tasks.id, title: tasks.title });
 
-      const action = await repos.actionConfigs.createActionConfig(defaultOrgId, {
-        actionId: "slack:slack-org-token",
-        phase: "d0",
-        config: { channel: "#rh", message: "{{task}}: {{status}}" },
+      const rule = await repos.automationRules.createRule(defaultOrgId, {
+        name: "Slack on done",
+        trigger: "task.status_changed",
+        conditions: { "task.stepId": "slack-org-token", "task.status": "done" },
+        actions: [{ type: "slack", channel: "#rh", message: "{{task}}: {{status}}" }],
       });
 
       try {
@@ -9457,7 +9462,7 @@ describe.skipIf(!url)("api", () => {
           }),
         );
       } finally {
-        await repos.actionConfigs.deleteActionConfig(defaultOrgId, action.id);
+        await repos.automationRules.deleteRule(defaultOrgId, rule.id);
       }
     });
 
@@ -10358,79 +10363,151 @@ describe.skipIf(!url)("api", () => {
     expect(res.status).toBe(422);
   });
 
-  it("lists action configs from seed", async () => {
-    const res = await call("/action-configs");
-    const list = await res.json();
+  const ruleBody = {
+    name: "Close on receive",
+    trigger: "equipment.status_changed",
+    conditions: { "equipment.status": "received" },
+    actions: [{ type: "update_task", set: { status: "done" } }],
+  };
 
-    expect(res.status).toBe(200);
-    expect(list.length).toBeGreaterThan(0);
-    expect(list[0]).toEqual({
+  it("creates, reads, updates and deletes an automation rule", async () => {
+    const created = await call("/automation-rules", "POST", ruleBody);
+    const rule = await created.json();
+
+    expect(created.status).toBe(201);
+    expect(rule).toEqual({
       id: expect.any(String),
-      actionId: expect.any(String),
-      enabled: expect.any(Boolean),
-      config: expect.any(Object),
-      phase: expect.any(String),
-    });
-  });
-
-  it("creates an action config", async () => {
-    const res = await call("/action-configs", "POST", {
-      actionId: "google::transfer_files",
-      phase: "first-week",
-      config: { target: "manager" },
-    });
-
-    expect(res.status).toBe(201);
-    expect(await res.json()).toEqual({
-      id: expect.any(String),
-      actionId: "google::transfer_files",
+      ...ruleBody,
       enabled: true,
-      config: { target: "manager" },
-      phase: "first-week",
+      cronSchedule: null,
+      sourceRef: null,
     });
-  });
 
-  it("rejects a duplicate action_id", async () => {
-    await call("/action-configs", "POST", { actionId: "dup::test", phase: "d0" });
-    const res = await call("/action-configs", "POST", { actionId: "dup::test", phase: "d0" });
+    expect(await (await call("/automation-rules")).json()).toContainEqual(rule);
+    expect(await (await call(`/automation-rules/${rule.id}`)).json()).toEqual(rule);
 
-    expect(res.status).toBe(409);
-  });
-
-  it("updates an action config", async () => {
-    const created = await (
-      await call("/action-configs", "POST", { actionId: "upd::test", phase: "d0" })
-    ).json();
-
-    const res = await call(`/action-configs/${created.id}`, "PUT", {
+    const updated = await call(`/automation-rules/${rule.id}`, "PUT", {
       enabled: false,
-      phase: "pre",
+      cronSchedule: "0 9 * * *",
     });
 
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ id: created.id, enabled: false, phase: "pre" });
+    expect(updated.status).toBe(200);
+    expect(await updated.json()).toMatchObject({
+      id: rule.id,
+      enabled: false,
+      cronSchedule: "0 9 * * *",
+    });
+
+    expect((await call(`/automation-rules/${rule.id}`, "DELETE")).status).toBe(204);
+    expect((await call(`/automation-rules/${rule.id}`)).status).toBe(404);
   });
 
-  it("returns 404 when updating unknown config", async () => {
-    const res = await call(`/action-configs/${missingCaseId}`, "PUT", { enabled: false });
-
-    expect(res.status).toBe(404);
+  it("returns 404 for unknown automation rules", async () => {
+    expect((await call(`/automation-rules/${missingCaseId}`)).status).toBe(404);
+    expect(
+      (
+        await call(`/automation-rules/${missingCaseId}`, "PUT", {
+          enabled: false,
+        })
+      ).status,
+    ).toBe(404);
+    expect((await call(`/automation-rules/${missingCaseId}`, "DELETE")).status).toBe(404);
   });
 
-  it("deletes an action config", async () => {
-    const created = await (
-      await call("/action-configs", "POST", { actionId: "del::test", phase: "d0" })
-    ).json();
+  it("rejects invalid automation rules", async () => {
+    const noName = await call("/automation-rules", "POST", {
+      ...ruleBody,
+      name: "",
+    });
 
-    const res = await call(`/action-configs/${created.id}`, "DELETE");
+    const badTrigger = await call("/automation-rules", "POST", {
+      ...ruleBody,
+      trigger: "nope",
+    });
 
-    expect(res.status).toBe(204);
+    const badAction = await call("/automation-rules", "POST", {
+      ...ruleBody,
+      actions: [{ type: "nope" }],
+    });
+
+    expect(noName.status).toBe(422);
+    expect(badTrigger.status).toBe(422);
+    expect(badAction.status).toBe(422);
   });
 
-  it("returns 404 when deleting unknown config", async () => {
-    const res = await call(`/action-configs/${missingCaseId}`, "DELETE");
+  it("keeps automation rules of other organizations out of reach", async () => {
+    const other = await repos.automationRules.createRule(otherOrgId, {
+      name: "Other org",
+      trigger: "task.status_changed",
+      conditions: {},
+      actions: [],
+    });
 
-    expect(res.status).toBe(404);
+    expect((await call(`/automation-rules/${other.id}`)).status).toBe(404);
+    expect((await call(`/automation-rules/${other.id}`, "PUT", { enabled: false })).status).toBe(
+      404,
+    );
+    expect((await call(`/automation-rules/${other.id}`, "DELETE")).status).toBe(404);
+    expect(await (await call("/automation-rules")).json()).not.toContainEqual(
+      expect.objectContaining({ id: other.id }),
+    );
+
+    await repos.automationRules.deleteRule(otherOrgId, other.id);
+  });
+
+  it("restricts automation rule access by role", async () => {
+    const send = (role: string, method: string, body?: typeof ruleBody) =>
+      app.handle(
+        new Request("http://localhost/api/automation-rules", {
+          method,
+          headers: {
+            "x-test-session": role,
+            origin: webOrigin,
+            "content-type": "application/json",
+          },
+          body: body ? JSON.stringify(body) : undefined,
+        }),
+      );
+
+    expect((await send("visualizador", "GET")).status).toBe(403);
+    expect((await send("visualizador", "POST", ruleBody)).status).toBe(403);
+  });
+
+  it("runs scheduled automation rules only with the cron secret", async () => {
+    const rule = await repos.automationRules.createRule(defaultOrgId, {
+      name: "Nightly",
+      trigger: "schedule.cron",
+      conditions: {},
+      actions: [{ type: "correios_check" }, { type: "email", to: "rh@example.com" }],
+      cronSchedule: "0 9 * * *",
+    });
+
+    const run = (authorization?: string) =>
+      app.handle(
+        new Request("http://localhost/api/automation-rules/run-scheduled", {
+          method: "POST",
+          headers: authorization ? { authorization } : {},
+        }),
+      );
+
+    try {
+      expect((await run()).status).toBe(401);
+      expect((await run("Bearer wrong")).status).toBe(401);
+
+      await call("/integrations/E-mail", "PUT", { status: "disconnected" });
+
+      const ok = await run(`Bearer ${cronSecret}`);
+
+      expect(ok.status).toBe(200);
+      expect(await ok.json()).toContainEqual({
+        ruleId: rule.id,
+        matched: true,
+        errors: ["correios_check: correios_check is not available", "email: E-mail disabled"],
+      });
+    } finally {
+      await call("/integrations/E-mail", "PUT", { status: "connected" });
+      await repos.automationRules.deleteRule(defaultOrgId, rule.id);
+    }
   });
 
   it("lists seeded team members ordered by name", async () => {
@@ -10538,14 +10615,6 @@ describe.skipIf(!url)("api", () => {
     expect(res.status).toBe(404);
   });
 
-  it("rejects invalid action config", async () => {
-    const noAction = await call("/action-configs", "POST", { phase: "d0" });
-    const noPhase = await call("/action-configs", "POST", { actionId: "test::x" });
-
-    expect(noAction.status).toBe(422);
-    expect(noPhase.status).toBe(422);
-  });
-
   it("rethrows non-unique-violation errors from createOffboarding", async () => {
     const failing = createApp(
       webOrigin,
@@ -10570,30 +10639,6 @@ describe.skipIf(!url)("api", () => {
           deadline: "2026-12-01",
           email: "rethrow@example.com",
         }),
-      }),
-    );
-
-    expect(res.status).toBe(500);
-  });
-
-  it("rethrows unexpected create errors", async () => {
-    const failing = createApp(
-      webOrigin,
-      {
-        ...repos,
-        actionConfigs: {
-          ...repos.actionConfigs,
-          createActionConfig: () => Promise.reject(new Error("boom")),
-        },
-      },
-      appOptions,
-    );
-
-    const res = await failing.handle(
-      new Request("http://localhost/api/action-configs", {
-        method: "POST",
-        headers: { "content-type": "application/json", origin: webOrigin },
-        body: JSON.stringify({ actionId: "x::y", phase: "d0" }),
       }),
     );
 
@@ -11035,30 +11080,6 @@ describe.skipIf(!url)("api", () => {
     const body = await res.json();
     expect(body.checked).toBe(1);
     expect(body.delivered).toEqual([]);
-  });
-
-  it("rethrows unexpected create errors", async () => {
-    const failing = createApp(
-      webOrigin,
-      {
-        ...repos,
-        actionConfigs: {
-          ...repos.actionConfigs,
-          createActionConfig: () => Promise.reject(new Error("boom")),
-        },
-      },
-      appOptions,
-    );
-
-    const res = await failing.handle(
-      new Request("http://localhost/api/action-configs", {
-        method: "POST",
-        headers: { "content-type": "application/json", origin: webOrigin },
-        body: JSON.stringify({ actionId: "x::y", phase: "d0" }),
-      }),
-    );
-
-    expect(res.status).toBe(500);
   });
 });
 

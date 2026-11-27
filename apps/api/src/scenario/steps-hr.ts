@@ -159,7 +159,7 @@ export async function connectIntegrations(ctx: Context, admin: Admin) {
   );
 }
 
-const actionRows = z.array(z.object({ id: z.string(), actionId: z.string() }));
+const ruleRows = z.array(z.object({ id: z.string(), name: z.string() }));
 
 export const actionSteps = [
   { stepId: "point", phase: "d0", title: "Fechar ponto e banco de horas" },
@@ -180,35 +180,43 @@ export async function configureActions(
   const cookie = admin.session.cookie;
 
   const existing = parseBody(
-    expectStatus(await ctx.http("GET", "/action-configs", { cookie }), "Listing actions", 200),
-    "Actions",
-    actionRows,
+    expectStatus(await ctx.http("GET", "/automation-rules", { cookie }), "Listing rules", 200),
+    "Rules",
+    ruleRows,
   );
 
   const ids: string[] = [];
 
-  for (const { stepId, phase } of actionSteps) {
-    const actionId = `webhook:${stepId}`;
-    const config = { url: receiver.url, method: "POST" };
-    const found = existing.find((item) => item.actionId === actionId);
+  for (const { stepId } of actionSteps) {
+    const name = `webhook:${stepId}`;
+    const actions = [{ type: "webhook", url: receiver.url, method: "POST" }];
+    const found = existing.find((item) => item.name === name);
 
     const reply = found
-      ? await ctx.http("PUT", `/action-configs/${found.id}`, {
+      ? await ctx.http("PUT", `/automation-rules/${found.id}`, {
           cookie,
-          body: { enabled: true, config },
+          body: { enabled: true, actions },
         })
-      : await ctx.http("POST", "/action-configs", { cookie, body: { actionId, phase, config } });
+      : await ctx.http("POST", "/automation-rules", {
+          cookie,
+          body: {
+            name,
+            trigger: "task.status_changed",
+            conditions: { "task.stepId": stepId },
+            actions,
+          },
+        });
 
     ids.push(
       parseBody(
-        expectStatus(reply, `Configuring ${actionId}`, 200, 201),
-        "Action",
+        expectStatus(reply, `Configuring ${name}`, 200, 201),
+        "Rule",
         z.object({ id: z.string() }),
       ).id,
     );
   }
 
-  ctx.log(`${actionSteps.length} webhook actions point at the local receiver ${receiver.url}`);
+  ctx.log(`${actionSteps.length} webhook rules point at the local receiver ${receiver.url}`);
 
   const detail = parseBody(
     expectStatus(
@@ -240,11 +248,11 @@ export async function configureActions(
 
   for (const id of ids) {
     expectStatus(
-      await ctx.http("PUT", `/action-configs/${id}`, { cookie, body: { enabled: false } }),
-      "Disabling an action",
+      await ctx.http("PUT", `/automation-rules/${id}`, { cookie, body: { enabled: false } }),
+      "Disabling a rule",
       200,
     );
   }
 
-  ctx.log("actions left disabled because the local receiver stops with this run");
+  ctx.log("rules left disabled because the local receiver stops with this run");
 }

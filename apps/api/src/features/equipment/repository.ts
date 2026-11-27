@@ -59,6 +59,15 @@ export function createEquipmentRepository(db: Database) {
     return updated ?? null;
   }
 
+  async function areAllCaseEquipmentReceived(orgId: string, caseId: string) {
+    const rows = await db
+      .select({ status: equipment.status })
+      .from(equipment)
+      .where(and(eq(equipment.orgId, orgId), eq(equipment.caseId, caseId)));
+
+    return rows.length > 0 && rows.every((row) => row.status === "received");
+  }
+
   async function casesWithEmail(orgId: string, email: string) {
     const key = normalizeHolderEmail(email);
 
@@ -231,6 +240,7 @@ export function createEquipmentRepository(db: Database) {
     importEquipment,
     listEquipment,
     updateEquipmentStatus,
+    areAllCaseEquipmentReceived,
     createEquipment,
     assignEquipment,
     updateEquipment,

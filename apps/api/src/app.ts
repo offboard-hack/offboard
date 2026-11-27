@@ -1,7 +1,12 @@
 import { cors } from "@elysia/cors";
 import { Elysia, ElysiaCustomStatusResponse, t } from "elysia";
 import { actionConfigsRoutes } from "./features/action-configs/routes.js";
-import { fireActions } from "./features/action-configs/actions.js";
+import { automationRulesRoutes } from "./features/automation-rules/routes.js";
+import {
+  fireRulesForTrigger,
+  runScheduledRules,
+  type EngineRepos,
+} from "./features/automation-rules/engine.js";
 import { saoPauloDate } from "./shared/sao-paulo-date.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 import { employeeRoutes } from "./features/employee/routes.js";
@@ -149,19 +154,28 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
   const slackApiUrl = options.slackApiUrl ?? defaultSlackApiUrl;
   const readSlackToken = slackTokenReader(repos.integrations, box);
 
-  const dispatchAction: DispatchAction = async (context, stepId) => {
-    const getActionConfigsByPhase = stepId
-      ? (orgId: string) => repos.actionConfigs.getActionConfigsByStep(orgId, stepId)
-      : repos.actionConfigs.getActionConfigsByPhase;
+  const engineRepos: EngineRepos = {
+    automationRules: repos.automationRules,
+    offboardings: repos.offboardings,
+    equipment: repos.equipment,
+    slack: { apiUrl: slackApiUrl, readToken: readSlackToken },
+    emailEnabled: (orgId) => repos.integrations.isConnected(orgId, emailIntegration),
+  };
 
-    await fireActions(
-      { getActionConfigsByPhase },
-      context,
+  const dispatchAction: DispatchAction = async (context, stepId) => {
+    await fireRulesForTrigger(
+      "task.status_changed",
       {
-        apiUrl: slackApiUrl,
-        readToken: readSlackToken,
+        orgId: context.orgId,
+        task: {
+          id: context.taskId,
+          title: context.taskTitle,
+          status: context.status,
+          phase: context.phase,
+          stepId: stepId ?? undefined,
+        },
       },
-      (orgId) => repos.integrations.isConnected(orgId, emailIntegration),
+      engineRepos,
     );
   };
 
@@ -610,6 +624,14 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       ),
     )
     .use(actionConfigsRoutes(repos.actionConfigs, access))
+    .use(
+      automationRulesRoutes(
+        repos.automationRules,
+        access,
+        () => runScheduledRules(engineRepos),
+        options.cronSecret,
+      ),
+    )
     .use(teamRoutes(repos.team, access))
     .use(insightsRoutes(repos.insights, access))
     .use(
