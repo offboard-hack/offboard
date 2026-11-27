@@ -39,6 +39,24 @@ const careerPlanResponse = t.Object({
     }),
     t.Null(),
   ]),
+  copay: t.Object({
+    offer: t.Union([t.Object({ planName: t.String(), priceCents: t.Number() }), t.Null()]),
+    subscription: t.Union([
+      t.Object({
+        status: t.Union([
+          t.Literal("pending"),
+          t.Literal("active"),
+          t.Literal("past_due"),
+          t.Literal("canceled"),
+        ]),
+        planName: t.String(),
+        priceCents: t.Number(),
+        currentPeriodEnd: nullableDate,
+        cancelable: t.Boolean(),
+      }),
+      t.Null(),
+    ]),
+  }),
   aiApply: t.Object({
     allowedBy: t.Union([
       t.Literal("company"),
@@ -85,6 +103,7 @@ export function careerPlanRoutes(
 
         return {
           ...plan,
+          copay: { ...plan.copay, offer: gateway.configured ? plan.copay.offer : null },
           upgrade: { ...plan.upgrade, offered: plan.upgrade.offered && gateway.configured },
         };
       },

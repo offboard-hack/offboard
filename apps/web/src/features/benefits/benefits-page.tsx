@@ -104,7 +104,12 @@ export function BenefitsTab() {
       id: "source",
       accessorFn: ({ source }) => sources[source],
       header: "Fonte",
-      cell: ({ row }) => <Badge variant="secondary">{sources[row.original.source]}</Badge>,
+      cell: ({ row }) => (
+        <div className="flex flex-wrap gap-1">
+          <Badge variant="secondary">{sources[row.original.source]}</Badge>
+          {row.original.copay ? <Badge variant="outline">Coparticipação</Badge> : null}
+        </div>
+      ),
     },
     {
       id: "validUntil",

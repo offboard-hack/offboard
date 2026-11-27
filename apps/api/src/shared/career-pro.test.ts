@@ -29,6 +29,7 @@ describe("careerPlanOf", () => {
       company: { name: "Platinum Premium", includesAiApply: true, sponsoredUntil: "2027-02-28" },
       individual: null,
       benefit: null,
+      copay: { offer: null, subscription: null },
       aiApply: { allowedBy: "company", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
@@ -47,6 +48,7 @@ describe("careerPlanOf", () => {
       company: { name: "Platinum Premium", includesAiApply: true, sponsoredUntil: "2026-11-26" },
       individual: null,
       benefit: null,
+      copay: { offer: null, subscription: null },
       aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: true, priceCents: 7900, dailyLimit: 10 },
     });
@@ -68,6 +70,7 @@ describe("careerPlanOf", () => {
       company: { name: "Gold", includesAiApply: false, sponsoredUntil: "2027-02-28" },
       individual: null,
       benefit: null,
+      copay: { offer: null, subscription: null },
       aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: true, priceCents: 7900, dailyLimit: 10 },
     });
@@ -100,6 +103,7 @@ describe("careerPlanOf", () => {
         cancelable: false,
       },
       benefit: null,
+      copay: { offer: null, subscription: null },
       aiApply: { allowedBy: "individual", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
@@ -107,6 +111,7 @@ describe("careerPlanOf", () => {
     expect(pro(null).aiApply.allowedBy).toBe("individual");
     expect(pro("2026-11-25")).toMatchObject({
       benefit: null,
+      copay: { offer: null, subscription: null },
       aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: true },
     });
@@ -118,6 +123,7 @@ describe("careerPlanOf", () => {
         cancelable: false,
       },
       benefit: null,
+      copay: { offer: null, subscription: null },
       aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: true },
     });
@@ -166,6 +172,7 @@ describe("careerPlanOf", () => {
 
     expect(careerPlanOf(both, now)).toMatchObject({
       benefit: null,
+      copay: { offer: null, subscription: null },
       aiApply: { allowedBy: "company", dailyLimit: 10 },
       upgrade: { offered: false },
     });
@@ -192,6 +199,7 @@ describe("careerPlanOf", () => {
 
     expect(canceled("2026-11-26")).toMatchObject({
       individual: { status: "canceled", currentPeriodEnd: "2026-11-26" },
+      copay: { offer: null, subscription: null },
       aiApply: { allowedBy: "individual", dailyLimit: 10 },
       upgrade: { offered: false },
     });

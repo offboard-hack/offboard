@@ -8,6 +8,8 @@ import { employeeRoutes } from "./features/employee/routes.js";
 import { applicationsRoutes } from "./features/applications/routes.js";
 import { authRoutes } from "./features/auth/routes.js";
 import { createAbacatePayGateway, type AbacatePayGateway } from "./features/billing/abacatepay.js";
+import { sweepCopays } from "./features/benefit-copay/expiry.js";
+import { benefitCopayRoutes } from "./features/benefit-copay/routes.js";
 import { benefitRoutes } from "./features/benefits/routes.js";
 import { backofficeRoutes } from "./features/backoffice/routes.js";
 import { billingRoutes } from "./features/billing/routes.js";
@@ -509,6 +511,9 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
   }
 
   async function beforeDrain() {
+    await sweepCopays(repos.benefitCopay, abacatepay, new Date()).catch(
+      logFailure("benefit co-pay sweep failed"),
+    );
     await repos.aiApply.sweepStale(new Date()).catch(logFailure("AI application sweep failed"));
     await scheduleSources();
     await repos.aiApply
@@ -581,6 +586,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       ),
     )
     .use(careerPlanRoutes(repos.careerPlan, talent, abacatepay, webOrigin))
+    .use(benefitCopayRoutes(repos.benefitCopay, talent, abacatepay, webOrigin))
     .use(jobsRoutes(repos.jobs, talent))
     .use(applicationsRoutes(repos.applications, talent, publicPageUrl))
     .use(
@@ -673,7 +679,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     .use(
       integrationsRoutes(repos.integrations, access, options.slackSigningSecret, box, slackApiUrl),
     )
-    .use(benefitRoutes(repos.benefits, access))
+    .use(benefitRoutes(repos.benefits, access, abacatepay))
     .use(
       billingRoutes(repos.billing, access, abacatepay, webOrigin, options.abacatepayWebhookSecret),
     )

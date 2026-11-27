@@ -14,12 +14,33 @@ export type CareerPlan = {
     validUntil: string;
     source: "default" | "rule" | "manual";
   } | null;
+  copay: {
+    offer: { planName: string; priceCents: number } | null;
+    subscription: {
+      status: "pending" | "active" | "past_due" | "canceled";
+      planName: string;
+      priceCents: number;
+      currentPeriodEnd: string | null;
+      cancelable: boolean;
+    } | null;
+  };
   aiApply: { allowedBy: "company" | "individual" | "benefit" | null; dailyLimit: number };
   upgrade: { offered: boolean; priceCents: number; dailyLimit: number };
 };
 
 export const paymentReceivedNote =
   "Pagamento recebido. O Carreira Pro é ativado assim que o pagamento for confirmado.";
+
+export const copayPaymentNote =
+  "Pagamento recebido. O upgrade é ativado assim que o pagamento for confirmado.";
+
+export const copayPastDueNote =
+  "Pagamento do upgrade pendente. Você mantém o acesso até o fim do período já pago.";
+
+export const copayCancelLabel = "Cancelar upgrade";
+
+export const copayCancelPrompt =
+  "Cancelar o upgrade? Você mantém o acesso até o fim do período já pago.";
 
 export const planPollInterval = 3_000;
 
@@ -72,7 +93,7 @@ export const cancelConfirmLabel = "Sim, cancelar";
 export const cancelKeepLabel = "Manter";
 
 export function shouldPollPlan(plan: CareerPlan | undefined, today: string) {
-  return plan === undefined || !isProActive(plan, today);
+  return plan === undefined || !(isProActive(plan, today) || plan.copay.subscription !== null);
 }
 
 function daysUntil(day: string, today: string) {
@@ -111,6 +132,28 @@ function benefitLine(benefit: CareerPlan["benefit"], proActive: boolean) {
     : `${benefit.planName} · Patrocinado pela empresa até ${planDate(benefit.validUntil)}`;
 }
 
+function copayView(copay: CareerPlan["copay"], paid: boolean) {
+  const { offer, subscription } = copay;
+
+  return {
+    offerLabel:
+      offer && !paid ? `Upgrade para ${offer.planName} · ${planPrice(offer.priceCents)}` : null,
+    activeLine: subscription ? copayLine(subscription) : null,
+    cancelable: subscription?.cancelable === true,
+    note: subscription?.status === "past_due" ? copayPastDueNote : null,
+  };
+}
+
+function copayLine(subscription: NonNullable<CareerPlan["copay"]["subscription"]>) {
+  if (subscription.status !== "canceled") {
+    return `Upgrade ${subscription.planName} ativo · ${planPrice(subscription.priceCents)}`;
+  }
+
+  return subscription.currentPeriodEnd === null
+    ? "Upgrade cancelado"
+    : `Upgrade cancelado · acesso até ${planDate(subscription.currentPeriodEnd)}`;
+}
+
 const proAiApplyDailyLimit = 10;
 
 function benefitExpiryNote(days: number, proActive: boolean) {
@@ -126,7 +169,7 @@ function aiApplyLabel(dailyLimit: number, priority: boolean) {
 }
 
 export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
-  const { company, individual, aiApply, upgrade, benefit } = plan;
+  const { company, individual, aiApply, upgrade, benefit, copay } = plan;
 
   const activeBenefit = benefit !== null && benefit.validUntil >= today ? benefit : null;
   const benefitDays = activeBenefit ? daysUntil(activeBenefit.validUntil, today) : null;
@@ -137,6 +180,7 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
     daysUntil(company.sponsoredUntil, today) <= sponsorshipWarningDays;
 
   const proActive = isProActive(plan, today);
+  const copayApplies = copay.offer !== null || copay.subscription !== null;
   const pastDue = individual?.status === "past_due";
   const checkoutPending = individual?.status === "pending" && !upgrade.offered;
 
@@ -154,19 +198,28 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
       company.name === null
         ? null
         : `Patrocinado pela empresa até ${planDate(company.sponsoredUntil)}`,
-    paymentNote: paid && !proActive,
+    paymentNote:
+      paid && !proActive && copay.subscription === null
+        ? copay.offer
+          ? copayPaymentNote
+          : paymentReceivedNote
+        : null,
     statusNote: statusNote(pastDue, checkoutPending && !paid),
     proLine: proLabel(individual, proActive),
     cancelable: individual?.cancelable === true,
-    upgrade: upgradeState(wantsUpgrade, upgrade.offered),
+    upgrade: upgradeState(wantsUpgrade && !copayApplies, upgrade.offered),
     upgradeLabel: `Fazer upgrade · ${planPrice(upgrade.priceCents)}`,
     benefitLine: benefitLine(activeBenefit, proActive),
     benefitExpiring,
     benefitExpiryWarning:
-      benefitDays !== null && benefitExpiring ? benefitExpiryNote(benefitDays, proActive) : null,
+      benefitDays !== null && benefitExpiring
+        ? benefitExpiryNote(benefitDays, proActive || copayApplies)
+        : null,
+    copay: copayView(copay, paid),
     activeBenefit,
     showComparison:
       activeBenefit !== null &&
+      copay.subscription === null &&
       (!proActive || activeBenefit.aiApplyDailyLimit > proAiApplyDailyLimit),
     aiApplyLine: aiApplyLabel(aiApply.dailyLimit, activeBenefit?.aiApplyPriority === true),
   };

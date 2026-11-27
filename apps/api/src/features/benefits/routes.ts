@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 import { z } from "zod";
 import { benefitRuleSchema } from "../../shared/benefit-rules.js";
 import type { PortalAccessPlugin } from "../../shared/access.js";
+import { logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import { addMonths, saoPauloDate } from "../../shared/sao-paulo-date.js";
 import type { BenefitRepository } from "./repository.js";
@@ -36,11 +37,30 @@ const assignmentRow = t.Object({
   effectivePlanName: t.String(),
   source: t.Union([t.Literal("default"), t.Literal("rule"), t.Literal("manual")]),
   validUntil: t.String(),
+  copay: t.Boolean(),
 });
 
 const idRow = t.Object({ id: t.String() });
 
-export function benefitRoutes(repos: BenefitRepository, access: PortalAccessPlugin) {
+export function benefitRoutes(
+  repos: BenefitRepository,
+  access: PortalAccessPlugin,
+  gateway: { cancelSubscription(id: string): Promise<void> },
+) {
+  async function releaseCopay(orgId: string, profileId: string, planId: string) {
+    try {
+      for (const id of await repos.copaySubscriptionsAtOrBelow(profileId, orgId, planId)) {
+        await gateway.cancelSubscription(id);
+      }
+
+      return true;
+    } catch (cause) {
+      logFailureCode("Benefit co-pay cancellation failed")(cause);
+
+      return false;
+    }
+  }
+
   return new Elysia()
     .use(access)
     .get(
@@ -87,6 +107,10 @@ export function benefitRoutes(repos: BenefitRepository, access: PortalAccessPlug
           return status(404, { error: "Profile not found" });
         }
 
+        if (!(await releaseCopay(principal.orgId, body.profileId, body.planId))) {
+          return status(502, { error: "Could not cancel the collaborator's upgrade" });
+        }
+
         const policy = await repos.getPolicy(principal.orgId);
 
         const validUntil = addMonths(
@@ -114,7 +138,7 @@ export function benefitRoutes(repos: BenefitRepository, access: PortalAccessPlug
           planId: t.String({ format: "uuid" }),
           source: t.Optional(t.Literal("manual")),
         }),
-        response: { 201: idRow, 404: errorResponse, 422: errorResponse },
+        response: { 201: idRow, 404: errorResponse, 422: errorResponse, 502: errorResponse },
       },
     )
     .put(
@@ -129,6 +153,10 @@ export function benefitRoutes(repos: BenefitRepository, access: PortalAccessPlug
 
         if (!existing) return status(404, { error: "Assignment not found" });
 
+        if (!(await releaseCopay(principal.orgId, existing.profileId, body.planId))) {
+          return status(502, { error: "Could not cancel the collaborator's upgrade" });
+        }
+
         return repos.upsertAssignment({
           orgId: principal.orgId,
           profileId: existing.profileId,
@@ -142,7 +170,7 @@ export function benefitRoutes(repos: BenefitRepository, access: PortalAccessPlug
         permit: ["manage", "Billing"],
         params: t.Object({ id: t.String({ format: "uuid" }) }),
         body: t.Object({ planId: t.String({ format: "uuid" }) }),
-        response: { 200: idRow, 404: errorResponse, 422: errorResponse },
+        response: { 200: idRow, 404: errorResponse, 422: errorResponse, 502: errorResponse },
       },
     );
 }

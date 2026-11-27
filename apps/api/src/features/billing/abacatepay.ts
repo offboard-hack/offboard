@@ -1,5 +1,10 @@
 import { AbacatePay } from "@abacatepay/sdk";
-import { PaymentMethod, SubscriptionStatus } from "@abacatepay/types/v2";
+import {
+  PaymentMethod,
+  ProductCycle,
+  ProductStatus,
+  SubscriptionStatus,
+} from "@abacatepay/types/v2";
 
 export type CreateSubscriptionCheckoutParams = {
   externalId: string;
@@ -52,7 +57,36 @@ export function createAbacatePayGateway(
     return { id: result.data.id, url: result.data.url } satisfies SubscriptionCheckout;
   }
 
-  return { configured: Boolean(apiKey), createSubscriptionCheckout, cancelSubscription };
+  async function ensureCopayProduct(fromSlug: string, toSlug: string, priceCents: number) {
+    const api = client();
+    const externalId = `copay-${fromSlug}-${toSlug}`;
+    const listed = await api.products.list({ externalId, status: ProductStatus.Active });
+
+    if (!listed.success) throw new Error(`AbacatePay product lookup failed: ${listed.error}`);
+
+    const [existing] = listed.data;
+
+    if (existing) return { id: existing.id };
+
+    const created = await api.products.create({
+      externalId,
+      name: `Upgrade de benefício ${fromSlug} para ${toSlug}`,
+      price: priceCents,
+      currency: "BRL",
+      cycle: ProductCycle.Monthly,
+    });
+
+    if (!created.success) throw new Error(`AbacatePay product creation failed: ${created.error}`);
+
+    return { id: created.data.id };
+  }
+
+  return {
+    configured: Boolean(apiKey),
+    createSubscriptionCheckout,
+    cancelSubscription,
+    ensureCopayProduct,
+  };
 }
 
 export type AbacatePayGateway = ReturnType<typeof createAbacatePayGateway>;

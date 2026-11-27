@@ -205,6 +205,22 @@ export function accountRoutes(
           await repos.markSubscriptionCanceled(me.id, subscriptionId);
         }
 
+        const copay = await repos.cancelableCopay(me.id);
+
+        if (copay !== null) {
+          if (!gateway.configured) return status(503, { error: "Billing not configured" });
+
+          try {
+            await gateway.cancelSubscription(copay.providerSubscriptionId);
+          } catch (cause) {
+            logFailureCode("Benefit co-pay cancellation failed")(cause);
+
+            return status(502, { error: "Could not cancel the benefit upgrade; try again" });
+          }
+
+          await repos.markCopayCanceled(copay.assignmentId, copay.providerSubscriptionId);
+        }
+
         if (storage) {
           try {
             await storage.removePrefix(`resumes/${me.id}/`);

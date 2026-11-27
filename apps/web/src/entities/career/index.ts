@@ -314,6 +314,43 @@ export function useCancelCareerPro(account: EmployeeAccount) {
   });
 }
 
+export function useCopayCheckout(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    async mutationFn() {
+      const result = await client().benefit.copay.checkout.post(undefined, {
+        headers: employeeAccessHeaders(account),
+      });
+
+      if (result.status === 409) {
+        await queryClient.invalidateQueries({ queryKey: careerPlanQuery(account).queryKey });
+      }
+
+      return settle(result, "Não foi possível abrir o pagamento. Tente de novo.");
+    },
+    onSuccess(checkout) {
+      window.location.assign(checkout.url);
+    },
+  });
+}
+
+export function useCancelCopay(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    async mutationFn() {
+      const result = await client().benefit.copay.cancel.post(undefined, {
+        headers: employeeAccessHeaders(account),
+      });
+
+      await queryClient.invalidateQueries({ queryKey: careerPlanQuery(account).queryKey });
+
+      return settle(result, "Não foi possível cancelar agora. Tente de novo.");
+    },
+  });
+}
+
 export type ResumeContentInput = Parameters<Me["resume"]["post"]>[0]["content"];
 
 export function useReadResume(account: EmployeeAccount) {

@@ -96,6 +96,7 @@ describe.skipIf(!url)("career plan repository", () => {
       company: { name: "Platinum Premium", includesAiApply: true, sponsoredUntil: "2026-12-20" },
       individual: null,
       benefit: null,
+      copay: { offer: null, subscription: null },
       aiApply: { allowedBy: "company", dailyLimit: 10 },
       upgrade: { offered: true, priceCents: 7900, dailyLimit: 10 },
     });
@@ -147,6 +148,7 @@ describe.skipIf(!url)("career plan repository", () => {
         cancelable: false,
       },
       benefit: null,
+      copay: { offer: null, subscription: null },
       aiApply: { allowedBy: "individual", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });

@@ -1,5 +1,6 @@
 import type { Database } from "@offboard/db/client";
 import {
+  benefitCopays,
   billingWebhookEvents,
   invoices,
   plans,
@@ -7,6 +8,7 @@ import {
   talentSubscriptions,
 } from "@offboard/db/schema";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { syncEffectivePlan } from "../../shared/benefit-copay.js";
 import { checkoutRetryMs } from "../../shared/career-pro.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 
@@ -21,6 +23,16 @@ const talentSubscriptionColumns = {
   providerSubscriptionId: talentSubscriptions.providerSubscriptionId,
   currentPeriodEnd: talentSubscriptions.currentPeriodEnd,
   status: talentSubscriptions.status,
+};
+
+type CopayStatus = (typeof benefitCopays.$inferSelect)["status"];
+
+const copayColumns = {
+  assignmentId: benefitCopays.assignmentId,
+  status: benefitCopays.status,
+  checkoutId: benefitCopays.checkoutId,
+  providerSubscriptionId: benefitCopays.providerSubscriptionId,
+  currentPeriodEnd: benefitCopays.currentPeriodEnd,
 };
 
 const invoiceColumns = {
@@ -379,6 +391,57 @@ export function createBillingRepository(db: Database) {
     });
   }
 
+  async function findCopay(assignmentId: string) {
+    const [row] = await db
+      .select(copayColumns)
+      .from(benefitCopays)
+      .where(eq(benefitCopays.assignmentId, assignmentId));
+
+    return row ?? null;
+  }
+
+  async function findCopayByProvider(providerSubscriptionId: string) {
+    const [row] = await db
+      .select(copayColumns)
+      .from(benefitCopays)
+      .where(eq(benefitCopays.providerSubscriptionId, providerSubscriptionId))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async function updateCopay(
+    assignmentId: string,
+    patch: {
+      status?: CopayStatus;
+      providerSubscriptionId?: string;
+      currentPeriodEnd?: string;
+    },
+    eventId: string | null,
+    now: Date,
+  ) {
+    return db.transaction(async (tx) => {
+      if (eventId !== null) {
+        const [fresh] = await tx
+          .insert(billingWebhookEvents)
+          .values({ id: eventId, receivedAt: now })
+          .onConflictDoNothing()
+          .returning({ id: billingWebhookEvents.id });
+
+        if (!fresh) return false;
+      }
+
+      await tx
+        .update(benefitCopays)
+        .set({ ...patch, updatedAt: now })
+        .where(eq(benefitCopays.assignmentId, assignmentId));
+
+      await syncEffectivePlan(tx, assignmentId, saoPauloDate(now));
+
+      return true;
+    });
+  }
+
   return {
     listPlans,
     getSubscription,
@@ -394,6 +457,9 @@ export function createBillingRepository(db: Database) {
     findTalentSubscription,
     findTalentSubscriptionByProvider,
     updateTalentSubscription,
+    findCopay,
+    findCopayByProvider,
+    updateCopay,
   };
 }
 

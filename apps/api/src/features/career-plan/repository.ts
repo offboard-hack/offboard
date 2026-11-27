@@ -1,6 +1,7 @@
 import type { Database } from "@offboard/db/client";
 import {
   benefitAssignments,
+  benefitCopays,
   employeeAccess,
   offboardingCases,
   plans,
@@ -8,7 +9,20 @@ import {
   talentProfiles,
   talentSubscriptions,
 } from "@offboard/db/schema";
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  aliasedTable,
+  and,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
+import { nextTierAbove } from "../../shared/benefit-copay.js";
 import { careerPlanOf, checkoutRetryMs } from "../../shared/career-pro.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 
@@ -45,6 +59,49 @@ export function createCareerPlanRepository(db: Database) {
     return row ?? null;
   }
 
+  async function copayOf(profileId: string, today: string) {
+    const [assignment] = await db
+      .select({ id: benefitAssignments.id, priceCents: plans.perPersonPriceCents })
+      .from(benefitAssignments)
+      .innerJoin(plans, eq(plans.id, benefitAssignments.assignedPlanId))
+      .where(
+        and(eq(benefitAssignments.profileId, profileId), gte(benefitAssignments.validUntil, today)),
+      );
+
+    if (!assignment) return undefined;
+
+    const next = await nextTierAbove(db, assignment.priceCents);
+    const target = aliasedTable(plans, "target_plan");
+
+    const [held] = await db
+      .select({
+        status: benefitCopays.status,
+        currentPeriodEnd: benefitCopays.currentPeriodEnd,
+        providerSubscriptionId: benefitCopays.providerSubscriptionId,
+        planName: target.name,
+        targetPriceCents: target.perPersonPriceCents,
+      })
+      .from(benefitCopays)
+      .innerJoin(target, eq(target.id, benefitCopays.targetPlanId))
+      .where(eq(benefitCopays.assignmentId, assignment.id));
+
+    return {
+      nextTier: next && {
+        planName: next.name,
+        priceCents: next.priceCents - assignment.priceCents,
+      },
+      subscription: held
+        ? {
+            status: held.status,
+            currentPeriodEnd: held.currentPeriodEnd,
+            providerSubscriptionId: held.providerSubscriptionId,
+            planName: held.planName,
+            priceCents: held.targetPriceCents - assignment.priceCents,
+          }
+        : null,
+    };
+  }
+
   async function plan(profileId: string, now: Date) {
     const [row] = await db
       .select({
@@ -79,12 +136,14 @@ export function createCareerPlanRepository(db: Database) {
     if (row === undefined) return undefined;
 
     const { orgId, ...standing } = row;
+    const today = saoPauloDate(now);
 
     return careerPlanOf(
       {
         ...standing,
         company: await companyOf(orgId),
-        benefit: await benefitOf(profileId, saoPauloDate(now)),
+        benefit: await benefitOf(profileId, today),
+        copay: await copayOf(profileId, today),
       },
       now,
     );

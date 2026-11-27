@@ -1,4 +1,5 @@
 import { onTopPlan, type CompanyPlan } from "./ai-apply-access.js";
+import { copayGrants, type CopayStanding } from "./benefit-copay.js";
 import {
   benefitEntitlement,
   companySponsors,
@@ -27,6 +28,18 @@ export type BenefitStanding = {
   source: "default" | "rule" | "manual";
 };
 
+export type CopayOffer = { planName: string; priceCents: number };
+
+export type CopayHeld = CopayStanding & {
+  planName: string;
+  priceCents: number;
+  providerSubscriptionId: string | null;
+};
+
+export type CopayInput = { nextTier: CopayOffer | null; subscription: CopayHeld | null };
+
+const noCopay = { nextTier: null, subscription: null } satisfies CopayInput;
+
 export type CareerStanding = {
   sponsoredUntil: string;
   company: (CompanyPlan & { name: string }) | null;
@@ -34,6 +47,7 @@ export type CareerStanding = {
     | (IndividualPlan & { updatedAt?: Date | null; providerSubscriptionId?: string | null })
     | null;
   benefit?: BenefitStanding | null;
+  copay?: CopayInput;
 };
 
 export type AllowedBy = "company" | "individual" | "benefit" | null;
@@ -63,6 +77,12 @@ export function careerPlanOf(standing: CareerStanding, now: Date) {
   const individualGrant = individualActive(individual, today);
 
   const benefit = standing.benefit ?? null;
+  const copay = standing.copay ?? noCopay;
+
+  const held =
+    copay.subscription !== null && copayGrants(copay.subscription, today)
+      ? copay.subscription
+      : null;
 
   const benefitGrant = benefitEntitlement(benefit, today).kind !== "lapsed";
 
@@ -97,9 +117,22 @@ export function careerPlanOf(standing: CareerStanding, now: Date) {
         (individual.providerSubscriptionId ?? null) !== null,
     },
     benefit,
+    copay: {
+      offer: held === null && !individualGrant ? copay.nextTier : null,
+      subscription: held && {
+        status: held.status,
+        planName: held.planName,
+        priceCents: held.priceCents,
+        currentPeriodEnd: held.currentPeriodEnd,
+        cancelable:
+          (held.status === "active" || held.status === "past_due") &&
+          held.providerSubscriptionId !== null,
+      },
+    },
     aiApply: { allowedBy, dailyLimit },
     upgrade: {
       offered:
+        copay.nextTier === null &&
         !individualGrant &&
         !checkoutInFlight(individual, now) &&
         (!companyGrant || sponsoredUntil <= upgradeWindowEnd(today)),

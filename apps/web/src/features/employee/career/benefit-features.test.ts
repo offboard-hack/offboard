@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  copayPriceCents,
   currentTierFeatures,
   featureComparisonView,
   nextTierFeatures,
@@ -28,7 +27,7 @@ describe("tier catalog", () => {
     expect(tierCatalog).toHaveLength(4);
     expect(tierCatalog[0].name).toBe("Silver");
     expect(tierCatalog[3].name).toBe("Platinum Premium");
-    expect(tierCatalog.map((tier) => tier.priceCents)).toEqual([0, 2900, 5900, 9900]);
+    expect(tierCatalog.map((tier) => tier.aiApplyLimit)).toEqual([0, 3, 10, 25]);
   });
 });
 
@@ -62,35 +61,28 @@ describe("nextTierFeatures", () => {
   });
 });
 
-describe("copayPriceCents", () => {
-  it("is the difference between tier prices", () => {
-    expect(copayPriceCents(2900, 5900)).toBe(3000);
-  });
-});
-
 describe("featureComparisonView", () => {
-  it("returns current, next, and copay label for Gold", () => {
+  it("returns the current and the next tier", () => {
     const view = featureComparisonView(goldBenefit)!;
 
     expect(view.current.name).toBe("Gold");
     expect(view.next!.name).toBe("Platinum");
-    expect(view.copayLabel).toBe("Upgrade para Platinum · R$ 30/mês");
   });
 
-  it("returns null copayLabel for Platinum Premium", () => {
+  it("has no next tier for Platinum Premium", () => {
     const view = featureComparisonView(ppBenefit)!;
 
     expect(view.next).toBeNull();
-    expect(view.copayLabel).toBeNull();
   });
 
   it("returns null for null benefit", () => {
     expect(featureComparisonView(null)).toBeNull();
   });
 
-  it("returns copay for Silver to Gold (R$0 to R$29)", () => {
+  it("compares Silver with Gold", () => {
     const view = featureComparisonView(silverBenefit)!;
 
-    expect(view.copayLabel).toBe("Upgrade para Gold · R$ 29/mês");
+    expect(view.current.name).toBe("Silver");
+    expect(view.next!.name).toBe("Gold");
   });
 });

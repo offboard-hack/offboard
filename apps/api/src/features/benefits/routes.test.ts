@@ -42,7 +42,12 @@ const auth: PortalAuth = {
 describe.skipIf(!url)("benefit routes", () => {
   const db = createClient(url ?? "");
   const repos = createRepositories(db);
-  const app = new Elysia().use(benefitRoutes(repos.benefits, portalAccess(auth, webOrigin)));
+
+  const app = new Elysia().use(
+    benefitRoutes(repos.benefits, portalAccess(auth, webOrigin), {
+      cancelSubscription: async () => undefined,
+    }),
+  );
 
   beforeAll(async () => {
     await migrate(db, {
@@ -236,6 +241,7 @@ describe.skipIf(!url)("benefit routes", () => {
         effectivePlanName: expect.any(String),
         source: "manual",
         validUntil: monthsFromToday(3),
+        copay: false,
       },
     ]);
     expect(list[0].assignedPlanName).toBe(list[0].effectivePlanName);

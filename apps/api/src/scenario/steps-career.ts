@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { addDays, expectStatus, parseBody, type Context } from "./context.js";
-import type { Collaborator } from "./steps.js";
+import { completedEvent } from "./webhook.js";
+import { paymentKeys, sendWebhook, type Admin, type Collaborator } from "./steps.js";
 
 const jobList = z.object({
   items: z.array(z.object({ id: z.string(), title: z.string() })),
@@ -455,4 +456,91 @@ export async function draftAiApply(ctx: Context, collaborator: Collaborator, tit
   }
 
   return "drafted" as const;
+}
+
+const copayPlan = z.object({
+  benefit: z.object({ planName: z.string() }).nullable(),
+  copay: z.object({
+    offer: z.object({ planName: z.string(), priceCents: z.number() }).nullable(),
+    subscription: z.object({ status: z.string() }).nullable(),
+  }),
+});
+
+const copayCheckout = z.object({ url: z.string(), checkoutId: z.string() });
+
+const assignmentIds = z.array(z.object({ id: z.string(), profileName: z.string() }));
+
+async function readCopayPlan(ctx: Context, cookie: string) {
+  return parseBody(
+    expectStatus(await ctx.http("GET", "/me/plan", { cookie }), "Reading the plan", 200),
+    "Plan",
+    copayPlan,
+  );
+}
+
+export async function upgradeBenefitTier(ctx: Context, admin: Admin, collaborator: Collaborator) {
+  const keys = paymentKeys(ctx);
+  const name = collaborator.person.name;
+
+  if ("skipped" in keys) {
+    ctx.log(`benefit upgrade ${keys.skipped}`);
+
+    return "skipped" as const;
+  }
+
+  const cookie = collaborator.session.cookie;
+  const before = await readCopayPlan(ctx, cookie);
+
+  if (before.copay.subscription) {
+    ctx.log(`${name} benefit upgrade already active`);
+
+    return "active" as const;
+  }
+
+  if (!before.copay.offer) {
+    ctx.log(`${name} has no benefit upgrade to buy`);
+
+    return "none" as const;
+  }
+
+  const assignment = parseBody(
+    expectStatus(
+      await ctx.http("GET", "/benefit-assignments", { cookie: admin.session.cookie }),
+      "Listing benefit assignments",
+      200,
+    ),
+    "Benefit assignments",
+    assignmentIds,
+  ).find((item) => item.profileName === name);
+
+  if (!assignment) throw new Error(`${name} has no benefit assignment`);
+
+  const checkout = parseBody(
+    expectStatus(
+      await ctx.http("POST", "/me/benefit/copay/checkout", { cookie }),
+      "Starting the benefit upgrade checkout",
+      200,
+    ),
+    "Checkout",
+    copayCheckout,
+  );
+
+  ctx.log(`AbacatePay sandbox checkout: ${checkout.url}`);
+
+  await sendWebhook(
+    ctx,
+    keys.secret,
+    completedEvent({
+      eventId: ctx.newId(),
+      externalId: `copay:${assignment.id}`,
+      checkoutId: checkout.checkoutId,
+      amountCents: before.copay.offer.priceCents,
+    }),
+  );
+
+  const after = await readCopayPlan(ctx, cookie);
+
+  ctx.log(`${name} benefit is ${after.benefit?.planName ?? "missing"} after the upgrade`);
+
+  return after.benefit?.planName ?? "missing";
 }

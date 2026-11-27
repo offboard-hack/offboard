@@ -84,12 +84,16 @@ const replaceableEvents = new Set([
   "subscription.cancelled",
 ]);
 
-function isStale(name: string | undefined, event: SubscriptionEvent, talent: TalentTarget) {
+function isStale(
+  name: string | undefined,
+  event: SubscriptionEvent,
+  target: { providerSubscriptionId: string | null },
+) {
   return (
     name !== undefined &&
     replaceableEvents.has(name) &&
-    talent.providerSubscriptionId !== null &&
-    talent.providerSubscriptionId !== event.data.subscription.id
+    target.providerSubscriptionId !== null &&
+    target.providerSubscriptionId !== event.data.subscription.id
   );
 }
 
@@ -140,21 +144,24 @@ async function cancelOrphan(
   gateway: SubscriptionCanceler,
   name: string | undefined,
   event: SubscriptionEvent,
+  owner: "talent" | "copay" = "talent",
 ) {
   if (name === undefined || !chargingEvents.has(name)) {
-    console.error("talent webhook ignored", { event: name });
+    console.error(`${owner} webhook ignored`, { event: name });
 
     return;
   }
 
   if (!gateway.configured) {
-    console.error("talent webhook for a deleted account could not be canceled", { event: name });
+    console.error(`${owner} webhook for a deleted account could not be canceled`, {
+      event: name,
+    });
 
     return;
   }
 
   await gateway.cancelSubscription(event.data.subscription.id);
-  console.error("talent subscription of a deleted account canceled", { event: name });
+  console.error(`${owner} subscription of a deleted account canceled`, { event: name });
 }
 
 async function applyTalentEvent(
@@ -178,6 +185,103 @@ async function applyTalentEvent(
   if (!patch) return;
 
   await repos.updateTalentSubscription(talent.profileId, patch, event.id ?? deliveryId, new Date());
+}
+
+const copayPrefix = "copay:";
+
+type CopayTarget = {
+  assignmentId: string;
+  status: "pending" | "active" | "past_due" | "canceled";
+  checkoutId: string | null;
+  providerSubscriptionId: string | null;
+  currentPeriodEnd: string | null;
+};
+
+async function copayOf(repos: BillingRepository, externalId: string) {
+  const parsed = talentProfileId.safeParse(externalId.slice(copayPrefix.length));
+
+  return parsed.success ? repos.findCopay(parsed.data) : undefined;
+}
+
+function copayBinds(name: string | undefined, copay: CopayTarget) {
+  return (
+    name === "subscription.completed" ||
+    name === "subscription.trial_started" ||
+    (name === "subscription.renewed" && copay.providerSubscriptionId === null)
+  );
+}
+
+function copayPatch(name: string | undefined, event: SubscriptionEvent, copay: CopayTarget) {
+  const today = saoPauloDate(new Date());
+
+  if (copayBinds(name, copay)) {
+    return {
+      status: "active",
+      providerSubscriptionId: event.data.subscription.id,
+      currentPeriodEnd: addOneMonth(today),
+    } as const;
+  }
+
+  if (copay.status === "pending") return null;
+
+  if (name === "subscription.renewed") {
+    const end = copay.currentPeriodEnd;
+
+    if (copay.status === "canceled" && end === null) return null;
+
+    const next = addOneMonth(end !== null && end > today ? end : today);
+
+    return copay.status === "canceled"
+      ? ({ currentPeriodEnd: next } as const)
+      : ({ status: "active", currentPeriodEnd: next } as const);
+  }
+
+  if (name === "subscription.payment_failed") {
+    return copay.status === "canceled" ? null : ({ status: "past_due" } as const);
+  }
+
+  if (name === "subscription.cancelled") return { status: "canceled" } as const;
+
+  return null;
+}
+
+async function applyCopayEvent(
+  repos: BillingRepository,
+  gateway: SubscriptionCanceler,
+  name: string | undefined,
+  event: SubscriptionEvent,
+  deliveryId: string | null,
+  copay: CopayTarget | null | undefined,
+) {
+  if (copay === undefined) {
+    console.error("copay webhook ignored", { event: name });
+
+    return;
+  }
+
+  if (copay === null) return cancelOrphan(gateway, name, event, "copay");
+
+  if (copayBinds(name, copay)) {
+    if (copay.status !== "pending" || copay.checkoutId !== event.data.checkout?.id) {
+      if (copay.status === "canceled" && copay.providerSubscriptionId === null) {
+        return cancelOrphan(gateway, name, event, "copay");
+      }
+
+      console.error("copay webhook ignored", { event: name });
+
+      return;
+    }
+  } else if (isStale(name, event, copay)) {
+    console.error("copay webhook ignored", { event: name });
+
+    return;
+  }
+
+  const patch = copayPatch(name, event, copay);
+
+  if (!patch) return;
+
+  await repos.updateCopay(copay.assignmentId, patch, event.id ?? deliveryId, new Date());
 }
 
 type CompanyTarget = {
@@ -242,10 +346,20 @@ export async function applyWebhookEvent(
     return applyTalentEvent(repos, gateway, name, event, deliveryId, talent);
   }
 
+  if (subscriptionId?.startsWith(copayPrefix)) {
+    const copay = await copayOf(repos, subscriptionId);
+
+    return applyCopayEvent(repos, gateway, name, event, deliveryId, copay);
+  }
+
   if (!subscriptionId) {
     const talent = await repos.findTalentSubscriptionByProvider(event.data.subscription.id);
 
     if (talent) return applyTalentEvent(repos, gateway, name, event, deliveryId, talent);
+
+    const copay = await repos.findCopayByProvider(event.data.subscription.id);
+
+    if (copay) return applyCopayEvent(repos, gateway, name, event, deliveryId, copay);
   }
 
   if (!name || !subscriptionId) return;

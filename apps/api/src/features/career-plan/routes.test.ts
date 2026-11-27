@@ -180,6 +180,7 @@ describe.skipIf(!url)("career plan route", () => {
       company: { name: "Platinum Premium", includesAiApply: true, sponsoredUntil: "2099-12-31" },
       individual: null,
       benefit: null,
+      copay: { offer: null, subscription: null },
       aiApply: { allowedBy: "company", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
@@ -204,6 +205,7 @@ describe.skipIf(!url)("career plan route", () => {
       company: { name: "Platinum Premium", includesAiApply: true, sponsoredUntil: yesterday },
       individual: null,
       benefit: null,
+      copay: { offer: null, subscription: null },
       aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: true, priceCents: 7900, dailyLimit: 10 },
     });
@@ -227,6 +229,7 @@ describe.skipIf(!url)("career plan route", () => {
         cancelable: false,
       },
       benefit: null,
+      copay: { offer: null, subscription: null },
       aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
@@ -245,6 +248,7 @@ describe.skipIf(!url)("career plan route", () => {
         cancelable: false,
       },
       benefit: null,
+      copay: { offer: null, subscription: null },
       aiApply: { allowedBy: "individual", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
@@ -427,6 +431,7 @@ describe.skipIf(!url)("career plan route", () => {
       });
       expect(await (await get(profileId)).json()).toMatchObject({
         individual: { status: "canceled", currentPeriodEnd: "2099-01-01" },
+        copay: { offer: null, subscription: null },
         aiApply: { allowedBy: "individual", dailyLimit: 10 },
         upgrade: { offered: false },
       });

@@ -1,7 +1,13 @@
 import { brazilTimezone } from "@offboard/employee";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { careerPlanQuery, useCancelCareerPro, useUpgradeCheckout } from "@/entities/career";
+import {
+  careerPlanQuery,
+  useCancelCareerPro,
+  useCancelCopay,
+  useCopayCheckout,
+  useUpgradeCheckout,
+} from "@/entities/career";
 import type { EmployeeAccount } from "@/entities/employee";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
@@ -13,7 +19,8 @@ import {
   cancelConfirmPrompt,
   cancelKeepLabel,
   cancelProLabel,
-  paymentReceivedNote,
+  copayCancelLabel,
+  copayCancelPrompt,
   planCardView,
   planPollInterval,
   planPollTimeout,
@@ -30,6 +37,8 @@ const dayFormat = new Intl.DateTimeFormat("en-CA", {
 export function PlanSection({ account, paid }: { account: EmployeeAccount; paid: boolean }) {
   const checkout = useUpgradeCheckout(account);
   const cancel = useCancelCareerPro(account);
+  const copayCheckout = useCopayCheckout(account);
+  const copayCancel = useCancelCopay(account);
   const [openedAt] = useState(() => Date.now());
   const [today] = useState(() => dayFormat.format(new Date()));
 
@@ -51,10 +60,19 @@ export function PlanSection({ account, paid }: { account: EmployeeAccount; paid:
       today={today}
       paid={paid}
       upgrading={checkout.isPending || checkout.isSuccess}
-      error={checkout.error?.message ?? cancel.error?.message}
+      copaying={copayCheckout.isPending || copayCheckout.isSuccess}
+      error={
+        checkout.error?.message ??
+        cancel.error?.message ??
+        copayCheckout.error?.message ??
+        copayCancel.error?.message
+      }
       canceling={cancel.isPending}
+      cancelingCopay={copayCancel.isPending}
       onUpgrade={() => checkout.mutate()}
       onCancel={() => cancel.mutate()}
+      onCopay={() => copayCheckout.mutate()}
+      onCancelCopay={() => copayCancel.mutate()}
     />
   );
 }
@@ -87,21 +105,30 @@ export function PlanCard({
   today,
   paid,
   upgrading,
+  copaying,
   error,
   canceling,
+  cancelingCopay,
   onUpgrade,
   onCancel,
+  onCopay,
+  onCancelCopay,
 }: {
   plan: CareerPlan;
   today: string;
   paid: boolean;
   upgrading: boolean;
+  copaying: boolean;
   error?: string;
   canceling: boolean;
+  cancelingCopay: boolean;
   onUpgrade: () => void;
   onCancel: () => void;
+  onCopay: () => void;
+  onCancelCopay: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [confirmingCopay, setConfirmingCopay] = useState(false);
   const view = planCardView(plan, today, paid);
   const comparison = view.showComparison ? featureComparisonView(view.activeBenefit) : null;
 
@@ -129,13 +156,41 @@ export function PlanCard({
           {comparison.next ? (
             <FeatureList title={`No ${comparison.next.name}`} tier={comparison.next} />
           ) : null}
-          {comparison.copayLabel ? (
-            <div>
-              <Button variant="outline" disabled>
-                {comparison.copayLabel} · Em breve
-              </Button>
-            </div>
-          ) : null}
+        </div>
+      ) : null}
+      {view.copay.activeLine ? (
+        <p className="text-sm font-medium">{view.copay.activeLine}</p>
+      ) : null}
+      {view.copay.note ? <p className="text-sm text-destructive">{view.copay.note}</p> : null}
+      {view.copay.offerLabel ? (
+        <div>
+          <Button onClick={onCopay} disabled={copaying}>
+            {view.copay.offerLabel}
+          </Button>
+        </div>
+      ) : null}
+      {view.copay.cancelable && !confirmingCopay ? (
+        <div>
+          <Button variant="outline" onClick={() => setConfirmingCopay(true)}>
+            {copayCancelLabel}
+          </Button>
+        </div>
+      ) : null}
+      {view.copay.cancelable && confirmingCopay ? (
+        <div role="alertdialog" aria-label={copayCancelLabel} className="space-y-2">
+          <p className="text-sm">{copayCancelPrompt}</p>
+          <div className="flex gap-2">
+            <Button variant="destructive" onClick={onCancelCopay} disabled={cancelingCopay}>
+              {cancelConfirmLabel}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmingCopay(false)}
+              disabled={cancelingCopay}
+            >
+              {cancelKeepLabel}
+            </Button>
+          </div>
         </div>
       ) : null}
       {view.sponsorLine ? (
@@ -143,7 +198,7 @@ export function PlanCard({
       ) : null}
       {view.paymentNote ? (
         <p role="status" className="text-sm">
-          {paymentReceivedNote}
+          {view.paymentNote}
         </p>
       ) : null}
       {view.statusNote ? <p className="text-sm text-destructive">{view.statusNote}</p> : null}

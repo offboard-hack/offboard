@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   type CareerPlan,
   checkoutPendingNote,
+  copayPastDueNote,
+  copayPaymentNote,
   isProActive,
   pastDueNote,
   planCardView,
   planDate,
+  paymentReceivedNote,
   planPrice,
   shouldPollPlan,
 } from "./plan-card";
@@ -14,6 +17,7 @@ const base: CareerPlan = {
   company: { name: "Platinum Premium", includesAiApply: true, sponsoredUntil: "2027-03-10" },
   individual: null,
   benefit: null,
+  copay: { offer: null, subscription: null },
   aiApply: { allowedBy: "company", dailyLimit: 10 },
   upgrade: { offered: true, priceCents: 7900, dailyLimit: 10 },
 };
@@ -34,7 +38,7 @@ describe("plan card view", () => {
       sponsorLine: "Patrocinado pela empresa até 10/03/2027",
       proLine: null,
       cancelable: false,
-      paymentNote: false,
+      paymentNote: null,
       statusNote: null,
       upgrade: "hidden",
       upgradeLabel: "Fazer upgrade · R$ 79/mês",
@@ -43,6 +47,7 @@ describe("plan card view", () => {
       benefitExpiryWarning: null,
       activeBenefit: null,
       showComparison: false,
+      copay: { offerLabel: null, activeLine: null, cancelable: false, note: null },
       aiApplyLine: "10 candidaturas/dia com IA",
     });
   });
@@ -188,7 +193,10 @@ describe("plan card view", () => {
     const inFlight: CareerPlan = { ...pending, upgrade: { ...base.upgrade, offered: false } };
 
     expect(planCardView(pending, today, false).upgrade).toBe("available");
-    expect(planCardView(none, today, true)).toMatchObject({ upgrade: "hidden", paymentNote: true });
+    expect(planCardView(none, today, true)).toMatchObject({
+      upgrade: "hidden",
+      paymentNote: paymentReceivedNote,
+    });
     expect(planCardView(inFlight, today, false)).toMatchObject({
       upgrade: "hidden",
       statusNote: checkoutPendingNote,
@@ -196,7 +204,7 @@ describe("plan card view", () => {
     expect(planCardView(inFlight, today, true)).toMatchObject({
       upgrade: "hidden",
       statusNote: null,
-      paymentNote: true,
+      paymentNote: paymentReceivedNote,
     });
   });
 
@@ -216,7 +224,7 @@ describe("plan card view", () => {
       proLine: "Carreira Pro ativo · renova em 26/11/2026",
       upgrade: "hidden",
     });
-    expect(planCardView(sponsored, today, true).paymentNote).toBe(false);
+    expect(planCardView(sponsored, today, true).paymentNote).toBeNull();
 
     const lapsed: CareerPlan = {
       ...sponsored,
@@ -293,6 +301,7 @@ const benefitBase: CareerPlan = {
     validUntil: "2027-06-15",
     source: "rule",
   },
+  copay: { offer: null, subscription: null },
   aiApply: { allowedBy: "benefit", dailyLimit: 3 },
   upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
 };
@@ -455,5 +464,114 @@ describe("plan card benefit view", () => {
     };
 
     expect(planCardView(plan, today, false).showComparison).toBe(true);
+  });
+});
+
+describe("plan card co-pay view", () => {
+  const offer = { planName: "Platinum", priceCents: 3000 };
+
+  const held = {
+    status: "active",
+    planName: "Platinum",
+    priceCents: 3000,
+    currentPeriodEnd: "2026-12-26",
+    cancelable: true,
+  } satisfies NonNullable<CareerPlan["copay"]["subscription"]>;
+
+  it("offers the co-pay as the only upgrade, even when the benefit is about to expire", () => {
+    const expiring = {
+      ...benefitBase,
+      benefit: { ...benefitBase.benefit!, validUntil: "2026-12-20" },
+      copay: { offer, subscription: null },
+    } satisfies CareerPlan;
+
+    expect(planCardView(expiring, today, false)).toMatchObject({
+      upgrade: "hidden",
+      benefitExpiryWarning: "Seu benefício expira em 24 dias.",
+      copay: { offerLabel: "Upgrade para Platinum · R$ 30/mês", activeLine: null },
+    });
+    expect(
+      planCardView({ ...expiring, upgrade: { ...base.upgrade, offered: true } }, today, false),
+    ).toMatchObject({ upgrade: "hidden" });
+  });
+
+  it("keeps the comparison and explains the co-pay payment after returning from checkout", () => {
+    const plan = { ...benefitBase, copay: { offer, subscription: null } } satisfies CareerPlan;
+
+    expect(planCardView(plan, today, false)).toMatchObject({
+      showComparison: true,
+      paymentNote: null,
+    });
+    expect(planCardView(plan, today, true)).toMatchObject({
+      paymentNote: copayPaymentNote,
+      copay: { offerLabel: null },
+    });
+  });
+
+  it("shows the active upgrade with a cancel action and no comparison or second upgrade", () => {
+    const plan = {
+      ...benefitBase,
+      benefit: { ...benefitBase.benefit!, planName: "Platinum", validUntil: "2026-12-20" },
+      copay: { offer: null, subscription: held },
+    } satisfies CareerPlan;
+
+    expect(planCardView(plan, today, true)).toMatchObject({
+      upgrade: "hidden",
+      showComparison: false,
+      paymentNote: null,
+      copay: {
+        offerLabel: null,
+        activeLine: "Upgrade Platinum ativo · R$ 30/mês",
+        cancelable: true,
+        note: null,
+      },
+    });
+  });
+
+  it("shows a canceled upgrade with its access end and a past due upgrade with its note", () => {
+    const canceled = {
+      ...benefitBase,
+      copay: { offer: null, subscription: { ...held, status: "canceled", cancelable: false } },
+    } satisfies CareerPlan;
+
+    expect(planCardView(canceled, today, false).copay).toEqual({
+      offerLabel: null,
+      activeLine: "Upgrade cancelado · acesso até 26/12/2026",
+      cancelable: false,
+      note: null,
+    });
+
+    const open = {
+      ...canceled,
+      copay: {
+        offer: null,
+        subscription: { ...held, status: "canceled", currentPeriodEnd: null, cancelable: false },
+      },
+    } satisfies CareerPlan;
+
+    expect(planCardView(open, today, false).copay.activeLine).toBe("Upgrade cancelado");
+
+    const pastDue = {
+      ...canceled,
+      copay: { offer: null, subscription: { ...held, status: "past_due" } },
+    } satisfies CareerPlan;
+
+    expect(planCardView(pastDue, today, false).copay).toMatchObject({
+      activeLine: "Upgrade Platinum ativo · R$ 30/mês",
+      cancelable: true,
+      note: copayPastDueNote,
+    });
+  });
+
+  it("stops polling once the upgrade is held", () => {
+    const pending = { ...benefitBase, copay: { offer, subscription: null } } satisfies CareerPlan;
+
+    const active = {
+      ...benefitBase,
+      copay: { offer: null, subscription: held },
+    } satisfies CareerPlan;
+
+    expect(shouldPollPlan(pending, today)).toBe(true);
+    expect(shouldPollPlan(active, today)).toBe(false);
   });
 });

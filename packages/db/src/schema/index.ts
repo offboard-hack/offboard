@@ -821,6 +821,39 @@ export const benefitAssignments = pgTable(
   ],
 );
 
+export const benefitCopayStatusEnum = pgEnum("benefit_copay_status", [
+  "pending",
+  "active",
+  "past_due",
+  "canceled",
+]);
+
+export const benefitCopays = pgTable(
+  "benefit_copays",
+  {
+    assignmentId: uuid("assignment_id")
+      .primaryKey()
+      .references(() => benefitAssignments.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    targetPlanId: uuid("target_plan_id")
+      .notNull()
+      .references(() => plans.id),
+    status: benefitCopayStatusEnum("status").notNull().default("pending"),
+    checkoutId: varchar("checkout_id", { length: 255 }),
+    checkoutUrl: text("checkout_url"),
+    providerSubscriptionId: varchar("provider_subscription_id", { length: 255 }),
+    currentPeriodEnd: date("current_period_end"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("benefit_copays_org_id_idx").on(table.orgId),
+    index("benefit_copays_provider_subscription_id_idx").on(table.providerSubscriptionId),
+  ],
+);
+
 export const benefitPoliciesRelations = relations(benefitPolicies, ({ one }) => ({
   organization: one(organizations, {
     fields: [benefitPolicies.orgId],

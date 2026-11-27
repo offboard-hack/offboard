@@ -140,6 +140,7 @@ describe.skipIf(!url)("benefit repository", () => {
         effectivePlanName: low.name,
         source: "rule",
         validUntil: "2027-01-31",
+        copay: false,
       },
     ]);
   });

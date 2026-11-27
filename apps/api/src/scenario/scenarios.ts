@@ -6,6 +6,7 @@ import {
   recordApplications,
   rejectJobs,
   saveAnswers,
+  upgradeBenefitTier,
 } from "./steps-career.js";
 import {
   configureActions,
@@ -319,6 +320,18 @@ async function benefitsManualScenario(ctx: Context) {
   await setBenefitPolicy(ctx, admin, policy);
 }
 
+async function benefitCopayScenario(ctx: Context) {
+  const admin = await auroraAdmin(ctx);
+
+  await setBenefitPolicy(ctx, admin, { ...benefitPolicy, rules: [...benefitPolicy.rules] });
+
+  const person = await addPerson(ctx, admin, people.marina);
+  const collaborator = await signInCollaborator(ctx, person);
+
+  await openCareer(ctx, collaborator);
+  await upgradeBenefitTier(ctx, admin, collaborator);
+}
+
 async function equipmentScenario(ctx: Context) {
   const admin = await auroraAdmin(ctx);
   const person = await addPerson(ctx, admin, people.nina);
@@ -356,6 +369,7 @@ async function allScenario(ctx: Context) {
   await orgsScenario(ctx);
   await addPersonScenario(ctx);
   await companyPaymentScenario(ctx);
+  await benefitCopayScenario(ctx);
   await benefitsManualScenario(ctx);
   await careerScenario(ctx);
   await applicationsScenario(ctx);
@@ -375,6 +389,7 @@ export const scenarios = {
   applications: applicationsScenario,
   answers: answersScenario,
   "benefits-manual": benefitsManualScenario,
+  "benefit-copay": benefitCopayScenario,
   equipment: equipmentScenario,
   integrations: integrationsScenario,
   "checklist-actions": checklistActionsScenario,

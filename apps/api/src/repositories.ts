@@ -3,6 +3,7 @@ import type { Database } from "@offboard/db/client";
 import { createOffboardingsRepository } from "./features/offboardings/repository.js";
 import { createIntegrationsRepository } from "./features/integrations/repository.js";
 import { createActionConfigsRepository } from "./features/action-configs/repository.js";
+import { createBenefitCopayRepository } from "./features/benefit-copay/repository.js";
 import { createBenefitRepository } from "./features/benefits/repository.js";
 import { createBillingRepository } from "./features/billing/repository.js";
 import { createCareerPlanRepository } from "./features/career-plan/repository.js";
@@ -44,6 +45,7 @@ export function createRepositories(db: Database) {
     billing: createBillingRepository(db),
     backoffice: createBackofficeRepository(db),
     benefits: createBenefitRepository(db),
+    benefitCopay: createBenefitCopayRepository(db),
     careerPlan: createCareerPlanRepository(db),
     employee: createEmployeeRepository(db),
     organizations: createOrganizationsRepository(db),

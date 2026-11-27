@@ -1110,6 +1110,7 @@ describe.skipIf(!url)("api", () => {
           cancelable: false,
         },
         benefit: null,
+        copay: { offer: null, subscription: null },
         aiApply: { allowedBy: "individual", dailyLimit: 10 },
         upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
       });
@@ -3168,12 +3169,14 @@ describe.skipIf(!url)("api", () => {
         configured: boolean;
         createSubscriptionCheckout: () => Promise<{ id: string; url: string }>;
         cancelSubscription: (id: string) => Promise<void>;
+        ensureCopayProduct: () => Promise<{ id: string }>;
       };
 
       function billingStub(cancelled: string[], fail = false) {
         return {
           configured: true,
           createSubscriptionCheckout: async () => ({ id: "bill", url: "https://pay.example/bill" }),
+          ensureCopayProduct: async () => ({ id: "prod_copay" }),
           cancelSubscription: async (id) => {
             if (fail) throw new Error("gateway down");
 

@@ -6,6 +6,8 @@ import {
   applicationPackages,
   applications,
   authUser,
+  benefitAssignments,
+  benefitCopays,
   employeeAccess,
   employeeStates,
   interviews,
@@ -25,6 +27,8 @@ import {
 import { and, asc, desc, eq, inArray, isNotNull, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
+import { syncEffectivePlan } from "../../shared/benefit-copay.js";
+import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 import { toPreferences } from "../../shared/talent-preferences.js";
 
 const resumeJobs = alias(jobs, "resume_jobs");
@@ -405,6 +409,43 @@ export function createAccountRepository(db: Database) {
       );
   }
 
+  async function cancelableCopay(profileId: string) {
+    const [row] = await db
+      .select({
+        assignmentId: benefitCopays.assignmentId,
+        providerSubscriptionId: sql<string>`${benefitCopays.providerSubscriptionId}`,
+      })
+      .from(benefitCopays)
+      .innerJoin(benefitAssignments, eq(benefitAssignments.id, benefitCopays.assignmentId))
+      .where(
+        and(
+          eq(benefitAssignments.profileId, profileId),
+          inArray(benefitCopays.status, ["active", "past_due"]),
+          isNotNull(benefitCopays.providerSubscriptionId),
+        ),
+      );
+
+    return row ?? null;
+  }
+
+  async function markCopayCanceled(assignmentId: string, providerSubscriptionId: string) {
+    const now = new Date();
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(benefitCopays)
+        .set({ status: "canceled", updatedAt: now })
+        .where(
+          and(
+            eq(benefitCopays.assignmentId, assignmentId),
+            eq(benefitCopays.providerSubscriptionId, providerSubscriptionId),
+          ),
+        );
+
+      await syncEffectivePlan(tx, assignmentId, saoPauloDate(now));
+    });
+  }
+
   async function deleteProfile(profileId: string) {
     return db.transaction(async (tx) => {
       const [deleted] = await tx
@@ -442,7 +483,15 @@ export function createAccountRepository(db: Database) {
     });
   }
 
-  return { exportData, fileKeys, cancelableSubscription, markSubscriptionCanceled, deleteProfile };
+  return {
+    exportData,
+    fileKeys,
+    cancelableSubscription,
+    markSubscriptionCanceled,
+    cancelableCopay,
+    markCopayCanceled,
+    deleteProfile,
+  };
 }
 
 export type AccountRepository = ReturnType<typeof createAccountRepository>;

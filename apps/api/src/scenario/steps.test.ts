@@ -21,6 +21,7 @@ import {
   upgradeCareerPro,
   type Admin,
 } from "./steps.js";
+import { upgradeBenefitTier } from "./steps-career.js";
 
 const reply = (status: number, body: Json = null, cookies: string[] = []) =>
   ({ status, body, cookies }) satisfies Reply;
@@ -234,4 +235,89 @@ it("dedupes logins, renders them and adds days", () => {
 
   expect(renderLogins(ctx.logins)).toEqual(["  HR: a@example.com -> /entrar"]);
   expect(addDays("2026-11-26", -10)).toBe("2026-11-16");
+});
+
+const keys = { ABACATEPAY_API_KEY: "key", ABACATEPAY_WEBHOOK_SECRET: "secret" };
+const marina = { person: { ...person, name: "Marina" }, session: { cookie: "c" } };
+
+const offered = {
+  benefit: { planName: "Silver" },
+  copay: { offer: { planName: "Gold", priceCents: 2900 }, subscription: null },
+};
+
+it("skips the benefit upgrade without payment keys", async () => {
+  const { ctx, lines } = scripted([]);
+
+  expect(await upgradeBenefitTier(ctx, admin, marina)).toBe("skipped");
+  expect(lines).toEqual(["benefit upgrade skipped: ABACATEPAY_API_KEY not set"]);
+});
+
+it("leaves an active benefit upgrade alone and reports when nothing is offered", async () => {
+  const active = scripted(
+    [
+      reply(200, {
+        benefit: { planName: "Gold" },
+        copay: { offer: null, subscription: { status: "active" } },
+      }),
+    ],
+    keys,
+  );
+
+  expect(await upgradeBenefitTier(active.ctx, admin, marina)).toBe("active");
+  expect(active.lines).toEqual(["Marina benefit upgrade already active"]);
+
+  const none = scripted(
+    [reply(200, { benefit: null, copay: { offer: null, subscription: null } })],
+    keys,
+  );
+
+  expect(await upgradeBenefitTier(none.ctx, admin, marina)).toBe("none");
+  expect(none.lines).toEqual(["Marina has no benefit upgrade to buy"]);
+});
+
+it("buys the benefit upgrade and reads the new tier", async () => {
+  const bought = scripted(
+    [
+      reply(200, offered),
+      reply(200, [{ id: "assignment-1", profileName: "Marina" }]),
+      reply(200, { url: "https://checkout.example.com/3", checkoutId: "bill_3" }),
+      reply(200, { ok: true }),
+      reply(200, { ...offered, benefit: { planName: "Gold" } }),
+    ],
+    keys,
+  );
+
+  expect(await upgradeBenefitTier(bought.ctx, admin, marina)).toBe("Gold");
+  expect(bought.calls).toEqual([
+    "GET /me/plan",
+    "GET /benefit-assignments",
+    "POST /me/benefit/copay/checkout",
+    "POST /billing/webhook",
+    "GET /me/plan",
+  ]);
+  expect(bought.lines).toEqual([
+    "AbacatePay sandbox checkout: https://checkout.example.com/3",
+    "Marina benefit is Gold after the upgrade",
+  ]);
+
+  const missing = scripted(
+    [
+      reply(200, offered),
+      reply(200, [{ id: "assignment-1", profileName: "Marina" }]),
+      reply(200, { url: "https://checkout.example.com/4", checkoutId: "bill_4" }),
+      reply(200, { ok: true }),
+      reply(200, { benefit: null, copay: { offer: null, subscription: null } }),
+    ],
+    keys,
+  );
+
+  expect(await upgradeBenefitTier(missing.ctx, admin, marina)).toBe("missing");
+});
+
+it("fails the benefit upgrade for a person without an assignment", async () => {
+  const lost = scripted([reply(200, offered), reply(200, [])], keys);
+
+  await expect(upgradeBenefitTier(lost.ctx, admin, marina)).rejects.toThrow(
+    "Marina has no benefit assignment",
+  );
 });

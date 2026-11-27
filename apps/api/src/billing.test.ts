@@ -67,6 +67,8 @@ describe("abacatepay gateway", () => {
   let responseStatus = 200;
   let responseBody = "";
   let lookupBody = "";
+  let listBody = "";
+  const paths: string[] = [];
 
   const server = createServer((req, res) => {
     requestAuthorization = req.headers.authorization ?? "";
@@ -77,9 +79,13 @@ describe("abacatepay gateway", () => {
     });
     req.on("end", () => {
       const lookup = requestPath.startsWith("/v2/subscriptions/get");
+      const listing = requestPath.startsWith("/v2/products/list");
 
-      res.writeHead(lookup ? 200 : responseStatus, { "content-type": "application/json" });
-      res.end(lookup ? lookupBody : responseBody);
+      paths.push(requestPath);
+      res.writeHead(lookup || listing ? 200 : responseStatus, {
+        "content-type": "application/json",
+      });
+      res.end(listing ? listBody : lookup ? lookupBody : responseBody);
     });
   });
 
@@ -208,6 +214,71 @@ describe("abacatepay gateway", () => {
     await expect(createAbacatePayGateway(undefined).cancelSubscription("subs_1")).rejects.toThrow(
       "ABACATEPAY_API_KEY is not configured",
     );
+    await expect(
+      createAbacatePayGateway(undefined).ensureCopayProduct("silver", "gold", 2900),
+    ).rejects.toThrow("ABACATEPAY_API_KEY is not configured");
+  });
+
+  describe("co-pay product", () => {
+    const page = { limit: 100, hasNext: false, next: null, before: null };
+
+    it("creates a monthly product the first time and reuses it afterwards", async () => {
+      const gateway = createAbacatePayGateway("secret-key", base);
+
+      paths.length = 0;
+      listBody = JSON.stringify({ success: true, data: [], error: null, pagination: page });
+      responseStatus = 200;
+      responseBody = JSON.stringify({
+        success: true,
+        data: { id: "prod_new", externalId: "copay-silver-gold" },
+        error: null,
+      });
+
+      await expect(gateway.ensureCopayProduct("silver", "gold", 2900)).resolves.toEqual({
+        id: "prod_new",
+      });
+      expect(paths).toEqual([
+        "/v2/products/list?externalId=copay-silver-gold&status=ACTIVE",
+        "/v2/products/create",
+      ]);
+      expect(JSON.parse(requestBody)).toMatchObject({
+        externalId: "copay-silver-gold",
+        price: 2900,
+        currency: "BRL",
+        cycle: "MONTHLY",
+      });
+
+      paths.length = 0;
+      listBody = JSON.stringify({
+        success: true,
+        data: [{ id: "prod_existing", externalId: "copay-silver-gold" }],
+        error: null,
+        pagination: page,
+      });
+
+      await expect(gateway.ensureCopayProduct("silver", "gold", 2900)).resolves.toEqual({
+        id: "prod_existing",
+      });
+      expect(paths).toEqual(["/v2/products/list?externalId=copay-silver-gold&status=ACTIVE"]);
+    });
+
+    it("fails when AbacatePay rejects the lookup or the creation", async () => {
+      const gateway = createAbacatePayGateway("secret-key", base);
+
+      listBody = JSON.stringify({ success: false, data: null, error: "unavailable" });
+
+      await expect(gateway.ensureCopayProduct("silver", "gold", 2900)).rejects.toThrow(
+        "AbacatePay product lookup failed: unavailable",
+      );
+
+      listBody = JSON.stringify({ success: true, data: [], error: null, pagination: page });
+      responseStatus = 400;
+      responseBody = JSON.stringify({ success: false, data: null, error: "denied" });
+
+      await expect(gateway.ensureCopayProduct("silver", "gold", 2900)).rejects.toThrow(
+        "AbacatePay product creation failed: denied",
+      );
+    });
   });
 
   it("throws when AbacatePay rejects the checkout", async () => {
@@ -636,6 +707,7 @@ describe.skipIf(!url)("billing", () => {
       return { id: `bill_${issued.length}`, url: `https://pay.example/bill_${issued.length}` };
     },
     cancelSubscription: async () => undefined,
+    ensureCopayProduct: async () => ({ id: "prod_copay" }),
   };
 
   const stubApp = createApp(webOrigin, repos, {

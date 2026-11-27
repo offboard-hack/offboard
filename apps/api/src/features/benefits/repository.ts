@@ -2,14 +2,16 @@ import type { Database } from "@offboard/db/client";
 import {
   type BenefitPolicyRule,
   benefitAssignments,
+  benefitCopays,
   benefitPolicies,
   offboardingCases,
   plans,
   talentProfiles,
 } from "@offboard/db/schema";
-import { aliasedTable, and, eq, gte, isNull } from "drizzle-orm";
+import { aliasedTable, and, eq, gte, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
+import { endCopay, syncEffectivePlan } from "../../shared/benefit-copay.js";
 import { evaluateBenefitRules, matchesBenefitRule } from "../../shared/benefit-rules.js";
-import { addMonths } from "../../shared/sao-paulo-date.js";
+import { addMonths, saoPauloDate } from "../../shared/sao-paulo-date.js";
 
 type AssignmentSource = (typeof benefitAssignments.$inferSelect)["source"];
 
@@ -66,11 +68,13 @@ export function createBenefitRepository(db: Database) {
         effectivePlanName: effective.name,
         source: benefitAssignments.source,
         validUntil: benefitAssignments.validUntil,
+        copay: sql<boolean>`coalesce(${benefitCopays.status} <> 'pending' and ${benefitCopays.currentPeriodEnd} >= (now() at time zone 'America/Sao_Paulo')::date, false)`,
       })
       .from(benefitAssignments)
       .innerJoin(talentProfiles, eq(talentProfiles.id, benefitAssignments.profileId))
       .innerJoin(assigned, eq(assigned.id, benefitAssignments.assignedPlanId))
       .innerJoin(effective, eq(effective.id, benefitAssignments.effectivePlanId))
+      .leftJoin(benefitCopays, eq(benefitCopays.assignmentId, benefitAssignments.id))
       .where(eq(benefitAssignments.orgId, orgId))
       .orderBy(talentProfiles.name);
   }
@@ -95,23 +99,73 @@ export function createBenefitRepository(db: Database) {
     return row ?? null;
   }
 
-  async function upsertAssignment(input: AssignmentInput) {
-    const [row] = await db
-      .insert(benefitAssignments)
-      .values(input)
-      .onConflictDoUpdate({
-        target: benefitAssignments.profileId,
-        set: {
-          assignedPlanId: input.assignedPlanId,
-          effectivePlanId: input.effectivePlanId,
-          source: input.source,
-          validUntil: input.validUntil,
-          updatedAt: new Date(),
-        },
-      })
-      .returning({ id: benefitAssignments.id });
+  async function copaySubscriptionsAtOrBelow(profileId: string, orgId: string, planId: string) {
+    const target = aliasedTable(plans, "target_plan");
+    const chosen = aliasedTable(plans, "chosen_plan");
 
-    return row;
+    const rows = await db
+      .select({ id: sql<string>`${benefitCopays.providerSubscriptionId}` })
+      .from(benefitCopays)
+      .innerJoin(benefitAssignments, eq(benefitAssignments.id, benefitCopays.assignmentId))
+      .innerJoin(target, eq(target.id, benefitCopays.targetPlanId))
+      .innerJoin(chosen, eq(chosen.id, planId))
+      .where(
+        and(
+          eq(benefitAssignments.profileId, profileId),
+          eq(benefitAssignments.orgId, orgId),
+          inArray(benefitCopays.status, ["active", "past_due"]),
+          isNotNull(benefitCopays.providerSubscriptionId),
+          lte(target.perPersonPriceCents, chosen.perPersonPriceCents),
+        ),
+      );
+
+    return rows.map((row) => row.id);
+  }
+
+  async function upsertAssignment(input: AssignmentInput) {
+    return db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(benefitAssignments)
+        .values(input)
+        .onConflictDoUpdate({
+          target: benefitAssignments.profileId,
+          set: {
+            assignedPlanId: input.assignedPlanId,
+            effectivePlanId: input.effectivePlanId,
+            source: input.source,
+            validUntil: input.validUntil,
+            updatedAt: new Date(),
+          },
+        })
+        .returning({ id: benefitAssignments.id });
+
+      const target = aliasedTable(plans, "target_plan");
+      const now = new Date();
+
+      const covered = await tx
+        .select({ id: benefitCopays.assignmentId })
+        .from(benefitCopays)
+        .innerJoin(target, eq(target.id, benefitCopays.targetPlanId))
+        .innerJoin(plans, eq(plans.id, input.assignedPlanId))
+        .where(
+          and(
+            eq(benefitCopays.assignmentId, row.id),
+            inArray(benefitCopays.status, ["pending", "active", "past_due"]),
+            lte(target.perPersonPriceCents, plans.perPersonPriceCents),
+          ),
+        );
+
+      for (const copay of covered) await endCopay(tx, copay.id, now);
+
+      const held = await tx
+        .select({ id: benefitCopays.assignmentId })
+        .from(benefitCopays)
+        .where(eq(benefitCopays.assignmentId, row.id));
+
+      for (const copay of held) await syncEffectivePlan(tx, copay.id, saoPauloDate(now));
+
+      return row;
+    });
   }
 
   async function planPriceMap() {
@@ -198,6 +252,7 @@ export function createBenefitRepository(db: Database) {
     listAssignments,
     getEffectiveBenefit,
     upsertAssignment,
+    copaySubscriptionsAtOrBelow,
     planPriceMap,
   };
 }

@@ -66,6 +66,7 @@ describe.skipIf(!url)("scenario runner against the in-process API", () => {
         return { id: `bill_${checkouts}`, url: "https://checkout.example.com/x" };
       },
       cancelSubscription: async () => undefined,
+      ensureCopayProduct: async () => ({ id: "prod_copay" }),
     },
     catalog: [],
     runInBackground: () => undefined,
@@ -159,6 +160,29 @@ describe.skipIf(!url)("scenario runner against the in-process API", () => {
     expect(second.lines).toContain("log in to see the result:");
   });
 
+  it("upgrades Marina's benefit tier through a co-pay checkout and a signed webhook", async () => {
+    await db.delete(benefitAssignments);
+
+    const env = { ABACATEPAY_API_KEY: "sandbox-key", ABACATEPAY_WEBHOOK_SECRET: webhookSecret };
+    const first = context(env);
+
+    await runScenario("benefit-copay", first.ctx);
+
+    expect(first.lines).toContain("Marina Lopes benefit is Gold after the upgrade");
+
+    const [row] = await db.select().from(benefitAssignments);
+
+    expect(row.assignedPlanId).not.toBe(row.effectivePlanId);
+
+    const second = context(env);
+
+    await runScenario("benefit-copay", second.ctx);
+
+    expect(second.lines).toContain("Marina Lopes benefit upgrade already active");
+
+    await db.delete(benefitAssignments);
+  });
+
   it("runs every scenario twice and leaves the same state", async () => {
     const first = context();
 
@@ -170,6 +194,7 @@ describe.skipIf(!url)("scenario runner against the in-process API", () => {
     expect(lines).toContain("created org Vale Verde Agro");
     expect(lines).toContain("company plan silver skipped: ABACATEPAY_API_KEY not set");
     expect(lines).toContain("Carreira Pro skipped: ABACATEPAY_API_KEY not set");
+    expect(lines).toContain("benefit upgrade skipped: ABACATEPAY_API_KEY not set");
     expect(lines).toContain("skipped: AI not configured");
     expect(lines).toContain("Marina Lopes benefit overridden manually to platinum");
     expect(lines).toContain(
