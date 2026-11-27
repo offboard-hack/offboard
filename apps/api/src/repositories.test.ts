@@ -1020,13 +1020,21 @@ describe.skipIf(!url)("automation rules", () => {
     const second = await repos.automationRules.upsertBySourceRef(orgA, "ref-1", {
       ...rule,
       name: "Changed",
-      enabled: false,
     });
 
     expect(second.id).toBe(first.id);
     expect(second.name).toBe("Changed");
-    expect(second.enabled).toBe(false);
     expect(await repos.automationRules.listRules(orgA)).toHaveLength(1);
+  });
+
+  it("keeps a rule disabled when upserting by source_ref", async () => {
+    const first = await repos.automationRules.upsertBySourceRef(orgA, "ref-1", rule);
+
+    await repos.automationRules.updateRule(orgA, first.id, { enabled: false });
+
+    const second = await repos.automationRules.upsertBySourceRef(orgA, "ref-1", rule);
+
+    expect(second.enabled).toBe(false);
   });
 
   it("allows same source_ref in different orgs", async () => {

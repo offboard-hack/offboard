@@ -9633,6 +9633,28 @@ describe.skipIf(!url)("api", () => {
       }
     });
 
+    it("updates equipment even when loading rules fails", async () => {
+      const [{ person: _person, ...first }] = await (await call("/equipment")).json();
+      const next = first.status === "transit" ? "scheduled" : "transit";
+
+      const failing = createApp(
+        webOrigin,
+        {
+          ...repos,
+          automationRules: {
+            ...repos.automationRules,
+            getEnabledRulesByTrigger: () => Promise.reject(new Error("rules down")),
+          },
+        },
+        appOptions,
+      );
+
+      const res = await call(`/equipment/${first.id}`, "PUT", { status: next }, failing);
+
+      expect(res.status).toBe(200);
+      expect(hooks).toEqual([]);
+    });
+
     it("does not fire rules when the equipment does not exist", async () => {
       await withRule("received", async () => {
         const res = await call(`/equipment/${missingTaskId}`, "PUT", { status: "received" });

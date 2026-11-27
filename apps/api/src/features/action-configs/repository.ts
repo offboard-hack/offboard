@@ -175,7 +175,6 @@ export function createActionConfigsRepository(db: Database, checklistRules: Chec
               trigger: "task.status_changed",
               conditions: { "task.stepId": step.id },
               actions: [{ type: kind, ...config }],
-              enabled: true,
               cronSchedule: null,
               sourceRef,
             });

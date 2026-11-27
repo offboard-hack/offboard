@@ -100,7 +100,6 @@ export function createAutomationRulesRepository(
           trigger: sql`excluded.trigger`,
           conditions: sql`excluded.conditions`,
           actions: sql`excluded.actions`,
-          enabled: sql`excluded.enabled`,
           cronSchedule: sql`excluded.cron_schedule`,
           updatedAt: new Date(),
         },
