@@ -369,8 +369,8 @@ async function allScenario(ctx: Context) {
   await orgsScenario(ctx);
   await addPersonScenario(ctx);
   await companyPaymentScenario(ctx);
-  await benefitCopayScenario(ctx);
   await benefitsManualScenario(ctx);
+  await benefitCopayScenario(ctx);
   await careerScenario(ctx);
   await applicationsScenario(ctx);
   await answersScenario(ctx);

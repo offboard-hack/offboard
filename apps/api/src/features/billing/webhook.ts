@@ -198,7 +198,8 @@ type CopayTarget = {
 };
 
 async function copayOf(repos: BillingRepository, externalId: string) {
-  const parsed = talentProfileId.safeParse(externalId.slice(copayPrefix.length));
+  const [assignmentId] = externalId.slice(copayPrefix.length).split(":");
+  const parsed = talentProfileId.safeParse(assignmentId);
 
   return parsed.success ? repos.findCopay(parsed.data) : undefined;
 }

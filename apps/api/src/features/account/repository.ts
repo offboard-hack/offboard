@@ -14,6 +14,7 @@ import {
   jobMatches,
   jobRejections,
   jobs,
+  plans,
   publicPageDailyViews,
   publicPages,
   resumes,
@@ -243,6 +244,17 @@ export function createAccountRepository(db: Database) {
       .from(talentSubscriptions)
       .where(eq(talentSubscriptions.profileId, profileId));
 
+    const [ownUpgrade] = await db
+      .select({
+        status: benefitCopays.status,
+        targetPlan: plans.name,
+        currentPeriodEnd: benefitCopays.currentPeriodEnd,
+      })
+      .from(benefitCopays)
+      .innerJoin(benefitAssignments, eq(benefitAssignments.id, benefitCopays.assignmentId))
+      .innerJoin(plans, eq(plans.id, benefitCopays.targetPlanId))
+      .where(eq(benefitAssignments.profileId, profileId));
+
     return {
       profile: {
         name: profile.name,
@@ -358,6 +370,7 @@ export function createAccountRepository(db: Database) {
         answer: item.answer,
         updatedAt: item.updatedAt?.toISOString() ?? null,
       })),
+      benefitUpgrade: ownUpgrade ?? null,
       careerSubscription: ownSubscription
         ? {
             ...ownSubscription,

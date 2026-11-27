@@ -145,6 +145,14 @@ const exportResponse = t.Object({
       updatedAt: nullable,
     }),
   ),
+  benefitUpgrade: t.Union([
+    t.Object({
+      status: t.String(),
+      targetPlan: t.String(),
+      currentPeriodEnd: nullable,
+    }),
+    t.Null(),
+  ]),
   careerSubscription: t.Union([
     t.Object({
       plan: t.String(),

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Database } from "@offboard/db/client";
 import { benefitAssignments, benefitCopays, plans, talentSubscriptions } from "@offboard/db/schema";
 import { and, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
@@ -106,7 +107,7 @@ export function createBenefitCopayRepository(db: Database) {
       );
 
       const checkout = await ports.createCheckout({
-        externalId: `copay:${assignment.id}`,
+        externalId: `copay:${assignment.id}:${randomUUID().slice(0, 8)}`,
         planSlug: product.id,
       });
 

@@ -177,7 +177,7 @@ describe.skipIf(!url)("benefit co-pay", () => {
       data: {
         subscription: { id: overrides.subscription ?? "subs_copay_1", amount: 2900 },
         checkout: assignmentId
-          ? { id: overrides.checkout ?? "bill_1", externalId: `copay:${assignmentId}` }
+          ? { id: overrides.checkout ?? "bill_1", externalId: `copay:${assignmentId}:attempt` }
           : undefined,
         payment: { id: `pay_${randomUUID()}` },
       },
@@ -327,7 +327,7 @@ describe.skipIf(!url)("benefit co-pay", () => {
       expect(gateway.products).toEqual([{ from: "silver", to: "gold", priceCents: 2900 }]);
       expect(gateway.checkouts).toEqual([
         {
-          externalId: `copay:${assignmentId}`,
+          externalId: expect.stringMatching(new RegExp(`^copay:${assignmentId}:[0-9a-f]{8}$`)),
           planSlug: "prod_silver_gold",
           returnUrl: `${webOrigin}/colaborador?tela=carreira`,
           completionUrl: `${webOrigin}/colaborador?tela=carreira&plano=ok`,
@@ -444,7 +444,7 @@ describe.skipIf(!url)("benefit co-pay", () => {
         event: "subscription.completed",
         data: {
           subscription: { id: "subs_x", amount: 1 },
-          checkout: { id: "bill_1", externalId: `copay:${assignmentId}` },
+          checkout: { id: "bill_1", externalId: `copay:${assignmentId}:attempt` },
         },
       });
 
@@ -686,6 +686,9 @@ describe.skipIf(!url)("benefit co-pay", () => {
         checkoutId: "bill_2",
       });
       expect(gateway.cancels).toEqual(["subs_copay_1"]);
+      expect(gateway.checkouts).toHaveLength(2);
+      expect(gateway.checkouts[1].externalId).not.toBe(gateway.checkouts[0].externalId);
+      expect(gateway.checkouts[1].externalId.startsWith(`copay:${assignmentId}:`)).toBe(true);
 
       await deliver(
         event("subscription.completed", assignmentId, {
@@ -695,6 +698,7 @@ describe.skipIf(!url)("benefit co-pay", () => {
       );
 
       expect(await effective(assignmentId)).toBe("gold");
+      expect((await copay(assignmentId)).providerSubscriptionId).toBe("subs_copay_2");
     });
 
     it("answers 409 when there is nothing to cancel and 502 when the gateway fails", async () => {
@@ -922,6 +926,29 @@ describe.skipIf(!url)("benefit co-pay", () => {
       expect(gateway.cancels).toEqual(["subs_late"]);
       expect((await copay(assignmentId)).status).toBe("canceled");
       expect(await effective(assignmentId)).toBe("gold");
+    });
+  });
+
+  describe("data export", () => {
+    it("exports the upgrade without provider ids", async () => {
+      const { profileId, assignmentId } = await person();
+
+      expect(
+        (await (await request("/me/export", { talent: profileId })).json()).benefitUpgrade,
+      ).toBeNull();
+
+      await activate(profileId, assignmentId);
+
+      const response = await request("/me/export", { talent: profileId });
+      const exported = await response.json();
+
+      expect(exported.benefitUpgrade).toEqual({
+        status: "active",
+        targetPlan: "Gold",
+        currentPeriodEnd: addMonths(day(0), 1),
+      });
+      expect(JSON.stringify(exported)).not.toContain("subs_copay_1");
+      expect(JSON.stringify(exported)).not.toContain("bill_1");
     });
   });
 
