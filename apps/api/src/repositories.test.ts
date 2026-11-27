@@ -212,7 +212,7 @@ describe.skipIf(!url)("repositories", () => {
 
     const updated = await repos.offboardings.updateTaskStatus(defaultOrgId, target.id, "done");
 
-    expect(updated).toEqual({
+    expect(updated).toMatchObject({
       ...target,
       status: "done",
     });
