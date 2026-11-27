@@ -157,6 +157,14 @@ export function criterionLabel(criterion: string | null) {
   return criterion === null ? null : (criterionLabels.get(criterion) ?? null);
 }
 
+export function pointsLabel(points: number) {
+  return `${points} ${points === 1 ? "ponto" : "pontos"}`;
+}
+
+export function gainLabel(points: number) {
+  return `+${pointsLabel(points)}`;
+}
+
 export function scoreCriteria(breakdown: CareerResume["scoreBreakdown"]) {
   return [...criterionLabels].flatMap(([criterion, label]) => {
     const entry = breakdown?.[criterion];

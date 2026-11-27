@@ -2,6 +2,7 @@ import type { ResumeScoreBreakdown } from "@offboard/db/schema";
 import { z } from "zod";
 import { bounded } from "../../shared/bounded.js";
 import { storableClip } from "../../shared/storable-text.js";
+import { plainReason } from "./reason.js";
 
 export const resumeCriteria = {
   results: {
@@ -82,7 +83,7 @@ export function breakdownOf(assessment: z.infer<typeof criteriaSchema>) {
         {
           points: bounded(assessment[criterion].points, 0, max),
           max,
-          reason: storableClip(assessment[criterion].reason, 300),
+          reason: storableClip(plainReason(assessment[criterion].reason), 300),
         },
       ];
     }),

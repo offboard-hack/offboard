@@ -8,8 +8,10 @@ import {
   evidenceValue,
   failedFieldNote,
   isLongText,
+  gainLabel,
   jobPlace,
   matchScore,
+  pointsLabel,
   resumeScoreState,
   salaryRange,
   scoreCriteria,
@@ -130,5 +132,18 @@ describe("career labels", () => {
     expect(resumeScoreState({ score: null, rescoring: false })).toBe("pending");
     expect(resumeScoreState({ score: 62, rescoring: true })).toBe("recalculating");
     expect(resumeScoreState({ score: 0, rescoring: false })).toBe("ready");
+  });
+
+  it("pluralizes points", () => {
+    expect(pointsLabel(0)).toBe("0 pontos");
+    expect(pointsLabel(1)).toBe("1 ponto");
+    expect(pointsLabel(2)).toBe("2 pontos");
+    expect(pointsLabel(14)).toBe("14 pontos");
+  });
+
+  it("signs gains", () => {
+    expect(gainLabel(1)).toBe("+1 ponto");
+    expect(gainLabel(2)).toBe("+2 pontos");
+    expect(gainLabel(0)).toBe("+0 pontos");
   });
 });
