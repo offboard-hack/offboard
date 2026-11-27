@@ -31,4 +31,9 @@ describe("spendingSearchSchema", () => {
     expect(spendingSearchSchema.parse({ aba: "x" })).toEqual({ aba: undefined });
     expect(spendingSearchSchema.parse({})).toEqual({});
   });
+
+  it("keeps the checkout return marker and drops other values", () => {
+    expect(spendingSearchSchema.parse({ plano: "ok" })).toEqual({ plano: "ok" });
+    expect(spendingSearchSchema.parse({ plano: "x" })).toEqual({ plano: undefined });
+  });
 });

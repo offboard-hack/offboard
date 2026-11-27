@@ -70,3 +70,18 @@ export function useCheckout() {
     onSuccess: (checkout) => window.location.assign(checkout.url),
   });
 }
+
+async function postSubscribe(planSlug: string) {
+  const { data, error } = await getApiClient().api.billing.subscription.post({ planSlug });
+
+  if (error) throw new Error("Failed to start subscription");
+
+  return data;
+}
+
+export function useSubscribe() {
+  return useMutation({
+    mutationFn: postSubscribe,
+    onSuccess: (checkout) => window.location.assign(checkout.url),
+  });
+}
