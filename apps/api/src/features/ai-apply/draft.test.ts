@@ -809,6 +809,76 @@ describe("draftAnswers", () => {
         expect(unanswered.map(({ status }) => status)).toEqual(["sensitive", "sensitive"]);
       });
 
+      it("also withholds exact saved demographic answers when consent is not yes", async () => {
+        const consent = select(
+          "consent",
+          "Consentimento - Diversidade e Inclusão (D&I)",
+          options("Sim. Eu concordo", "Não. Eu não concordo"),
+          true,
+        );
+
+        const exact = select("exact", "Raça/cor", options("Branca", "Preta"), true);
+
+        const pronouns = question({ id: "pronouns", label: "Pronouns" });
+        const colour = question({ id: "colour", label: "What is your skin colour?" });
+
+        const form = [consent, exact, pronouns, colour];
+
+        const library = (answer: string) => [
+          { question: "Consentimento D&I", answer, sensitive: true },
+          { question: "Raça/cor", answer: "Branca", sensitive: true },
+          { question: "Pronouns", answer: "Ela/dela", sensitive: false },
+          { question: "What is your skin colour?", answer: "Branca", sensitive: false },
+        ];
+
+        const refused = await draftAnswers(
+          fake([]).generate,
+          input(form, { library: library("Não. Eu não concordo") }),
+        );
+
+        const given = await draftAnswers(
+          fake([]).generate,
+          input(form, { library: library("Sim. Eu concordo") }),
+        );
+
+        expect(refused.map(({ status }) => status)).toEqual([
+          "suggested",
+          "sensitive",
+          "blank",
+          "blank",
+        ]);
+
+        expect(given.map(({ status }) => status)).toEqual([
+          "suggested",
+          "filled",
+          "filled",
+          "filled",
+        ]);
+      });
+
+      it("fills demographic answers when consent is answered Autorizo", async () => {
+        const consent = select(
+          "consent",
+          "Consentimento - Diversidade e Inclusão (D&I)",
+          options("Autorizo", "Não autorizo"),
+          true,
+        );
+
+        const exact = select("exact", "Raça/cor", options("Branca", "Preta"), true);
+
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([consent, exact, race], {
+            library: [
+              ...saved,
+              { question: "Consentimento D&I", answer: "Autorizo", sensitive: true },
+            ],
+          }),
+        );
+
+        expect(answers.map(({ status }) => status)).toEqual(["suggested", "filled", "suggested"]);
+      });
+
       it("reads topics only from saved answers that pass the filters", async () => {
         const answers = await draftAnswers(
           fake([]).generate,
