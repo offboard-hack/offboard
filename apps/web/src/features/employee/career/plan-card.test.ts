@@ -397,6 +397,28 @@ describe("plan card benefit view", () => {
     expect(view.benefitLine).toBe("Gold · Patrocinado + upgrade pessoal");
   });
 
+  it("names the benefit instead of a missing company plan and drops the company AI badge", () => {
+    const plan: CareerPlan = {
+      ...benefitBase,
+      company: { name: null, includesAiApply: false, sponsoredUntil: "2027-03-10" },
+    };
+
+    expect(planCardView(plan, today, false)).toMatchObject({
+      companyPlan: "Benefício da empresa",
+      aiLine: null,
+      sponsorLine: null,
+      benefitLine: "Gold · Patrocinado pela empresa até 15/06/2027",
+    });
+    expect(planCardView(benefitBase, today, false)).toMatchObject({
+      companyPlan: "Gold",
+      aiLine: null,
+    });
+    expect(planCardView({ ...plan, benefit: null }, today, false)).toMatchObject({
+      companyPlan: "Sua empresa não tem plano",
+      aiLine: "Não inclui",
+    });
+  });
+
   it("falls back when allowedBy is benefit but benefit field is null", () => {
     expect(planCardView({ ...benefitBase, benefit: null }, today, false).benefitLine).toBeNull();
   });

@@ -185,8 +185,13 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean, cop
     (aiApply.allowedBy === null || sponsorshipEnding || benefitExpiring);
 
   return {
-    companyPlan: company.name ?? "Sua empresa não tem plano",
-    aiLine: company.includesAiApply ? "Inclui candidatura com IA" : "Não inclui",
+    companyPlan:
+      company.name ?? (activeBenefit ? "Benefício da empresa" : "Sua empresa não tem plano"),
+    aiLine: activeBenefit
+      ? null
+      : company.includesAiApply
+        ? "Inclui candidatura com IA"
+        : "Não inclui",
     sponsorLine:
       company.name === null
         ? null
