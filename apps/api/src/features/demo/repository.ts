@@ -1,5 +1,5 @@
 import type { Database } from "@offboard/db/client";
-import { demoProfileEmbeddings, demoSearchUsage } from "@offboard/db/schema";
+import { demoProfileEmbeddings } from "@offboard/db/schema";
 import { asc, cosineDistance, notInArray, sql } from "drizzle-orm";
 
 export function createDemoRepository(db: Database) {
@@ -38,26 +38,7 @@ export function createDemoRepository(db: Database) {
       .limit(limit);
   }
 
-  async function takeSearch(buckets: { bucket: string; limit: number }[], day: string) {
-    let allowed = true;
-
-    for (const { bucket, limit } of buckets) {
-      const [row] = await db
-        .insert(demoSearchUsage)
-        .values({ bucket, day, searches: 1 })
-        .onConflictDoUpdate({
-          target: [demoSearchUsage.bucket, demoSearchUsage.day],
-          set: { searches: sql`${demoSearchUsage.searches} + 1` },
-        })
-        .returning({ searches: demoSearchUsage.searches });
-
-      if (row.searches > limit) allowed = false;
-    }
-
-    return allowed;
-  }
-
-  return { stored, save, keepOnly, nearest, takeSearch };
+  return { stored, save, keepOnly, nearest };
 }
 
 export type DemoRepository = ReturnType<typeof createDemoRepository>;

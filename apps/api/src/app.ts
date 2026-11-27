@@ -42,6 +42,7 @@ import { scoreResume } from "./features/resumes/score.js";
 import { scoreMatches, type MatchJob } from "./features/matches/score.js";
 import { searchTerms, toTsQuery } from "./features/matches/terms.js";
 import { backgroundRoutes } from "./features/background/routes.js";
+import { candidatesRoutes } from "./features/candidates/routes.js";
 import { demoRoutes } from "./features/demo/routes.js";
 import { syncDemoEmbeddings } from "./features/demo/sync.js";
 import { drain, type JobHandler } from "./features/background/drain.js";
@@ -664,7 +665,8 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         isolated: { kind: "ai_apply", budgetMs: aiApplyBudgetMs },
       }),
     )
-    .use(demoRoutes(repos.demo, options.embedProfile))
+    .use(demoRoutes(repos.demo, repos.searchQuota, options.embedProfile))
+    .use(candidatesRoutes(repos.candidates, repos.searchQuota, options.embedProfile))
     .use(accountRoutes(repos.account, talent, options.storage))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
