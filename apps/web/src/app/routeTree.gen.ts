@@ -16,6 +16,7 @@ import { Route as CadastroRouteImport } from './routes/cadastro'
 import { Route as ColaboradorRouteImport } from './routes/colaborador'
 import { Route as EntrarRouteImport } from './routes/entrar'
 import { Route as RecolocacaoRouteImport } from './routes/recolocacao'
+import { Route as PortalAutomacoesRouteImport } from './routes/_portal.automacoes'
 import { Route as PortalBeneficiosRouteImport } from './routes/_portal.beneficios'
 import { Route as PortalBensEColetaRouteImport } from './routes/_portal.bens-e-coleta'
 import { Route as PortalCandidaturasAssistidasRouteImport } from './routes/_portal.candidaturas-assistidas'
@@ -65,6 +66,11 @@ const RecolocacaoRoute = RecolocacaoRouteImport.update({
   id: '/recolocacao',
   path: '/recolocacao',
   getParentRoute: () => rootRouteImport,
+} as any)
+const PortalAutomacoesRoute = PortalAutomacoesRouteImport.update({
+  id: '/automacoes',
+  path: '/automacoes',
+  getParentRoute: () => PortalRoute,
 } as any)
 const PortalBeneficiosRoute = PortalBeneficiosRouteImport.update({
   id: '/beneficios',
@@ -154,6 +160,7 @@ export interface FileRoutesByFullPath {
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
   '/recolocacao': typeof RecolocacaoRoute
+  '/automacoes': typeof PortalAutomacoesRoute
   '/beneficios': typeof PortalBeneficiosRoute
   '/bens-e-coleta': typeof PortalBensEColetaRoute
   '/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
@@ -177,6 +184,7 @@ export interface FileRoutesByTo {
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
   '/recolocacao': typeof RecolocacaoRoute
+  '/automacoes': typeof PortalAutomacoesRoute
   '/beneficios': typeof PortalBeneficiosRoute
   '/bens-e-coleta': typeof PortalBensEColetaRoute
   '/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
@@ -202,6 +210,7 @@ export interface FileRoutesById {
   '/colaborador': typeof ColaboradorRoute
   '/entrar': typeof EntrarRoute
   '/recolocacao': typeof RecolocacaoRoute
+  '/_portal/automacoes': typeof PortalAutomacoesRoute
   '/_portal/beneficios': typeof PortalBeneficiosRoute
   '/_portal/bens-e-coleta': typeof PortalBensEColetaRoute
   '/_portal/candidaturas-assistidas': typeof PortalCandidaturasAssistidasRoute
@@ -227,6 +236,7 @@ export interface FileRouteTypes {
     | '/colaborador'
     | '/entrar'
     | '/recolocacao'
+    | '/automacoes'
     | '/beneficios'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
@@ -250,6 +260,7 @@ export interface FileRouteTypes {
     | '/colaborador'
     | '/entrar'
     | '/recolocacao'
+    | '/automacoes'
     | '/beneficios'
     | '/bens-e-coleta'
     | '/candidaturas-assistidas'
@@ -274,6 +285,7 @@ export interface FileRouteTypes {
     | '/colaborador'
     | '/entrar'
     | '/recolocacao'
+    | '/_portal/automacoes'
     | '/_portal/beneficios'
     | '/_portal/bens-e-coleta'
     | '/_portal/candidaturas-assistidas'
@@ -353,6 +365,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/recolocacao'
       preLoaderRoute: typeof RecolocacaoRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_portal/automacoes': {
+      id: '/_portal/automacoes'
+      path: '/automacoes'
+      fullPath: '/automacoes'
+      preLoaderRoute: typeof PortalAutomacoesRouteImport
+      parentRoute: typeof PortalRoute
     }
     '/_portal/beneficios': {
       id: '/_portal/beneficios'
@@ -463,6 +482,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface PortalRouteChildren {
+  PortalAutomacoesRoute: typeof PortalAutomacoesRoute
   PortalBeneficiosRoute: typeof PortalBeneficiosRoute
   PortalBensEColetaRoute: typeof PortalBensEColetaRoute
   PortalCandidaturasAssistidasRoute: typeof PortalCandidaturasAssistidasRoute
@@ -479,6 +499,7 @@ interface PortalRouteChildren {
 }
 
 const PortalRouteChildren: PortalRouteChildren = {
+  PortalAutomacoesRoute: PortalAutomacoesRoute,
   PortalBeneficiosRoute: PortalBeneficiosRoute,
   PortalBensEColetaRoute: PortalBensEColetaRoute,
   PortalCandidaturasAssistidasRoute: PortalCandidaturasAssistidasRoute,

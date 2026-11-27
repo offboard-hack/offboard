@@ -134,6 +134,12 @@ const navigationGroups: {
         icon: "M14 8a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM3 20a7 5 0 0 1 14 0m2-13v6m-3-3h6",
       },
       {
+        to: "/automacoes",
+        label: "Automações",
+        subject: "Integrations",
+        icon: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15",
+      },
+      {
         to: "/integracoes",
         label: "Integrações",
         subject: "Integrations",
