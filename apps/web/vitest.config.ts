@@ -23,6 +23,7 @@ export default defineConfig({
         "src/features/employee/career/job-preferences-form.ts",
         "src/features/employee/career/rejections.ts",
         "src/features/employee/career/diversity-form.ts",
+        "src/features/employee/career/resume-onboarding.ts",
       ],
       thresholds: { lines: 100, functions: 100, branches: 100, statements: 100 },
     },
