@@ -16,7 +16,7 @@ export function outboxPath(env: Record<string, string | undefined>) {
 }
 
 export function appendToOutbox(path: string, entry: OutboxMessage) {
-  appendFileSync(path, `${JSON.stringify(entry)}\n`);
+  appendFileSync(path, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
 }
 
 export function readOutbox(path: string) {
@@ -31,8 +31,15 @@ export function readOutbox(path: string) {
   return content
     .split("\n")
     .filter(Boolean)
-    .map((line) => message.safeParse(JSON.parse(line)))
-    .flatMap((parsed) => (parsed.success ? [parsed.data] : []));
+    .flatMap((line) => {
+      try {
+        const parsed = message.safeParse(JSON.parse(line));
+
+        return parsed.success ? [parsed.data] : [];
+      } catch {
+        return [];
+      }
+    });
 }
 
 export function latestCode(messages: OutboxMessage[], email: string) {

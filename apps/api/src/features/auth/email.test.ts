@@ -93,9 +93,14 @@ it("escapes the names HR typed into the employee invite", () => {
   expect(message.html).toContain('href="https://offboard.example/colaborador/entrar"');
 });
 
-it("writes console mail to the dev outbox and rejects it in production", async () => {
+it("writes console mail to the dev outbox", async () => {
   const outbox = join(mkdtempSync(join(tmpdir(), "offboard-outbox-")), "mail.jsonl");
-  const sender = createEmailSender({ EMAIL_PROVIDER: "console", DEV_EMAIL_OUTBOX: outbox });
+
+  const sender = createEmailSender({
+    EMAIL_PROVIDER: "console",
+    NODE_ENV: "development",
+    DEV_EMAIL_OUTBOX: outbox,
+  });
 
   await sender.send({
     to: "a@example.com",
@@ -109,11 +114,24 @@ it("writes console mail to the dev outbox and rejects it in production", async (
     subject: "Assunto",
     text: "Corpo 123456",
   });
-  expect(() => createEmailSender({ EMAIL_PROVIDER: "console", NODE_ENV: "production" })).toThrow(
-    "only available in local development",
-  );
-  expect(() => createEmailSender({ EMAIL_PROVIDER: "console", VERCEL: "1" })).toThrow(
-    "only available in local development",
-  );
   expect(emailProvider.safeParse("console").success).toBe(false);
+});
+
+it("allows console mail only in an explicitly local environment", () => {
+  const refused = "requires NODE_ENV=development or test";
+
+  expect(() => createEmailSender({ EMAIL_PROVIDER: "console" })).toThrow(refused);
+  expect(() => createEmailSender({ EMAIL_PROVIDER: "console", NODE_ENV: "production" })).toThrow(
+    refused,
+  );
+  expect(() => createEmailSender({ EMAIL_PROVIDER: "console", NODE_ENV: "staging" })).toThrow(
+    refused,
+  );
+  expect(() =>
+    createEmailSender({ EMAIL_PROVIDER: "console", NODE_ENV: "development", VERCEL: "1" }),
+  ).toThrow(refused);
+  expect(() =>
+    createEmailSender({ EMAIL_PROVIDER: "console", NODE_ENV: "test", VERCEL: "0" }),
+  ).toThrow(refused);
+  expect(() => createEmailSender({ EMAIL_PROVIDER: "console", NODE_ENV: "test" })).not.toThrow();
 });

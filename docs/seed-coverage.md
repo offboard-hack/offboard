@@ -15,7 +15,7 @@ export DATABASE_URL=postgresql://offboard:offboard@127.0.0.1:5432/offboard
 export POSTGRES_URL=$DATABASE_URL
 npm run migrate -w @offboard/db
 
-BETTER_AUTH_SECRET=$(openssl rand -hex 32) EMAIL_PROVIDER=console npm run dev
+BETTER_AUTH_SECRET=$(openssl rand -hex 32) NODE_ENV=development EMAIL_PROVIDER=console npm run dev
 ```
 
 In another terminal, with the same `DATABASE_URL`:
@@ -24,13 +24,13 @@ In another terminal, with the same `DATABASE_URL`:
 npm run scenario -- add-person
 ```
 
-Options: `--base-url` for the API (default `http://127.0.0.1:3001`) and `--web-origin` for the portal origin the API trusts (default `http://localhost:5173`). Every scenario can be rerun: existing orgs, members and people are reused.
+The runner refuses to run when `--base-url` or `DATABASE_URL` points to a host other than `127.0.0.1`, `localhost` or `::1`, because it writes the plans and jobs catalog directly; `--allow-remote` overrides that. Options: `--base-url` for the API (default `http://127.0.0.1:3001`) and `--web-origin` for the portal origin the API trusts (default `http://localhost:5173`). Every scenario can be rerun: existing orgs, members and people are reused.
 
 ## Signing in locally
 
 `EMAIL_PROVIDER=console` makes the API write every outgoing email to a JSON lines file (`DEV_EMAIL_OUTBOX`, default `offboard-dev-outbox.jsonl` in the system temp directory) and log it. The scenario reads the six-digit code from that file, and you can read it from the API log or the file when you sign in by hand.
 
-The provider is refused when `NODE_ENV=production` or `VERCEL=1`, and the Worker's config only accepts `resend` and `cloudflare`, so it cannot be enabled in production. With it on, the API also trusts `x-forwarded-for` for its sign-in rate limit, so the runner can request many codes in a minute. The per-email limit of 5 codes every 15 minutes still applies.
+The provider is refused unless `NODE_ENV` is `development` or `test` and no `VERCEL` variable is set, and the Worker's config only accepts `resend` and `cloudflare`, so it cannot be enabled in production. With it on, the API also trusts `x-forwarded-for` for its sign-in rate limit, so the runner can request many codes in a minute. The per-email limit of 5 codes every 15 minutes still applies.
 
 To sign in by hand as any user a scenario printed: open `/entrar` (HR) or `/colaborador/entrar` (collaborator), enter the email, and copy the code from the API log.
 
@@ -40,7 +40,7 @@ To sign in by hand as any user a scenario printed: open `/entrar` (HR) or `/cola
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `orgs`            | Three orgs (Aurora Cosméticos on gold, Horizonte Logística on silver, Vale Verde Agro on platinum), each with an admin and HR members in other roles.         | `beatriz.castro@aurora.example.com`, `rafaela.nunes@horizonte.example.com`, `otavio.prado@valeverde.example.com` at `/entrar`. Members: Equipe.                                             |
 | `add-person`      | Aurora sets a benefit policy (silver by default, gold for Tecnologia), adds Marina Lopes and Rafael Mendes with an invite, and both sign in as collaborators. | HR: Beneficios and Desligamentos. Collaborators `marina.colaboradora@aurora.example.com` (default silver) and `rafael.colaborador@aurora.example.com` (rule gold) at `/colaborador/entrar`. |
-| `company-payment` | Aurora subscribes to a plan and the payment is confirmed. Needs the sandbox keys below.                                                                       | HR: Planos e gastos.                                                                                                                                                                        |
+| `company-payment` | Horizonte Logística subscribes to its plan and the payment is confirmed. Needs the sandbox keys below.                                                        | HR: Planos e gastos.                                                                                                                                                                        |
 | `career`          | Helena Pires signs in, saves a résumé and preferences, lists jobs, has her company sponsorship set to lapsed, and upgrades to Carreira Pro.                   | `helena.colaboradora@aurora.example.com` at `/colaborador/entrar`, then the Carreira screen.                                                                                                |
 | `offboarding`     | Aurora adds Gustavo Ribeiro, every task in his checklist moves to done, and an exit survey is submitted.                                                      | HR: Desligamentos, Painel, Resultados e feedback.                                                                                                                                           |
 | `all`             | Runs the five above in order.                                                                                                                                 | All of the above.                                                                                                                                                                           |

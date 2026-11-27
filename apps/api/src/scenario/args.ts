@@ -21,9 +21,15 @@ const options = z.object({
 export function parseArgs(argv: string[]) {
   const values = new Map<string, string>();
   const positional: string[] = [];
+  let allowRemote = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
+
+    if (arg === "--allow-remote") {
+      allowRemote = true;
+      continue;
+    }
 
     if (!arg.startsWith("--")) {
       positional.push(arg);
@@ -43,7 +49,9 @@ export function parseArgs(argv: string[]) {
   const name = scenarioName.safeParse(positional[0]);
 
   if (!name.success || positional.length > 1) {
-    throw new Error(`Usage: npm run scenario -- <${scenarioNames.join("|")}> [--base-url URL]`);
+    throw new Error(
+      `Usage: npm run scenario -- <${scenarioNames.join("|")}> [--base-url URL] [--web-origin URL] [--allow-remote]`,
+    );
   }
 
   const parsed = options.parse({
@@ -55,5 +63,35 @@ export function parseArgs(argv: string[]) {
     name: name.data,
     baseUrl: new URL(parsed.baseUrl).origin,
     webOrigin: new URL(parsed.webOrigin).origin,
+    allowRemote,
   };
+}
+
+const loopbackHosts = new Set(["127.0.0.1", "localhost", "::1", "[::1]", ""]);
+
+export function isLoopbackHost(hostname: string) {
+  return loopbackHosts.has(hostname);
+}
+
+export function assertLocalTargets(targets: {
+  baseUrl: string;
+  databaseUrl: string;
+  allowRemote: boolean;
+}) {
+  if (targets.allowRemote) return;
+
+  const refuse = (what: string) =>
+    new Error(`${what} is not a loopback host. Pass --allow-remote to run against it anyway.`);
+
+  if (!isLoopbackHost(new URL(targets.baseUrl).hostname)) throw refuse("--base-url");
+
+  let database: URL;
+
+  try {
+    database = new URL(targets.databaseUrl);
+  } catch {
+    throw new Error("DATABASE_URL is not a valid connection URL");
+  }
+
+  if (!isLoopbackHost(database.hostname)) throw refuse("DATABASE_URL");
 }

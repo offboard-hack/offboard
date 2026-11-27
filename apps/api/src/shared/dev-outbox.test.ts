@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -24,7 +24,7 @@ it("reads nothing from a missing outbox and skips malformed lines", () => {
   expect(readOutbox(path)).toEqual([]);
 
   appendToOutbox(path, { to: "a@example.com", subject: "s", text: "t" });
-  writeFileSync(path, `{"to":1}\n`, { flag: "a" });
+  writeFileSync(path, `{"to":1}\nnot json at all\n`, { flag: "a" });
 
   expect(readOutbox(path)).toEqual([{ to: "a@example.com", subject: "s", text: "t" }]);
 });
@@ -39,4 +39,12 @@ it("picks the latest sign-in code for an email and ignores other mail", () => {
 
   expect(latestCode(messages, "a@example.com")).toBe("333333");
   expect(latestCode(messages, "c@example.com")).toBeUndefined();
+});
+
+it("creates the outbox readable by its owner only", () => {
+  const path = join(dir(), "mail.jsonl");
+
+  appendToOutbox(path, { to: "a@example.com", subject: "s", text: "t" });
+
+  expect(statSync(path).mode & 0o777).toBe(0o600);
 });

@@ -42,6 +42,7 @@ describe.skipIf(!url)("scenario runner against the in-process API", () => {
       BETTER_AUTH_URL: webOrigin,
       BETTER_AUTH_SECRET: randomUUID() + randomUUID(),
       EMAIL_PROVIDER: "console",
+      NODE_ENV: "test",
       DEV_EMAIL_OUTBOX: outbox,
     },
   });
@@ -193,6 +194,15 @@ describe.skipIf(!url)("scenario runner against the in-process API", () => {
     expect(lines).toContain("Helena Pires saved a base résumé");
     expect(lines.some((line) => line.startsWith("Helena Pires sees"))).toBe(true);
     expect(lines).toContain("Helena Pires Carreira Pro is active");
+
+    const again = context({
+      ABACATEPAY_API_KEY: "sandbox-key",
+      ABACATEPAY_WEBHOOK_SECRET: webhookSecret,
+    });
+
+    await runScenario("career", again.ctx);
+
+    expect(again.lines).toContain("Helena Pires Carreira Pro already active");
   });
 
   it("subscribes a company through the checkout route and activates it from a signed webhook", async () => {

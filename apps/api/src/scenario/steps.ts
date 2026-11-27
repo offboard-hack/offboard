@@ -526,6 +526,14 @@ const planBody = z.object({
   individual: z.object({ status: z.string() }).nullable(),
 });
 
+async function readPlan(ctx: Context, cookie: string) {
+  return parseBody(
+    expectStatus(await ctx.http("GET", "/me/plan", { cookie }), "Reading the plan", 200),
+    "Plan",
+    planBody,
+  );
+}
+
 export async function upgradeCareerPro(
   ctx: Context,
   collaborator: Collaborator,
@@ -540,6 +548,14 @@ export async function upgradeCareerPro(
   }
 
   const cookie = collaborator.session.cookie;
+
+  const before = await readPlan(ctx, cookie);
+
+  if (before.individual?.status === "active") {
+    ctx.log(`${collaborator.person.name} Carreira Pro already active`);
+
+    return "active";
+  }
 
   const checkout = parseBody(
     expectStatus(
@@ -559,11 +575,7 @@ export async function upgradeCareerPro(
     completedEvent({ eventId: ctx.newId(), externalId: `talent:${profileId}`, amountCents: 7900 }),
   );
 
-  const plan = parseBody(
-    expectStatus(await ctx.http("GET", "/me/plan", { cookie }), "Reading the plan", 200),
-    "Plan",
-    planBody,
-  );
+  const plan = await readPlan(ctx, cookie);
 
   ctx.log(`${collaborator.person.name} Carreira Pro is ${plan.individual?.status ?? "missing"}`);
 

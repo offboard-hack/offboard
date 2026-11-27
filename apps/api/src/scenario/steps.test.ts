@@ -138,6 +138,17 @@ it("leaves an already active company subscription alone", async () => {
   expect(lines).toEqual(["company subscription already active on gold"]);
 });
 
+it("leaves an active Carreira Pro alone", async () => {
+  const { ctx, calls, lines } = scripted(
+    [reply(200, { upgrade: { offered: false }, individual: { status: "active" } })],
+    { ABACATEPAY_API_KEY: "key", ABACATEPAY_WEBHOOK_SECRET: "secret" },
+  );
+
+  expect(await upgradeCareerPro(ctx, { person, session: { cookie: "c" } }, "p1")).toBe("active");
+  expect(calls).toEqual(["GET /me/plan"]);
+  expect(lines).toEqual(["Pessoa Carreira Pro already active"]);
+});
+
 it("skips Carreira Pro without keys and reports a missing individual plan", async () => {
   const skipped = scripted([]);
 
@@ -147,6 +158,7 @@ it("skips Carreira Pro without keys and reports a missing individual plan", asyn
 
   const paid = scripted(
     [
+      reply(200, { upgrade: { offered: true }, individual: null }),
       reply(200, { url: "https://checkout.example.com/2" }),
       reply(200, { ok: true }),
       reply(200, { upgrade: { offered: true }, individual: null }),

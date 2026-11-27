@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@offboard/db/client";
 import { seedCatalog } from "@offboard/db/seed-database";
 import { latestCode, outboxPath, readOutbox } from "../shared/dev-outbox.js";
-import { parseArgs } from "./args.js";
+import { assertLocalTargets, parseArgs } from "./args.js";
 import { createHttp } from "./http.js";
 import { runScenario } from "./run.js";
 
@@ -10,6 +10,8 @@ const args = parseArgs(process.argv.slice(2));
 const databaseUrl = process.env.POSTGRES_URL ?? process.env.DATABASE_URL;
 
 if (!databaseUrl) throw new Error("POSTGRES_URL or DATABASE_URL is required to seed the catalog");
+
+assertLocalTargets({ baseUrl: args.baseUrl, databaseUrl, allowRemote: args.allowRemote });
 
 const db = createClient(databaseUrl);
 const outbox = outboxPath(process.env);

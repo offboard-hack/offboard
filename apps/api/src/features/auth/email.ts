@@ -51,8 +51,12 @@ function createCloudflareSender(from: string, binding: CloudflareEmailBinding) {
 }
 
 function createConsoleSender(env: Record<string, string | undefined>) {
-  if (env.NODE_ENV === "production" || env.VERCEL === "1") {
-    throw new Error("EMAIL_PROVIDER=console is only available in local development");
+  const local = env.NODE_ENV === "development" || env.NODE_ENV === "test";
+
+  if (!local || env.VERCEL !== undefined) {
+    throw new Error(
+      "EMAIL_PROVIDER=console requires NODE_ENV=development or test and no VERCEL variable",
+    );
   }
 
   const path = outboxPath(env);
