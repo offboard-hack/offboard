@@ -49,6 +49,14 @@ describe("plainReason", () => {
     );
   });
 
+  it("keeps month and year dates", () => {
+    expect(plainReason("Experiência de 03/2019 a 08/2021 sem resultados.")).toBe(
+      "Experiência de 03/2019 a 08/2021 sem resultados.",
+    );
+    expect(plainReason("Desde 12/2020, faltam métricas.")).toBe("Desde 12/2020, faltam métricas.");
+    expect(plainReason("Peso de 20 × 1/6, sem datas.")).toBe("Sem datas.");
+  });
+
   it("returns an empty reason when nothing plain is left", () => {
     expect(plainReason("20 × 1/6 ≈ 3")).toBe("");
   });

@@ -1,4 +1,4 @@
-const arithmetic = /[×≈=]|\d+\s*\/\s*\d+/;
+const arithmetic = /[×≈=]|(?<!\d)\d+\s*\/\s*(?!\d{4})\d+/;
 const parenthetical = /\s*\([^()]*\)/g;
 const clause = /(?:[^.!?;,]|[.,](?=\S))+[.!?;,]*/g;
 
