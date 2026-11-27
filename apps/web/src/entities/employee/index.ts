@@ -104,6 +104,8 @@ export function employeeStateQuery(account: EmployeeAccount, key: EmployeeState[
   });
 }
 
+export const consentRequiredMessage = "Para salvar, aceite os termos de uso e a privacidade.";
+
 export function useEmployeeWrite(account: EmployeeAccount) {
   const queryClient = useQueryClient();
 
@@ -132,7 +134,7 @@ export function useEmployeeWrite(account: EmployeeAccount) {
         "error" in errorValue &&
         errorValue.error === "Consent required"
       ) {
-        throw new Error("Para salvar, aceite os termos em Perfil → Privacidade.");
+        throw new Error(consentRequiredMessage);
       }
 
       if (result.status === 422) {

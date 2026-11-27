@@ -1,10 +1,38 @@
 import { useCallback, type ComponentProps } from "react";
 import { cn } from "@/shared/lib/utils";
 import { DayPicker, getDefaultClassNames, type DayButton, type Locale } from "react-day-picker";
+import type { DateLib, DateLibOptions, Modifiers } from "react-day-picker";
 
 import { Button, buttonVariants } from "./button";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeftIcon, ArrowRightIcon, ArrowDownIcon } from "@hugeicons/core-free-icons";
+
+const portugueseLabels = {
+  labelNav: () => "Navegação do calendário",
+  labelNext: () => "Ir para o próximo mês",
+  labelPrevious: () => "Ir para o mês anterior",
+  labelMonthDropdown: () => "Mês",
+  labelYearDropdown: () => "Ano",
+  labelGrid: (date: Date, _options?: DateLibOptions, dateLib?: DateLib) =>
+    dateLib?.format(date, "LLLL yyyy") ?? "",
+  labelGridcell: (
+    date: Date,
+    modifiers?: Modifiers,
+    _options?: DateLibOptions,
+    dateLib?: DateLib,
+  ) => `${modifiers?.today ? "Hoje, " : ""}${dateLib?.format(date, "PPPP") ?? ""}`,
+  labelDayButton: (
+    date: Date,
+    modifiers: Modifiers,
+    _options?: DateLibOptions,
+    dateLib?: DateLib,
+  ) =>
+    `${modifiers.today ? "Hoje, " : ""}${dateLib?.format(date, "PPPP") ?? ""}${modifiers.selected ? ", selecionado" : ""}`,
+  labelWeekday: (date: Date, _options?: DateLibOptions, dateLib?: DateLib) =>
+    dateLib?.format(date, "cccc") ?? "",
+  labelWeekNumber: (week: number) => `Semana ${week}`,
+  labelWeekNumberHeader: () => "Número da semana",
+};
 
 function Calendar({
   className,
@@ -15,6 +43,7 @@ function Calendar({
   locale,
   formatters,
   components,
+  labels,
   ...props
 }: ComponentProps<typeof DayPicker> & {
   buttonVariant?: ComponentProps<typeof Button>["variant"];
@@ -32,6 +61,7 @@ function Calendar({
       )}
       captionLayout={captionLayout}
       locale={locale}
+      labels={{ ...portugueseLabels, ...labels }}
       formatters={{
         formatMonthDropdown: (date) => date.toLocaleString(locale?.code, { month: "short" }),
         ...formatters,

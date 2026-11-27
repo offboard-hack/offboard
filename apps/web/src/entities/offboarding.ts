@@ -16,6 +16,7 @@ export const offboardingDepartments = [
   "Operações",
   "Financeiro",
   "Produto",
+  "Comercial",
 ];
 
 export const offboardingTeams = [

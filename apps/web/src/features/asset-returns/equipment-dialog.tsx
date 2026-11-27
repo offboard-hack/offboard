@@ -35,14 +35,30 @@ import {
 
 type CaseOption = { id: string; name: string };
 
+export type DialogControl = { open: boolean; onOpenChange: (open: boolean) => void };
+
+function useDialogOpen(control?: DialogControl) {
+  const [own, setOwn] = useState(false);
+
+  return control ?? { open: own, onOpenChange: setOwn };
+}
+
 const textFields = [
   { name: "item", label: "Item", placeholder: "Notebook Dell Latitude 5440" },
   { name: "tag", label: "Patrimônio", placeholder: "AUR-0412" },
 ] as const;
 
-export function EquipmentDialog({ cases, item }: { cases: CaseOption[]; item?: EquipmentReturn }) {
+export function EquipmentDialog({
+  cases,
+  item,
+  control,
+}: {
+  cases: CaseOption[];
+  item?: EquipmentReturn;
+  control?: DialogControl;
+}) {
   const id = useId();
-  const [open, setOpen] = useState(false);
+  const { open, onOpenChange: setOpen } = useDialogOpen(control);
   const save = useSaveEquipment(item?.id);
 
   const form = useForm({
@@ -72,24 +88,12 @@ export function EquipmentDialog({ cases, item }: { cases: CaseOption[]; item?: E
         }
       }}
     >
-      <DialogTrigger
-        render={
-          item ? (
-            <Button variant="ghost" size="sm" aria-label={`Editar ${item.code}`} />
-          ) : (
-            <Button />
-          )
-        }
-      >
-        {item ? (
-          "Editar"
-        ) : (
-          <>
-            <HugeiconsIcon icon={Add01Icon} aria-hidden="true" />
-            Adicionar bem
-          </>
-        )}
-      </DialogTrigger>
+      {control ? null : (
+        <DialogTrigger render={<Button />}>
+          <HugeiconsIcon icon={Add01Icon} aria-hidden="true" />
+          Adicionar bem
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle className="text-xl leading-tight font-semibold sm:text-2xl">
@@ -241,9 +245,15 @@ export function EquipmentDialog({ cases, item }: { cases: CaseOption[]; item?: E
   );
 }
 
-export function AssignEquipmentDialog({ item }: { item: EquipmentReturn }) {
+export function AssignEquipmentDialog({
+  item,
+  control,
+}: {
+  item: EquipmentReturn;
+  control: DialogControl;
+}) {
   const id = useId();
-  const [open, setOpen] = useState(false);
+  const { open, onOpenChange: setOpen } = control;
   const assign = useAssignEquipment(item.id);
   const failure = assign.error instanceof EquipmentChangeError ? assign.error.code : undefined;
 
@@ -271,11 +281,6 @@ export function AssignEquipmentDialog({ item }: { item: EquipmentReturn }) {
         }
       }}
     >
-      <DialogTrigger
-        render={<Button variant="ghost" size="sm" aria-label={`Vincular ${item.code}`} />}
-      >
-        Vincular
-      </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Vincular {item.code}</DialogTitle>
@@ -343,8 +348,14 @@ export function AssignEquipmentDialog({ item }: { item: EquipmentReturn }) {
   );
 }
 
-export function RemoveEquipmentDialog({ item }: { item: EquipmentReturn }) {
-  const [open, setOpen] = useState(false);
+export function RemoveEquipmentDialog({
+  item,
+  control,
+}: {
+  item: EquipmentReturn;
+  control: DialogControl;
+}) {
+  const { open, onOpenChange: setOpen } = control;
   const remove = useRemoveEquipment(item.id);
   const failure = remove.error instanceof EquipmentChangeError ? remove.error.code : undefined;
 
@@ -357,18 +368,6 @@ export function RemoveEquipmentDialog({ item }: { item: EquipmentReturn }) {
         if (!next) remove.reset();
       }}
     >
-      <DialogTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive"
-            aria-label={`Remover ${item.code}`}
-          />
-        }
-      >
-        Remover
-      </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Remover {item.code}?</DialogTitle>

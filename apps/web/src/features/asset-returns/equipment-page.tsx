@@ -1,6 +1,13 @@
 import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { listPagination } from "@/shared/lib/list-pagination";
-import { Alert02Icon, Calendar03Icon, Tick02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
+import {
+  Alert02Icon,
+  Calendar03Icon,
+  MoreVerticalIcon,
+  Tick02Icon,
+  UserGroupIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { classProps } from "../../shared/lib/class-props";
@@ -30,6 +37,12 @@ import {
   type EquipmentReturn,
 } from "@/entities/equipment-returns";
 import { Button } from "@/shared/ui/shadcn/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/shared/ui/shadcn/dropdown-menu";
 import { AssignEquipmentDialog, EquipmentDialog, RemoveEquipmentDialog } from "./equipment-dialog";
 import { EquipmentImportDialog } from "./equipment-import-dialog";
 import {
@@ -45,6 +58,7 @@ import {
 const styles = {
   section: "rounded-2xl border bg-card p-4 sm:p-5",
   inventory: "min-w-2xl",
+  holder: "block max-w-40 truncate",
   badge: "text-xs font-medium text-primary",
   badgeNeutral: "text-muted-foreground",
   badgeReady: "text-foreground",
@@ -124,6 +138,41 @@ function CollectionDetails({ item, caseId }: { item: EquipmentReturn; caseId: st
   );
 }
 
+type EquipmentDialogName = "edit" | "assign" | "remove";
+
+function EquipmentActions({ item, cases }: { item: EquipmentReturn; cases: CaseOption[] }) {
+  const [dialog, setDialog] = useState<EquipmentDialogName | null>(null);
+
+  const control = (name: EquipmentDialogName) => ({
+    open: dialog === name,
+    onOpenChange: (open: boolean) => setDialog(open ? name : null),
+  });
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={<Button variant="ghost" size="icon-sm" aria-label={`Ações de ${item.code}`} />}
+        >
+          <HugeiconsIcon icon={MoreVerticalIcon} aria-hidden="true" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={() => setDialog("edit")}>Editar</DropdownMenuItem>
+          {!item.caseId && (
+            <DropdownMenuItem onClick={() => setDialog("assign")}>Vincular</DropdownMenuItem>
+          )}
+          <DropdownMenuItem variant="destructive" onClick={() => setDialog("remove")}>
+            Remover
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <EquipmentDialog cases={cases} item={item} control={control("edit")} />
+      {!item.caseId && <AssignEquipmentDialog item={item} control={control("assign")} />}
+      <RemoveEquipmentDialog item={item} control={control("remove")} />
+    </>
+  );
+}
+
 function ReceiptAction({ item, caseId }: { item: EquipmentReturn; caseId: string }) {
   const client = useQueryClient();
 
@@ -148,7 +197,7 @@ function ReceiptAction({ item, caseId }: { item: EquipmentReturn; caseId: string
         onClick={() => mutation.mutate()}
         aria-label={`${label} de ${item.code}`}
       >
-        {mutation.isPending ? "Salvando…" : label}
+        {mutation.isPending ? "Salvando…" : item.received ? "Desfazer" : "Confirmar"}
       </Button>
       {mutation.isError ? (
         <p role="alert" className="max-w-44 whitespace-normal text-destructive">
@@ -246,6 +295,7 @@ function equipmentColumns(canUpdate: boolean, cases: CaseOption[]) {
       enableSorting: true,
       sortFn: "portugueseText",
       meta: { cellStyle: portalStyles.tableHeading },
+      cell: ({ getValue }) => <span className="block min-w-32">{getValue<string>()}</span>,
     },
     { id: "tag", accessorFn: ({ code }) => code, header: "Patrimônio" },
     {
@@ -264,7 +314,10 @@ function equipmentColumns(canUpdate: boolean, cases: CaseOption[]) {
             {original.person}
           </Link>
         ) : (
-          <span className="text-muted-foreground">
+          <span
+            {...classProps(styles.holder, "text-muted-foreground")}
+            title={original.holderEmail ? `Aguardando ${original.holderEmail}` : undefined}
+          >
             {original.holderEmail ? `Aguardando ${original.holderEmail}` : "Em estoque"}
           </span>
         ),
@@ -328,11 +381,7 @@ function equipmentColumns(canUpdate: boolean, cases: CaseOption[]) {
               original.fromEmployeePlan ? (
                 <span className="text-xs text-muted-foreground">Plano da pessoa</span>
               ) : (
-                <div className="flex gap-1">
-                  {!original.caseId && <AssignEquipmentDialog item={original} />}
-                  <EquipmentDialog cases={cases} item={original} />
-                  <RemoveEquipmentDialog item={original} />
-                </div>
+                <EquipmentActions item={original} cases={cases} />
               ),
           } satisfies TableColumn<EquipmentReturn>,
         ]
