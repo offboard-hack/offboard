@@ -43,6 +43,7 @@ export function createBillingRepository(db: Database) {
         slug: plans.slug,
         monthlyPriceCents: plans.monthlyPriceCents,
         maxEmployees: plans.maxEmployees,
+        perPersonPriceCents: plans.perPersonPriceCents,
         features: plans.features,
       })
       .from(plans)
@@ -62,6 +63,7 @@ export function createBillingRepository(db: Database) {
           slug: plans.slug,
           monthlyPriceCents: plans.monthlyPriceCents,
           maxEmployees: plans.maxEmployees,
+          perPersonPriceCents: plans.perPersonPriceCents,
           features: plans.features,
         },
       })

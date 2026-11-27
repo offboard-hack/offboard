@@ -11,6 +11,7 @@ const planRow = t.Object({
   slug: t.String(),
   monthlyPriceCents: t.Number(),
   maxEmployees: t.Number(),
+  perPersonPriceCents: t.Number(),
   features: t.Array(t.String()),
 });
 
