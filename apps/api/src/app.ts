@@ -43,6 +43,7 @@ import { scoreMatches, type MatchJob } from "./features/matches/score.js";
 import { searchTerms, toTsQuery } from "./features/matches/terms.js";
 import { backgroundRoutes } from "./features/background/routes.js";
 import { candidatesRoutes } from "./features/candidates/routes.js";
+import type { Rerank } from "./features/candidates/routes.js";
 import { demoRoutes } from "./features/demo/routes.js";
 import { syncDemoEmbeddings } from "./features/demo/sync.js";
 import { drain, type JobHandler } from "./features/background/drain.js";
@@ -110,6 +111,7 @@ type AppOptions = {
   runInBackground?: (task: () => Promise<void>) => void;
   publicPageOrigin?: string;
   browserbase?: { apiKey: string; projectId: string };
+  rerank?: Rerank;
 };
 
 function ownResumePdf(name: string, content: ResumeContent) {
@@ -667,10 +669,13 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     )
     .use(demoRoutes(repos.demo, repos.searchQuota, options.embedProfile))
     .use(
-      candidatesRoutes(repos.candidates, repos.searchQuota, options.embedProfile, {
-        send: options.sendEmail,
-        origin: webOrigin,
-      }),
+      candidatesRoutes(
+        repos.candidates,
+        repos.searchQuota,
+        options.embedProfile,
+        { send: options.sendEmail, origin: webOrigin },
+        options.rerank,
+      ),
     )
     .use(accountRoutes(repos.account, talent, options.storage, abacatepay))
     .use(equipmentRoutes(repos.equipment, access))

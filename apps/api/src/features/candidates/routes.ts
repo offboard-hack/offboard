@@ -5,6 +5,7 @@ import { errorResponse } from "../../shared/http.js";
 import { profileCard, toProfileCard } from "../../shared/profile-card.js";
 import type { SearchQuota } from "../../shared/search-quota.js";
 import { contactEmail } from "./contact.js";
+import type { RankedCandidate } from "./rerank.js";
 import type { CandidatesRepository } from "./repository.js";
 
 const resultLimit = 12;
@@ -14,11 +15,17 @@ const contactsPerCandidate = 5;
 
 type Message = { to: string; subject: string; text: string; html: string };
 
+export type Rerank = (
+  query: string,
+  candidates: RankedCandidate[],
+) => Promise<{ id: string; name: string; content: RankedCandidate["content"]; match: number }[]>;
+
 export function candidatesRoutes(
   repo: CandidatesRepository,
   quota: SearchQuota,
   embed: Embed | undefined,
   mail: { send: (message: Message) => Promise<void>; origin: string },
+  rerank?: Rerank,
 ) {
   return new Elysia()
     .get(
@@ -37,6 +44,28 @@ export function candidatesRoutes(
         if (!vectors) return status(502, { error: "Search unavailable" });
 
         const nearest = await repo.nearest(vectors[0], resultLimit);
+
+        if (rerank && nearest.length > 0) {
+          const reranked = await rerank(query.q.trim(), nearest).catch(
+            logFailure("candidate reranking failed"),
+          );
+
+          if (reranked) {
+            return reranked.map((row) => ({
+              id: row.id,
+              name: row.name,
+              headline: row.content.headline.text,
+              summary: row.content.summary.text,
+              city: row.content.contact.city,
+              match: row.match,
+              experiences: row.content.experiences
+                .slice(0, 2)
+                .map(({ role, company, start, end }) => ({ role, company, start, end })),
+              skills: row.content.skills.slice(0, 8).map((skill) => skill.name),
+              languages: row.content.languages.map(({ name, level }) => ({ name, level })),
+            }));
+          }
+        }
 
         return nearest.map((row) => toProfileCard(row.id, row.name, row.content, row.distance));
       },
