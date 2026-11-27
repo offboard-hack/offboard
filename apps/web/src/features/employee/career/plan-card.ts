@@ -22,6 +22,8 @@ export type CareerPlan = {
     targetPlanName: string;
     priceCents: number;
     active: boolean;
+    checkoutOpen: boolean;
+    endsAt: string | null;
   } | null;
 };
 
@@ -81,6 +83,13 @@ export const cancelConfirmLabel = "Sim, cancelar";
 
 export const cancelKeepLabel = "Manter";
 
+export const cancelCopayLabel = "Cancelar upgrade";
+
+export const cancelCopayPrompt =
+  "Cancelar o upgrade? Você mantém o acesso até o fim do período já pago.";
+
+export const copayPendingLabel = "Pagamento em andamento";
+
 export function shouldPollPlan(plan: CareerPlan | undefined, today: string, copayPaid = false) {
   if (plan === undefined) return true;
 
@@ -99,6 +108,8 @@ function upgradeState(wanted: boolean, offered: boolean) {
 
 function copayState(copay: CareerPlan["copay"]) {
   if (copay?.active) return "active" as const;
+
+  if (copay?.checkoutOpen) return "pending" as const;
 
   return copay?.offered ? ("available" as const) : ("hidden" as const);
 }
@@ -154,6 +165,7 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean, cop
     aiApply.allowedBy === "company" &&
     daysUntil(company.sponsoredUntil, today) <= sponsorshipWarningDays;
 
+  const copayButton = copayState(copay);
   const proActive = isProActive(plan, today);
   const pastDue = individual?.status === "past_due";
   const checkoutPending = individual?.status === "pending" && !upgrade.offered;
@@ -187,11 +199,21 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean, cop
     showComparison:
       activeBenefit !== null &&
       (!proActive || activeBenefit.aiApplyDailyLimit > proAiApplyDailyLimit),
-    copayButton: copayState(copay),
-    copayLabel: copay?.offered
-      ? `Upgrade para ${copay.targetPlanName} · ${planPrice(copay.priceCents)}`
-      : null,
-    copayActiveLabel: copay?.active ? `Upgrade ativo · ${copay.targetPlanName}` : null,
+    copayButton,
+    copayLabel:
+      copay && copayButton === "available"
+        ? `Upgrade para ${copay.targetPlanName} · ${planPrice(copay.priceCents)}`
+        : null,
+    copayPendingLabel: copayButton === "pending" ? copayPendingLabel : null,
+    copayActiveLabel:
+      copay && copayButton === "active" && copay.endsAt === null
+        ? `Upgrade ativo · ${copay.targetPlanName} · ${planPrice(copay.priceCents)}`
+        : null,
+    copayEndedLabel:
+      copay?.active && copay.endsAt !== null
+        ? `Upgrade cancelado · acesso até ${planDate(copay.endsAt)}`
+        : null,
+    copayCancelable: copay?.active === true && copay.endsAt === null,
     aiApplyLine: aiApplyLabel(aiApply.dailyLimit, activeBenefit?.aiApplyPriority === true),
   };
 }

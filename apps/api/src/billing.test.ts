@@ -24,10 +24,11 @@ import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.ts";
 import { createAbacatePayGateway } from "./features/billing/abacatepay.js";
+import { applyWebhookEvent, parseWebhookEvent } from "./features/billing/webhook.js";
 import { careerPlanRoutes } from "./features/career-plan/routes.js";
 import { createRepositories } from "./repositories.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
-import { saoPauloDate } from "./shared/sao-paulo-date.js";
+import { addMonths, saoPauloDate } from "./shared/sao-paulo-date.js";
 import { talentAccess } from "./shared/talent-access.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -2128,11 +2129,15 @@ describe.skipIf(!url)("billing", () => {
   describe("co-pay webhook", () => {
     const cancelled: string[] = [];
 
+    let configured = true;
+
     const copayApp = createApp(webOrigin, repos, {
       auth,
       sendEmail: () => Promise.resolve(),
       abacatepay: {
-        configured: true,
+        get configured() {
+          return configured;
+        },
         createSubscriptionCheckout: () => Promise.resolve({ id: "bill_x", url: "https://x" }),
         cancelSubscription(id: string) {
           cancelled.push(id);
@@ -2149,6 +2154,7 @@ describe.skipIf(!url)("billing", () => {
 
     beforeEach(async () => {
       cancelled.length = 0;
+      configured = true;
       await db.delete(benefitAssignments);
       await db.delete(copayProducts);
 
@@ -2174,6 +2180,8 @@ describe.skipIf(!url)("billing", () => {
     });
 
     async function assign(patch: Partial<typeof benefitAssignments.$inferInsert> = {}) {
+      const owned = patch.copaySubscriptionId !== undefined && patch.copaySubscriptionId !== null;
+
       await db.insert(benefitAssignments).values({
         orgId: defaultOrgId,
         profileId,
@@ -2181,6 +2189,10 @@ describe.skipIf(!url)("billing", () => {
         effectivePlanId: goldId,
         source: "manual",
         validUntil: "2099-12-31",
+        copayCheckoutId: "bill_1",
+        copayCheckoutUrl: owned ? null : "https://pay.example/bill_1",
+        copayCheckoutAt: owned ? null : new Date(),
+        copayPriceCents: 4000,
         ...patch,
       });
     }
@@ -2191,7 +2203,12 @@ describe.skipIf(!url)("billing", () => {
       return row;
     }
 
-    function copayWebhook(event: string, externalId: string | null, subscription = "subs_1") {
+    function copayWebhook(
+      event: string,
+      externalId: string | null,
+      subscription = "subs_1",
+      checkoutId = "bill_1",
+    ) {
       return copayApp.handle(
         new Request(`http://localhost/api/billing/webhook?webhookSecret=${webhookSecret}`, {
           method: "POST",
@@ -2201,22 +2218,30 @@ describe.skipIf(!url)("billing", () => {
             apiVersion: 2,
             data: {
               subscription: { id: subscription, amount: 1000 },
-              ...(externalId !== null && { checkout: { id: "bill_1", externalId } }),
+              ...(externalId !== null && { checkout: { id: checkoutId, externalId } }),
             },
           }),
         }),
       );
     }
 
-    it("subscription.completed upgrades effectivePlanId", async () => {
+    const monthFromToday = () => addMonths(saoPauloDate(new Date()), 1);
+
+    it("subscription.completed of the issued checkout upgrades the plan and sets the period end", async () => {
       await assign();
 
       const res = await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
 
       expect(res.status).toBe(200);
+      expect(cancelled).toEqual([]);
       expect(await assignment()).toMatchObject({
         effectivePlanId: platinumId,
         copaySubscriptionId: "subs_1",
+        copayCheckoutId: "bill_1",
+        copayCheckoutUrl: null,
+        copayCheckoutAt: null,
+        copayPriceCents: 4000,
+        copayPeriodEnd: monthFromToday(),
       });
     });
 
@@ -2231,7 +2256,87 @@ describe.skipIf(!url)("billing", () => {
       });
     });
 
-    it("cancels subscription when target is already below effective plan", async () => {
+    it("cancels a paid bill of another checkout and logs that it needs a refund", async () => {
+      await assign();
+
+      const logged = vi.spyOn(console, "error");
+
+      try {
+        await copayWebhook(
+          "subscription.completed",
+          `copay:${profileId}:${platinumId}`,
+          "subs_stray",
+          "bill_stray",
+        );
+
+        expect(cancelled).toEqual(["subs_stray"]);
+        expect(logged).toHaveBeenCalledWith("copay payment needs refund", {
+          event: "subscription.completed",
+          reason: "checkout does not match the issued one",
+          profileId,
+          subscriptionId: "subs_stray",
+          checkoutId: "bill_stray",
+        });
+        expect(await assignment()).toMatchObject({
+          effectivePlanId: goldId,
+          copaySubscriptionId: null,
+          copayCheckoutId: "bill_1",
+        });
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("cancels a paid bill of a checkout that HR voided", async () => {
+      await assign({
+        copayCheckoutId: null,
+        copayCheckoutUrl: null,
+        copayCheckoutAt: null,
+        copayPriceCents: null,
+      });
+      await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
+
+      expect(cancelled).toEqual(["subs_1"]);
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: goldId,
+        copaySubscriptionId: null,
+      });
+    });
+
+    it("never activates another profile with a checkout that is not its own", async () => {
+      await assign();
+
+      const [other] = await db
+        .insert(talentProfiles)
+        .values({
+          orgId: defaultOrgId,
+          personalEmail: `pessoa-${randomUUID()}@exemplo.com`,
+          name: "Outra Pessoa",
+          sponsoredUntil: "2099-12-31",
+        })
+        .returning({ id: talentProfiles.id });
+
+      await db.insert(benefitAssignments).values({
+        orgId: defaultOrgId,
+        profileId: other.id,
+        assignedPlanId: goldId,
+        effectivePlanId: goldId,
+        source: "manual",
+        validUntil: "2099-12-31",
+        copayCheckoutId: "bill_other",
+        copayCheckoutAt: new Date(),
+      });
+
+      await copayWebhook("subscription.completed", `copay:${other.id}:${platinumId}`);
+
+      expect(cancelled).toEqual(["subs_1"]);
+
+      const rows = await db.select().from(benefitAssignments);
+
+      expect(rows.map((row) => row.copaySubscriptionId)).toEqual([null, null]);
+    });
+
+    it("cancels the incoming subscription when the target is already below the effective plan", async () => {
       await assign({ effectivePlanId: platinumId });
       await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
 
@@ -2242,12 +2347,175 @@ describe.skipIf(!url)("billing", () => {
       });
     });
 
-    it("cancels incoming subscription when another is already attached", async () => {
+    it("cancels the incoming subscription, never the owned one, when another is attached", async () => {
       await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_2" });
       await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
 
       expect(cancelled).toEqual(["subs_1"]);
       expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_2" });
+    });
+
+    it("logs instead of canceling when the gateway is not configured", async () => {
+      await assign();
+      configured = false;
+
+      const logged = vi.spyOn(console, "error");
+
+      try {
+        await copayWebhook(
+          "subscription.completed",
+          `copay:${profileId}:${platinumId}`,
+          "subs_x",
+          "bill_x",
+        );
+
+        expect(cancelled).toEqual([]);
+        expect(logged).toHaveBeenCalledWith(
+          "copay subscription could not be canceled",
+          expect.objectContaining({ subscriptionId: "subs_x" }),
+        );
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    describe("when the conditional activation loses", () => {
+      function lost(current: string | null | "gone") {
+        const stale = {
+          assignedPlanId: goldId,
+          effectivePlanId: goldId,
+          copaySubscriptionId: null,
+          copayCheckoutId: "bill_1",
+          copayCheckoutAt: new Date(),
+          copayPeriodEnd: null,
+          validUntil: "2099-12-31",
+        };
+
+        let reads = 0;
+
+        return {
+          ...repos.benefits,
+          async findAssignmentByProfile() {
+            reads += 1;
+
+            if (reads === 1) return stale;
+
+            return current === "gone" ? null : { ...stale, copaySubscriptionId: current };
+          },
+          async activateCopay() {
+            return false;
+          },
+        };
+      }
+
+      async function deliver(current: string | null | "gone") {
+        const event = parseWebhookEvent(
+          JSON.stringify({
+            event: "subscription.completed",
+            data: {
+              subscription: { id: "subs_1", amount: 1000 },
+              checkout: { id: "bill_1", externalId: `copay:${profileId}:${platinumId}` },
+            },
+          }),
+        );
+
+        if (!event) throw new Error("invalid event");
+
+        await applyWebhookEvent(
+          repos.billing,
+          lost(current),
+          { configured: true, cancelSubscription: async (id) => void cancelled.push(id) },
+          event,
+          null,
+        );
+      }
+
+      it("leaves a delivery alone when the winner is the same subscription", async () => {
+        await deliver("subs_1");
+
+        expect(cancelled).toEqual([]);
+      });
+
+      it("cancels only the incoming subscription when another one won", async () => {
+        await deliver("subs_2");
+
+        expect(cancelled).toEqual(["subs_1"]);
+      });
+
+      it("cancels the incoming subscription when the assignment vanished", async () => {
+        await deliver("gone");
+
+        expect(cancelled).toEqual(["subs_1"]);
+      });
+
+      it("cancels the incoming subscription when nobody owns the co-pay", async () => {
+        await deliver(null);
+
+        expect(cancelled).toEqual(["subs_1"]);
+      });
+    });
+
+    it("lets only one of two concurrent deliveries for the checkout own the co-pay", async () => {
+      await assign();
+
+      const reference = `copay:${profileId}:${platinumId}`;
+
+      await Promise.all([
+        copayWebhook("subscription.completed", reference, "subs_a"),
+        copayWebhook("subscription.completed", reference, "subs_b"),
+      ]);
+
+      const row = await assignment();
+
+      expect(["subs_a", "subs_b"]).toContain(row.copaySubscriptionId);
+      expect(cancelled).toEqual([row.copaySubscriptionId === "subs_a" ? "subs_b" : "subs_a"]);
+    });
+
+    it.each(["subscription.renewed", "subscription.trial_started"])(
+      "cancels %s of a subscription the co-pay does not own",
+      async (event) => {
+        await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_2" });
+
+        const logged = vi.spyOn(console, "error");
+
+        try {
+          await copayWebhook(event, `copay:${profileId}:${platinumId}`, "subs_stray");
+
+          expect(cancelled).toEqual(["subs_stray"]);
+          expect(logged).toHaveBeenCalledWith(
+            "copay payment needs refund",
+            expect.objectContaining({ event, subscriptionId: "subs_stray" }),
+          );
+          expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_2" });
+        } finally {
+          logged.mockRestore();
+        }
+      },
+    );
+
+    it("cancels a renewal when the co-pay has no owner at all", async () => {
+      await assign();
+      await copayWebhook("subscription.renewed", `copay:${profileId}:${platinumId}`);
+
+      expect(cancelled).toEqual(["subs_1"]);
+      expect(await assignment()).toMatchObject({ copaySubscriptionId: null });
+    });
+
+    it("ignores a cancellation or payment failure of a subscription it does not own", async () => {
+      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_2" });
+      await copayWebhook("subscription.cancelled", `copay:${profileId}:${platinumId}`, "subs_x");
+      await copayWebhook(
+        "subscription.payment_failed",
+        `copay:${profileId}:${platinumId}`,
+        "subs_x",
+      );
+
+      expect(cancelled).toEqual([]);
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_2",
+        copayCheckoutAt: null,
+      });
     });
 
     it("ignores co-pay references with a malformed plan, suffix or extra segment", async () => {
@@ -2284,8 +2552,59 @@ describe.skipIf(!url)("billing", () => {
       }
     });
 
-    it("subscription.cancelled reverts effectivePlanId", async () => {
+    it("subscription.cancelled reverts the plan and clears the co-pay fields", async () => {
       await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+      await copayWebhook("subscription.cancelled", `copay:${profileId}:${platinumId}`);
+
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: goldId,
+        copaySubscriptionId: null,
+        copayCheckoutId: null,
+        copayPriceCents: null,
+        copayPeriodEnd: null,
+      });
+    });
+
+    it("keeps the tier until the period end when the co-pay was already wound down", async () => {
+      const periodEnd = monthFromToday();
+
+      await assign({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
+        copayCheckoutAt: new Date(),
+        copayPeriodEnd: periodEnd,
+      });
+      await copayWebhook("subscription.cancelled", `copay:${profileId}:${platinumId}`);
+
+      expect(cancelled).toEqual([]);
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
+        copayPeriodEnd: periodEnd,
+      });
+    });
+
+    it("reverts a wound-down co-pay whose period end has passed", async () => {
+      await assign({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
+        copayCheckoutAt: new Date(),
+        copayPeriodEnd: "2020-01-01",
+      });
+      await copayWebhook("subscription.cancelled", `copay:${profileId}:${platinumId}`);
+
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: goldId,
+        copaySubscriptionId: null,
+      });
+    });
+
+    it("reverts a co-pay marked before period ends were stored", async () => {
+      await assign({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
+        copayCheckoutAt: new Date(),
+      });
       await copayWebhook("subscription.cancelled", `copay:${profileId}:${platinumId}`);
 
       expect(await assignment()).toMatchObject({
@@ -2295,7 +2614,13 @@ describe.skipIf(!url)("billing", () => {
     });
 
     it("ignores a redelivered completion of the subscription it already owns", async () => {
-      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+      const periodEnd = "2027-01-01";
+
+      await assign({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
+        copayPeriodEnd: periodEnd,
+      });
 
       const res = await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
 
@@ -2304,6 +2629,7 @@ describe.skipIf(!url)("billing", () => {
       expect(await assignment()).toMatchObject({
         effectivePlanId: platinumId,
         copaySubscriptionId: "subs_1",
+        copayPeriodEnd: periodEnd,
       });
     });
 
@@ -2332,16 +2658,29 @@ describe.skipIf(!url)("billing", () => {
       });
     });
 
-    it("renewal within validity is noop", async () => {
-      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+    it("renewal within validity extends the period end and restores a wound-down co-pay", async () => {
+      await assign({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
+        copayCheckoutAt: new Date(),
+        copayPeriodEnd: "2026-01-01",
+      });
       await copayWebhook("subscription.renewed", `copay:${profileId}:${platinumId}`);
 
       expect(cancelled).toEqual([]);
-      expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_1" });
+      expect(await assignment()).toMatchObject({
+        copaySubscriptionId: "subs_1",
+        copayCheckoutAt: null,
+        copayPeriodEnd: monthFromToday(),
+      });
     });
 
-    it("payment failure keeps the current tier", async () => {
-      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+    it("payment failure keeps the tier and the subscription and winds the co-pay down", async () => {
+      await assign({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
+        copayPeriodEnd: "2027-01-01",
+      });
 
       const logged = vi.spyOn(console, "error");
 
@@ -2349,10 +2688,16 @@ describe.skipIf(!url)("billing", () => {
         await copayWebhook("subscription.payment_failed", `copay:${profileId}:${platinumId}`);
 
         expect(logged).toHaveBeenCalledWith("copay payment failed", { profileId });
-        expect(await assignment()).toMatchObject({
+        expect(cancelled).toEqual([]);
+
+        const row = await assignment();
+
+        expect(row).toMatchObject({
           effectivePlanId: platinumId,
           copaySubscriptionId: "subs_1",
+          copayPeriodEnd: "2027-01-01",
         });
+        expect(row.copayCheckoutAt).not.toBeNull();
       } finally {
         logged.mockRestore();
       }
@@ -2584,6 +2929,38 @@ describe.skipIf(!url)("billing", () => {
       expect(await stateOf(endsToday)).toMatchObject({ copaySubscriptionId: "subs_today" });
       expect(await stateOf(future)).toMatchObject({ copaySubscriptionId: "subs_future" });
       expect(await stateOf(plain)).toMatchObject({ copaySubscriptionId: null });
+    });
+
+    it("reverts wound-down co-pays at their period end and keeps healthy and unfinished ones", async () => {
+      const today = saoPauloDate(new Date());
+      const yesterday = saoPauloDate(new Date(Date.now() - 86_400_000));
+      const ended = await upgraded("subs_ended", "2099-12-31");
+      const lasting = await upgraded("subs_lasting", "2099-12-31");
+      const renewing = await upgraded("subs_renewing", "2099-12-31");
+
+      const wound = (profileId: string, copayPeriodEnd: string) =>
+        db
+          .update(benefitAssignments)
+          .set({ copayCheckoutAt: new Date(), copayPeriodEnd })
+          .where(eq(benefitAssignments.profileId, profileId));
+
+      await wound(ended, yesterday);
+      await wound(lasting, today);
+      await db
+        .update(benefitAssignments)
+        .set({ copayCheckoutAt: null, copayPeriodEnd: yesterday })
+        .where(eq(benefitAssignments.profileId, renewing));
+
+      await drainNow();
+
+      expect(cancelled).toEqual(["subs_ended"]);
+      expect(await stateOf(ended)).toMatchObject({
+        copaySubscriptionId: null,
+        effectivePlanId: goldId,
+        copayPeriodEnd: null,
+      });
+      expect(await stateOf(lasting)).toMatchObject({ copaySubscriptionId: "subs_lasting" });
+      expect(await stateOf(renewing)).toMatchObject({ copaySubscriptionId: "subs_renewing" });
     });
 
     it("sweeps at most 20 per tick and is idempotent", async () => {

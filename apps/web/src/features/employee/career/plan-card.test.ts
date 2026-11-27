@@ -47,7 +47,10 @@ describe("plan card view", () => {
       showComparison: false,
       copayButton: "hidden",
       copayLabel: null,
+      copayPendingLabel: null,
       copayActiveLabel: null,
+      copayEndedLabel: null,
+      copayCancelable: false,
       aiApplyLine: "10 candidaturas/dia com IA",
     });
   });
@@ -292,6 +295,8 @@ describe("plan card view", () => {
       targetPlanId: "x",
       targetPlanName: "Platinum",
       priceCents: 3000,
+      checkoutOpen: false,
+      endsAt: null,
     };
 
     expect(shouldPollPlan(undefined, today, true)).toBe(true);
@@ -485,13 +490,29 @@ describe("co-pay button", () => {
     targetPlanName: "Platinum",
     priceCents: 3000,
     active: false,
+    checkoutOpen: false,
+    endsAt: null,
   };
 
   it("shows co-pay button when offered", () => {
     expect(planCardView({ ...benefitBase, copay }, today, false)).toMatchObject({
       copayButton: "available",
       copayLabel: "Upgrade para Platinum · R$ 30/mês",
+      copayPendingLabel: null,
       copayActiveLabel: null,
+      copayCancelable: false,
+    });
+  });
+
+  it("hides the subscribe button and shows the payment in progress while a checkout is open", () => {
+    expect(
+      planCardView({ ...benefitBase, copay: { ...copay, checkoutOpen: true } }, today, false),
+    ).toMatchObject({
+      copayButton: "pending",
+      copayLabel: null,
+      copayPendingLabel: "Pagamento em andamento",
+      copayActiveLabel: null,
+      copayCancelable: false,
     });
   });
 
@@ -519,17 +540,38 @@ describe("co-pay button", () => {
     ).toMatchObject({ copayButton: "hidden", copayLabel: null });
   });
 
-  it("shows co-pay active state", () => {
+  it("shows the agreed price and a cancel button once the co-pay is active", () => {
     expect(
       planCardView(
-        { ...benefitBase, copay: { ...copay, offered: false, active: true } },
+        { ...benefitBase, copay: { ...copay, offered: false, active: true, priceCents: 4050 } },
         today,
         false,
       ),
     ).toMatchObject({
       copayButton: "active",
       copayLabel: null,
-      copayActiveLabel: "Upgrade ativo · Platinum",
+      copayPendingLabel: null,
+      copayActiveLabel: "Upgrade ativo · Platinum · R$ 40,50/mês",
+      copayEndedLabel: null,
+      copayCancelable: true,
+    });
+  });
+
+  it("shows the canceled upgrade with its access end and no cancel button", () => {
+    expect(
+      planCardView(
+        {
+          ...benefitBase,
+          copay: { ...copay, offered: false, active: true, endsAt: "2026-12-31" },
+        },
+        today,
+        false,
+      ),
+    ).toMatchObject({
+      copayButton: "active",
+      copayActiveLabel: null,
+      copayEndedLabel: "Upgrade cancelado · acesso até 31/12/2026",
+      copayCancelable: false,
     });
   });
 });

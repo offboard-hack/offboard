@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { z } from "zod";
 import { logFailureCode } from "../../shared/error-summary.js";
 import { matchesSecret } from "../../shared/machine-auth.js";
-import { saoPauloDate } from "../../shared/sao-paulo-date.js";
+import { addMonths, saoPauloDate } from "../../shared/sao-paulo-date.js";
 import type { BillingRepository } from "./repository.js";
 
 const subscriptionEvent = z.object({
@@ -267,24 +267,30 @@ async function openInvoice(
 
 const copayPrefix = "copay:";
 
+type CopayAssignment = {
+  assignedPlanId: string;
+  effectivePlanId: string;
+  copaySubscriptionId: string | null;
+  copayCheckoutId: string | null;
+  copayCheckoutAt: Date | null;
+  copayPeriodEnd: string | null;
+  validUntil: string;
+};
+
 export type CopayBenefits = {
-  findAssignmentByProfile(profileId: string): Promise<{
-    assignedPlanId: string;
-    effectivePlanId: string;
-    copaySubscriptionId: string | null;
-    validUntil: string;
-  } | null>;
-  findAssignmentBySubscription(subscriptionId: string): Promise<{
-    profileId: string;
-    assignedPlanId: string;
-    effectivePlanId: string;
-    validUntil: string;
-  } | null>;
+  findAssignmentByProfile(profileId: string): Promise<CopayAssignment | null>;
+  findAssignmentBySubscription(
+    subscriptionId: string,
+  ): Promise<(Omit<CopayAssignment, "copaySubscriptionId"> & { profileId: string }) | null>;
   planPriceMap(): Promise<Map<string, number>>;
-  updateCopayState(
+  activateCopay(
     profileId: string,
-    patch: { effectivePlanId?: string; copaySubscriptionId?: string | null },
-  ): Promise<void>;
+    checkoutId: string,
+    patch: { effectivePlanId: string; copaySubscriptionId: string; copayPeriodEnd: string },
+  ): Promise<boolean>;
+  renewCopay(profileId: string, subscriptionId: string, periodEnd: string): Promise<void>;
+  windDownCopay(profileId: string, subscriptionId: string, now: Date): Promise<string | null>;
+  revertCopay(profileId: string, subscriptionId: string): Promise<void>;
 };
 
 function copayReference(externalId: string) {
@@ -302,7 +308,7 @@ function copayReference(externalId: string) {
 type CopayTarget = {
   profileId: string;
   targetPlanId: string | undefined;
-  assignment: NonNullable<Awaited<ReturnType<CopayBenefits["findAssignmentByProfile"]>>>;
+  assignment: CopayAssignment;
 };
 
 async function copayTargetOf(benefits: CopayBenefits, providerSubscriptionId: string) {
@@ -319,6 +325,73 @@ async function copayTargetOf(benefits: CopayBenefits, providerSubscriptionId: st
   };
 }
 
+async function rejectUnowned(
+  gateway: SubscriptionCanceler,
+  name: string | undefined,
+  event: SubscriptionEvent,
+  profileId: string,
+  reason: string,
+) {
+  const detail = {
+    event: name,
+    reason,
+    profileId,
+    subscriptionId: event.data.subscription.id,
+    checkoutId: event.data.checkout?.id,
+  };
+
+  console.error("copay payment needs refund", detail);
+
+  if (!gateway.configured) {
+    console.error("copay subscription could not be canceled", detail);
+
+    return;
+  }
+
+  await gateway.cancelSubscription(event.data.subscription.id);
+}
+
+async function activateCopay(
+  benefits: CopayBenefits,
+  gateway: SubscriptionCanceler,
+  name: string | undefined,
+  event: SubscriptionEvent,
+  profileId: string,
+  targetPlanId: string,
+  assignment: CopayAssignment,
+) {
+  const subscriptionId = event.data.subscription.id;
+  const checkoutId = event.data.checkout?.id;
+
+  if (checkoutId === undefined || assignment.copayCheckoutId !== checkoutId) {
+    return rejectUnowned(gateway, name, event, profileId, "checkout does not match the issued one");
+  }
+
+  if (assignment.copaySubscriptionId !== null) {
+    return rejectUnowned(gateway, name, event, profileId, "co-pay already owned");
+  }
+
+  const prices = await benefits.planPriceMap();
+
+  if (!(prices.get(targetPlanId)! > prices.get(assignment.effectivePlanId)!)) {
+    return rejectUnowned(gateway, name, event, profileId, "target is not an upgrade");
+  }
+
+  const activated = await benefits.activateCopay(profileId, checkoutId, {
+    effectivePlanId: targetPlanId,
+    copaySubscriptionId: subscriptionId,
+    copayPeriodEnd: addMonths(saoPauloDate(new Date()), 1),
+  });
+
+  if (activated) return;
+
+  const current = await benefits.findAssignmentByProfile(profileId);
+
+  if (current?.copaySubscriptionId !== subscriptionId) {
+    await rejectUnowned(gateway, name, event, profileId, "lost the activation race");
+  }
+}
+
 async function applyCopayEvent(
   benefits: CopayBenefits,
   gateway: SubscriptionCanceler,
@@ -328,58 +401,46 @@ async function applyCopayEvent(
 ) {
   const { profileId, targetPlanId, assignment } = target;
   const providerSubscriptionId = event.data.subscription.id;
-  const owned = assignment.copaySubscriptionId === providerSubscriptionId;
+  const today = saoPauloDate(new Date());
 
-  if (name === "subscription.completed" && targetPlanId) {
-    if (owned) return;
-
-    if (assignment.copaySubscriptionId !== null) {
-      await gateway.cancelSubscription(providerSubscriptionId);
-
-      return;
+  if (assignment.copaySubscriptionId !== providerSubscriptionId) {
+    if (name === "subscription.completed" && targetPlanId) {
+      return activateCopay(benefits, gateway, name, event, profileId, targetPlanId, assignment);
     }
 
-    const prices = await benefits.planPriceMap();
-
-    if (!(prices.get(targetPlanId)! > prices.get(assignment.effectivePlanId)!)) {
-      await gateway.cancelSubscription(providerSubscriptionId);
-
-      return;
+    if (name === "subscription.renewed" || name === "subscription.trial_started") {
+      return rejectUnowned(gateway, name, event, profileId, "subscription is not the owned one");
     }
-
-    await benefits.updateCopayState(profileId, {
-      effectivePlanId: targetPlanId,
-      copaySubscriptionId: providerSubscriptionId,
-    });
 
     return;
   }
 
-  if (name === "subscription.cancelled" && owned) {
-    await benefits.updateCopayState(profileId, {
-      effectivePlanId: assignment.assignedPlanId,
-      copaySubscriptionId: null,
-    });
+  if (name === "subscription.cancelled") {
+    const { copayCheckoutAt, copayPeriodEnd } = assignment;
+
+    if (copayCheckoutAt !== null && copayPeriodEnd !== null && copayPeriodEnd >= today) return;
+
+    await benefits.revertCopay(profileId, providerSubscriptionId);
 
     return;
   }
 
-  if (
-    name === "subscription.renewed" &&
-    owned &&
-    assignment.validUntil < saoPauloDate(new Date())
-  ) {
-    await gateway.cancelSubscription(providerSubscriptionId);
-    await benefits.updateCopayState(profileId, {
-      effectivePlanId: assignment.assignedPlanId,
-      copaySubscriptionId: null,
-    });
+  if (name === "subscription.renewed") {
+    if (assignment.validUntil < today) {
+      await gateway.cancelSubscription(providerSubscriptionId);
+      await benefits.revertCopay(profileId, providerSubscriptionId);
+
+      return;
+    }
+
+    await benefits.renewCopay(profileId, providerSubscriptionId, addMonths(today, 1));
 
     return;
   }
 
   if (name === "subscription.payment_failed") {
     console.error("copay payment failed", { profileId });
+    await benefits.windDownCopay(profileId, providerSubscriptionId, new Date());
   }
 }
 
