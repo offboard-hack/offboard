@@ -656,7 +656,12 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       }),
     )
     .use(demoRoutes(repos.demo, repos.searchQuota, options.embedProfile))
-    .use(candidatesRoutes(repos.candidates, repos.searchQuota, options.embedProfile))
+    .use(
+      candidatesRoutes(repos.candidates, repos.searchQuota, options.embedProfile, {
+        send: options.sendEmail,
+        origin: webOrigin,
+      }),
+    )
     .use(accountRoutes(repos.account, talent, options.storage))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))

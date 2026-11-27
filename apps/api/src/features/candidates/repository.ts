@@ -26,7 +26,23 @@ export function createCandidatesRepository(db: Database) {
       .limit(limit);
   }
 
-  return { nearest };
+  async function contactTarget(resumeId: string) {
+    const [row] = await db
+      .select({ email: talentProfiles.personalEmail, name: talentProfiles.name })
+      .from(resumes)
+      .innerJoin(talentProfiles, eq(talentProfiles.id, resumes.profileId))
+      .where(
+        and(
+          eq(resumes.id, resumeId),
+          eq(resumes.kind, "base"),
+          isNotNull(talentProfiles.searchableAt),
+        ),
+      );
+
+    return row;
+  }
+
+  return { nearest, contactTarget };
 }
 
 export type CandidatesRepository = ReturnType<typeof createCandidatesRepository>;
