@@ -66,6 +66,8 @@ import { codeAudienceHeader, createAuth, createRuntimeAuth } from "./features/au
 import { catalogSources, type CatalogSource } from "./features/sources/catalog.js";
 import type { GenerateStructured } from "./shared/ai.js";
 import type { Embed } from "./shared/embed.js";
+import type { Rerank } from "./features/candidates/routes.js";
+import { matchScore } from "./shared/profile-card.js";
 import { diskStorage } from "./shared/disk-storage.js";
 import type { ObjectStorage } from "./shared/object-storage.js";
 import { zipSync } from "fflate";
@@ -3245,6 +3247,7 @@ describe.skipIf(!url)("api", () => {
           embed?: Embed;
           embedProfile?: Embed;
           billing?: BillingStub;
+          rerank?: Rerank;
         } = {},
       ) {
         const store: Store = { puts: [], removed: [], prefixes: [], failRemove: false };
@@ -3346,6 +3349,7 @@ describe.skipIf(!url)("api", () => {
           embedProfile: options.embedProfile,
           storage: options.storage === false ? undefined : storage,
           abacatepay: options.billing,
+          rerank: options.rerank,
           runInBackground: (task) => {
             background.push(task);
           },
@@ -4713,7 +4717,11 @@ describe.skipIf(!url)("api", () => {
 
       it("finds only people who opted in to the public candidate search", async () => {
         const embedder = fakeEmbed();
-        const app = resumesApp({ embedProfile: embedder.embed });
+
+        const fakeRerank: Rerank = async (_query, candidates) =>
+          candidates.map((c) => ({ ...c, match: matchScore(c.distance) }));
+
+        const app = resumesApp({ embedProfile: embedder.embed, rerank: fakeRerank });
         const visible = await profile();
         const hidden = await profile("outra.pessoal@example.com", 1);
 
