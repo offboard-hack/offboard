@@ -2,11 +2,13 @@ import { cors } from "@elysia/cors";
 import { Elysia, ElysiaCustomStatusResponse, t } from "elysia";
 import { actionConfigsRoutes } from "./features/action-configs/routes.js";
 import { fireActions } from "./features/action-configs/actions.js";
+import { saoPauloDate } from "./shared/sao-paulo-date.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 import { employeeRoutes } from "./features/employee/routes.js";
 import { applicationsRoutes } from "./features/applications/routes.js";
 import { authRoutes } from "./features/auth/routes.js";
 import { createAbacatePayGateway, type AbacatePayGateway } from "./features/billing/abacatepay.js";
+import { benefitRoutes } from "./features/benefits/routes.js";
 import { billingRoutes } from "./features/billing/routes.js";
 import { equipmentRoutes } from "./features/equipment/routes.js";
 import { catalogSources, type CatalogSource } from "./features/sources/catalog.js";
@@ -154,6 +156,8 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     talent: repos.talent,
     companyActive,
     individualPlan: repos.careerPlan.individual,
+    benefitPlan: (profileId) =>
+      repos.benefits.getEffectiveBenefit(profileId, saoPauloDate(new Date())),
   });
 
   const fetchGreenhouse = options.fetchGreenhouseImpl ?? fetch;
@@ -572,6 +576,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
     .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret))
+    .use(benefitRoutes(repos.benefits, access))
     .use(
       billingRoutes(repos.billing, access, abacatepay, webOrigin, options.abacatepayWebhookSecret),
     );
