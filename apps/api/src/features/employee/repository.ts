@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "@offboard/db/client";
 import {
+  authRateLimit,
   authSession,
   authUser,
   employeeAccess,
@@ -29,7 +30,9 @@ import type { EmployeePrincipal } from "../../shared/employee-auth.js";
 
 import {
   readChecklist,
+  readTrackingCode,
   setChecklistTask,
+  setTrackingCode,
   setWorkflowTasks,
   syncDepartureTasks,
   type ChecklistChange,
@@ -57,12 +60,17 @@ type EmployeeData = {
     plan: z.infer<typeof employeePlanSchema>;
     equipment: Awaited<ReturnType<typeof readEquipment>>;
     checklist: Awaited<ReturnType<typeof readChecklist>>;
+    trackingCode: string | null;
   }>;
   setChecklistTask(taskId: string, done: boolean): ReturnType<typeof setChecklistTask>;
+  setTrackingCode(code: string): ReturnType<typeof setTrackingCode>;
   syncDeparture(previous: Departure, next: Departure): Promise<ChecklistChange[]>;
   readState(key: EmployeeState["key"]): ReturnType<typeof readState>;
   saveState(next: EmployeeState): ReturnType<typeof saveState>;
 };
+
+const invitesPerCase = 3;
+const inviteWindowMs = 24 * 60 * 60 * 1000;
 
 export function createEmployeeRepository(db: Database) {
   async function readSettings(orgId: string, caseId: string) {
@@ -115,6 +123,30 @@ export function createEmployeeRepository(db: Database) {
       .where(and(eq(offboardingCases.orgId, orgId), eq(offboardingCases.id, caseId)));
 
     return invitee;
+  }
+
+  async function claimInvite(caseId: string) {
+    const now = Date.now();
+    const expired = sql`${authRateLimit.lastRequest} <= ${now - inviteWindowMs}`;
+
+    const [row] = await db
+      .insert(authRateLimit)
+      .values({
+        id: randomUUID(),
+        key: `offboard:employee-invite:${caseId}`,
+        count: 1,
+        lastRequest: now,
+      })
+      .onConflictDoUpdate({
+        target: authRateLimit.key,
+        set: {
+          count: sql`case when ${expired} then 1 else ${authRateLimit.count} + 1 end`,
+          lastRequest: sql`case when ${expired} then ${now} else ${authRateLimit.lastRequest} end`,
+        },
+      })
+      .returning({ count: authRateLimit.count });
+
+    return row.count <= invitesPerCase;
   }
 
   function markInviteSent(orgId: string, caseId: string) {
@@ -264,12 +296,17 @@ export function createEmployeeRepository(db: Database) {
       return operation({
         async readJourney() {
           const plan = employeePlanSchema.parse(journey.plan);
-          const equipment = await readEquipment(tx, orgId, principal.caseId, plan.equipment);
-          const checklist = await readChecklist(tx, orgId, principal.caseId);
 
-          return { ...journey, plan, equipment, checklist };
+          const [equipment, checklist, trackingCode] = await Promise.all([
+            readEquipment(tx, orgId, principal.caseId, plan.equipment),
+            readChecklist(tx, orgId, principal.caseId),
+            readTrackingCode(tx, orgId, principal.caseId),
+          ]);
+
+          return { ...journey, plan, equipment, checklist, trackingCode };
         },
         setChecklistTask: (id, done) => setChecklistTask(tx, orgId, principal.caseId, id, done),
+        setTrackingCode: (code) => setTrackingCode(tx, orgId, principal.caseId, code),
         async syncDeparture(previous, next) {
           if (JSON.stringify(previous.booking) !== JSON.stringify(next.booking)) {
             await syncEquipmentSchedule(
@@ -300,6 +337,7 @@ export function createEmployeeRepository(db: Database) {
         status: equipment.status,
         returnMethod: equipment.returnMethod,
         scheduledDate: equipment.scheduledDate,
+        fromEmployeePlan: equipment.fromEmployeePlan,
         plan: employeeAccess.plan,
         state: employeeStates.value,
       })
@@ -403,6 +441,7 @@ export function createEmployeeRepository(db: Database) {
   return {
     readSettings,
     readInvitee,
+    claimInvite,
     markInviteSent,
     saveSettings,
     withAccess,

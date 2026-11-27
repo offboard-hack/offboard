@@ -1,4 +1,5 @@
 import { normalizeQuestion } from "@offboard/db/question";
+import { isCombinable } from "../../shared/diversity.js";
 
 export type Topic =
   | "consent"
@@ -140,7 +141,7 @@ export const topicOf = (label: string) => {
   return thirdParty.test(normalized) ? undefined : topic;
 };
 
-export const canonicalValue = (topic: Topic, text: string) => {
+export const canonicalValues = (topic: Topic, text: string) => {
   const normalized = normalizeQuestion(text);
 
   if (uncertain.test(normalized)) return undefined;
@@ -149,7 +150,9 @@ export const canonicalValue = (topic: Topic, text: string) => {
     values[topic].flatMap(([value, pattern]) => (pattern.test(normalized) ? [value] : [])),
   );
 
-  if (matched.has("decline")) return "decline";
+  if (matched.has("decline")) return new Set(["decline"]);
 
-  return matched.size === 1 ? [...matched][0] : undefined;
+  if (matched.size === 0 || (matched.size > 1 && !isCombinable(topic))) return undefined;
+
+  return matched;
 };

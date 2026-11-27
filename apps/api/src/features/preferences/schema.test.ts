@@ -111,6 +111,24 @@ describe("preferences input", () => {
     }
   });
 
+  it("accepts declared diversity values and refuses free text", () => {
+    const declared = parse({
+      profileFields: {
+        gender: { value: "female;cis", share: true },
+        race: { value: null, share: false },
+        disability: { value: "no", share: false },
+      },
+    });
+
+    expect(declared.success).toBe(true);
+    expect(parse({ profileFields: { gender: { value: "Mulher", share: true } } }).success).toBe(
+      false,
+    );
+    expect(parse({ profileFields: { pronoun: { value: "she;he", share: true } } }).success).toBe(
+      false,
+    );
+  });
+
   describe("CPF, birth date and address", () => {
     const address = {
       cep: "01310-100",

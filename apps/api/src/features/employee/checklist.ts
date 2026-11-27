@@ -1,7 +1,7 @@
 import type { Departure } from "@offboard/employee/departure";
 import type { Database } from "@offboard/db/client";
 import { tasks } from "@offboard/db/schema";
-import { and, asc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { employeeTaskAction, employeeTeam } from "../../shared/task-workflow.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -89,6 +89,48 @@ export function setWorkflowTasks(
       ),
     )
     .returning(actionFields);
+}
+
+const collectStepId = "collect";
+
+export async function readTrackingCode(tx: Transaction, orgId: string, caseId: string) {
+  const [row] = await tx
+    .select({ trackingCode: tasks.trackingCode })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.orgId, orgId),
+        eq(tasks.caseId, caseId),
+        eq(tasks.checklistStepId, collectStepId),
+      ),
+    );
+
+  return row?.trackingCode ?? null;
+}
+
+export async function setTrackingCode(
+  tx: Transaction,
+  orgId: string,
+  caseId: string,
+  code: string,
+) {
+  const [updated] = await tx
+    .update(tasks)
+    .set({
+      trackingCode: code,
+      status: sql<TaskStatus>`case when ${tasks.status} = 'done' then 'todo' else ${tasks.status} end`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(tasks.orgId, orgId),
+        eq(tasks.caseId, caseId),
+        eq(tasks.checklistStepId, collectStepId),
+      ),
+    )
+    .returning({ id: tasks.id, trackingCode: tasks.trackingCode });
+
+  return updated;
 }
 
 export async function syncDepartureTasks(

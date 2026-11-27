@@ -102,8 +102,12 @@ export function createActionConfigsRepository(db: Database) {
     const [model] = await db.select().from(checklistModels).where(eq(checklistModels.orgId, orgId));
 
     return model
-      ? { revision: model.revision, steps: checklistLayoutSchema.parse(model.steps) }
-      : { revision: 0, steps: initialSteps };
+      ? {
+          revision: model.revision,
+          steps: checklistLayoutSchema.parse(model.steps),
+          template: initialSteps,
+        }
+      : { revision: 0, steps: initialSteps, template: initialSteps };
   }
 
   async function saveChecklist(
