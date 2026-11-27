@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { correiosIntegration } from "../features/integrations/routes.js";
 import { expectStatus, parseBody, type Context } from "./context.js";
 import { waitForHit, type Receiver } from "./receiver.js";
 import { listPlans, type Admin, type Person } from "./steps.js";
@@ -126,7 +127,7 @@ export const integrationPlan = [
   { name: "Sistema de ponto", status: "reconnect" },
   { name: "Google Workspace", status: "connected" },
   { name: "HubSpot", status: "connected" },
-  { name: "Correios", status: "connected" },
+  { name: correiosIntegration, status: "connected" },
   { name: "Clínica ocupacional", status: "connected" },
   { name: "Operadora do plano de saúde", status: "disconnected" },
 ] as const;
