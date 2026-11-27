@@ -6,6 +6,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Embed } from "../../shared/embed.js";
 import { demoProfiles } from "./profiles.js";
+import { createSearchQuota } from "../../shared/search-quota.js";
 import { createDemoRepository } from "./repository.js";
 import { type DemoProfile, demoRoutes } from "./routes.js";
 import { syncDemoEmbeddings } from "./sync.js";
@@ -78,6 +79,7 @@ describe("demo profiles", () => {
 describe.skipIf(!url)("demo people search", () => {
   const db = createClient(url ?? "");
   const repo = createDemoRepository(db);
+  const quota = createSearchQuota(db);
 
   beforeAll(async () => {
     await migrate(db, {
@@ -139,14 +141,14 @@ describe.skipIf(!url)("demo people search", () => {
     await syncDemoEmbeddings(repo, embedder.embed, catalog);
     await repo.save([{ slug: "gone", hash: "x", embedding: vectorFor("Go") }]);
 
-    const res = await search(demoRoutes(repo, embedder.embed, catalog), "  dev Go  ");
+    const res = await search(demoRoutes(repo, quota, embedder.embed, catalog), "  dev Go  ");
 
     expect(res.status).toBe(200);
 
     const cards = await res.json();
 
     expect(cards[0]).toEqual({
-      slug: "go",
+      id: "go",
       name: "Pessoa go",
       headline: "Engenheira Go",
       summary: "",
@@ -160,7 +162,7 @@ describe.skipIf(!url)("demo people search", () => {
       languages: [{ name: "Inglês", level: "Fluente" }],
     });
     expect(cards[0].match).toBeGreaterThan(90);
-    expect(cards.map((card: { slug: string }) => card.slug)).toEqual(["go", "design", "vendas"]);
+    expect(cards.map((card: { id: string }) => card.id)).toEqual(["go", "design", "vendas"]);
     expect(embedder.calls.at(-1)).toEqual(["dev Go"]);
   });
 
@@ -169,13 +171,13 @@ describe.skipIf(!url)("demo people search", () => {
 
     await syncDemoEmbeddings(repo, embedder.embed);
 
-    const cards = await (await search(demoRoutes(repo, embedder.embed), "Go")).json();
+    const cards = await (await search(demoRoutes(repo, quota, embedder.embed), "Go")).json();
 
     expect(cards).toHaveLength(6);
   });
 
   it("caps searches per visitor and per day", async () => {
-    const app = demoRoutes(repo, fakeEmbed().embed, catalog);
+    const app = demoRoutes(repo, quota, fakeEmbed().embed, catalog);
 
     for (let index = 0; index < 30; index += 1) {
       expect((await search(app, "Go")).status).toBe(200);
@@ -190,7 +192,7 @@ describe.skipIf(!url)("demo people search", () => {
     await db
       .update(demoSearchUsage)
       .set({ searches: 2_000 })
-      .where(eq(demoSearchUsage.bucket, "all"));
+      .where(eq(demoSearchUsage.bucket, "demo:all"));
 
     expect((await search(app, "Go", "198.51.100.3")).status).toBe(429);
 
@@ -200,14 +202,14 @@ describe.skipIf(!url)("demo people search", () => {
   });
 
   it("answers 503 without embeddings, 502 when embedding fails and 422 for short queries", async () => {
-    expect((await search(demoRoutes(repo, undefined, catalog), "Go")).status).toBe(503);
+    expect((await search(demoRoutes(repo, quota, undefined, catalog), "Go")).status).toBe(503);
 
     const logged = vi.spyOn(console, "error");
     const embedder = fakeEmbed();
 
     embedder.state.fail = true;
 
-    const failed = await search(demoRoutes(repo, embedder.embed, catalog), "Go");
+    const failed = await search(demoRoutes(repo, quota, embedder.embed, catalog), "Go");
 
     expect(failed.status).toBe(502);
     expect(await failed.json()).toEqual({ error: "Search unavailable" });
@@ -217,6 +219,8 @@ describe.skipIf(!url)("demo people search", () => {
     ]);
     logged.mockRestore();
 
-    expect((await search(demoRoutes(repo, fakeEmbed().embed, catalog), "a")).status).toBe(422);
+    expect((await search(demoRoutes(repo, quota, fakeEmbed().embed, catalog), "a")).status).toBe(
+      422,
+    );
   });
 });

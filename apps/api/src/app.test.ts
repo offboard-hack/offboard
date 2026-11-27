@@ -19,6 +19,7 @@ import {
   authSession,
   authUser,
   backgroundJobs,
+  demoSearchUsage,
   benefitAssignments,
   benefitPolicies,
   checklistModels,
@@ -4680,6 +4681,70 @@ describe.skipIf(!url)("api", () => {
         expect(profileCalls()[1][0]).toContain("Inglês (Fluente)\nRecife");
         expect(profileCalls()[1][0]).not.toContain("maria@example.com");
         expect((await profileEmbedding(id)).hash).not.toBe(first.hash);
+      });
+
+      it("finds only people who opted in to the public candidate search", async () => {
+        const embedder = fakeEmbed();
+        const app = resumesApp({ embedProfile: embedder.embed });
+        const visible = await profile();
+        const hidden = await profile("outra.pessoal@example.com", 1);
+
+        await upload(app.instance, visible);
+        await upload(app.instance, hidden);
+        await app.settle();
+        await repos.talent.setSearchable(visible, true, new Date());
+
+        const find = (instance: typeof app.instance, q: string) =>
+          instance.handle(
+            new Request(`http://localhost/api/candidates/search?q=${encodeURIComponent(q)}`),
+          );
+
+        const res = await find(app.instance, "engenheira backend");
+
+        expect(res.status).toBe(200);
+
+        const cards = await res.json();
+
+        expect(cards).toEqual([
+          {
+            id: expect.any(String),
+            name: expect.any(String),
+            headline: "Engenheira de Software",
+            summary: "Dez anos de experiência",
+            city: null,
+            match: expect.any(Number),
+            experiences: [{ role: "Dev", company: "Acme", start: "2019", end: null }],
+            skills: ["TypeScript"],
+            languages: [],
+          },
+        ]);
+        expect(JSON.stringify(cards)).not.toContain("@");
+
+        expect((await find(resumesApp().instance, "dev")).status).toBe(503);
+        expect((await find(app.instance, "a")).status).toBe(422);
+
+        const logged = vi.spyOn(console, "error");
+
+        embedder.state.fail = true;
+
+        const failed = await find(app.instance, "dev");
+
+        expect(failed.status).toBe(502);
+        expect(logged.mock.calls).toContainEqual([
+          "candidate search embedding failed",
+          { name: "Error", message: "embeddings down" },
+        ]);
+        logged.mockRestore();
+
+        await db
+          .update(demoSearchUsage)
+          .set({ searches: 2_000 })
+          .where(eq(demoSearchUsage.bucket, "candidates:all"));
+
+        const capped = await find(app.instance, "dev");
+
+        expect(capped.status).toBe(429);
+        expect(await capped.json()).toEqual({ error: "Too many searches" });
       });
 
       it("backfills profiles without a search embedding and skips what it cannot embed", async () => {

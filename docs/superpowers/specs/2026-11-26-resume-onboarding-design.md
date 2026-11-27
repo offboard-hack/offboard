@@ -50,3 +50,10 @@ Samuel, 2026-11-26: real résumés can be found only by people who opt in. The s
 - `PUT /me/search-consent { searchable }` sets or clears it and returns `/me`, which now carries `searchable`.
 - In the wizard the switch starts untouched. It shows the current choice and is saved only after Criar currículo, so redoing a résumé never changes an earlier choice by itself.
 - Any future search over `resumes.profile_embedding` must join `talent_profiles` and require `searchable_at is not null`.
+
+## Public candidate search
+
+- `/busca-candidato` is a public web page. The query lives in `?q=`, so a search can be shared as a link.
+- `GET /api/candidates/search?q=` embeds the query and returns up to 12 base résumés by cosine distance on `resumes.profile_embedding`. Only profiles with `talent_profiles.searchable_at` set are included.
+- A card shows name, headline, summary, city, two experiences, skills and languages. It never includes email, phone, links or the profile id. Its `id` is the résumé id, used only as a list key.
+- It shares the per-visitor and daily caps with the landing demo through `shared/search-quota.ts`, under its own `candidates:` buckets (30 per visitor and 2,000 in total per day).
