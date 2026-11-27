@@ -103,8 +103,40 @@ describe("createReranker", () => {
 
     expect(capturedPrompt).toContain("Go developer");
     expect(capturedPrompt).toContain("Go Engineer");
-    expect(capturedPrompt).toContain("Senior Dev @ Acme");
-    expect(capturedPrompt).toContain("Built microservices");
+    expect(capturedPrompt).toContain("Senior Dev @ Acme — Built microservices");
     expect(capturedPrompt).toContain("Go, Kubernetes");
+  });
+
+  it("omits bullet separator when experience has no bullets", async () => {
+    let capturedPrompt = "";
+
+    const generate: GenerateStructured = async ({ prompt }) => {
+      capturedPrompt = prompt;
+
+      // WARNING: scores shape is correct for relevanceSchema; cast bypasses the generic return type
+      return { scores: [{ id: "y", score: 60 }] } as never;
+    };
+
+    const rerank = createReranker(generate);
+
+    await rerank("designer", [
+      {
+        id: "y",
+        name: "Des",
+        distance: 0.4,
+        content: {
+          headline: { text: "Designer" },
+          summary: { text: "" },
+          experiences: [{ role: "Lead", company: "Studio", start: "2021", end: null, bullets: [] }],
+          education: [],
+          skills: [],
+          languages: [],
+          contact: { city: null },
+        },
+      },
+    ]);
+
+    expect(capturedPrompt).toContain("Lead @ Studio");
+    expect(capturedPrompt).not.toContain("—");
   });
 });
