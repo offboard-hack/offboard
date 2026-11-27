@@ -35,7 +35,9 @@ const formQuestion = t.Object({
     t.Object({
       name: t.String(),
       type: t.UnionEnum(["text", "textarea", "file", "hidden", "single_select", "multi_select"]),
-      options: t.Array(t.Object({ label: t.String(), value: t.String() })),
+      options: t.Array(
+        t.Object({ label: t.String(), value: t.String(), freeForm: t.Optional(t.Literal(true)) }),
+      ),
     }),
   ),
   kind: t.UnionEnum([

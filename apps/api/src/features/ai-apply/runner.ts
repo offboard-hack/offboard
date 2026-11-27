@@ -318,14 +318,14 @@ async function operate(ready: Run, progress: Progress, deadline: number) {
 
   const submitted = await submitGreenhouse(page);
 
-  if (submitted === "challenge") return assisted("blocked");
+  if (submitted.outcome === "challenge") return assisted("blocked");
 
-  if (submitted === "unguarded") return assisted("error");
+  if (submitted.outcome === "unguarded") return assisted("error");
 
-  if (submitted === "errors") {
-    progress.evidence.formErrors = await visibleErrors(page);
+  if (submitted.outcome === "errors") {
+    progress.evidence.formErrors = submitted.errors;
 
-    return assisted("form_rejected");
+    return assisted("form_errors");
   }
 
   const seen = await awaitOutcome(page, deps.outcomeMs);

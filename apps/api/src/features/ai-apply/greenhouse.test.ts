@@ -174,7 +174,8 @@ describe("reads a Greenhouse form", () => {
             type: "multi_value_multi_select",
             answer_options: [
               { id: 1, label: "Branca" },
-              { id: 2, label: "Preta" },
+              { id: 2, label: "Preta", free_form: false },
+              { id: 9, label: "Outra", free_form: true },
             ],
           },
           {
@@ -214,10 +215,12 @@ describe("reads a Greenhouse form", () => {
           options: [
             { label: "Branca", value: "1" },
             { label: "Preta", value: "2" },
+            { label: "Outra", value: "9", freeForm: true },
           ],
         },
       ],
     });
+    expect(questions[3]?.fields[0]?.options[0]).not.toHaveProperty("freeForm");
     expect(questions[4]?.fields[0]?.type).toBe("single_select");
   });
 

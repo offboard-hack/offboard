@@ -1116,6 +1116,30 @@ describe("fills demographic questions", () => {
     expect(await fill(fakePage().page, [field], unknown)).toEqual(changed("demographic:7"));
   });
 
+  it("refuses an option that opens a free-text box", async () => {
+    const field = demographic("multi_select", genders);
+
+    const free = {
+      ...field,
+      fields: [
+        {
+          ...field.fields[0],
+          options: [
+            ...field.fields[0].options,
+            { label: "Other", value: "9", freeForm: true as const },
+          ],
+        },
+      ],
+    };
+
+    const { page, actions } = fakePage({ menus: { "7": [...genders, "Other"] }, multi: ["7"] });
+
+    expect(await fill(page, [free], answers({ "demographic:7": ["1", "9"] }))).toEqual(
+      changed("demographic:7"),
+    );
+    expect(steps(actions)).toEqual([]);
+  });
+
   it("reports an unanswered demographic question that shows a value", async () => {
     const single = demographic("single_select", genders);
     const multi = demographic("multi_select", genders);
@@ -1276,25 +1300,25 @@ describe("classifies the outcome", () => {
   it("lifts the guard and clicks the submit button", async () => {
     const { page, actions } = fakePage();
 
-    expect(await submitGreenhouse(page)).toBe("clicked");
+    expect(await submitGreenhouse(page)).toEqual({ outcome: "clicked", errors: [] });
     expect(actions).toEqual(["lift", 'click #application-form button[type="submit"]']);
   });
 
   it("refuses to click on a page whose guard was never installed", async () => {
     const { page, actions } = fakePage({ unguarded: true });
 
-    expect(await submitGreenhouse(page)).toBe("unguarded");
+    expect(await submitGreenhouse(page)).toEqual({ outcome: "unguarded", errors: [] });
     expect(actions).toEqual(["lift"]);
   });
 
   it("refuses to click while errors or a challenge are visible", async () => {
-    for (const [shown, outcome] of [
-      [errored, "errors"],
-      [challenged, "challenge"],
+    for (const [shown, outcome, errors] of [
+      [errored, "errors", ["Este campo é obrigatório."]],
+      [challenged, "challenge", []],
     ] as const) {
       const { page, actions } = fakePage({ pages: [shown] });
 
-      expect(await submitGreenhouse(page)).toBe(outcome);
+      expect(await submitGreenhouse(page)).toEqual({ outcome, errors });
       expect(actions).toEqual([]);
     }
   });
