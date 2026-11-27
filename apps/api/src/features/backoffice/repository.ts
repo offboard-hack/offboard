@@ -304,7 +304,7 @@ export function createBackofficeRepository(db: Database) {
 type LatestSubscription = {
   orgId: string;
   id: string;
-  status: "active" | "past_due" | "canceled" | "trialing";
+  status: "active" | "past_due" | "canceled" | "trialing" | "pending";
   currentPeriodEnd: string;
   plan: { id: string; name: string; slug: string; monthlyPriceCents: number };
 };

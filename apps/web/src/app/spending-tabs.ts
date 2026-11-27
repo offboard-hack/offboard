@@ -4,6 +4,7 @@ export const spendingTabs = ["plano", "beneficios"] as const;
 
 export const spendingSearchSchema = z.object({
   aba: z.enum(spendingTabs).optional().catch(undefined),
+  plano: z.literal("ok").optional().catch(undefined),
 });
 
 export type SpendingTab = (typeof spendingTabs)[number];
