@@ -657,7 +657,14 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     )
     .use(benefitRoutes(repos.benefits, access))
     .use(
-      billingRoutes(repos.billing, access, abacatepay, webOrigin, options.abacatepayWebhookSecret),
+      billingRoutes(
+        repos.billing,
+        repos.benefits,
+        access,
+        abacatepay,
+        webOrigin,
+        options.abacatepayWebhookSecret,
+      ),
     )
     .use(
       backofficeRoutes(

@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { z } from "zod";
 import { matchesSecret } from "../../shared/machine-auth.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
+import type { AbacatePayGateway } from "./abacatepay.js";
 import type { BillingRepository } from "./repository.js";
 
 const subscriptionEvent = z.object({
@@ -197,13 +198,108 @@ async function openInvoice(
   return repos.createInvoice(orgId, subscriptionId, amount, new Date().toISOString().slice(0, 10));
 }
 
+const copayPrefix = "copay:";
+
+export type CopayBenefits = {
+  findAssignmentByProfile(profileId: string): Promise<{
+    assignedPlanId: string;
+    effectivePlanId: string;
+    copaySubscriptionId: string | null;
+    validUntil: string;
+  } | null>;
+  findAssignmentBySubscription(subscriptionId: string): Promise<{ profileId: string } | null>;
+  planPriceMap(): Promise<Map<string, number>>;
+  updateCopayState(
+    profileId: string,
+    patch: { effectivePlanId?: string; copaySubscriptionId?: string | null },
+  ): Promise<void>;
+};
+
+async function copayTargetOf(
+  benefits: CopayBenefits,
+  externalId: string | null | undefined,
+  providerSubscriptionId: string,
+) {
+  const [profileId, targetPlanId] = externalId?.startsWith(copayPrefix)
+    ? externalId.slice(copayPrefix.length).split(":")
+    : [(await benefits.findAssignmentBySubscription(providerSubscriptionId))?.profileId];
+
+  const parsed = talentProfileId.safeParse(profileId);
+  const assignment = parsed.success ? await benefits.findAssignmentByProfile(parsed.data) : null;
+
+  return assignment && parsed.success ? { profileId: parsed.data, targetPlanId, assignment } : null;
+}
+
+async function applyCopayEvent(
+  benefits: CopayBenefits,
+  gateway: AbacatePayGateway,
+  name: string | undefined,
+  event: SubscriptionEvent,
+  target: NonNullable<Awaited<ReturnType<typeof copayTargetOf>>>,
+) {
+  const { profileId, targetPlanId, assignment } = target;
+  const providerSubscriptionId = event.data.subscription.id;
+  const owned = assignment.copaySubscriptionId === providerSubscriptionId;
+
+  if (name === "subscription.completed" && targetPlanId) {
+    const prices = await benefits.planPriceMap();
+
+    if ((prices.get(targetPlanId) ?? 0) > (prices.get(assignment.effectivePlanId) ?? 0)) {
+      await benefits.updateCopayState(profileId, {
+        effectivePlanId: targetPlanId,
+        copaySubscriptionId: providerSubscriptionId,
+      });
+    }
+
+    return;
+  }
+
+  if (name === "subscription.cancelled" && owned) {
+    await benefits.updateCopayState(profileId, {
+      effectivePlanId: assignment.assignedPlanId,
+      copaySubscriptionId: null,
+    });
+
+    return;
+  }
+
+  if (
+    name === "subscription.renewed" &&
+    owned &&
+    assignment.validUntil < saoPauloDate(new Date())
+  ) {
+    await gateway.cancelSubscription(providerSubscriptionId);
+    await benefits.updateCopayState(profileId, { copaySubscriptionId: null });
+
+    return;
+  }
+
+  if (name === "subscription.payment_failed") {
+    console.error("copay payment failed", { profileId });
+  }
+}
+
 export async function applyWebhookEvent(
   repos: BillingRepository,
+  benefits: CopayBenefits,
+  gateway: AbacatePayGateway,
   event: SubscriptionEvent,
   deliveryId: string | null,
 ) {
   const name = event.event ?? event.type;
   const subscriptionId = event.data.checkout?.externalId;
+
+  if (subscriptionId?.startsWith(copayPrefix)) {
+    const copay = await copayTargetOf(benefits, subscriptionId, event.data.subscription.id);
+
+    if (!copay) {
+      console.error("copay webhook ignored", { event: name });
+
+      return;
+    }
+
+    return applyCopayEvent(benefits, gateway, name, event, copay);
+  }
 
   if (subscriptionId?.startsWith(talentPrefix)) {
     const talent = await talentSubscriptionOf(repos, subscriptionId);
@@ -215,6 +311,10 @@ export async function applyWebhookEvent(
     const talent = await repos.findTalentSubscriptionByProvider(event.data.subscription.id);
 
     if (talent) return applyTalentEvent(repos, name, event, deliveryId, talent);
+
+    const copay = await copayTargetOf(benefits, null, event.data.subscription.id);
+
+    if (copay) return applyCopayEvent(benefits, gateway, name, event, copay);
   }
 
   if (!name || !subscriptionId) return;

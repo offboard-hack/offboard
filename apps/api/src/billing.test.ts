@@ -4,12 +4,15 @@ import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import {
+  benefitAssignments,
+  copayProducts,
   defaultOrgId,
   invoices,
   offboardingCases,
   organizations,
   plans,
   subscriptions,
+  talentProfiles,
   talentSubscriptions,
 } from "@offboard/db/schema";
 import { seedDatabase, testSeedFixtures } from "@offboard/db/seed-database";
@@ -1479,5 +1482,207 @@ describe.skipIf(!url)("billing", () => {
     expect(refunded).toMatchObject({ status: "refunded", abacatepayBillingId: null });
     expect(await repos.billing.updateInvoiceStatus(defaultOrgId, missingId, "paid")).toBeNull();
     expect(await repos.billing.getInvoiceByBillingId(defaultOrgId, "missing")).toBeNull();
+  });
+  describe("co-pay webhook", () => {
+    const cancelled: string[] = [];
+
+    const copayApp = createApp(webOrigin, repos, {
+      auth,
+      sendEmail: () => Promise.resolve(),
+      abacatepay: {
+        configured: true,
+        createSubscriptionCheckout: () => Promise.resolve({ id: "bill_x", url: "https://x" }),
+        cancelSubscription(id: string) {
+          cancelled.push(id);
+
+          return Promise.resolve();
+        },
+      },
+      abacatepayWebhookSecret: webhookSecret,
+    });
+
+    let profileId = "";
+    let goldId = "";
+    let platinumId = "";
+
+    beforeEach(async () => {
+      cancelled.length = 0;
+      await db.delete(benefitAssignments);
+      await db.delete(copayProducts);
+
+      const rows = await db.select().from(plans).orderBy(plans.monthlyPriceCents);
+
+      goldId = rows[0].id;
+      platinumId = rows[rows.length - 1].id;
+
+      const [profile] = await db
+        .insert(talentProfiles)
+        .values({
+          orgId: defaultOrgId,
+          personalEmail: `pessoa-${randomUUID()}@exemplo.com`,
+          name: "Pessoa Teste",
+          sponsoredUntil: "2099-12-31",
+        })
+        .returning({ id: talentProfiles.id });
+
+      profileId = profile.id;
+      await db
+        .insert(copayProducts)
+        .values({ fromPlanId: goldId, toPlanId: platinumId, abacatePayProductId: "prod_1" });
+    });
+
+    async function assign(patch: Partial<typeof benefitAssignments.$inferInsert> = {}) {
+      await db.insert(benefitAssignments).values({
+        orgId: defaultOrgId,
+        profileId,
+        assignedPlanId: goldId,
+        effectivePlanId: goldId,
+        source: "manual",
+        validUntil: "2099-12-31",
+        ...patch,
+      });
+    }
+
+    async function assignment() {
+      const [row] = await db.select().from(benefitAssignments);
+
+      return row;
+    }
+
+    function copayWebhook(event: string, externalId: string | null, subscription = "subs_1") {
+      return copayApp.handle(
+        new Request(`http://localhost/api/billing/webhook?webhookSecret=${webhookSecret}`, {
+          method: "POST",
+          body: JSON.stringify({
+            id: randomUUID(),
+            event,
+            apiVersion: 2,
+            data: {
+              subscription: { id: subscription, amount: 1000 },
+              ...(externalId !== null && { checkout: { id: "bill_1", externalId } }),
+            },
+          }),
+        }),
+      );
+    }
+
+    it("subscription.completed upgrades effectivePlanId", async () => {
+      await assign();
+
+      const res = await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
+
+      expect(res.status).toBe(200);
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
+      });
+    });
+
+    it("subscription.completed is noop when HR already upgraded", async () => {
+      await assign({ effectivePlanId: platinumId });
+      await copayWebhook("subscription.completed", `copay:${profileId}:${platinumId}`);
+
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: null,
+      });
+    });
+
+    it("ignores events for unknown profiles and malformed ids", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      try {
+        await assign();
+        await copayWebhook("subscription.completed", `copay:${missingId}:${platinumId}`);
+        await copayWebhook("subscription.completed", "copay:");
+
+        expect(logged).toHaveBeenCalledTimes(2);
+        expect(await assignment()).toMatchObject({ effectivePlanId: goldId });
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("subscription.cancelled reverts effectivePlanId", async () => {
+      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+      await copayWebhook("subscription.cancelled", `copay:${profileId}:${platinumId}`);
+
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: goldId,
+        copaySubscriptionId: null,
+      });
+    });
+
+    it("stale cancel for wrong subscription is noop", async () => {
+      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_2" });
+      await copayWebhook("subscription.cancelled", `copay:${profileId}:${platinumId}`);
+
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_2",
+      });
+    });
+
+    it("renewal after benefit expiry cancels subscription", async () => {
+      await assign({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
+        validUntil: "2020-01-01",
+      });
+      await copayWebhook("subscription.renewed", `copay:${profileId}:${platinumId}`);
+
+      expect(cancelled).toEqual(["subs_1"]);
+      expect(await assignment()).toMatchObject({ copaySubscriptionId: null });
+    });
+
+    it("renewal within validity is noop", async () => {
+      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+      await copayWebhook("subscription.renewed", `copay:${profileId}:${platinumId}`);
+
+      expect(cancelled).toEqual([]);
+      expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_1" });
+    });
+
+    it("payment failure keeps the current tier", async () => {
+      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+
+      const logged = vi.spyOn(console, "error");
+
+      try {
+        await copayWebhook("subscription.payment_failed", `copay:${profileId}:${platinumId}`);
+
+        expect(logged).toHaveBeenCalledWith("copay payment failed", { profileId });
+        expect(await assignment()).toMatchObject({
+          effectivePlanId: platinumId,
+          copaySubscriptionId: "subs_1",
+        });
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("falls back to the provider subscription id", async () => {
+      await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
+      await copayWebhook("subscription.cancelled", null);
+
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: goldId,
+        copaySubscriptionId: null,
+      });
+    });
+
+    it("does not upgrade from a completed event without an external id", async () => {
+      await assign({ copaySubscriptionId: "subs_1" });
+      await copayWebhook("subscription.completed", null);
+
+      expect(await assignment()).toMatchObject({ effectivePlanId: goldId });
+    });
+
+    it("ignores unknown subscriptions without an external id", async () => {
+      await assign({ copaySubscriptionId: "subs_1" });
+      await copayWebhook("subscription.cancelled", null, "subs_other");
+
+      expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_1" });
+    });
   });
 });

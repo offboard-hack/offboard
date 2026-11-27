@@ -4,7 +4,12 @@ import { logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import type { AbacatePayGateway } from "./abacatepay.js";
 import type { BillingRepository } from "./repository.js";
-import { applyWebhookEvent, isAuthorizedWebhook, parseWebhookEvent } from "./webhook.js";
+import {
+  applyWebhookEvent,
+  type CopayBenefits,
+  isAuthorizedWebhook,
+  parseWebhookEvent,
+} from "./webhook.js";
 
 const planRow = t.Object({
   id: t.String(),
@@ -50,6 +55,7 @@ const checkoutResponse = t.Object({ checkoutId: t.String(), url: t.String() });
 
 export function billingRoutes(
   repos: BillingRepository,
+  benefits: CopayBenefits,
   access: PortalAccessPlugin,
   gateway: AbacatePayGateway,
   webOrigin: string,
@@ -173,7 +179,7 @@ export function billingRoutes(
 
         if (!event) return status(422, { error: "Invalid webhook event" });
 
-        await applyWebhookEvent(repos, event, request.headers.get("webhook-id"));
+        await applyWebhookEvent(repos, benefits, gateway, event, request.headers.get("webhook-id"));
 
         return { ok: true } satisfies { ok: true };
       },
