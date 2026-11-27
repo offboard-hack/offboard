@@ -450,6 +450,111 @@ describe("connectPage", () => {
     });
   });
 
+  it("clips the capture to the framed form box", async () => {
+    const fake = fakeSocket({
+      "Runtime.evaluate": evaluated({ x: 120.2, y: 640.4, width: 760.5, height: 2400.1 }),
+      "Page.captureScreenshot": { data: btoa("\u0089PNG") },
+    });
+
+    const page = await connectPage(fake.socket);
+
+    const bytes = await page.screenshot({ fullPage: true, frame: ["#application-form", "form"] });
+
+    expect([...bytes]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    expect(fake.named("Page.getLayoutMetrics")).toHaveLength(0);
+    expect(fake.named("Runtime.evaluate")[0]?.params.expression).toContain('"#application-form"');
+    expect(fake.named("Runtime.evaluate")[0]?.params.expression).toContain('"form"');
+    expect(fake.named("Page.captureScreenshot")[0]?.params).toEqual({
+      format: "png",
+      captureBeyondViewport: true,
+      clip: { x: 120, y: 640, width: 761, height: 2401, scale: 1 },
+    });
+  });
+
+  it("caps a framed capture at 6 000 px", async () => {
+    const fake = fakeSocket({
+      "Runtime.evaluate": evaluated({ x: 0, y: 100, width: 800, height: 40_000 }),
+      "Page.captureScreenshot": { data: btoa("\u0089PNG") },
+    });
+
+    const page = await connectPage(fake.socket);
+
+    await page.screenshot({ fullPage: true, frame: ["#application-form"] });
+
+    expect(fake.named("Page.captureScreenshot")[0]?.params.clip).toEqual({
+      x: 0,
+      y: 100,
+      width: 800,
+      height: 6000,
+      scale: 1,
+    });
+  });
+
+  it("falls back to the whole page when no form is framed", async () => {
+    const fake = fakeSocket({
+      "Runtime.evaluate": evaluated(null),
+      "Page.getLayoutMetrics": { cssContentSize: { x: 0, y: 0, width: 1280, height: 3000 } },
+      "Page.captureScreenshot": { data: btoa("\u0089PNG") },
+    });
+
+    const page = await connectPage(fake.socket);
+
+    await page.screenshot({ fullPage: true, frame: ["#application-form"] });
+
+    expect(fake.named("Page.captureScreenshot")).toHaveLength(1);
+    expect(fake.named("Page.captureScreenshot")[0]?.params.clip).toEqual({
+      x: 0,
+      y: 0,
+      width: 1280,
+      height: 3000,
+      scale: 1,
+    });
+  });
+
+  it("falls back to the whole page when the form box is empty", async () => {
+    const fake = fakeSocket({
+      "Runtime.evaluate": evaluated({ x: 0, y: 0, width: 0, height: 0 }),
+      "Page.getLayoutMetrics": { cssContentSize: { x: 0, y: 0, width: 1280, height: 3000 } },
+      "Page.captureScreenshot": { data: btoa("\u0089PNG") },
+    });
+
+    const page = await connectPage(fake.socket);
+
+    await page.screenshot({ fullPage: true, frame: ["#application-form"] });
+
+    expect(fake.named("Page.captureScreenshot")[0]?.params.clip).toMatchObject({ height: 3000 });
+  });
+
+  it("falls back to the whole page when the framed capture throws", async () => {
+    const fake = fakeSocket({
+      "Runtime.evaluate": evaluated({ x: 0, y: 100, width: 800, height: 900 }),
+      "Page.getLayoutMetrics": { cssContentSize: { x: 0, y: 0, width: 1280, height: 3000 } },
+      "Page.captureScreenshot": [{ error: "Unable to capture" }, { data: btoa("\u0089PNG") }],
+    });
+
+    const page = await connectPage(fake.socket);
+
+    const bytes = await page.screenshot({ fullPage: true, frame: ["#application-form"] });
+
+    expect([...bytes]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    expect(fake.named("Page.captureScreenshot")).toHaveLength(2);
+    expect(fake.named("Page.captureScreenshot")[1]?.params.clip).toMatchObject({ height: 3000 });
+  });
+
+  it("falls back to the whole page when reading the form box throws", async () => {
+    const fake = fakeSocket({
+      "Runtime.evaluate": { error: "Execution context was destroyed" },
+      "Page.getLayoutMetrics": { cssContentSize: { x: 0, y: 0, width: 1280, height: 3000 } },
+      "Page.captureScreenshot": { data: btoa("\u0089PNG") },
+    });
+
+    const page = await connectPage(fake.socket);
+
+    await page.screenshot({ fullPage: true, frame: ["#application-form"] });
+
+    expect(fake.named("Page.captureScreenshot")[0]?.params.clip).toMatchObject({ height: 3000 });
+  });
+
   it("reads the current url", async () => {
     const fake = fakeSocket({
       "Runtime.evaluate": evaluated("https://x.test/a"),
