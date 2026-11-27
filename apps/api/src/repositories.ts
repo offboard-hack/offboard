@@ -29,6 +29,7 @@ import { createPackagesRepository } from "./features/preferences/package.js";
 import { createRejectionsRepository } from "./features/preferences/rejections.js";
 import { createPreferencesRepository } from "./features/preferences/repository.js";
 import { createSourcesRepository } from "./features/sources/repository.js";
+import { createDemoRepository } from "./features/demo/repository.js";
 
 export function createRepositories(db: Database) {
   return {
@@ -57,6 +58,7 @@ export function createRepositories(db: Database) {
     pages: createPagesRepository(db),
     insights: createInsightsRepository(db),
     sources: createSourcesRepository(db),
+    demo: createDemoRepository(db),
     preferences: createPreferencesRepository(db),
     answers: createAnswersRepository(db),
     rejections: createRejectionsRepository(db),
