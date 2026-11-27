@@ -54,6 +54,9 @@ describe.skipIf(!url)("career plan route", () => {
 
       return { id: "bill_pro", url: "https://pay.example/bill_pro" };
     },
+    async cancelSubscription() {
+      throw new Error("not implemented in stub");
+    },
   };
 
   function planApp(checkout = gateway, companyActive = true) {
@@ -424,6 +427,9 @@ describe.skipIf(!url)("career plan route", () => {
       createSubscriptionCheckout: async () => {
         throw new TypeError("secret provider detail");
       },
+      cancelSubscription: async () => {
+        throw new Error("not implemented");
+      },
     });
 
     try {
@@ -583,6 +589,9 @@ describe.skipIf(!url)("career plan route", () => {
         configured: true,
         createSubscriptionCheckout: async () => {
           throw new TypeError("secret provider detail");
+        },
+        cancelSubscription: async () => {
+          throw new Error("not implemented");
         },
       });
 
