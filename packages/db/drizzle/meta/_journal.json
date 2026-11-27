@@ -148,6 +148,13 @@
       "when": 1795743045510,
       "tag": "0020_integration_config",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795743045511,
+      "tag": "0021_add_resume_profile_embeddings",
+      "breakpoints": true
     }
   ]
 }

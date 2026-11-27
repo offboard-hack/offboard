@@ -885,6 +885,8 @@ export const resumes = pgTable(
     sourceFileKey: varchar("source_file_key", { length: 512 }),
     embedding: vector("embedding", { dimensions: 1024 }),
     embeddedHash: varchar("embedded_hash", { length: 64 }),
+    profileEmbedding: vector("profile_embedding", { dimensions: 1024 }),
+    profileEmbeddedHash: varchar("profile_embedded_hash", { length: 64 }),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
