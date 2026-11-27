@@ -6,13 +6,9 @@ import Package01Icon from "@hugeicons/core-free-icons/Package01Icon";
 import Task01Icon from "@hugeicons/core-free-icons/Task01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { employeeDate, type EmployeeState } from "@offboard/employee";
-import {
-  bookingFormSchema,
-  bookingSchema,
-  feedbackTopics,
-  type BookingForm,
-} from "@offboard/employee/departure";
+import { feedbackTopics } from "@offboard/employee/departure";
 import { revalidateLogic, useForm } from "@tanstack/react-form";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import {
@@ -20,10 +16,10 @@ import {
   type EmployeeJourney,
   useEmployeeChecklistWrite,
   useEmployeeTrackingCode,
+  employeeTrackingQuery,
   useEmployeeWrite,
 } from "@/entities/employee";
 import { todayAtWorkspace } from "@/entities/offboarding";
-import { PortalFilter } from "@/shared/ui/select";
 import { ProgressBar } from "@/shared/ui/progress";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
@@ -47,6 +43,7 @@ import {
   feedbackWizardDefaults,
   toDepartureFeedback,
 } from "./feedback-wizard";
+import { returnStatus } from "./return-status";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "./ui";
 
 type DepartureState = Extract<EmployeeState, { key: "departure-v1" }>;
@@ -67,7 +64,7 @@ export function DepartureOverview({
   home: boolean;
 }) {
   const { plan } = journey;
-  const { booking, handoffCompleted, examAttended, feedback } = state.value;
+  const { handoffCompleted, examAttended, feedback } = state.value;
 
   const equipmentReceived =
     journey.equipment.length > 0 && journey.equipment.every((item) => item.received);
@@ -96,13 +93,13 @@ export function DepartureOverview({
       title: "Devolver equipamentos",
       status: equipmentReceived
         ? "completed"
-        : booking || journey.equipment.length === 0
+        : journey.trackingCode || journey.equipment.length === 0
           ? "tracking"
           : "pending",
       description: equipmentReceived
         ? "Recebimento confirmado"
-        : booking
-          ? `Agendado para ${employeeDate(booking.day, dayFormat)}`
+        : journey.trackingCode
+          ? "Postado nos Correios"
           : journey.equipment.length === 1
             ? "1 equipamento informado"
             : `${journey.equipment.length} equipamentos informados`,
@@ -310,14 +307,17 @@ export function Handoff({ account, journey, state }: DepartureProps) {
   );
 }
 
-export function Equipment({ account, journey, state }: DepartureProps) {
-  const [editing, setEditing] = useState(false);
-  const { booking } = state.value;
-  const { bookingDays, officeAddress } = journey.plan;
-  const { equipment } = journey;
+export function Equipment({
+  account,
+  journey,
+}: {
+  account: EmployeeAccount;
+  journey: EmployeeJourney;
+}) {
+  const { officeAddress } = journey.plan;
+  const { equipment, trackingCode } = journey;
   const pending = equipment.filter((item) => !item.received).length;
   const allReceived = equipment.length > 0 && pending === 0;
-  const canBook = pending > 0 && bookingDays.length > 0;
 
   return (
     <div className="space-y-5">
@@ -326,27 +326,31 @@ export function Equipment({ account, journey, state }: DepartureProps) {
           <p>A equipe confirmou o recebimento de todos os bens.</p>
         </EmployeePanel>
       ) : null}
-      {booking && pending > 0 && (!editing || !canBook) ? (
+      {pending > 0 ? (
         <EmployeePanel
-          title="Devolução agendada"
-          description={booking.method === "pickup" ? "Coleta em casa" : "Entrega no escritório"}
+          title="Postar nos Correios"
+          description="Leve todos os bens em uma única embalagem a uma agência dos Correios."
         >
-          <p className="font-bold">
-            {employeeDate(booking.day, dayFormat)} ·{" "}
-            {booking.slot === "morning" ? "9h às 12h" : "13h às 17h"}
-          </p>
-          <p className="text-muted-foreground">
-            {booking.method === "pickup" ? booking.address : officeAddress}
-          </p>
-          {canBook ? (
-            <Button variant="outline" onClick={() => setEditing(true)}>
-              Alterar agendamento
-            </Button>
-          ) : null}
+          <ol className="list-decimal space-y-2 pl-5">
+            <li>Embale os bens listados abaixo juntos, protegidos para o transporte.</li>
+            <li>
+              Poste em qualquer agência dos Correios, em nome da empresa
+              {officeAddress ? (
+                <>
+                  , no endereço <span className="font-bold wrap-anywhere">{officeAddress}</span>
+                </>
+              ) : (
+                ". O RH ainda não informou o endereço de destino; confirme com ele antes de postar"
+              )}
+              .
+            </li>
+            <li>Guarde o comprovante e informe o código de rastreio abaixo.</li>
+          </ol>
         </EmployeePanel>
       ) : null}
-      {pending > 0 && !allReceived ? (
-        <TrackingCodeInput account={account} trackingCode={journey.trackingCode} />
+      {pending > 0 ? <TrackingCodeInput account={account} trackingCode={trackingCode} /> : null}
+      {trackingCode ? (
+        <ReturnTracking account={account} trackingCode={trackingCode} done={allReceived} />
       ) : null}
       <EmployeePanel title={`Bens vinculados (${equipment.length})`}>
         {equipment.length === 0 ? (
@@ -365,24 +369,48 @@ export function Equipment({ account, journey, state }: DepartureProps) {
                 <Badge variant="status-success" className="shrink-0">
                   Recebido
                 </Badge>
+              ) : trackingCode ? (
+                <Badge variant="secondary" className="shrink-0">
+                  Postado
+                </Badge>
               ) : null}
             </li>
           ))}
         </ul>
       </EmployeePanel>
-      {canBook && (!booking || editing) ? (
-        <BookingForm
-          account={account}
-          journey={journey}
-          state={state}
-          close={() => setEditing(false)}
-        />
-      ) : pending > 0 && !canBook ? (
-        <p className="text-sm text-muted-foreground">
-          O RH ainda não disponibilizou datas para devolução.
-        </p>
-      ) : null}
     </div>
+  );
+}
+
+function ReturnTracking({
+  account,
+  trackingCode,
+  done,
+}: {
+  account: EmployeeAccount;
+  trackingCode: string;
+  done: boolean;
+}) {
+  const { data, isPending } = useQuery(employeeTrackingQuery(account));
+  const status = returnStatus(trackingCode, data?.tracking);
+
+  return (
+    <EmployeePanel
+      title="Acompanhamento da devolução"
+      description={
+        data?.tracking === null
+          ? "O acompanhamento automático não está disponível. O RH confirma o recebimento quando o pacote chegar."
+          : "Atualizado a partir dos Correios."
+      }
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={done || status.label === "Entregue" ? "status-success" : "secondary"}>
+          {isPending ? "Consultando" : done ? "Entregue" : status.label}
+        </Badge>
+        <span className="font-mono text-sm text-muted-foreground">{trackingCode}</span>
+      </div>
+      {status.detail ? <p className="text-sm text-muted-foreground">{status.detail}</p> : null}
+    </EmployeePanel>
   );
 }
 
@@ -435,172 +463,6 @@ function TrackingCodeInput({
         </form>
       )}
       <EmployeeError message={write.error?.message} />
-    </EmployeePanel>
-  );
-}
-
-function BookingForm({ account, journey, state, close }: DepartureProps & { close: () => void }) {
-  const write = useEmployeeWrite(account);
-  const { booking } = state.value;
-  const { bookingDays, officeAddress } = journey.plan;
-
-  const initial: BookingForm = {
-    method: booking?.method === "office" && officeAddress ? "office" : "pickup",
-    day: booking && bookingDays.includes(booking.day) ? booking.day : null,
-    slot: booking?.slot ?? null,
-    address: booking?.method === "pickup" ? booking.address : "",
-  };
-
-  const form = useForm({
-    defaultValues: initial,
-    validationLogic: revalidateLogic({ mode: "submit", modeAfterSubmission: "change" }),
-    validators: { onDynamic: bookingFormSchema },
-    onSubmit: ({ value }) =>
-      write.mutate(
-        { ...state, value: { ...state.value, booking: bookingSchema.parse(value) } },
-        { onSuccess: close },
-      ),
-  });
-
-  return (
-    <EmployeePanel title={booking ? "Alterar agendamento" : "Agendar devolução"}>
-      <form
-        className="grid gap-5"
-        noValidate
-        onSubmit={(event) => {
-          event.preventDefault();
-          void form.handleSubmit();
-        }}
-      >
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <form.Field name="method">
-            {(field) => (
-              <div className="grid content-start gap-2">
-                <Label htmlFor="booking-method">Como prefere devolver?</Label>
-                <PortalFilter
-                  id="booking-method"
-                  label="Como prefere devolver?"
-                  value={field.state.value}
-                  disabled={write.isPending}
-                  className="w-full"
-                  items={[
-                    { value: "pickup", label: "Coleta em casa" },
-                    ...(officeAddress
-                      ? [{ value: "office", label: "Entregar no escritório" }]
-                      : []),
-                  ]}
-                  onChange={(value) => {
-                    if (value === "pickup" || value === "office") field.handleChange(value);
-                  }}
-                />
-              </div>
-            )}
-          </form.Field>
-          <form.Field name="day">
-            {(field) => {
-              const error = field.state.meta.errors[0]?.message;
-
-              return (
-                <div className="grid content-start gap-2">
-                  <Label htmlFor="booking-day">Dia da devolução</Label>
-                  <PortalFilter
-                    id="booking-day"
-                    label="Dia da devolução"
-                    value={field.state.value ?? ""}
-                    invalid={Boolean(error)}
-                    describedBy={error ? "booking-day-error" : undefined}
-                    disabled={write.isPending}
-                    className="w-full"
-                    items={[
-                      { value: "", label: "Escolha o dia" },
-                      ...bookingDays.map((day) => ({
-                        value: day,
-                        label: employeeDate(day, dayFormat),
-                      })),
-                    ]}
-                    onChange={(value) => field.handleChange(value || null)}
-                  />
-                  <EmployeeError id="booking-day-error" message={error} />
-                </div>
-              );
-            }}
-          </form.Field>
-          <form.Field name="slot">
-            {(field) => {
-              const error = field.state.meta.errors[0]?.message;
-
-              return (
-                <div className="grid content-start gap-2">
-                  <Label htmlFor="booking-slot">Horário</Label>
-                  <PortalFilter
-                    id="booking-slot"
-                    label="Horário"
-                    value={field.state.value ?? ""}
-                    invalid={Boolean(error)}
-                    describedBy={error ? "booking-slot-error" : undefined}
-                    disabled={write.isPending}
-                    className="w-full"
-                    items={[
-                      { value: "", label: "Escolha o horário" },
-                      { value: "morning", label: "9h às 12h" },
-                      { value: "afternoon", label: "13h às 17h" },
-                    ]}
-                    onChange={(value) =>
-                      field.handleChange(
-                        value === "morning" || value === "afternoon" ? value : null,
-                      )
-                    }
-                  />
-                  <EmployeeError id="booking-slot-error" message={error} />
-                </div>
-              );
-            }}
-          </form.Field>
-        </div>
-        <form.Subscribe selector={(formState) => formState.values.method}>
-          {(method) =>
-            method === "pickup" ? (
-              <form.Field name="address">
-                {(field) => (
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="pickup-address">Endereço da coleta</Label>
-                    <Input
-                      id="pickup-address"
-                      value={field.state.value}
-                      disabled={write.isPending}
-                      autoComplete="street-address"
-                      placeholder="Rua, número e cidade"
-                      onBlur={field.handleBlur}
-                      onChange={(event) => field.handleChange(event.target.value)}
-                      aria-invalid={field.state.meta.errors.length > 0}
-                      aria-describedby={
-                        field.state.meta.errors.length > 0 ? "pickup-address-error" : undefined
-                      }
-                    />
-                    <EmployeeError
-                      id="pickup-address-error"
-                      message={field.state.meta.errors[0]?.message}
-                    />
-                  </div>
-                )}
-              </form.Field>
-            ) : (
-              <p className="text-sm text-muted-foreground">{officeAddress}</p>
-            )
-          }
-        </form.Subscribe>
-        <EmployeeError message={write.error?.message} />
-        <div className="flex flex-wrap gap-2">
-          <Button type="submit" disabled={write.isPending}>
-            {write.isPending ? "Salvando…" : "Salvar agendamento"}
-          </Button>
-          {booking ? (
-            <Button type="button" variant="ghost" onClick={close} disabled={write.isPending}>
-              Cancelar
-            </Button>
-          ) : null}
-        </div>
-      </form>
     </EmployeePanel>
   );
 }

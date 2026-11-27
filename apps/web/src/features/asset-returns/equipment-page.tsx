@@ -357,7 +357,9 @@ function equipmentColumns(canUpdate: boolean, cases: CaseOption[]) {
 
         return (
           <Badge variant="secondary" {...classProps(styles.badge, assetBadges[status])}>
-            {equipmentStatus[status]}
+            {!row.original.caseId && status === "withPerson"
+              ? "Sem desligamento"
+              : equipmentStatus[status]}
           </Badge>
         );
       },

@@ -53,6 +53,7 @@ describe.skipIf(!url)("employee access settings", () => {
         async () => undefined,
         async () => "sent",
         granted,
+        async () => null,
       ),
     );
   }

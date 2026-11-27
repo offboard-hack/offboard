@@ -54,7 +54,9 @@ export function EmployeeAgenda({
           className="mx-auto border p-3 [--cell-size:--spacing(10)] md:mx-0"
         />
         <div className="grid content-start gap-2">
-          <h3 className="text-sm font-semibold capitalize">{dayLabel.format(selected)}</h3>
+          <h3 className="text-sm font-semibold first-letter:uppercase">
+            {dayLabel.format(selected)}
+          </h3>
           {chosen.length === 0 ? <EmployeeEmpty>Nada marcado para este dia.</EmployeeEmpty> : null}
           <ul className="divide-y">
             {chosen.map((item) => {
