@@ -23,6 +23,8 @@ import {
   newPlace,
   workModelOptions,
 } from "./job-preferences-form";
+import { describedBy } from "./preferences-form";
+import { useUnsavedGuard } from "./use-unsaved-guard";
 
 export function JobPreferencesSection({ account }: { account: EmployeeAccount }) {
   const preferences = useQuery(careerPreferencesQuery(account));
@@ -47,6 +49,7 @@ function JobForm({ account, stored }: { account: EmployeeAccount; stored: Career
   const [unchanged, setUnchanged] = useState(false);
   const save = useSaveJobPreferences(account);
   const problems = jobProblems(draft);
+  useUnsavedGuard(Object.keys(jobChanges(stored, draft)).length > 0);
   const invalid = Object.values(problems).some(Boolean);
   const shown = (message: string | undefined) => (checked ? message : undefined);
   const chosenModels = new Set(draft.workModels);
@@ -98,7 +101,7 @@ function JobForm({ account, stored }: { account: EmployeeAccount; stored: Career
             value={draft.titles}
             placeholder={"Engenheiro de Software\nPlatform Engineer"}
             aria-invalid={shown(problems.titles) !== undefined}
-            aria-describedby="job-titles-error"
+            aria-describedby={describedBy(shown(problems.titles) ? "job-titles-error" : undefined)}
             onChange={(event) => change({ titles: event.target.value })}
           />
           <EmployeeError id="job-titles-error" message={shown(problems.titles)} />
@@ -191,7 +194,10 @@ function JobForm({ account, stored }: { account: EmployeeAccount; stored: Career
             placeholder="8.000"
             value={draft.salaryFloor}
             aria-invalid={shown(problems.salaryFloor) !== undefined}
-            aria-describedby="job-salary-hint job-salary-error"
+            aria-describedby={describedBy(
+              "job-salary-hint",
+              shown(problems.salaryFloor) ? "job-salary-error" : undefined,
+            )}
             onChange={(event) => change({ salaryFloor: event.target.value })}
           />
           <p id="job-salary-hint" className="text-xs text-muted-foreground">
@@ -207,7 +213,9 @@ function JobForm({ account, stored }: { account: EmployeeAccount; stored: Career
             value={draft.excluded}
             placeholder="Uma por linha"
             aria-invalid={shown(problems.excluded) !== undefined}
-            aria-describedby="job-excluded-error"
+            aria-describedby={describedBy(
+              shown(problems.excluded) ? "job-excluded-error" : undefined,
+            )}
             onChange={(event) => change({ excluded: event.target.value })}
           />
           <EmployeeError id="job-excluded-error" message={shown(problems.excluded)} />

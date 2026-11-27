@@ -83,14 +83,14 @@ export const textFields = [
 }[];
 
 export const addressFields = [
-  { key: "cep", label: "CEP", optional: false },
-  { key: "street", label: "Rua", optional: false },
-  { key: "number", label: "Número", optional: false },
-  { key: "complement", label: "Complemento", optional: true },
-  { key: "neighborhood", label: "Bairro", optional: false },
-  { key: "city", label: "Cidade", optional: false },
-  { key: "state", label: "Estado (UF)", optional: false },
-] as const satisfies { key: AddressKey; label: string; optional: boolean }[];
+  { key: "cep", label: "CEP", optional: false, autoComplete: "postal-code" },
+  { key: "street", label: "Rua", optional: false, autoComplete: "street-address" },
+  { key: "number", label: "Número", optional: false, autoComplete: "off" },
+  { key: "complement", label: "Complemento", optional: true, autoComplete: "off" },
+  { key: "neighborhood", label: "Bairro", optional: false, autoComplete: "off" },
+  { key: "city", label: "Cidade", optional: false, autoComplete: "address-level2" },
+  { key: "state", label: "Estado (UF)", optional: false, autoComplete: "address-level1" },
+] as const satisfies { key: AddressKey; label: string; optional: boolean; autoComplete: string }[];
 
 const addressLimits: Record<AddressKey, number> = {
   cep: 9,
@@ -299,6 +299,12 @@ export function profileChanges(fields: Fields, draft: ProfileDraft) {
   }
 
   return changes;
+}
+
+export function describedBy(...ids: (string | undefined)[]) {
+  const present = ids.filter((id) => id !== undefined);
+
+  return present.length > 0 ? present.join(" ") : undefined;
 }
 
 export function answerProblem(answer: string) {
