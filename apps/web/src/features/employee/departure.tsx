@@ -43,6 +43,7 @@ import {
   feedbackWizardDefaults,
   toDepartureFeedback,
 } from "./feedback-wizard";
+import { isDeadlineOverdue } from "./deadline-overdue";
 import { returnStatus } from "./return-status";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "./ui";
 
@@ -70,6 +71,7 @@ export function DepartureOverview({
     journey.equipment.length > 0 && journey.equipment.every((item) => item.received);
 
   const reviewed = plan.handoff.filter(({ id }) => handoffCompleted.includes(id)).length;
+  const deadlineOverdue = isDeadlineOverdue(journey.deadline, todayAtWorkspace());
   const examCanBeConfirmed = plan.exam && plan.exam.day <= todayAtWorkspace();
 
   const steps = [
@@ -120,7 +122,8 @@ export function DepartureOverview({
       icon: File01Icon,
       title: "Receber o termo de rescisão",
       status: "tracking",
-      description: `Prazo informado pelo RH: ${deadlineLabel(journey)}`,
+      overdue: deadlineOverdue,
+      description: `Prazo informado pelo RH: ${deadlineLabel(journey)}${deadlineOverdue ? " · em atraso" : ""}`,
     },
     {
       to: "feedback",
@@ -144,7 +147,7 @@ export function DepartureOverview({
     items.length ? (
       <EmployeePanel key={groupTitle} title={groupTitle}>
         <ul className="divide-y">
-          {items.map(({ to, title, icon, description }) => (
+          {items.map(({ to, title, icon, description, ...step }) => (
             <li key={to}>
               <Item size="sm" render={<Link to="/colaborador" search={{ tela: to }} />}>
                 <ItemMedia variant="icon">
@@ -152,7 +155,11 @@ export function DepartureOverview({
                 </ItemMedia>
                 <ItemContent className="min-w-0">
                   <ItemTitle className="block wrap-anywhere">{title}</ItemTitle>
-                  <ItemDescription>{description}</ItemDescription>
+                  <ItemDescription
+                    className={"overdue" in step && step.overdue ? "text-destructive" : undefined}
+                  >
+                    {description}
+                  </ItemDescription>
                 </ItemContent>
                 <ItemActions>
                   <HugeiconsIcon
