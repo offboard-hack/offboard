@@ -96,12 +96,13 @@ export const rights: Right[] = [
     id: "plano-de-saude",
     question: "Posso manter o plano de saúde da empresa?",
     paragraphs: [
-      "Se você pagava mensalidade pelo plano empresarial e foi dispensado sem justa causa, a Lei 9.656/1998, art. 30, garante manter o plano nas mesmas condições de cobertura, desde que assuma o pagamento integral, incluindo a parte que a empresa pagava. Segundo a ANS, quem pediu demissão também tem esse direito.",
+      "Se você pagava mensalidade pelo plano empresarial e foi dispensado sem justa causa, a Lei 9.656/1998, art. 30, garante manter o plano nas mesmas condições de cobertura, desde que assuma o pagamento integral, incluindo a parte que a empresa pagava.",
       "O direito dura 1/3 do tempo em que você participou do plano, com mínimo de 6 e máximo de 24 meses. Você deve manifestar a opção por escrito em até 30 dias após a empresa informar esse direito, geralmente no aviso de dispensa.",
     ],
     points: [
       "Quem só pagava coparticipação, sem mensalidade, não tem esse direito.",
       "A dispensa por justa causa não garante a continuidade.",
+      "Quem pede demissão não tem esse direito.",
       "O direito se encerra se a empresa deixar de oferecer o plano a todos os empregados.",
     ],
   },
