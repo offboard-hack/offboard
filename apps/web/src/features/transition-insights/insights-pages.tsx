@@ -1,12 +1,14 @@
-import { Alert02Icon, Calendar03Icon, Tick02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { Analytics01Icon, StarIcon, Tick02Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { exitSurveyAggregatesQuery } from "@/entities/exit-survey";
+import { talentAggregatesQuery } from "@/entities/talent-aggregates";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import type { ListMetric } from "@/shared/ui/list-page";
 import { Bar, BarChart, LabelList, XAxis } from "recharts";
 import { ChartContainer } from "@/shared/ui/shadcn/chart";
 import { classProps } from "../../shared/lib/class-props";
 import { portalStyles as s } from "../../shared/ui/surface.styles";
+import { barWidth, formatNps, placementSummary, responsesLabel } from "./feedback-view";
 
 const styles = {
   report: "grid min-w-0 gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]",
@@ -25,33 +27,34 @@ const styles = {
   placementCopy: "text-sm text-muted-foreground",
 };
 
-function formatNps(value: number) {
-  return value > 0 ? `+${value}` : String(value);
-}
-
 export function FeedbackPage() {
   const { data } = useSuspenseQuery(exitSurveyAggregatesQuery);
+  const talent = useQuery(talentAggregatesQuery);
 
-  const {
-    totalResponses,
-    averageNps,
-    nps,
-    completionRate,
-    ratings,
-    activationsByMonth,
-    topTopics,
-  } = data;
+  const placement = placementSummary({
+    isPending: talent.isPending,
+    isError: talent.isError,
+    hiresShared: talent.data?.hiresShared,
+  });
+
+  const { totalResponses, averageNps, nps, completionRate, ratings, responsesByMonth, topTopics } =
+    data;
 
   const feedbackMetrics: ListMetric[] = [
     { label: "Respostas", value: String(totalResponses), icon: UserGroupIcon, tone: "primary" },
     { label: "Taxa de resposta", value: `${completionRate}%`, icon: Tick02Icon, tone: "success" },
     {
-      label: "Nota média",
-      value: averageNps.toLocaleString("pt-BR"),
-      icon: Calendar03Icon,
+      label: "Recomendação média (0 a 10)",
+      value: totalResponses === 0 ? "—" : averageNps.toLocaleString("pt-BR"),
+      icon: StarIcon,
       tone: "primary",
     },
-    { label: "NPS de saída", value: formatNps(nps), icon: Alert02Icon, tone: "primary" },
+    {
+      label: "NPS de saída",
+      value: totalResponses === 0 ? "—" : formatNps(nps),
+      icon: Analytics01Icon,
+      tone: "primary",
+    },
   ];
 
   return (
@@ -61,13 +64,22 @@ export function FeedbackPage() {
       metrics={feedbackMetrics}
     >
       <div {...classProps(styles.report)}>
-        <section aria-labelledby="monthly-activations" {...classProps(styles.section)}>
-          <h2 id="monthly-activations" {...classProps(styles.reportHeading)}>
-            Ativações por mês
+        <section aria-labelledby="monthly-responses" {...classProps(styles.section)}>
+          <h2 id="monthly-responses" {...classProps(styles.reportHeading)}>
+            Respostas por mês
           </h2>
-          <ChartContainer className="aspect-auto h-48 w-full min-w-0" aria-hidden="true">
+          {responsesByMonth.length === 0 && (
+            <p {...classProps(styles.placementCopy)}>
+              Ainda não há respostas. Elas aparecem aqui quando colaboradores enviarem a pesquisa de
+              saída.
+            </p>
+          )}
+          <ChartContainer
+            className={responsesByMonth.length === 0 ? "hidden" : "aspect-auto h-48 w-full min-w-0"}
+            aria-hidden="true"
+          >
             <BarChart
-              data={activationsByMonth}
+              data={responsesByMonth}
               margin={{ top: 20, bottom: 4 }}
               accessibilityLayer={false}
             >
@@ -84,7 +96,7 @@ export function FeedbackPage() {
             </BarChart>
           </ChartContainer>
           <ol className="sr-only">
-            {activationsByMonth.map(({ label, value }) => (
+            {responsesByMonth.map(({ label, value }) => (
               <li key={label}>
                 {label}: {value}
               </li>
@@ -95,10 +107,8 @@ export function FeedbackPage() {
           <h2 id="reported-placements" {...classProps(s.subheading)}>
             Recolocação informada
           </h2>
-          <p {...classProps(styles.stageValue, styles.outcomeValue)}>12 pessoas</p>
-          <p {...classProps(styles.placementCopy)}>
-            Total baseado em relatos voluntários com autorização.
-          </p>
+          <p {...classProps(styles.stageValue, styles.outcomeValue)}>{placement.value}</p>
+          <p {...classProps(styles.placementCopy)}>{placement.copy}</p>
         </section>
       </div>
       <section aria-labelledby="feedback-ratings" {...classProps(styles.feedback)}>
@@ -111,7 +121,7 @@ export function FeedbackPage() {
             <li key={key} {...classProps(styles.topic)}>
               <span>{label}</span>
               <div {...classProps(styles.track, styles.topicTrack)} aria-hidden="true">
-                <div {...classProps(styles.bar)} style={{ width: `${(average / 5) * 100}%` }} />
+                <div {...classProps(styles.bar)} style={{ width: barWidth(average, 5) }} />
               </div>
               <span {...classProps(styles.topicValue)}>
                 {responses === 0 ? "—" : average.toLocaleString("pt-BR")}
@@ -125,7 +135,9 @@ export function FeedbackPage() {
           O que aparece nos feedbacks
         </h2>
         <p {...classProps(styles.placementCopy)}>
-          {totalResponses} respostas anônimas. Temas mais citados:
+          {topTopics.length === 0
+            ? "Nenhum tema foi escolhido ainda."
+            : `${responsesLabel(totalResponses)}, sem identificação de quem respondeu. Temas mais citados:`}
         </p>
         <ul role="list" {...classProps(styles.topics)}>
           {topTopics.map(({ label, value }) => (
@@ -134,7 +146,7 @@ export function FeedbackPage() {
               <div {...classProps(styles.track, styles.topicTrack)} aria-hidden="true">
                 <div
                   {...classProps(styles.bar)}
-                  style={{ width: `${(value / totalResponses) * 100}%` }}
+                  style={{ width: barWidth(value, totalResponses) }}
                 />
               </div>
               <span {...classProps(styles.topicValue)}>{value}</span>

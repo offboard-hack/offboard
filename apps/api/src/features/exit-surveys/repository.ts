@@ -79,16 +79,23 @@ export function createExitSurveysRepository(db: Database) {
       monthCounts.set(monthKey, (monthCounts.get(monthKey) ?? 0) + 1);
     }
 
-    const activationsByMonth = [...monthCounts]
-      .sort(([a], [b]) => a - b)
-      .slice(-chartMonths)
-      .map(([key, value]) => ({ label: monthLabels[key % 12], value }));
+    const lastMonth = Math.max(...monthCounts.keys());
+    const firstMonth = Math.max(Math.min(...monthCounts.keys()), lastMonth - chartMonths + 1);
+
+    const responsesByMonth = Array.from(
+      { length: monthCounts.size === 0 ? 0 : lastMonth - firstMonth + 1 },
+      (_, index) => {
+        const key = firstMonth + index;
+
+        return { label: monthLabels[key % 12], value: monthCounts.get(key) ?? 0 };
+      },
+    );
 
     const ratings = exitSurveyRatings.map(({ key, label }) => {
       const values = surveys.flatMap(({ responses }) => {
-        const value = responses[key];
+        const value = Number(responses[key]);
 
-        return Number.isInteger(value) ? [Number(value)] : [];
+        return Number.isInteger(value) && value >= 1 && value <= 5 ? [value] : [];
       });
 
       const sum = values.reduce((total, value) => total + value, 0);
@@ -111,7 +118,7 @@ export function createExitSurveysRepository(db: Database) {
       nps: percent(promoters, totalResponses) - percent(detractors, totalResponses),
       completionRate: percent(totalResponses, cases.length),
       ratings,
-      activationsByMonth,
+      responsesByMonth,
       topTopics,
     };
   }

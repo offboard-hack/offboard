@@ -24,6 +24,7 @@ import {
   benefitPolicies,
   checklistModels,
   defaultOrgId,
+  exitSurveys,
   employeeAccess,
   employeeStates,
   equipment,
@@ -9808,7 +9809,7 @@ describe.skipIf(!url)("api", () => {
         { key: "equipmentReturn", label: "Devolução de equipamentos", average: 3.2, responses: 5 },
         { key: "documents", label: "Documentos e rescisão", average: 3.6, responses: 5 },
       ],
-      activationsByMonth: [
+      responsesByMonth: [
         { label: "Jun", value: 1 },
         { label: "Jul", value: 1 },
         { label: "Ago", value: 1 },
@@ -9842,9 +9843,49 @@ describe.skipIf(!url)("api", () => {
         { key: "equipmentReturn", label: "Devolução de equipamentos", average: 0, responses: 0 },
         { key: "documents", label: "Documentos e rescisão", average: 0, responses: 0 },
       ],
-      activationsByMonth: [],
+      responsesByMonth: [],
       topTopics: [],
     });
+  });
+
+  it("fills quiet months, keeps the last six and ignores invalid ratings", async () => {
+    const cases = await (await call("/offboardings")).json();
+    await db.$client.query("DELETE FROM exit_surveys");
+
+    const dated = [
+      ["2026-01-10", { assessment: 1 }],
+      ["2026-03-10", { assessment: 4, managerSupport: 6 }],
+      ["2026-06-10", { assessment: 0, managerSupport: 3.5, teamRespect: 7, communication: null }],
+      ["2026-08-20", { assessment: 5, managerSupport: 2 }],
+    ] as const;
+
+    await db.insert(exitSurveys).values(
+      dated.map(([date, responses], index) => ({
+        orgId: defaultOrgId,
+        caseId: cases[index].id,
+        npsScore: 8,
+        responses,
+        topics: [],
+        submittedAt: new Date(`${date}T12:00:00Z`),
+      })),
+    );
+
+    const body = await (await call("/exit-surveys/aggregates")).json();
+
+    expect(body.responsesByMonth).toEqual([
+      { label: "Mar", value: 1 },
+      { label: "Abr", value: 0 },
+      { label: "Mai", value: 0 },
+      { label: "Jun", value: 1 },
+      { label: "Jul", value: 0 },
+      { label: "Ago", value: 1 },
+    ]);
+
+    expect(body.ratings.slice(0, 3)).toMatchObject([
+      { key: "assessment", average: 3.3, responses: 3 },
+      { key: "managerSupport", average: 2, responses: 1 },
+      { key: "teamRespect", average: 0, responses: 0 },
+    ]);
   });
 
   it("submits and resubmits a survey for a case", async () => {
