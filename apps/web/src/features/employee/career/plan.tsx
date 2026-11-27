@@ -1,7 +1,12 @@
 import { brazilTimezone } from "@offboard/employee";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { careerPlanQuery, useCancelCareerPro, useUpgradeCheckout } from "@/entities/career";
+import {
+  careerPlanQuery,
+  useCancelCareerPro,
+  useCopayCheckout,
+  useUpgradeCheckout,
+} from "@/entities/career";
 import type { EmployeeAccount } from "@/entities/employee";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
@@ -13,6 +18,7 @@ import {
   cancelConfirmPrompt,
   cancelKeepLabel,
   cancelProLabel,
+  copayPaymentReceivedNote,
   paymentReceivedNote,
   planCardView,
   planPollInterval,
@@ -27,8 +33,17 @@ const dayFormat = new Intl.DateTimeFormat("en-CA", {
   timeZone: brazilTimezone,
 });
 
-export function PlanSection({ account, paid }: { account: EmployeeAccount; paid: boolean }) {
+export function PlanSection({
+  account,
+  paid,
+  copayPaid,
+}: {
+  account: EmployeeAccount;
+  paid: boolean;
+  copayPaid: boolean;
+}) {
   const checkout = useUpgradeCheckout(account);
+  const copayCheckout = useCopayCheckout(account);
   const cancel = useCancelCareerPro(account);
   const [openedAt] = useState(() => Date.now());
   const [today] = useState(() => dayFormat.format(new Date()));
@@ -36,7 +51,9 @@ export function PlanSection({ account, paid }: { account: EmployeeAccount; paid:
   const plan = useQuery({
     ...careerPlanQuery(account),
     refetchInterval: (query) =>
-      paid && Date.now() - openedAt < planPollTimeout && shouldPollPlan(query.state.data, today)
+      (paid || copayPaid) &&
+      Date.now() - openedAt < planPollTimeout &&
+      shouldPollPlan(query.state.data, today, !paid)
         ? planPollInterval
         : false,
   });
@@ -50,10 +67,13 @@ export function PlanSection({ account, paid }: { account: EmployeeAccount; paid:
       plan={plan.data}
       today={today}
       paid={paid}
+      copayPaid={copayPaid}
       upgrading={checkout.isPending || checkout.isSuccess}
-      error={checkout.error?.message ?? cancel.error?.message}
+      copaying={copayCheckout.isPending || copayCheckout.isSuccess}
+      error={checkout.error?.message ?? copayCheckout.error?.message ?? cancel.error?.message}
       canceling={cancel.isPending}
       onUpgrade={() => checkout.mutate()}
+      onCopay={(targetPlanId) => copayCheckout.mutate(targetPlanId)}
       onCancel={() => cancel.mutate()}
     />
   );
@@ -86,23 +106,30 @@ export function PlanCard({
   plan,
   today,
   paid,
+  copayPaid,
   upgrading,
+  copaying,
   error,
   canceling,
   onUpgrade,
+  onCopay,
   onCancel,
 }: {
   plan: CareerPlan;
   today: string;
   paid: boolean;
+  copayPaid: boolean;
   upgrading: boolean;
+  copaying: boolean;
   error?: string;
   canceling: boolean;
   onUpgrade: () => void;
+  onCopay: (targetPlanId: string) => void;
   onCancel: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const view = planCardView(plan, today, paid);
+  const view = planCardView(plan, today, paid, copayPaid);
+  const { copay } = plan;
   const comparison = view.showComparison ? featureComparisonView(view.activeBenefit) : null;
 
   return (
@@ -129,13 +156,6 @@ export function PlanCard({
           {comparison.next ? (
             <FeatureList title={`No ${comparison.next.name}`} tier={comparison.next} />
           ) : null}
-          {comparison.copayLabel ? (
-            <div>
-              <Button variant="outline" disabled>
-                {comparison.copayLabel} · Em breve
-              </Button>
-            </div>
-          ) : null}
         </div>
       ) : null}
       {view.sponsorLine ? (
@@ -146,7 +166,22 @@ export function PlanCard({
           {paymentReceivedNote}
         </p>
       ) : null}
+      {view.copayPaymentNote ? (
+        <p role="status" className="text-sm">
+          {copayPaymentReceivedNote}
+        </p>
+      ) : null}
       {view.statusNote ? <p className="text-sm text-destructive">{view.statusNote}</p> : null}
+      {copay && view.copayButton === "available" ? (
+        <div>
+          <Button variant="outline" onClick={() => onCopay(copay.targetPlanId)} disabled={copaying}>
+            {view.copayLabel}
+          </Button>
+        </div>
+      ) : null}
+      {view.copayButton === "active" ? (
+        <Badge variant="status-success">{view.copayActiveLabel}</Badge>
+      ) : null}
       {view.upgrade === "available" ? (
         <div>
           <Button onClick={onUpgrade} disabled={upgrading}>

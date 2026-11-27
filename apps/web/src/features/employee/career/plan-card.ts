@@ -16,10 +16,20 @@ export type CareerPlan = {
   } | null;
   aiApply: { allowedBy: "company" | "individual" | "benefit" | null; dailyLimit: number };
   upgrade: { offered: boolean; priceCents: number; dailyLimit: number };
+  copay: {
+    offered: boolean;
+    targetPlanId: string;
+    targetPlanName: string;
+    priceCents: number;
+    active: boolean;
+  } | null;
 };
 
 export const paymentReceivedNote =
   "Pagamento recebido. O Carreira Pro é ativado assim que o pagamento for confirmado.";
+
+export const copayPaymentReceivedNote =
+  "Pagamento recebido. O upgrade do benefício é ativado assim que o pagamento for confirmado.";
 
 export const planPollInterval = 3_000;
 
@@ -71,8 +81,10 @@ export const cancelConfirmLabel = "Sim, cancelar";
 
 export const cancelKeepLabel = "Manter";
 
-export function shouldPollPlan(plan: CareerPlan | undefined, today: string) {
-  return plan === undefined || !isProActive(plan, today);
+export function shouldPollPlan(plan: CareerPlan | undefined, today: string, copayPaid = false) {
+  if (plan === undefined) return true;
+
+  return copayPaid ? plan.copay?.active !== true : !isProActive(plan, today);
 }
 
 function daysUntil(day: string, today: string) {
@@ -83,6 +95,12 @@ function upgradeState(wanted: boolean, offered: boolean) {
   if (!wanted) return "hidden" as const;
 
   return offered ? ("available" as const) : ("unavailable" as const);
+}
+
+function copayState(copay: CareerPlan["copay"]) {
+  if (copay?.active) return "active" as const;
+
+  return copay?.offered ? ("available" as const) : ("hidden" as const);
 }
 
 function statusNote(pastDue: boolean, checkoutPending: boolean) {
@@ -125,8 +143,8 @@ function aiApplyLabel(dailyLimit: number, priority: boolean) {
   return `${dailyLimit} candidaturas/dia com IA${priority ? " · prioridade" : ""}`;
 }
 
-export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
-  const { company, individual, aiApply, upgrade, benefit } = plan;
+export function planCardView(plan: CareerPlan, today: string, paid: boolean, copayPaid = false) {
+  const { company, individual, aiApply, upgrade, benefit, copay } = plan;
 
   const activeBenefit = benefit !== null && benefit.validUntil >= today ? benefit : null;
   const benefitDays = activeBenefit ? daysUntil(activeBenefit.validUntil, today) : null;
@@ -155,6 +173,7 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
         ? null
         : `Patrocinado pela empresa até ${planDate(company.sponsoredUntil)}`,
     paymentNote: paid && !proActive,
+    copayPaymentNote: copayPaid && copay?.active !== true,
     statusNote: statusNote(pastDue, checkoutPending && !paid),
     proLine: proLabel(individual, proActive),
     cancelable: individual?.cancelable === true,
@@ -168,6 +187,11 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean) {
     showComparison:
       activeBenefit !== null &&
       (!proActive || activeBenefit.aiApplyDailyLimit > proAiApplyDailyLimit),
+    copayButton: copayState(copay),
+    copayLabel: copay?.offered
+      ? `Upgrade para ${copay.targetPlanName} · ${planPrice(copay.priceCents)}`
+      : null,
+    copayActiveLabel: copay?.active ? `Upgrade ativo · ${copay.targetPlanName}` : null,
     aiApplyLine: aiApplyLabel(aiApply.dailyLimit, activeBenefit?.aiApplyPriority === true),
   };
 }

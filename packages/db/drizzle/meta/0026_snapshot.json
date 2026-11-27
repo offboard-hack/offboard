@@ -1,5 +1,5 @@
 {
-  "id": "7482e55d-18fe-4979-b3f7-4fce16851a10",
+  "id": "e225feec-912d-40ac-baf1-ea6497cce499",
   "prevId": "6aac8767-84f8-424a-a7e0-f87866721a21",
   "version": "7",
   "dialect": "postgresql",
@@ -1484,6 +1484,84 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.benefit_invoices": {
+      "name": "benefit_invoices",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'00000000-0000-0000-0000-000000000001'"
+        },
+        "period": {
+          "name": "period",
+          "type": "varchar(7)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_cents": {
+          "name": "total_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "status": {
+          "name": "status",
+          "type": "benefit_invoice_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "benefit_invoices_org_id_organizations_id_fk": {
+          "name": "benefit_invoices_org_id_organizations_id_fk",
+          "tableFrom": "benefit_invoices",
+          "tableTo": "organizations",
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "benefit_invoices_org_period_idx": {
+          "name": "benefit_invoices_org_period_idx",
+          "nullsNotDistinct": false,
+          "columns": ["org_id", "period"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.benefit_policies": {
       "name": "benefit_policies",
       "schema": "",
@@ -1574,91 +1652,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.candidate_contact_requests": {
-      "name": "candidate_contact_requests",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "resume_id": {
-          "name": "resume_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "varchar(120)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "email": {
-          "name": "email",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "company": {
-          "name": "company",
-          "type": "varchar(120)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "message": {
-          "name": "message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "token_hash": {
-          "name": "token_hash",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "confirmed_at": {
-          "name": "confirmed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "candidate_contact_requests_resume_id_resumes_id_fk": {
-          "name": "candidate_contact_requests_resume_id_resumes_id_fk",
-          "tableFrom": "candidate_contact_requests",
-          "tableTo": "resumes",
-          "columnsFrom": ["resume_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "candidate_contact_requests_token_hash_unique": {
-          "name": "candidate_contact_requests_token_hash_unique",
-          "nullsNotDistinct": false,
-          "columns": ["token_hash"]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.checklist_models": {
       "name": "checklist_models",
       "schema": "",
@@ -1696,6 +1689,69 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.copay_products": {
+      "name": "copay_products",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "from_plan_id": {
+          "name": "from_plan_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "to_plan_id": {
+          "name": "to_plan_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "abacatepay_product_id": {
+          "name": "abacatepay_product_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "copay_products_from_plan_id_plans_id_fk": {
+          "name": "copay_products_from_plan_id_plans_id_fk",
+          "tableFrom": "copay_products",
+          "tableTo": "plans",
+          "columnsFrom": ["from_plan_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "copay_products_to_plan_id_plans_id_fk": {
+          "name": "copay_products_to_plan_id_plans_id_fk",
+          "tableFrom": "copay_products",
+          "tableTo": "plans",
+          "columnsFrom": ["to_plan_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "copay_products_pair_idx": {
+          "name": "copay_products_pair_idx",
+          "nullsNotDistinct": false,
+          "columns": ["from_plan_id", "to_plan_id"]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -4760,6 +4816,11 @@
       "name": "benefit_assignment_source",
       "schema": "public",
       "values": ["default", "rule", "manual"]
+    },
+    "public.benefit_invoice_status": {
+      "name": "benefit_invoice_status",
+      "schema": "public",
+      "values": ["draft", "sent"]
     },
     "public.connection_status": {
       "name": "connection_status",

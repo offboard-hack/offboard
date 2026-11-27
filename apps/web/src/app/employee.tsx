@@ -412,7 +412,7 @@ function PreferencesContent({ account }: { account: EmployeeAccount }) {
 }
 
 function CareerContent({ account, screen }: { account: EmployeeAccount; screen: EmployeeScreen }) {
-  const { carreira, plano } = route.useSearch();
+  const { carreira, plano, copay } = route.useSearch();
   const tracking = screen === "carreira" && carreira === "candidaturas";
   const { data: summary } = useQuery({ ...applicationsSummaryQuery(account), enabled: tracking });
 
@@ -436,7 +436,12 @@ function CareerContent({ account, screen }: { account: EmployeeAccount; screen: 
       {screen === "curriculo" ? (
         <ResumeCareer account={account} />
       ) : (
-        <Career account={account} view={carreira} paid={plano === "ok"} />
+        <Career
+          account={account}
+          view={carreira}
+          paid={plano === "ok"}
+          copayPaid={copay === "ok"}
+        />
       )}
     </EmployeeScreenPage>
   );

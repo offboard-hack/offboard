@@ -2,9 +2,15 @@ import { Elysia, t } from "elysia";
 import type { PortalAccessPlugin } from "../../shared/access.js";
 import { logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
+import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 import type { AbacatePayGateway } from "./abacatepay.js";
 import type { BillingRepository } from "./repository.js";
-import { applyWebhookEvent, isAuthorizedWebhook, parseWebhookEvent } from "./webhook.js";
+import {
+  applyWebhookEvent,
+  type CopayBenefits,
+  isAuthorizedWebhook,
+  parseWebhookEvent,
+} from "./webhook.js";
 
 const planRow = t.Object({
   id: t.String(),
@@ -48,8 +54,34 @@ const invoiceRow = t.Object({
 
 const checkoutResponse = t.Object({ checkoutId: t.String(), url: t.String() });
 
+const benefitInvoiceRow = t.Object({
+  id: t.String(),
+  period: t.String(),
+  totalCents: t.Number(),
+  status: t.String(),
+});
+
+type BenefitInvoices = {
+  tallyActiveAssignments(orgId: string): Promise<{ totalCents: number }>;
+  createBenefitInvoice(
+    orgId: string,
+    period: string,
+    totalCents: number,
+  ): Promise<{ id: string; period: string; totalCents: number; status: string }>;
+  listBenefitInvoices(orgId: string): Promise<
+    {
+      id: string;
+      period: string;
+      totalCents: number;
+      status: string;
+      createdAt: Date | null;
+    }[]
+  >;
+};
+
 export function billingRoutes(
   repos: BillingRepository,
+  benefits: CopayBenefits & BenefitInvoices,
   access: PortalAccessPlugin,
   gateway: AbacatePayGateway,
   webOrigin: string,
@@ -86,6 +118,29 @@ export function billingRoutes(
       permit: ["manage", "Billing"],
       response: t.Array(invoiceRow),
     })
+    .get(
+      "/billing/benefit-invoices",
+      ({ principal }) => benefits.listBenefitInvoices(principal.orgId),
+      {
+        permit: ["read", "Billing"],
+        response: t.Array(
+          t.Composite([benefitInvoiceRow, t.Object({ createdAt: t.Nullable(t.Date()) })]),
+        ),
+      },
+    )
+    .post(
+      "/billing/benefit-invoices/generate",
+      async ({ principal }) => {
+        const { totalCents } = await benefits.tallyActiveAssignments(principal.orgId);
+
+        return benefits.createBenefitInvoice(
+          principal.orgId,
+          saoPauloDate(new Date()).slice(0, 7),
+          totalCents,
+        );
+      },
+      { permit: ["manage", "Billing"], response: benefitInvoiceRow },
+    )
     .post(
       "/billing/checkout",
       async ({ principal, status }) => {
@@ -173,7 +228,7 @@ export function billingRoutes(
 
         if (!event) return status(422, { error: "Invalid webhook event" });
 
-        await applyWebhookEvent(repos, gateway, event, request.headers.get("webhook-id"));
+        await applyWebhookEvent(repos, benefits, gateway, event, request.headers.get("webhook-id"));
 
         return { ok: true } satisfies { ok: true };
       },

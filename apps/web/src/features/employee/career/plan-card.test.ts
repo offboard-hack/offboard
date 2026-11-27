@@ -16,6 +16,7 @@ const base: CareerPlan = {
   benefit: null,
   aiApply: { allowedBy: "company", dailyLimit: 10 },
   upgrade: { offered: true, priceCents: 7900, dailyLimit: 10 },
+  copay: null,
 };
 
 const today = "2026-11-26";
@@ -35,6 +36,7 @@ describe("plan card view", () => {
       proLine: null,
       cancelable: false,
       paymentNote: false,
+      copayPaymentNote: false,
       statusNote: null,
       upgrade: "hidden",
       upgradeLabel: "Fazer upgrade · R$ 79/mês",
@@ -43,6 +45,9 @@ describe("plan card view", () => {
       benefitExpiryWarning: null,
       activeBenefit: null,
       showComparison: false,
+      copayButton: "hidden",
+      copayLabel: null,
+      copayActiveLabel: null,
       aiApplyLine: "10 candidaturas/dia com IA",
     });
   });
@@ -280,6 +285,20 @@ describe("plan card view", () => {
     expect(shouldPollPlan(pending, today)).toBe(true);
     expect(shouldPollPlan(active, today)).toBe(false);
   });
+
+  it("polls after a co-pay payment until the co-pay is active", () => {
+    const copay = {
+      offered: false,
+      targetPlanId: "x",
+      targetPlanName: "Platinum",
+      priceCents: 3000,
+    };
+
+    expect(shouldPollPlan(undefined, today, true)).toBe(true);
+    expect(shouldPollPlan(base, today, true)).toBe(true);
+    expect(shouldPollPlan({ ...base, copay: { ...copay, active: false } }, today, true)).toBe(true);
+    expect(shouldPollPlan({ ...base, copay: { ...copay, active: true } }, today, true)).toBe(false);
+  });
 });
 
 const benefitBase: CareerPlan = {
@@ -295,6 +314,7 @@ const benefitBase: CareerPlan = {
   },
   aiApply: { allowedBy: "benefit", dailyLimit: 3 },
   upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
+  copay: null,
 };
 
 const withValidUntil = (validUntil: string) =>
@@ -455,5 +475,61 @@ describe("plan card benefit view", () => {
     };
 
     expect(planCardView(plan, today, false).showComparison).toBe(true);
+  });
+});
+
+describe("co-pay button", () => {
+  const copay = {
+    offered: true,
+    targetPlanId: "x",
+    targetPlanName: "Platinum",
+    priceCents: 3000,
+    active: false,
+  };
+
+  it("shows co-pay button when offered", () => {
+    expect(planCardView({ ...benefitBase, copay }, today, false)).toMatchObject({
+      copayButton: "available",
+      copayLabel: "Upgrade para Platinum · R$ 30/mês",
+      copayActiveLabel: null,
+    });
+  });
+
+  it("shows the co-pay payment note until the co-pay is active", () => {
+    const active = { ...copay, offered: false, active: true };
+
+    expect(planCardView({ ...benefitBase, copay }, today, false, true).copayPaymentNote).toBe(true);
+    expect(
+      planCardView({ ...benefitBase, copay: active }, today, false, true).copayPaymentNote,
+    ).toBe(false);
+    expect(planCardView(benefitBase, today, false, true).copayPaymentNote).toBe(true);
+    expect(planCardView({ ...benefitBase, copay }, today, false, false).copayPaymentNote).toBe(
+      false,
+    );
+  });
+
+  it("hides co-pay button when not offered", () => {
+    expect(planCardView(benefitBase, today, false)).toMatchObject({
+      copayButton: "hidden",
+      copayLabel: null,
+      copayActiveLabel: null,
+    });
+    expect(
+      planCardView({ ...benefitBase, copay: { ...copay, offered: false } }, today, false),
+    ).toMatchObject({ copayButton: "hidden", copayLabel: null });
+  });
+
+  it("shows co-pay active state", () => {
+    expect(
+      planCardView(
+        { ...benefitBase, copay: { ...copay, offered: false, active: true } },
+        today,
+        false,
+      ),
+    ).toMatchObject({
+      copayButton: "active",
+      copayLabel: null,
+      copayActiveLabel: "Upgrade ativo · Platinum",
+    });
   });
 });
