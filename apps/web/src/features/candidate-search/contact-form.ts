@@ -51,7 +51,16 @@ const failures = new Map([
 ]);
 
 export function contactFailure(status: number) {
-  return failures.get(status) ?? "Não foi possível enviar a mensagem. Tente de novo.";
+  return failures.get(status) ?? "Não foi possível enviar o link de confirmação. Tente de novo.";
+}
+
+const confirmFailures = new Map([
+  [404, "Este link expirou ou já foi usado. Escreva de novo pela busca de candidatos."],
+  [429, "Esta pessoa já recebeu o máximo de mensagens de hoje. Tente de novo amanhã."],
+]);
+
+export function confirmFailure(status: number) {
+  return confirmFailures.get(status) ?? "Não foi possível enviar a mensagem. Tente de novo.";
 }
 
 export function firstName(name: string) {

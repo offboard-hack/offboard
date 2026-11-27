@@ -1,16 +1,26 @@
 import { Elysia, t } from "elysia";
-import type { Embed } from "../../shared/embed.js";
+import { type Embed, textHash } from "../../shared/embed.js";
 import { logFailure } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import { profileCard, toProfileCard } from "../../shared/profile-card.js";
 import type { SearchQuota } from "../../shared/search-quota.js";
-import { contactEmail } from "./contact.js";
+import { confirmationEmail, contactEmail } from "./contact.js";
 import type { CandidatesRepository } from "./repository.js";
 
 const resultLimit = 12;
 const limits = { visitor: 30, total: 2_000 };
 const contactLimits = { visitor: 5, total: 300 };
 const contactsPerCandidate = 5;
+const confirmationsPerSender = 3;
+const confirmationWindowMs = 24 * 60 * 60 * 1000;
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function newToken() {
+  return Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+}
 
 type Message = { to: string; subject: string; text: string; html: string };
 
@@ -61,25 +71,38 @@ export function candidatesRoutes(
 
         if (!candidate) return status(404, { error: "Candidate not found" });
 
-        const day = new Date().toISOString().slice(0, 10);
+        const sender = await textHash(body.email.toLowerCase());
 
         if (
           !(await quota.take(
-            [{ bucket: `contact:to:${params.id}`, limit: contactsPerCandidate }],
-            day,
+            [{ bucket: `contact:from:${sender.slice(0, 32)}`, limit: confirmationsPerSender }],
+            today(),
           ))
         ) {
           return status(429, { error: "Too many messages" });
         }
 
+        const token = newToken();
+
+        await repo.requestContact({
+          resumeId: params.id,
+          name: body.name.trim(),
+          email: body.email,
+          company: body.company?.trim() || null,
+          message: body.message.trim(),
+          tokenHash: await textHash(token),
+        });
+
+        const link = `${mail.origin}/busca-candidato/confirmar?token=${token}`;
+
         const sent = await mail
-          .send(contactEmail(candidate, { ...body, message: body.message.trim() }, mail.origin))
+          .send(confirmationEmail(body.email, candidate.name, link))
           .then(() => true)
-          .catch(logFailure("candidate contact email failed"));
+          .catch(logFailure("candidate contact confirmation failed"));
 
-        if (!sent) return status(502, { error: "Could not send the message" });
+        if (!sent) return status(502, { error: "Could not send the confirmation" });
 
-        return new Response(null, { status: 204 });
+        return new Response(null, { status: 202 });
       },
       {
         params: t.Object({ id: t.String({ format: "uuid" }) }),
@@ -89,6 +112,57 @@ export function candidatesRoutes(
           company: t.Optional(t.String({ maxLength: 120 })),
           message: t.String({ minLength: 20, maxLength: 2_000 }),
         }),
+        response: {
+          202: t.Void(),
+          404: errorResponse,
+          429: errorResponse,
+          502: errorResponse,
+        },
+      },
+    )
+    .post(
+      "/candidates/contact/confirm",
+      async ({ body, status }) => {
+        const now = new Date();
+
+        const claimed = await repo.claimContact(
+          await textHash(body.token),
+          new Date(now.getTime() - confirmationWindowMs),
+          now,
+        );
+
+        if (!claimed) return status(404, { error: "Link expired or already used" });
+
+        const candidate = await repo.contactTarget(claimed.resumeId);
+
+        if (!candidate) return status(404, { error: "Link expired or already used" });
+
+        if (
+          !(await quota.take(
+            [{ bucket: `contact:to:${claimed.resumeId}`, limit: contactsPerCandidate }],
+            today(),
+          ))
+        ) {
+          await repo.releaseContact(claimed.id);
+
+          return status(429, { error: "Too many messages" });
+        }
+
+        const sent = await mail
+          .send(contactEmail(candidate, claimed, mail.origin))
+          .then(() => true)
+          .catch(logFailure("candidate contact email failed"));
+
+        if (!sent) {
+          await repo.releaseContact(claimed.id);
+
+          return status(502, { error: "Could not send the message" });
+        }
+
+        return new Response(null, { status: 204 });
+      },
+      {
+        body: t.Object({ token: t.String({ minLength: 20, maxLength: 100 }) }),
         response: {
           204: t.Void(),
           404: errorResponse,
