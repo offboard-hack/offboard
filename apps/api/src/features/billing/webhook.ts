@@ -156,8 +156,20 @@ type CompanyTarget = {
   providerSubscriptionId: string | null;
 };
 
+function issuedCheckout(event: SubscriptionEvent) {
+  return { providerSubscriptionId: event.data.subscription.id, checkoutUrl: null };
+}
+
+function bindsCheckout(name: string, subscription: CompanyTarget) {
+  return (
+    name === "subscription.completed" ||
+    name === "subscription.trial_started" ||
+    (name === "subscription.renewed" && subscription.providerSubscriptionId === null)
+  );
+}
+
 function isStaleCompanyEvent(name: string, event: SubscriptionEvent, subscription: CompanyTarget) {
-  if (name === "subscription.completed") {
+  if (bindsCheckout(name, subscription)) {
     const paid = event.data.checkout?.id;
 
     return subscription.status === "pending"
@@ -222,7 +234,10 @@ export async function applyWebhookEvent(
   const amount = event.data.subscription.amount;
 
   if (name === "subscription.trial_started") {
-    await repos.updateSubscription(orgId, subscription.id, { status: "trialing" });
+    await repos.updateSubscription(orgId, subscription.id, {
+      status: "trialing",
+      ...issuedCheckout(event),
+    });
   }
 
   if (name === "subscription.cancelled") {
@@ -242,10 +257,7 @@ export async function applyWebhookEvent(
       status: "active",
       currentPeriodStart: today,
       currentPeriodEnd: addOneMonth(today),
-      ...(name === "subscription.completed" && {
-        providerSubscriptionId: event.data.subscription.id,
-        checkoutUrl: null,
-      }),
+      ...(bindsCheckout(name, subscription) && issuedCheckout(event)),
     });
   }
 

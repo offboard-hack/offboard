@@ -994,6 +994,83 @@ describe.skipIf(!url)("billing", () => {
       expect((await subscriptionsOf(defaultOrgId))[0].status).toBe("pending");
     });
 
+    it("ignores a trial from an old checkout and accepts the issued one", async () => {
+      await subscribe("silver");
+
+      const [silver] = await subscriptionsOf(defaultOrgId);
+
+      await ageCheckout();
+      await subscribe("gold");
+
+      const [row] = await subscriptionsOf(defaultOrgId);
+
+      const trial = (source: { id: string; checkoutId: string | null }) =>
+        webhook("subscription.trial_started", {
+          subscription: { id: "subs_trial", amount: 24900 },
+          checkout: { id: source.checkoutId ?? "", externalId: row.id },
+        });
+
+      expect((await trial(silver)).status).toBe(200);
+      expect((await subscriptionsOf(defaultOrgId))[0]).toMatchObject({
+        status: "pending",
+        providerSubscriptionId: null,
+      });
+
+      await trial(row);
+
+      expect((await subscriptionsOf(defaultOrgId))[0]).toMatchObject({
+        status: "trialing",
+        providerSubscriptionId: "subs_trial",
+        checkoutUrl: null,
+      });
+    });
+
+    it("ignores a first renewal from an old checkout and accepts the issued one", async () => {
+      await subscribe("silver");
+
+      const [silver] = await subscriptionsOf(defaultOrgId);
+
+      await ageCheckout();
+      await subscribe("gold");
+
+      const [row] = await subscriptionsOf(defaultOrgId);
+
+      const renewal = (source: { checkoutId: string | null }) =>
+        webhook("subscription.renewed", {
+          subscription: { id: "subs_renewed", amount: 24900 },
+          checkout: { id: source.checkoutId ?? "", externalId: row.id },
+          payment: { id: `pay_renewed_${source.checkoutId}` },
+        });
+
+      await renewal(silver);
+
+      expect((await subscriptionsOf(defaultOrgId))[0].status).toBe("pending");
+      expect(await allInvoices()).toEqual([]);
+
+      await renewal(row);
+
+      expect((await subscriptionsOf(defaultOrgId))[0]).toMatchObject({
+        status: "active",
+        providerSubscriptionId: "subs_renewed",
+      });
+      expect((await allInvoices()).map((invoice) => invoice.status)).toEqual(["paid"]);
+    });
+
+    it("matches later renewals by provider subscription once it is known", async () => {
+      await subscribe("silver");
+
+      const [row] = await subscriptionsOf(defaultOrgId);
+
+      await completion(row, "subs_known");
+      await webhook("subscription.renewed", {
+        subscription: { id: "subs_known", amount: 24900 },
+        checkout: { id: "bill_unrelated", externalId: row.id },
+        payment: { id: "pay_second_cycle" },
+      });
+
+      expect((await allInvoices()).map((invoice) => invoice.status)).toEqual(["paid", "paid"]);
+    });
+
     it("ignores lifecycle events from an older provider subscription", async () => {
       await subscribe("silver");
 
