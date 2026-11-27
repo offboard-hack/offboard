@@ -1,19 +1,41 @@
 import { queryOptions } from "@tanstack/react-query";
-import type { ApiClient, Treaty } from "@offboard/api-client";
+import type { AutomationRuleRow } from "@/entities/automation-rule";
 import type { ChecklistStep } from "./checklist-draft";
 import { stepFormSchema, type StepSettings } from "./step-settings";
 import { getApiClient } from "@/shared/lib/api-client";
 
 const kinds = ["email", "slack", "webhook"] as const;
 
-export type ActionConfigRow = Treaty.Data<ApiClient["api"]["action-configs"]["get"]>[number];
+type RuleAction = AutomationRuleRow["actions"][number];
+
+export type ActionConfigRow = {
+  id: string;
+  actionId: string;
+  config: Omit<RuleAction, "type">;
+};
+
+function extractConfig(action: RuleAction) {
+  return Object.fromEntries(
+    Object.entries(action).filter(([key]) => key !== "type"),
+  ) satisfies ActionConfigRow["config"];
+}
 
 async function listActionConfigs({ signal }: { signal: AbortSignal }) {
-  const { data, error } = await getApiClient().api["action-configs"].get({ fetch: { signal } });
+  const { data, error } = await getApiClient().api["automation-rules"].get({
+    fetch: { signal },
+  });
 
   if (error) throw new Error("Failed to fetch action configs");
 
-  return data;
+  return (data ?? []).flatMap((rule) => {
+    if (!rule.sourceRef) return [];
+
+    const actions = Array.isArray(rule.actions) ? rule.actions : [];
+    const first = actions[0];
+    const config = first ? extractConfig(first) : {};
+
+    return [{ id: rule.id, actionId: rule.sourceRef, config }];
+  });
 }
 
 export const actionConfigsQuery = queryOptions({

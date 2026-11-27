@@ -17,7 +17,21 @@ type Received = { method: string; url: string; body: unknown };
 
 const received: Received[] = [];
 let failing = false;
-let listBody: ActionConfigRow[] = [];
+
+interface ServerRule {
+  id: string;
+  sourceRef: string | null;
+  name: string;
+  trigger: string;
+  conditions: Record<string, string>;
+  actions: { type: string; [k: string]: string }[] | string;
+  enabled: boolean;
+  cronSchedule: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+let listBody: ServerRule[] | null = [];
 
 const server = createServer((req, res) => {
   let raw = "";
@@ -88,21 +102,56 @@ const row = (overrides: Partial<ActionConfigRow> = {}) =>
   ({
     id: "r1",
     actionId: "email:s1",
-    enabled: true,
     config: email,
-    phase: "d0",
     ...overrides,
   }) satisfies ActionConfigRow;
+
+function apiRule(r: ActionConfigRow) {
+  return {
+    id: r.id,
+    sourceRef: r.actionId,
+    name: r.actionId,
+    trigger: "task.status_changed",
+    conditions: {},
+    actions: [{ type: r.actionId.split(":")[0], ...r.config }],
+    enabled: true,
+    cronSchedule: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
 
 describe("actionConfigsQuery", () => {
   const fetchRows = () =>
     runInRequest(() => new QueryClient().fetchQuery({ ...actionConfigsQuery, retry: false }));
 
   it("fetches and parses rows", async () => {
-    listBody = [row()];
+    listBody = [apiRule(row())];
 
     expect(await fetchRows()).toEqual([row()]);
-    expect(received).toEqual([{ method: "GET", url: "/api/action-configs", body: "" }]);
+    expect(received).toEqual([{ method: "GET", url: "/api/automation-rules", body: "" }]);
+  });
+
+  it("returns empty when API returns null-ish data", async () => {
+    listBody = null;
+
+    expect(await fetchRows()).toEqual([]);
+  });
+
+  it("skips rules without sourceRef and handles missing actions", async () => {
+    listBody = [
+      apiRule(row()),
+      { ...apiRule(row({ id: "r2" })), sourceRef: null, actions: [] },
+      { ...apiRule(row({ id: "r3", actionId: "email:s3" })), actions: "not-an-array" },
+      { ...apiRule(row({ id: "r4", actionId: "email:s4" })), actions: [] },
+    ];
+
+    const result = await fetchRows();
+
+    expect(result).toHaveLength(3);
+    expect(result[0]).toEqual(row());
+    expect(result[1]).toEqual({ id: "r3", actionId: "email:s3", config: {} });
+    expect(result[2]).toEqual({ id: "r4", actionId: "email:s4", config: {} });
   });
 
   it("rejects when the server fails", async () => {

@@ -546,7 +546,12 @@ function ChecklistEditor({
     },
     onSuccess: ({ actionRows: rows, ...next }) => {
       client.setQueryData(checklistModelQuery(orgId).queryKey, { ...next, template });
-      client.setQueryData(checklistActionConfigsQuery(orgId).queryKey, rows);
+
+      const mapped = rows.map(
+        ({ id, actionId, config }) => ({ id, actionId, config }) satisfies ActionConfigRow,
+      );
+
+      client.setQueryData(checklistActionConfigsQuery(orgId).queryKey, mapped);
       loadPublishedModel(next, rows, "Modelo publicado.");
     },
   });
