@@ -686,7 +686,6 @@ export const ruleTriggers = [
   "equipment.status_changed",
   "task.status_changed",
   "correios.delivered",
-  "correios.in_transit",
   "schedule.cron",
 ] as const;
 

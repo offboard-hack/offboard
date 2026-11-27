@@ -17,7 +17,6 @@ const triggerOrder = [
   "task.status_changed",
   "equipment.status_changed",
   "correios.delivered",
-  "correios.in_transit",
   "schedule.cron",
 ] as const;
 
@@ -34,7 +33,6 @@ export const triggerLabels = {
   "task.status_changed": "Status da tarefa mudou",
   "equipment.status_changed": "Status do equipamento mudou",
   "correios.delivered": "Correios: entregue",
-  "correios.in_transit": "Correios: em trânsito",
   "schedule.cron": "Agendamento",
 } satisfies Record<Trigger, string>;
 
