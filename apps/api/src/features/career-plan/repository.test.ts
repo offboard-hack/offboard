@@ -204,7 +204,7 @@ describe.skipIf(!url)("career plan repository", () => {
 
     expect(await repos.careerPlan.allowedBy(profileId, now)).toEqual({
       allowedBy: null,
-      dailyLimit: 0,
+      dailyLimit: 10,
     });
   });
 
