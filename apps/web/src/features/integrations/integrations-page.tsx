@@ -64,7 +64,7 @@ const catalog: Integration[] = [
     name: "E-mail",
     category: "communication",
     icon: Mail01Icon,
-    purpose: "Envia notificações e links de acesso por e-mail.",
+    purpose: "Envia os e-mails das ações do checklist. Desligado, essas ações não enviam.",
   },
   {
     name: "Sistema de folha",

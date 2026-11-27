@@ -8617,6 +8617,15 @@ describe.skipIf(!url)("api", () => {
     expect(await res.json()).toEqual({ name: "Test Toggle", status: "disconnected" });
   });
 
+  it("treats only a connected E-mail row as switched on", async () => {
+    expect(await repos.integrations.isConnected(defaultOrgId, "E-mail")).toBe(true);
+
+    await call("/integrations/E-mail", "PUT", { status: "disconnected" });
+
+    expect(await repos.integrations.isConnected(defaultOrgId, "E-mail")).toBe(false);
+    expect(await repos.integrations.isConnected(defaultOrgId, "Never Saved")).toBe(false);
+  });
+
   describe("Slack settings", () => {
     const slackPosts: URLSearchParams[] = [];
 
