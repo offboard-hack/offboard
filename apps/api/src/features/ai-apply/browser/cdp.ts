@@ -32,7 +32,7 @@ export type Page = {
   type(text: string): Promise<void>;
   press(key: "Enter" | "ArrowDown" | "Tab" | "Escape"): Promise<void>;
   setFiles(selector: string, paths: string[]): Promise<void>;
-  screenshot(options?: { fullPage?: boolean }): Promise<Uint8Array>;
+  screenshot(options?: { fullPage?: boolean; frame?: string[] }): Promise<Uint8Array>;
   url(): Promise<string>;
   close(): void;
 };
@@ -114,6 +114,7 @@ const keys = {
 
 const pollMs = 250;
 const maxCaptureHeight = 10_000;
+const maxFrameHeight = 6000;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -339,8 +340,42 @@ export const connectPage = async (socket: Socket, options: { commandTimeoutMs?: 
       const capture = (params: Params) =>
         command("Page.captureScreenshot", { format: "png", ...params }, screenshot);
 
+      const framed = async () => {
+        if (options.frame === undefined) return null;
+
+        const selectors = JSON.stringify(options.frame);
+
+        const found = await evaluate(
+          `(() => { const el = ${selectors}.map((selector) => document.querySelector(selector)).find((item) => item !== null); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + window.scrollX, y: r.top + window.scrollY, width: r.width, height: r.height }; })()`,
+          box,
+        );
+
+        if (found === null || found.width <= 0 || found.height <= 0) return null;
+
+        return {
+          x: Math.floor(found.x),
+          y: Math.floor(found.y),
+          width: Math.ceil(found.width),
+          height: Math.min(Math.ceil(found.height), maxFrameHeight),
+          scale: 1,
+        };
+      };
+
+      const frameShot = async () => {
+        try {
+          const frame = await framed();
+
+          return frame === null
+            ? null
+            : await capture({ captureBeyondViewport: true, clip: frame });
+        } catch {
+          return null;
+        }
+      };
+
       const { data } = options.fullPage
-        ? await capture({ captureBeyondViewport: true, clip: await clip() })
+        ? ((await frameShot()) ??
+          (await capture({ captureBeyondViewport: true, clip: await clip() })))
         : await capture({});
 
       return Uint8Array.from(atob(data), (char) => char.charCodeAt(0));

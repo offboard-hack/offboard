@@ -17,6 +17,7 @@ import {
   awaitOutcome,
   checkForm,
   fillGreenhouse,
+  formFrame,
   readLiveForm,
   submitGreenhouse,
   visibleErrors,
@@ -180,7 +181,7 @@ function sentFields(
 async function capture(deps: RunnerDeps, page: Page, key: string) {
   if (deps.storage === undefined) return null;
 
-  const bytes = await page.screenshot({ fullPage: true });
+  const bytes = await page.screenshot({ fullPage: true, frame: formFrame });
 
   await deps.storage.put(key, bytes, "image/png");
 

@@ -36,6 +36,8 @@ const outcomePollMs = 250;
 const locationControl = "candidate-location";
 const letterField = "cover_letter_text";
 const letterReveal = '[data-testid="cover_letter-text"]';
+export const formFrame = ["#application-form", "form#application_form", "form"];
+
 const submitButton = '#application-form button[type="submit"]';
 const demographicPrefix = "demographic:";
 

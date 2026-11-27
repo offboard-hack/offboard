@@ -23,7 +23,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { createRepositories } from "../../repositories.js";
 import { BrowserbaseError } from "./browser/browserbase.js";
 import type { Page } from "./browser/cdp.js";
-import type { FormPage, OutcomePage } from "./browser/greenhouse-form.js";
+import { formFrame, type FormPage, type OutcomePage } from "./browser/greenhouse-form.js";
 import { failedLabel, runAiApplication, type RunnerDeps } from "./runner.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -164,7 +164,7 @@ const literal = (expression: string) => {
 
 const fakePage = (setup: PageSetup = {}) => {
   const actions: string[] = [];
-  const screenshots: ({ fullPage?: boolean } | undefined)[] = [];
+  const screenshots: ({ fullPage?: boolean; frame?: string[] } | undefined)[] = [];
   const values = new Map<string, string>();
   const shown = new Map<string, string>();
   const checked = new Set<string>();
@@ -652,7 +652,7 @@ describe.skipIf(!url)("ai apply runner", () => {
         },
       ]);
       expect(run.submits()).toBe(1);
-      expect(run.screenshots).toEqual([{ fullPage: true }]);
+      expect(run.screenshots).toEqual([{ fullPage: true, frame: formFrame }]);
       expect(run.stored).toEqual([
         { key: `ai-applications/${profileId}/${id}.png`, data: png, contentType: "image/png" },
       ]);
@@ -803,7 +803,7 @@ describe.skipIf(!url)("ai apply runner", () => {
       expect(run.actions.some((action) => action.startsWith("setFiles"))).toBe(false);
       expect(run.uploads).toEqual([]);
       expect(run.rendered).toEqual([]);
-      expect(run.screenshots).toEqual([{ fullPage: true }]);
+      expect(run.screenshots).toEqual([{ fullPage: true, frame: formFrame }]);
       expect(await db.select().from(applications)).toEqual([]);
       expect(run.released).toEqual(["session-1"]);
     });
