@@ -1,6 +1,6 @@
-import { WebClient } from "@slack/web-api";
 import type { ConfigValue } from "@offboard/db/schema";
 import { Resend } from "resend";
+import { postSlackMessage } from "../../shared/slack.js";
 import type { ActionConfigsRepository } from "./repository.js";
 
 import type { ActionContext } from "../../shared/action-dispatch.js";
@@ -78,26 +78,15 @@ async function executeEmail(to: string, subject: string, body: string, context: 
   return { ok: true };
 }
 
-async function executeSlackBot(
-  token: string,
-  channel: string,
-  message: string,
-  context: ActionContext,
-) {
-  const text = templateMessage(message, context);
-
-  const client = new WebClient(token, {
-    retryConfig: { retries: 0 },
-    timeout: 10_000,
-    slackApiUrl: process.env.SLACK_API_URL,
-  });
-
-  await client.chat.postMessage({ channel, text });
-}
+export type SlackDelivery = {
+  apiUrl: string;
+  readToken: (orgId: string) => Promise<string | undefined>;
+};
 
 export async function fireActions(
   repos: Pick<ActionConfigsRepository, "getActionConfigsByPhase">,
   context: ActionContext,
+  slack: SlackDelivery,
 ) {
   if (!context.phase) return [] satisfies ActionResult[];
 
@@ -125,7 +114,7 @@ export async function fireActions(
       } else if (config.actionId.startsWith("slack:")) {
         const webhookUrl = str(config.config.webhookUrl);
         const message = str(config.config.message) ?? "Task {{task}} changed to {{status}}";
-        const botToken = str(config.config.botToken) ?? process.env.SLACK_BOT_TOKEN;
+        const botToken = str(config.config.botToken) ?? (await slack.readToken(context.orgId));
 
         if (webhookUrl) {
           const { ok, status } = await executeSlack(webhookUrl, message, context);
@@ -147,13 +136,23 @@ export async function fireActions(
             continue;
           }
 
-          await executeSlackBot(botToken, channel, message, context);
-          results.push({ actionId: config.actionId, success: true });
+          const sent = await postSlackMessage(
+            slack.apiUrl,
+            botToken,
+            channel,
+            templateMessage(message, context),
+          );
+
+          results.push({
+            actionId: config.actionId,
+            success: sent.ok,
+            error: sent.ok ? undefined : sent.error,
+          });
         } else {
           results.push({
             actionId: config.actionId,
             success: false,
-            error: "missing webhookUrl or botToken",
+            error: "Slack not configured",
           });
         }
       } else if (config.actionId.startsWith("email:")) {
