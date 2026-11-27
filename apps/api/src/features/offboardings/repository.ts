@@ -1,6 +1,6 @@
 import type { Database } from "@offboard/db/client";
-import { and, asc, eq, isNotNull, ne, sql } from "drizzle-orm";
-import { employeeAccess, offboardingCases, subtasks, tasks } from "@offboard/db/schema";
+import { and, asc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { employeeAccess, equipment, offboardingCases, subtasks, tasks } from "@offboard/db/schema";
 import { emptyEmployeePlan } from "@offboard/employee";
 
 import { attachWaitingEquipment, normalizeHolderEmail } from "../../shared/equipment-holder.js";
@@ -299,9 +299,23 @@ export function createOffboardingsRepository(db: Database) {
         phase: tasks.phase,
         stepId: tasks.checklistStepId,
         trackingCode: tasks.trackingCode,
+        caseId: tasks.caseId,
       })
       .from(tasks)
       .where(and(isNotNull(tasks.trackingCode), ne(tasks.status, "done")));
+  }
+
+  async function markEquipmentReturned(orgId: string, caseId: string) {
+    await db
+      .update(equipment)
+      .set({ status: "received", updatedAt: new Date() })
+      .where(
+        and(
+          eq(equipment.orgId, orgId),
+          eq(equipment.caseId, caseId),
+          inArray(equipment.status, ["with_person", "scheduled", "transit", "failed"]),
+        ),
+      );
   }
 
   async function setTrackingCode(orgId: string, taskId: string, code: string) {
@@ -341,6 +355,7 @@ export function createOffboardingsRepository(db: Database) {
     updateTaskStatus,
     toggleSubtask,
     getTrackedTasks,
+    markEquipmentReturned,
     setTrackingCode,
     getTaskTrackingCode,
     getTaskOrgId,

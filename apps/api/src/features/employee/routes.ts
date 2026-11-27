@@ -19,6 +19,11 @@ import type { AccessGranted, InviteEmployee } from "../../shared/employee-invite
 import { errorResponse } from "../../shared/http.js";
 import type { EmployeeRepository } from "./repository.js";
 
+export type TrackShipment = (
+  orgId: string,
+  code: string,
+) => Promise<{ delivered: boolean; lastEvent: string; lastUpdate: string } | null>;
+
 const caseParams = t.Object({ caseId: t.String({ format: "uuid" }) });
 
 function initialState(key: z.infer<typeof stateKindSchema>, name: string) {
@@ -43,6 +48,7 @@ export function employeeRoutes(
   dispatchAction: DispatchAction,
   inviteEmployee: InviteEmployee,
   accessGranted: AccessGranted,
+  trackShipment: TrackShipment,
 ) {
   function dispatchChanges(changes: ChecklistChange[]) {
     for (const change of changes) {
@@ -115,6 +121,21 @@ export function employeeRoutes(
                 body: t.Object({ done: t.Boolean() }),
               },
             )
+            .get("/tracking", async ({ employee, status }) => {
+              const found = await repo.withAccess(employee, "read", async (data) => ({
+                orgId: data.orgId,
+                trackingCode: await data.readTrackingCode(),
+              }));
+
+              if (!found) return status(401, { error: "Unauthorized" });
+
+              return {
+                trackingCode: found.trackingCode,
+                tracking: found.trackingCode
+                  ? await trackShipment(found.orgId, found.trackingCode)
+                  : null,
+              };
+            })
             .patch(
               "/tracking-code",
               async ({ employee, body, status }) => {

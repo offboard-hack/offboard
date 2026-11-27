@@ -61,6 +61,26 @@ export function employeeJourneyQuery(account: EmployeeAccount) {
   });
 }
 
+export function employeeTrackingQuery(account: EmployeeAccount) {
+  return queryOptions({
+    queryKey: [...employeeAccountQueryKey(account), "tracking"],
+    staleTime: 60_000,
+    retry: retryEmployeeRead,
+    queryFn: async ({ signal }) => {
+      const result = await getApiClient().api.employee.tracking.get({
+        headers: employeeAccessHeaders(account),
+        fetch: { signal },
+      });
+
+      checkEmployeeAccess(result.status);
+
+      if (result.error) throw new Error("Não foi possível consultar o rastreio.");
+
+      return result.data;
+    },
+  });
+}
+
 export function employeeStateQuery(account: EmployeeAccount, key: EmployeeState["key"]) {
   return queryOptions({
     queryKey: [...employeeAccountQueryKey(account), key],
@@ -191,6 +211,11 @@ export function useEmployeeTrackingCode(account: EmployeeAccount) {
         employeeJourneyQuery(account).queryKey,
         (journey) => journey && { ...journey, trackingCode: data.trackingCode },
       );
+
+      return Promise.all([
+        client.invalidateQueries({ queryKey: employeeJourneyQuery(account).queryKey }),
+        client.invalidateQueries({ queryKey: employeeTrackingQuery(account).queryKey }),
+      ]);
     },
   });
 }

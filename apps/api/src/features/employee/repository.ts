@@ -48,6 +48,7 @@ import {
   joinDepartureState,
   readEquipment,
   setReceipt,
+  markPosted,
   syncEquipmentSchedule,
   syncPlanEquipment,
 } from "./equipment.js";
@@ -55,6 +56,8 @@ import {
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 type EmployeeData = {
+  orgId: string;
+  readTrackingCode(): ReturnType<typeof readTrackingCode>;
   readJourney(): Promise<{
     deadline: string;
     role: string;
@@ -301,6 +304,8 @@ export function createEmployeeRepository(db: Database) {
       const { orgId, ...journey } = access;
 
       return operation({
+        orgId,
+        readTrackingCode: () => readTrackingCode(tx, orgId, principal.caseId),
         async readJourney() {
           const plan = employeePlanSchema.parse(journey.plan);
 
@@ -313,7 +318,13 @@ export function createEmployeeRepository(db: Database) {
           return { ...journey, plan, equipment, checklist, trackingCode };
         },
         setChecklistTask: (id, done) => setChecklistTask(tx, orgId, principal.caseId, id, done),
-        setTrackingCode: (code) => setTrackingCode(tx, orgId, principal.caseId, code),
+        async setTrackingCode(code) {
+          const updated = await setTrackingCode(tx, orgId, principal.caseId, code);
+
+          if (updated) await markPosted(tx, orgId, principal.caseId);
+
+          return updated;
+        },
         async syncDeparture(previous, next) {
           if (JSON.stringify(previous.booking) !== JSON.stringify(next.booking)) {
             await syncEquipmentSchedule(
