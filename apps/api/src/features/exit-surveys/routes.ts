@@ -33,7 +33,7 @@ const aggregates = t.Object({
   nps: t.Integer(),
   completionRate: t.Integer(),
   ratings: t.Array(ratingAverage),
-  activationsByMonth: t.Array(labeledValue),
+  responsesByMonth: t.Array(labeledValue),
   topTopics: t.Array(labeledValue),
 });
 
