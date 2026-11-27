@@ -26,6 +26,8 @@ export function App() {
       return data;
     },
     retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   if (summary.isPending) return <p className="muted">Carregando…</p>;
