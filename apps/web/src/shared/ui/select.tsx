@@ -10,6 +10,7 @@ type FilterProps = {
   className?: string;
   invalid?: boolean;
   describedBy?: string;
+  placeholder?: string;
   value: string;
   items: { label: string; value: string; icon?: ComponentProps<typeof HugeiconsIcon>["icon"] }[];
   onChange: (value: string) => void;
@@ -25,12 +26,14 @@ export function PortalFilter({
   className,
   invalid,
   describedBy,
+  placeholder,
 }: FilterProps) {
   const selectedItem = items.find((item) => item.value === value);
+  const unselected = placeholder !== undefined && !selectedItem;
 
   return (
     <Select
-      value={value}
+      value={unselected ? null : value}
       disabled={disabled}
       items={items}
       onValueChange={(next) => {
@@ -54,7 +57,7 @@ export function PortalFilter({
             <span className="truncate">{selectedItem.label}</span>
           </SelectValue>
         ) : (
-          <SelectValue />
+          <SelectValue placeholder={placeholder} />
         )}
       </SelectTrigger>
       <SelectContent alignItemWithTrigger={false} aria-label={label}>

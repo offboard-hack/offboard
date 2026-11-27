@@ -704,25 +704,27 @@ function RatingScale({
   return (
     <fieldset className="space-y-2">
       <legend className="font-semibold">{legend}</legend>
-      <ToggleGroup
-        aria-label={legend}
-        variant="outline"
-        className="max-w-full flex-wrap"
-        value={value === null ? [] : [String(value)]}
-        onValueChange={([next]) =>
-          onChange(options.find((option) => String(option) === next) ?? null)
-        }
-      >
-        {options.map((option) => (
-          <ToggleGroupItem key={option} value={String(option)} className={selectedAnswer}>
-            {option}
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
-      <p className="flex max-w-md justify-between text-xs text-muted-foreground">
-        <span>{low}</span>
-        <span>{high}</span>
-      </p>
+      <div className="w-fit max-w-full">
+        <ToggleGroup
+          aria-label={legend}
+          variant="outline"
+          className="max-w-full flex-wrap"
+          value={value === null ? [] : [String(value)]}
+          onValueChange={([next]) =>
+            onChange(options.find((option) => String(option) === next) ?? null)
+          }
+        >
+          {options.map((option) => (
+            <ToggleGroupItem key={option} value={String(option)} className={selectedAnswer}>
+              {option}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <p className="mt-2 flex justify-between gap-4 text-xs text-muted-foreground">
+          <span>{low}</span>
+          <span>{high}</span>
+        </p>
+      </div>
       <EmployeeError message={error} />
     </fieldset>
   );

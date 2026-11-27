@@ -72,7 +72,9 @@ export function EmployeeAgenda({
                     <ItemContent className="min-w-0">
                       <ItemTitle className="block wrap-anywhere">{item.title}</ItemTitle>
                       {item.detail ? (
-                        <ItemDescription className="wrap-anywhere">{item.detail}</ItemDescription>
+                        <ItemDescription className="line-clamp-none wrap-anywhere">
+                          {item.detail}
+                        </ItemDescription>
                       ) : null}
                     </ItemContent>
                     {item.time ? <Badge variant="secondary">{item.time}</Badge> : null}

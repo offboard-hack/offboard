@@ -156,10 +156,8 @@ export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => Pro
                       label="Área"
                       className="w-full"
                       value={field.state.value}
-                      items={[
-                        { value: "", label: "Escolha a área" },
-                        ...offboardingDepartments.map((area) => ({ value: area, label: area })),
-                      ]}
+                      placeholder="Escolha a área"
+                      items={offboardingDepartments.map((area) => ({ value: area, label: area }))}
                       onChange={field.handleChange}
                       invalid={Boolean(error)}
                       describedBy={error ? errorId : undefined}
