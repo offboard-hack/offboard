@@ -603,6 +603,113 @@ describe.skipIf(!databaseUrl)("invite-only sign-in with PostgreSQL", () => {
     expect(await revokedAuth.resolvePrincipal(headers)).toEqual({ kind: "forbidden" });
   });
 
+  it("accepts the backoffice origin only for staff code sign-in and sign-out", async () => {
+    const staffEmail = `staff-${randomUUID()}@offboard.example`;
+    const backofficeOrigin = "https://backoffice.offboard.example";
+
+    const backofficeAuth = createAuth({
+      db,
+      origin,
+      backofficeOrigin,
+      secret: randomUUID() + randomUUID(),
+      talent,
+      staffEmails: new Set([staffEmail]),
+      sendLink() {
+        return Promise.resolve();
+      },
+      sendCode({ email, code }) {
+        codes.set(email, code);
+
+        return Promise.resolve();
+      },
+    });
+
+    const fromBackoffice = (
+      path: string,
+      audience: string | undefined,
+      body: Record<string, string | undefined> = { email: staffEmail, type: "sign-in" },
+      cookies?: Headers,
+    ) => {
+      const headers = new Headers(cookies);
+      headers.set("origin", backofficeOrigin);
+      headers.set("content-type", "application/json");
+
+      if (audience) headers.set(codeAudienceHeader, audience);
+
+      return backofficeAuth.handler(
+        new Request(`${backofficeOrigin}/api/auth${path}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        }),
+      );
+    };
+
+    for (const audience of ["member", "employee", undefined]) {
+      expect((await fromBackoffice("/email-otp/send-verification-otp", audience)).status).toBe(403);
+    }
+
+    expect(
+      (await fromBackoffice("/sign-in/magic-link", "staff", { email: staffEmail })).status,
+    ).toBe(403);
+
+    expect((await fromBackoffice("/email-otp/send-verification-otp", "staff")).status).toBe(200);
+
+    const signedIn = await fromBackoffice("/sign-in/email-otp", "staff", {
+      email: staffEmail,
+      otp: codes.get(staffEmail),
+    });
+
+    expect(signedIn.status).toBe(200);
+
+    const cookie = signedIn.headers
+      .getSetCookie()
+      .find((value) => value.includes("session_token="));
+
+    expect(cookie).toContain("offboard-staff.session_token=");
+    expect(cookie).not.toContain("Domain=");
+
+    const headers = sessionHeaders(signedIn);
+
+    expect(await backofficeAuth.resolvePrincipal(headers)).toEqual({
+      kind: "staff",
+      email: staffEmail,
+    });
+
+    expect((await fromBackoffice("/sign-out", "staff", {}, headers)).status).toBe(200);
+    expect(await backofficeAuth.resolvePrincipal(headers)).toEqual({ kind: "anonymous" });
+
+    const runtime = createRuntimeAuth(db, talent, undefined, {
+      env: {
+        BETTER_AUTH_URL: origin,
+        BETTER_AUTH_SECRET: randomUUID() + randomUUID(),
+        BACKOFFICE_ORIGIN: backofficeOrigin,
+        EMAIL_PROVIDER: "resend",
+        AUTH_EMAIL_FROM: "offboard@offboard.example",
+        RESEND_API_KEY: "test",
+      },
+    });
+
+    const rejected = await runtime.auth.handler(
+      new Request(`${backofficeOrigin}/api/auth/email-otp/send-verification-otp`, {
+        method: "POST",
+        headers: { origin: backofficeOrigin, [codeAudienceHeader]: "member" },
+      }),
+    );
+
+    expect(rejected.status).toBe(403);
+
+    expect(() =>
+      createRuntimeAuth(db, talent, undefined, {
+        env: {
+          BETTER_AUTH_URL: origin,
+          BETTER_AUTH_SECRET: randomUUID() + randomUUID(),
+          BACKOFFICE_ORIGIN: "http://backoffice.offboard.example",
+        },
+      }),
+    ).toThrow();
+  });
+
   it("uses the configured public origin and sends email through Resend", async () => {
     const server = createServer();
     const messages: string[] = [];

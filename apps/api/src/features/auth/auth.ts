@@ -131,12 +131,14 @@ export function createAuth({
   onVercel = false,
   ipAddressHeaders = onVercel ? ["x-vercel-forwarded-for"] : [],
   staffEmails,
+  backofficeOrigin,
 }: {
   db: Database;
   origin: string;
   secret: string;
   talent: TalentDirectory;
   staffEmails: ReadonlySet<string>;
+  backofficeOrigin?: string;
   sendLink: (message: { email: string; url: string }) => Promise<void>;
   sendCode?: (message: { email: string; code: string }) => Promise<void>;
   onVercel?: boolean;
@@ -307,14 +309,14 @@ export function createAuth({
     });
   }
 
-  const buildAuth = (cookiePrefix: string) =>
+  const buildAuth = (cookiePrefix: string, trustedOrigins = [origin]) =>
     betterAuth({
       appName: "Offboard",
       baseURL: origin,
       basePath: authPath,
       secret,
       database: drizzleAdapter(db, { provider: "pg", schema }),
-      trustedOrigins: [origin],
+      trustedOrigins,
       advanced: {
         cookiePrefix,
         useSecureCookies: origin.startsWith("https:"),
@@ -447,7 +449,11 @@ export function createAuth({
 
   const memberAuth = buildAuth("better-auth");
   const employeeAuth = buildAuth(employeeCookie);
-  const staffAuth = buildAuth(staffCookie);
+
+  const staffAuth = buildAuth(
+    staffCookie,
+    backofficeOrigin ? [origin, backofficeOrigin] : [origin],
+  );
 
   return {
     async handler(request) {
@@ -462,7 +468,17 @@ export function createAuth({
 
       const codeAudience = codeAudienceOf(request.headers.get(codeAudienceHeader));
 
-      if (request.method === "POST" && request.headers.get("origin") !== origin && !native) {
+      const requestOrigin = request.headers.get("origin");
+
+      const staffOrigin =
+        codeAudience === "staff" && nativeEndpoints.has(path) ? backofficeOrigin : undefined;
+
+      if (
+        request.method === "POST" &&
+        requestOrigin !== origin &&
+        requestOrigin !== staffOrigin &&
+        !native
+      ) {
         return new Response(null, { status: 403 });
       }
 
@@ -631,6 +647,7 @@ export function createRuntimeAuth(
     secret,
     talent,
     staffEmails: parseStaffEmails(env.BACKOFFICE_STAFF_EMAILS),
+    backofficeOrigin: env.BACKOFFICE_ORIGIN && originSchema.parse(env.BACKOFFICE_ORIGIN),
     onVercel: env.VERCEL === "1",
     ipAddressHeaders:
       ipAddressHeaders ?? (env.EMAIL_PROVIDER === "console" ? ["x-forwarded-for"] : undefined),

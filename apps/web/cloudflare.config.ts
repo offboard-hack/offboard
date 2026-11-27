@@ -13,7 +13,14 @@ const provider = z
   .default("resend")
   .parse(process.env.EMAIL_PROVIDER);
 
-const env: NonNullable<WorkerConfig["env"]> = { EMAIL_PROVIDER: bindings.text(provider) };
+const appDomain = "app.off-board.xyz";
+const backofficeDomain = "backoffice.off-board.xyz";
+
+const env: NonNullable<WorkerConfig["env"]> = {
+  EMAIL_PROVIDER: bindings.text(provider),
+  BACKOFFICE_ORIGIN: bindings.text(`https://${backofficeDomain}`),
+  ASSETS: bindings.assets(),
+};
 
 if (provider === "cloudflare") env.EMAIL = bindings.sendEmail();
 
@@ -64,7 +71,7 @@ export default defineConfig({
     compatibilityFlags: ["nodejs_compat"],
     placement: hyperdriveId && hyperdriveRegion ? { region: hyperdriveRegion } : undefined,
     workersDev: true,
-    domains: ["app.off-board.xyz"],
+    domains: [appDomain, backofficeDomain],
     env,
     triggers: cronEnabled
       ? Object.values(cronSchedules).map((schedule) => triggers.scheduled({ schedule }))
