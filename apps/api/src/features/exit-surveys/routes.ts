@@ -20,11 +20,19 @@ const surveyListRow = t.Object({ ...surveyBase, caseName: t.String() });
 
 const labeledValue = t.Object({ label: t.String(), value: t.Integer() });
 
+const ratingAverage = t.Object({
+  key: t.String(),
+  label: t.String(),
+  average: t.Number(),
+  responses: t.Integer(),
+});
+
 const aggregates = t.Object({
   totalResponses: t.Integer(),
   averageNps: t.Number(),
   nps: t.Integer(),
   completionRate: t.Integer(),
+  ratings: t.Array(ratingAverage),
   activationsByMonth: t.Array(labeledValue),
   topTopics: t.Array(labeledValue),
 });

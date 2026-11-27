@@ -117,26 +117,21 @@ const navigationGroups: {
     label: "Transição",
     links: [
       {
-        to: "/candidaturas-assistidas",
-        label: "Candidaturas assistidas",
-        icon: "M3 8h18v12H3zM8 8V4h8v4M3 13h18m-11 0v2h4v-2",
-      },
-      {
         to: "/resultados-e-feedback",
         label: "Resultados e feedback",
         icon: "M4 4v16h16M8 15l4-4 3 2 5-6",
-      },
-      {
-        to: "/equipe",
-        label: "Equipe",
-        subject: "Team",
-        icon: "M14 8a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM3 20a7 5 0 0 1 14 0m2-13v6m-3-3h6",
       },
     ],
   },
   {
     label: "Administração",
     links: [
+      {
+        to: "/equipe",
+        label: "Equipe",
+        subject: "Team",
+        icon: "M14 8a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM3 20a7 5 0 0 1 14 0m2-13v6m-3-3h6",
+      },
       {
         to: "/integracoes",
         label: "Integrações",

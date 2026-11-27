@@ -12,6 +12,7 @@ import { getApiClient } from "@/shared/lib/api-client";
 const screens = z.enum([
   "hoje",
   "saida",
+  "direitos",
   "carreira",
   "curriculo",
   "preferencias",

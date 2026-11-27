@@ -1,5 +1,6 @@
 import type { Database } from "@offboard/db/client";
 import { and, desc, eq } from "drizzle-orm";
+import { exitSurveyRatings } from "@offboard/employee/departure";
 import type { ConfigValue } from "@offboard/db/schema";
 import { exitSurveys, offboardingCases } from "@offboard/db/schema";
 
@@ -49,6 +50,7 @@ export function createExitSurveysRepository(db: Database) {
       db
         .select({
           npsScore: exitSurveys.npsScore,
+          responses: exitSurveys.responses,
           topics: exitSurveys.topics,
           submittedAt: exitSurveys.submittedAt,
         })
@@ -82,6 +84,23 @@ export function createExitSurveysRepository(db: Database) {
       .slice(-chartMonths)
       .map(([key, value]) => ({ label: monthLabels[key % 12], value }));
 
+    const ratings = exitSurveyRatings.map(({ key, label }) => {
+      const values = surveys.flatMap(({ responses }) => {
+        const value = responses[key];
+
+        return Number.isInteger(value) ? [Number(value)] : [];
+      });
+
+      const sum = values.reduce((total, value) => total + value, 0);
+
+      return {
+        key,
+        label,
+        average: values.length === 0 ? 0 : Math.round((sum / values.length) * 10) / 10,
+        responses: values.length,
+      };
+    });
+
     const topTopics = [...topicCounts]
       .map(([label, value]) => ({ label, value }))
       .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
@@ -91,6 +110,7 @@ export function createExitSurveysRepository(db: Database) {
       averageNps: totalResponses === 0 ? 0 : Math.round((scoreSum / totalResponses) * 10) / 10,
       nps: percent(promoters, totalResponses) - percent(detractors, totalResponses),
       completionRate: percent(totalResponses, cases.length),
+      ratings,
       activationsByMonth,
       topTopics,
     };
