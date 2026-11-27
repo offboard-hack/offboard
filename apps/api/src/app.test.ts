@@ -3364,10 +3364,17 @@ describe.skipIf(!url)("api", () => {
         );
       }
 
-      function upload(instance: ReturnType<typeof resumesApp>["instance"], talentId: string) {
-        const { isResume: _isResume, ...content } = draft;
+      function upload(
+        instance: ReturnType<typeof resumesApp>["instance"],
+        talentId: string,
+        bytes: Uint8Array = pdf,
+        name = "cv.pdf",
+      ) {
+        const form = new FormData();
 
-        return create(instance, talentId, JSON.stringify(content), { bytes: pdf, name: "cv.pdf" });
+        form.set("file", new File([new Uint8Array(bytes)], name, { type: "application/pdf" }));
+
+        return request(instance, talentId, "/me/resume/upload", { method: "POST", body: form });
       }
 
       function docx() {
@@ -3378,6 +3385,162 @@ describe.skipIf(!url)("api", () => {
           "[Content_Types].xml": new TextEncoder().encode("<Types/>"),
         });
       }
+
+      it("uploads a résumé and replaces it on the next upload", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        const first = await upload(instance, id);
+
+        expect(first.status).toBe(200);
+
+        const created = await first.json();
+
+        expect(created).toMatchObject({ kind: "base", score: null });
+        expect(created.content.headline.text).toBe("Engenheira de Software");
+        expect(store.puts).toHaveLength(1);
+        expect(store.puts[0].key).toMatch(new RegExp(`^resumes/${id}/[0-9a-f-]+\\.pdf$`));
+        expect(store.puts[0].contentType).toBe("application/pdf");
+
+        const second = await upload(instance, id, docx(), "cv.docx");
+
+        expect(second.status).toBe(200);
+        expect((await second.json()).id).toBe(created.id);
+        expect(store.puts[1].key).toMatch(/\.docx$/);
+        expect(store.puts[1].contentType).toBe(
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        );
+        expect(store.removed).toEqual([store.puts[0].key]);
+      });
+
+      it("keeps the new résumé when removing the previous file fails", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        expect((await upload(instance, id)).status).toBe(200);
+
+        store.failRemove = true;
+
+        expect((await upload(instance, id)).status).toBe(200);
+        expect(store.puts).toHaveLength(2);
+      });
+
+      it("rejects files whose bytes are not a PDF or DOCX", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        const html = await upload(instance, id, new TextEncoder().encode("<html></html>"));
+
+        expect(html.status).toBe(422);
+        expect(await html.json()).toEqual({ error: "Unsupported file" });
+        expect(store.puts).toEqual([]);
+      });
+
+      it("rejects an oversized docx expansion", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        const bomb = zipSync({
+          "word/document.xml": new Uint8Array(3_000_000).fill(0x61),
+        });
+
+        const res = await upload(instance, id, bomb, "cv.docx");
+
+        expect(res.status).toBe(422);
+        expect(await res.json()).toEqual({ error: "File too large" });
+        expect(store.puts).toEqual([]);
+      });
+
+      it("rejects files above the size limit", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+        const big = new Uint8Array(5_242_881);
+
+        big.set(pdf);
+
+        expect((await upload(instance, id, big)).status).toBe(422);
+        expect(store.puts).toEqual([]);
+      });
+
+      it("cleans up the stored file when extraction fails", async () => {
+        const logged = vi.spyOn(console, "error");
+
+        const failing = resumesApp({
+          generate: async ({ prompt }) => {
+            throw leakyError(prompt);
+          },
+        });
+
+        const id = await profile();
+        const res = await upload(failing.instance, id);
+
+        expect(res.status).toBe(502);
+        expect(await res.json()).toEqual({ error: "Could not read the résumé" });
+        expect(failing.store.removed).toEqual([failing.store.puts[0].key]);
+        expect(logged.mock.calls).toEqual([
+          ["résumé extraction failed", { name: "Error", message: "gateway down" }],
+        ]);
+        logged.mockRestore();
+
+        const notResume = resumesApp({ draft: { ...draft, isResume: false } });
+        const refused = await upload(notResume.instance, id);
+
+        expect(refused.status).toBe(422);
+        expect(await refused.json()).toEqual({ error: "File is not a résumé" });
+        expect(notResume.store.removed).toEqual([notResume.store.puts[0].key]);
+        expect((await request(notResume.instance, id, "/me/resume")).status).toBe(404);
+
+        const stuck = resumesApp({ draft: { ...draft, isResume: false } });
+
+        stuck.store.failRemove = true;
+
+        expect((await upload(stuck.instance, id)).status).toBe(422);
+      });
+
+      it("cleans up the stored file when saving fails", async () => {
+        const store: string[] = [];
+
+        const instance = createApp(
+          webOrigin,
+          {
+            ...repos,
+            resumes: {
+              ...repos.resumes,
+              replaceBase: () => Promise.reject(new Error("db down")),
+            },
+          },
+          {
+            ...appOptions,
+            generateStructured: async ({ schema }) => schema.parse(draft),
+            storage: {
+              put: async () => undefined,
+              remove: async (keys) => {
+                store.push(...keys);
+              },
+              removePrefix: async () => undefined,
+              get: async () => null,
+            },
+          },
+        );
+
+        const res = await upload(instance, await profile());
+
+        expect(res.status).toBe(500);
+        expect(store).toHaveLength(1);
+      });
+
+      it("answers 503 when upload is not configured", async () => {
+        const id = await profile();
+
+        for (const options of [{ storage: false }, { generate: null }]) {
+          const { instance, store } = resumesApp(options);
+          const res = await upload(instance, id);
+
+          expect(res.status).toBe(503);
+          expect(await res.json()).toEqual({ error: "Résumé upload not configured" });
+          expect(store.puts).toEqual([]);
+        }
+      });
 
       function create(
         instance: ReturnType<typeof resumesApp>["instance"],
@@ -9945,7 +10108,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     expect(
       (await request(inventory + "/receipt", "PATCH", cookie, { code: "QA-1", received: true }))
         .status,
-    ).toBe(403);
+    ).toBe(401);
 
     const receipt = (code: string, received: boolean) =>
       portal(inventory + "/receipt", "PATCH", { code, received });
@@ -10127,8 +10290,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     const cookie = await authenticate(email);
     const secondCookie = await authenticate(secondEmail);
     expect((await signIn(email, codes.get(email) ?? "")).status).toBe(400);
-    expect((await request("/session", "GET", cookie)).status).toBe(403);
-    expect((await request(`/employee-access/${second.id}`, "GET", cookie)).status).toBe(403);
+    expect((await request("/session", "GET", cookie)).status).toBe(401);
+    expect((await request(`/employee-access/${second.id}`, "GET", cookie)).status).toBe(401);
     const journeyBeforeConsent = await request("/employee/journey", "GET", cookie);
     expect(journeyBeforeConsent.status).toBe(200);
     expect(journeyBeforeConsent.headers.get("cache-control")).toBe("private, no-store");
@@ -10794,6 +10957,83 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       expect((await request("/session", "GET", cookie)).status).toBe(403);
     });
 
+    it("keeps HR and collaborator signed in side by side in one browser", async () => {
+      const hrEmail = `side-hr-${randomUUID()}@offboard.example`;
+      const employeeEmail = `side-employee-${randomUUID()}@offboard.example`;
+
+      await repos.team.createTeamMember(defaultOrgId, {
+        email: hrEmail,
+        name: "RH lado a lado",
+        role: "rh",
+      });
+
+      await repos.offboardings.createOffboarding(defaultOrgId, {
+        name: "Colaborador lado a lado",
+        role: "Analista",
+        department: "RH",
+        deadline: "2027-02-01",
+        email: employeeEmail,
+      });
+
+      expect((await sendMemberCode(hrEmail)).status).toBe(200);
+
+      const hr = sessionCookie(await signInMember(hrEmail, deliveredCode(hrEmail)));
+      const employee = await authenticate(employeeEmail);
+      const grantId = grants.get(employee);
+      const browser = `${hr}; ${employee}`;
+
+      expect(hr.split("=")[0]).not.toBe(employee.split("=")[0]);
+
+      const signedIn = (cookie: string) =>
+        Promise.all([
+          request("/session", "GET", cookie).then((response) => response.status),
+          request(
+            "/employee/session",
+            "GET",
+            cookie,
+            undefined,
+            webOrigin,
+            undefined,
+            grantId,
+          ).then((response) => response.status),
+        ]);
+
+      const signOut = (cookie: string, audience?: string) => {
+        const headers = new Headers({ origin: webOrigin, cookie });
+
+        if (audience) headers.set(codeAudienceHeader, audience);
+
+        return app.handle(
+          new Request(`${webOrigin}/api/auth/sign-out`, { method: "POST", headers }),
+        );
+      };
+
+      expect(await signedIn(browser)).toEqual([200, 200]);
+      expect((await signOut(browser)).status).toBe(200);
+      expect(await signedIn(browser)).toEqual([200, 401]);
+      expect((await signOut(hr, "employee")).status).toBe(200);
+      expect(await signedIn(hr)).toEqual([200, 401]);
+
+      const again = await authenticate(employeeEmail);
+      const second = `${hr}; ${again}`;
+
+      expect((await signOut(second, "member")).status).toBe(200);
+      expect((await request("/session", "GET", second)).status).toBe(401);
+      expect(
+        (
+          await request(
+            "/employee/session",
+            "GET",
+            second,
+            undefined,
+            webOrigin,
+            undefined,
+            grants.get(again),
+          )
+        ).status,
+      ).toBe(200);
+    });
+
     it("sends nothing to unknown emails and rejects any code for them", async () => {
       const email = `nobody-${randomUUID()}@offboard.example`;
 
@@ -11060,7 +11300,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       expect(await consent.json()).toMatchObject({ id: row.id, shareOutcomeWithHr: true });
       expect(await profilesOf(caseId)).toHaveLength(1);
 
-      expect((await request("/offboardings", "GET", cookie)).status).toBe(403);
+      expect((await request("/offboardings", "GET", cookie)).status).toBe(401);
     });
 
     it("creates the profile once", async () => {
@@ -11346,7 +11586,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       expect(await refused.json()).toEqual({ error: "AI Apply not available" });
     });
 
-    it("keeps member sessions out of the career routes", async () => {
+    it("serves the collaborator's career even with an HR session in the same browser", async () => {
       const orgId = await organization();
       const { caseId, email } = await collaboratorCase(orgId);
       const cookie = await authenticate(email);
@@ -11356,14 +11596,21 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         auth: { ...auth, resolveEmployee: employeeAuth.resolveEmployee },
       });
 
-      const response = await composed.handle(
-        new Request(webOrigin + "/api/me", {
-          headers: { cookie, "x-test-session": "admin", "x-test-org-id": orgId },
-        }),
-      );
+      const me = (session: string | undefined) =>
+        composed.handle(
+          new Request(webOrigin + "/api/me", {
+            headers: {
+              ...(session && { cookie: session }),
+              "x-test-session": "admin",
+              "x-test-org-id": orgId,
+            },
+          }),
+        );
 
-      expect(response.status).toBe(403);
+      expect((await me(undefined)).status).toBe(403);
       expect(await profilesOf(caseId)).toEqual([]);
+      expect((await me(cookie)).status).toBe(200);
+      expect(await profilesOf(caseId)).toHaveLength(1);
     });
   });
 

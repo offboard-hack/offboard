@@ -35,22 +35,12 @@ export function talentAccess(deps: {
     talent: (mode: "signed-in" | "active") => ({
       async resolve({ request, set, status }) {
         set.headers["cache-control"] = "no-store";
-        const access = await deps.auth.resolvePrincipal(request.headers);
-
-        if (access.kind === "anonymous") return status(401, { error: "Unauthorized" });
-
         const isRead = request.method === "GET" || request.method === "HEAD";
+        const crossOrigin = !isRead && request.headers.get("origin") !== deps.webOrigin;
+        const collaborator = await deps.auth.resolveEmployee?.(request.headers);
 
-        if (!isRead && request.headers.get("origin") !== deps.webOrigin) {
-          return status(403, { error: "Forbidden" });
-        }
-
-        if (access.kind === "authenticated") return status(403, { error: "Forbidden" });
-
-        if (access.kind === "forbidden") {
-          const collaborator = await deps.auth.resolveEmployee?.(request.headers);
-
-          if (!collaborator) return status(401, { error: "Unauthorized" });
+        if (collaborator) {
+          if (crossOrigin) return status(403, { error: "Forbidden" });
 
           const me = await deps.talent.ensureForCollaborator(collaborator, now());
 
@@ -58,6 +48,16 @@ export function talentAccess(deps: {
 
           return { me, entitlement: collaboratorEntitlement };
         }
+
+        const access = await deps.auth.resolvePrincipal(request.headers);
+
+        if (access.kind === "anonymous") return status(401, { error: "Unauthorized" });
+
+        if (crossOrigin) return status(403, { error: "Forbidden" });
+
+        if (access.kind === "authenticated") return status(403, { error: "Forbidden" });
+
+        if (access.kind === "forbidden") return status(401, { error: "Unauthorized" });
 
         const me = await deps.talent.findById(access.profile.id);
 

@@ -39,7 +39,7 @@ export function Career({
           Candidaturas{applications.data ? ` · ${applications.data.length}` : ""}
         </Link>
       </nav>
-      {resume.data === null ? <ResumeFirst /> : null}
+      {resume.data === null ? <ResumeFirst account={account} /> : null}
       {view === "vagas" ? (
         <CareerJobs account={account} />
       ) : (

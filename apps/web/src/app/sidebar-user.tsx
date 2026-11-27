@@ -7,6 +7,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { createPortalAbility, type PortalPrincipal } from "@offboard/access";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { employeeAuth } from "@/features/employee/auth";
 import { authClient } from "@/features/sign-in/auth-client";
 import { Link } from "@tanstack/react-router";
 import type { ComponentProps, ReactNode } from "react";
@@ -46,7 +47,8 @@ function usePortalSignOut(signInPath: SignInPath) {
 
   return useMutation({
     mutationFn: async () => {
-      const { error } = await authClient.signOut();
+      const client = signInPath === "/entrar" ? authClient : employeeAuth;
+      const { error } = await client.signOut();
 
       if (error) throw new Error(signOutError);
     },

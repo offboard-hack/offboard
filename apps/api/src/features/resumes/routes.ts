@@ -84,6 +84,60 @@ export function resumesRoutes(
   return new Elysia()
     .use(talentAccess)
     .post(
+      "/me/resume/upload",
+      async ({ me, body, status }) => {
+        const { generate, storage } = deps;
+
+        if (!generate || !storage) {
+          return status(503, { error: "Résumé upload not configured" });
+        }
+
+        const file = await readFile(body.file);
+
+        if ("error" in file) return status(422, file);
+
+        const key = await storeFile(storage, me.id, file);
+
+        const content = await extractResume(generate, file).catch(
+          logFailure("résumé extraction failed"),
+        );
+
+        if (content === undefined) {
+          await discard(storage, [key]);
+
+          return status(502, { error: "Could not read the résumé" });
+        }
+
+        if (content === "not_a_resume") {
+          await discard(storage, [key]);
+
+          return status(422, { error: "File is not a résumé" });
+        }
+
+        const saved = await repos.replaceBase(me.id, content, key).catch(async (error) => {
+          await discard(storage, [key]);
+
+          throw error;
+        });
+
+        if (saved.previousFileKey) await discard(storage, [saved.previousFileKey]);
+
+        const rescoring = await deps.rescore(saved.resume.id, me.id);
+
+        return { ...saved.resume, rescoring };
+      },
+      {
+        talent: "active",
+        body: t.Object({ file: t.File({ maxSize: maxBytes }) }),
+        response: {
+          200: resumeResponse,
+          422: errorResponse,
+          502: errorResponse,
+          503: errorResponse,
+        },
+      },
+    )
+    .post(
       "/me/resume/read",
       async ({ body, status }) => {
         const { generate } = deps;

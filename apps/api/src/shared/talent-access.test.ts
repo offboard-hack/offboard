@@ -412,37 +412,39 @@ describe("talentAccess", () => {
     expect(ensure).not.toHaveBeenCalled();
   });
 
+  const hr: PortalAccess = {
+    kind: "authenticated",
+    principal: {
+      id: "u",
+      name: "U",
+      email: "u@x.y",
+      role: "admin",
+      orgId: "00000000-0000-4000-8000-0000000000a1",
+    },
+  };
+
+  it.each([{ kind: "anonymous" }, hr] satisfies PortalAccess[])(
+    "serves the collaborator session next to a $kind portal session",
+    async (access) => {
+      const response = await build({ access, employee: async () => collaborator }).handle(
+        new Request("http://localhost/signed-in"),
+      );
+
+      expect(response.status).toBe(200);
+    },
+  );
+
   it.each([
     { access: { kind: "anonymous" }, status: 401 },
-    {
-      access: {
-        kind: "authenticated",
-        principal: {
-          id: "u",
-          name: "U",
-          email: "u@x.y",
-          role: "admin",
-          orgId: "00000000-0000-4000-8000-0000000000a1",
-        },
-      },
-      status: 403,
-    },
+    { access: hr, status: 403 },
   ] satisfies { access: PortalAccess; status: number }[])(
-    "never bridges $access.kind sessions",
+    "answers $status to a $access.kind session without a collaborator session",
     async ({ access, status }) => {
-      const lookups: string[] = [];
-
-      const response = await build({
-        access,
-        employee: async () => {
-          lookups.push(access.kind);
-
-          return collaborator;
-        },
-      }).handle(new Request("http://localhost/signed-in"));
+      const response = await build({ access, employee: async () => null }).handle(
+        new Request("http://localhost/signed-in"),
+      );
 
       expect(response.status).toBe(status);
-      expect(lookups).toEqual([]);
     },
   );
 });

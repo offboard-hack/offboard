@@ -1,7 +1,10 @@
 import { emailOTPClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 
-export const employeeAuth = createAuthClient({ plugins: [emailOTPClient()] });
+export const employeeAuth = createAuthClient({
+  plugins: [emailOTPClient()],
+  fetchOptions: { headers: { "x-offboard-audience": "employee" } },
+});
 
 export async function requestEmployeeCode(email: string) {
   const { error } = await employeeAuth.emailOtp.sendVerificationOtp({ email, type: "sign-in" });

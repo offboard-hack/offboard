@@ -298,28 +298,14 @@ export function useUpgradeCheckout(account: EmployeeAccount) {
   });
 }
 
-export type ResumeContentInput = Parameters<Me["resume"]["post"]>[0]["content"];
-
-export function useReadResume(account: EmployeeAccount) {
-  return useMutation({
-    mutationFn: async (file: File) =>
-      settle(
-        await client().resume.read.post({ file }, { headers: employeeAccessHeaders(account) }),
-        "Não foi possível ler o currículo. Tente novamente.",
-      ).content,
-  });
-}
-
-export function useCreateResume(account: EmployeeAccount) {
+export function useResumeUpload(account: EmployeeAccount) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ content, file }: { content: ResumeContentInput; file: File | null }) =>
+    mutationFn: async (file: File) =>
       settle(
-        await client().resume.post(file ? { content, file } : { content }, {
-          headers: employeeAccessHeaders(account),
-        }),
-        "Não foi possível criar o currículo. Tente novamente.",
+        await client().resume.upload.post({ file }, { headers: employeeAccessHeaders(account) }),
+        "Não foi possível enviar o currículo. Tente novamente.",
       ),
     onSuccess(resume) {
       queryClient.setQueryData(careerResumeQuery(account).queryKey, resume);
