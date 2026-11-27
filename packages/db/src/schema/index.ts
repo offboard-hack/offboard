@@ -1089,3 +1089,19 @@ export const applicationPackages = pgTable(
     index("application_packages_job_idx").on(table.jobId),
   ],
 );
+
+export const demoProfileEmbeddings = pgTable("demo_profile_embeddings", {
+  slug: varchar("slug", { length: 80 }).primaryKey(),
+  embeddedHash: varchar("embedded_hash", { length: 64 }).notNull(),
+  embedding: vector("embedding", { dimensions: 1024 }).notNull(),
+});
+
+export const demoSearchUsage = pgTable(
+  "demo_search_usage",
+  {
+    bucket: varchar("bucket", { length: 80 }).notNull(),
+    day: date("day").notNull(),
+    searches: integer("searches").notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.bucket, table.day] })],
+);
