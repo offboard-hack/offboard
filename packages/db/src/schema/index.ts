@@ -93,6 +93,11 @@ export type ProfileFields = {
   cpf?: ProfileField;
   birthDate?: ProfileField;
   address?: AddressField;
+  gender?: ProfileField;
+  race?: ProfileField;
+  orientation?: ProfileField;
+  disability?: ProfileField;
+  pronoun?: ProfileField;
 };
 
 export type FormField = {

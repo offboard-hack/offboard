@@ -44,6 +44,11 @@ export function toPreferences(row: StoredPreferences | undefined) {
       cpf: field(fields.cpf),
       birthDate: field(fields.birthDate),
       address: { value: fields.address?.value ?? null, share: fields.address?.share ?? false },
+      gender: field(fields.gender),
+      race: field(fields.race),
+      orientation: field(fields.orientation),
+      disability: field(fields.disability),
+      pronoun: field(fields.pronoun),
     },
   };
 }

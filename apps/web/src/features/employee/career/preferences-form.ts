@@ -1,8 +1,9 @@
 import type { CareerPreferences } from "@/entities/career";
+import type { DiversityKey } from "./diversity-form";
 
 type Fields = CareerPreferences["profileFields"];
 
-export type TextKey = Exclude<keyof Fields, "address">;
+export type TextKey = Exclude<keyof Fields, "address" | DiversityKey>;
 
 type Address = NonNullable<Fields["address"]["value"]>;
 
