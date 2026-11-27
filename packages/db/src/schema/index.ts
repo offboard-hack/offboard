@@ -630,11 +630,11 @@ export const integrations = pgTable(
     orgId: orgIdColumn(),
     name: varchar("name", { length: 255 }).notNull(),
     status: connectionStatusEnum("status").notNull().default("disconnected"),
+    config: jsonb("config").$type<Record<string, ConfigValue>>().notNull().default({}),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
-    uniqueIndex("integrations_name_idx").on(table.name),
     uniqueIndex("integrations_org_name_idx").on(table.orgId, table.name),
     index("integrations_org_id_idx").on(table.orgId),
   ],

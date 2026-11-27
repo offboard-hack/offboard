@@ -17,7 +17,7 @@ import { catalogSources, type CatalogSource } from "./features/sources/catalog.j
 import { fetchFeed } from "./features/sources/sources.js";
 import { exitSurveysRoutes } from "./features/exit-surveys/routes.js";
 import { insightsRoutes } from "./features/insights/routes.js";
-import { integrationsRoutes } from "./features/integrations/routes.js";
+import { integrationsRoutes, slackTokenReader } from "./features/integrations/routes.js";
 import { organizationsRoutes } from "./features/organizations/routes.js";
 import { jobsRoutes } from "./features/jobs/routes.js";
 import { offboardingsRoutes } from "./features/offboardings/routes.js";
@@ -60,6 +60,8 @@ import { portalAccess } from "./shared/access.js";
 import type { GenerateStructured } from "./shared/ai.js";
 import { jobEmbeddingText, resumeEmbeddingText, textHash, type Embed } from "./shared/embed.js";
 import { renderResumePdf } from "./shared/resume-pdf.js";
+import { secretBox } from "./shared/secret-box.js";
+import { defaultSlackApiUrl } from "./shared/slack.js";
 
 const textCandidateLimit = 30;
 const embeddedCandidateLimit = 50;
@@ -77,6 +79,8 @@ type AppOptions = {
   cronSecret?: string;
   webhookSecret?: string;
   slackSigningSecret?: string;
+  secretKey?: string;
+  slackApiUrl?: string;
   abacatepay?: AbacatePayGateway;
   abacatepayWebhookSecret?: string;
   generateStructured?: GenerateStructured;
@@ -114,12 +118,20 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
   const access = portalAccess(options.auth, webOrigin);
 
+  const box = options.secretKey ? secretBox(options.secretKey) : undefined;
+
+  const slackApiUrl = options.slackApiUrl ?? defaultSlackApiUrl;
+  const readSlackToken = slackTokenReader(repos.integrations, box);
+
   const dispatchAction: DispatchAction = async (context, stepId) => {
     const getActionConfigsByPhase = stepId
       ? (orgId: string) => repos.actionConfigs.getActionConfigsByStep(orgId, stepId)
       : repos.actionConfigs.getActionConfigsByPhase;
 
-    await fireActions({ getActionConfigsByPhase }, context);
+    await fireActions({ getActionConfigsByPhase }, context, {
+      apiUrl: slackApiUrl,
+      readToken: readSlackToken,
+    });
   };
 
   const inviteEmployee: InviteEmployee = async (orgId, caseId) => {
@@ -580,7 +592,9 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     .use(accountRoutes(repos.account, talent, options.storage))
     .use(equipmentRoutes(repos.equipment, access))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
-    .use(integrationsRoutes(repos.integrations, access, options.slackSigningSecret))
+    .use(
+      integrationsRoutes(repos.integrations, access, options.slackSigningSecret, box, slackApiUrl),
+    )
     .use(benefitRoutes(repos.benefits, access))
     .use(
       billingRoutes(repos.billing, access, abacatepay, webOrigin, options.abacatepayWebhookSecret),

@@ -87,7 +87,8 @@ const navigationGroups: {
     to: keyof FileRoutesByTo;
     label: string;
     icon: string;
-    subject?: "Team" | "Integrations";
+    subject?: "Team" | "Integrations" | "Billing";
+    action?: "read" | "manage";
   }[];
 }[] = [
   {
@@ -148,6 +149,13 @@ const navigationGroups: {
         subject: "Integrations",
         icon: "M5 3h14v18l-3-2-4 2-4-2-3 2zM9 8h6m-6 4h6",
       },
+      {
+        to: "/beneficios",
+        label: "Benefícios",
+        subject: "Billing",
+        action: "read",
+        icon: "M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z",
+      },
     ],
   },
 ];
@@ -164,7 +172,9 @@ function PortalNavigation({
 
   const groups = navigationGroups.map(({ label, links }) => ({
     label,
-    links: links.filter(({ subject }) => !subject || ability.can("manage", subject)),
+    links: links.filter(
+      ({ subject, action }) => !subject || ability.can(action ?? "manage", subject),
+    ),
   }));
 
   return (
