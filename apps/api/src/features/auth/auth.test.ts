@@ -544,10 +544,12 @@ describe.skipIf(!databaseUrl)("invite-only sign-in with PostgreSQL", () => {
     const staffEmail = `staff-${randomUUID()}@offboard.example`;
     const outsider = `outsider-${randomUUID()}@offboard.example`;
 
+    const sharedSecret = randomUUID() + randomUUID();
+
     const staffAuth = createAuth({
       db,
       origin,
-      secret: randomUUID() + randomUUID(),
+      secret: sharedSecret,
       talent,
       staffEmails: new Set([staffEmail]),
       sendLink() {
@@ -586,7 +588,19 @@ describe.skipIf(!databaseUrl)("invite-only sign-in with PostgreSQL", () => {
     );
 
     expect(await staffAuth.resolvePrincipal(headers)).toEqual({ kind: "staff", email: staffEmail });
-    expect(await auth.resolvePrincipal(headers)).toEqual({ kind: "forbidden" });
+
+    const revokedAuth = createAuth({
+      db,
+      origin,
+      secret: sharedSecret,
+      talent,
+      staffEmails: new Set(),
+      sendLink() {
+        return Promise.resolve();
+      },
+    });
+
+    expect(await revokedAuth.resolvePrincipal(headers)).toEqual({ kind: "forbidden" });
   });
 
   it("uses the configured public origin and sends email through Resend", async () => {
