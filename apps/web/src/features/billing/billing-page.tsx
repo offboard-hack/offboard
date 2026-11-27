@@ -22,12 +22,7 @@ import { classProps } from "../../shared/lib/class-props";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
 import { portalStyles } from "../../shared/ui/surface.styles";
-import {
-  paymentPendingLabel,
-  planPollInterval,
-  planView,
-  shouldPollSubscription,
-} from "./plan-view";
+import { paymentPendingLabel, planPollInterval, pollDeadline, planView } from "./plan-view";
 
 const styles = {
   label: "text-sm text-muted-foreground",
@@ -114,17 +109,20 @@ function planColumns(
   return [...baseColumns, subscribeColumn];
 }
 
-export function PlansTab({ paid }: { paid: boolean }) {
+export function PlansTab({ paid, onSettled }: { paid: boolean; onSettled: () => void }) {
   const [openedAt] = useState(() => Date.now());
 
   const { data: plans } = useSuspenseQuery(plansQuery);
 
   const { data: subscription } = useSuspenseQuery({
     ...subscriptionQuery,
-    refetchInterval: (query) =>
-      shouldPollSubscription(query.state.data, paid, Date.now() - openedAt)
-        ? planPollInterval
-        : false,
+    refetchInterval: (query) => {
+      const remaining = pollDeadline(query.state.data, paid, Date.now() - openedAt);
+
+      if (remaining === 0) queueMicrotask(onSettled);
+
+      return remaining ? planPollInterval : false;
+    },
   });
 
   const { data: invoices } = useSuspenseQuery(invoicesQuery);
@@ -180,7 +178,11 @@ export function PlansTab({ paid }: { paid: boolean }) {
           <Badge variant="status-warning" {...classProps(styles.badge)}>
             {paymentPendingLabel}
           </Badge>
-          <Button size="sm" disabled={checkout.isPending} onClick={() => checkout.mutate()}>
+          <Button
+            size="sm"
+            disabled={checkout.isPending || checkout.isSuccess}
+            onClick={() => checkout.mutate()}
+          >
             Pagar
           </Button>
         </div>
@@ -195,7 +197,11 @@ export function PlansTab({ paid }: { paid: boolean }) {
             }
             data={plans}
             scrollLabel="Tabela de planos"
-            columns={planColumns(view.canSubscribe, subscribe.isPending, subscribe.mutate)}
+            columns={planColumns(
+              view.canSubscribe,
+              subscribe.isPending || subscribe.isSuccess,
+              subscribe.mutate,
+            )}
             labelledBy="plans-title"
             getRowId={(plan) => plan.id}
             tableStyle="min-w-lg"
@@ -238,7 +244,7 @@ export function PlansTab({ paid }: { paid: boolean }) {
                     {(invoice.status === "pending" || invoice.status === "failed") && (
                       <Button
                         size="sm"
-                        disabled={checkout.isPending}
+                        disabled={checkout.isPending || checkout.isSuccess}
                         onClick={() => checkout.mutate()}
                       >
                         Pagar

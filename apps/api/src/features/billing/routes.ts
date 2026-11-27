@@ -27,6 +27,7 @@ const subscriptionRow = t.Object({
   ]),
   currentPeriodStart: t.String(),
   currentPeriodEnd: t.String(),
+  canRestart: t.Boolean(),
   plan: planRow,
 });
 
@@ -56,6 +57,13 @@ export function billingRoutes(
 ) {
   const planScreen = `${webOrigin}/planos-e-gastos?aba=plano`;
 
+  const issueCheckout = (params: { externalId: string; planSlug: string }) =>
+    gateway.createSubscriptionCheckout({
+      ...params,
+      returnUrl: planScreen,
+      completionUrl: `${planScreen}&plano=ok`,
+    });
+
   return new Elysia()
     .use(access)
     .get("/billing/plans", () => repos.listPlans(), {
@@ -83,22 +91,31 @@ export function billingRoutes(
       async ({ principal, status }) => {
         if (!gateway.configured) return status(503, { error: "Payments are not configured" });
 
-        const subscription = await repos.getSubscription(principal.orgId);
+        try {
+          const paid = await repos.payExisting(principal.orgId, new Date(), issueCheckout);
 
-        if (!subscription) return status(404, { error: "No subscription" });
+          if (paid.outcome === "none") return status(404, { error: "No subscription" });
 
-        const checkout = await gateway.createSubscriptionCheckout({
-          externalId: subscription.id,
-          planSlug: subscription.plan.slug,
-          returnUrl: planScreen,
-          completionUrl: `${planScreen}&plano=ok`,
-        });
+          if (paid.outcome === "not_payable") {
+            return status(409, { error: "Nothing to pay on this subscription" });
+          }
 
-        return { checkoutId: checkout.id, url: checkout.url };
+          return { checkoutId: paid.checkoutId, url: paid.url };
+        } catch (cause) {
+          logFailureCode("Company checkout failed")(cause);
+
+          return status(502, { error: "Could not start the checkout" });
+        }
       },
       {
         permit: ["manage", "Billing"],
-        response: { 200: checkoutResponse, 404: errorResponse, 503: errorResponse },
+        response: {
+          200: checkoutResponse,
+          404: errorResponse,
+          409: errorResponse,
+          502: errorResponse,
+          503: errorResponse,
+        },
       },
     )
     .post(
@@ -106,30 +123,27 @@ export function billingRoutes(
       async ({ principal, body, status }) => {
         if (!gateway.configured) return status(503, { error: "Payments are not configured" });
 
-        const started = await repos.startSubscription(principal.orgId, body.planSlug, new Date());
-
-        if (started.outcome === "unknown_plan") return status(422, { error: "Unknown plan" });
-
-        if (started.outcome === "subscribed") {
-          return status(409, { error: "Already subscribed" });
-        }
-
-        if (started.outcome === "in_progress") {
-          return status(409, { error: "A checkout is already in progress" });
-        }
-
         try {
-          const checkout = await gateway.createSubscriptionCheckout({
-            externalId: started.id,
-            planSlug: started.planSlug,
-            returnUrl: planScreen,
-            completionUrl: `${planScreen}&plano=ok`,
-          });
+          const started = await repos.startSubscription(
+            principal.orgId,
+            body.planSlug,
+            new Date(),
+            issueCheckout,
+          );
 
-          return { url: checkout.url };
+          if (started.outcome === "unknown_plan") return status(422, { error: "Unknown plan" });
+
+          if (started.outcome === "subscribed") {
+            return status(409, { error: "Already subscribed" });
+          }
+
+          if (started.outcome === "in_progress") {
+            return status(409, { error: "A checkout is already in progress" });
+          }
+
+          return { url: started.url };
         } catch (cause) {
           logFailureCode("Company plan checkout failed")(cause);
-          await repos.releaseSubscription(principal.orgId, started.id);
 
           return status(502, { error: "Could not start the checkout" });
         }

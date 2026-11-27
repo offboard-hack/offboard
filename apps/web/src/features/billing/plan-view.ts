@@ -1,11 +1,11 @@
-export type CompanySubscription = { status: string } | null | undefined;
+export type CompanySubscription = { status: string; canRestart: boolean } | null | undefined;
 
 export const paymentReceivedNote =
   "Pagamento recebido. O plano é ativado assim que o pagamento for confirmado.";
 
 export const paymentPendingLabel = "Pagamento pendente";
 
-export const planChangeNote = "Mudança de plano ainda não disponível";
+export const planChangeNote = "Mudança de plano ainda não disponível.";
 
 export const planPollInterval = 3_000;
 
@@ -16,8 +16,9 @@ export function planView<Subscription extends CompanySubscription>(
   paid: boolean,
 ) {
   const status = subscription?.status;
-  const paymentPending = status === "pending";
-  const canSubscribe = !subscription || status === "canceled";
+  const pending = status === "pending";
+  const paymentPending = pending && !subscription?.canRestart;
+  const canSubscribe = !subscription || status === "canceled" || (pending && !paymentPending);
   const standing = canSubscribe || paymentPending ? null : subscription;
 
   return {
@@ -25,14 +26,12 @@ export function planView<Subscription extends CompanySubscription>(
     paymentPending,
     standing,
     changeNote: standing ? planChangeNote : null,
-    paymentNote: paid && status !== "active" ? paymentReceivedNote : null,
+    paymentNote: paid && pending ? paymentReceivedNote : null,
   };
 }
 
-export function shouldPollSubscription(
-  subscription: CompanySubscription,
-  paid: boolean,
-  elapsedMs: number,
-) {
-  return paid && elapsedMs < planPollTimeout && subscription?.status !== "active";
+export function pollDeadline(subscription: CompanySubscription, paid: boolean, elapsedMs: number) {
+  if (!paid) return null;
+
+  return subscription?.status === "active" ? 0 : Math.max(0, planPollTimeout - elapsedMs);
 }

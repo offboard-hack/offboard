@@ -36,6 +36,40 @@ function serializeInvoice<Row extends { paidAt: Date | null }>(row: Row) {
   return { ...row, paidAt: row.paidAt?.toISOString() ?? null };
 }
 
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+type CreateCheckout = (params: {
+  externalId: string;
+  planSlug: string;
+}) => Promise<{ id: string; url: string }>;
+
+function isFresh(updatedAt: Date | null, now: Date) {
+  return updatedAt !== null && updatedAt.getTime() > now.getTime() - checkoutRetryMs;
+}
+
+async function lockOrg(tx: Transaction, orgId: string) {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`billing:${orgId}`}::text, 0))`,
+  );
+}
+
+async function issueCheckout(
+  tx: Transaction,
+  id: string,
+  planSlug: string,
+  now: Date,
+  create: CreateCheckout,
+) {
+  const checkout = await create({ externalId: id, planSlug });
+
+  await tx
+    .update(subscriptions)
+    .set({ checkoutId: checkout.id, checkoutUrl: checkout.url, updatedAt: now })
+    .where(eq(subscriptions.id, id));
+
+  return checkout;
+}
+
 export function createBillingRepository(db: Database) {
   async function listPlans() {
     return db
@@ -52,11 +86,12 @@ export function createBillingRepository(db: Database) {
       .orderBy(asc(plans.monthlyPriceCents));
   }
 
-  async function getSubscription(orgId: string) {
+  async function getSubscription(orgId: string, now = new Date()) {
     const [row] = await db
       .select({
         id: subscriptions.id,
         status: subscriptions.status,
+        updatedAt: subscriptions.updatedAt,
         currentPeriodStart: subscriptions.currentPeriodStart,
         currentPeriodEnd: subscriptions.currentPeriodEnd,
         plan: {
@@ -75,12 +110,24 @@ export function createBillingRepository(db: Database) {
       .orderBy(desc(subscriptions.createdAt))
       .limit(1);
 
-    return row ?? null;
+    if (!row) return null;
+
+    const { updatedAt, ...subscription } = row;
+
+    return {
+      ...subscription,
+      canRestart: row.status === "pending" && !isFresh(updatedAt, now),
+    };
   }
 
-  async function startSubscription(orgId: string, planSlug: string, now: Date) {
+  async function startSubscription(
+    orgId: string,
+    planSlug: string,
+    now: Date,
+    create: CreateCheckout,
+  ) {
     return db.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${orgId}))`);
+      await lockOrg(tx, orgId);
 
       const [plan] = await tx
         .select({ id: plans.id, slug: plans.slug })
@@ -104,50 +151,75 @@ export function createBillingRepository(db: Database) {
         return { outcome: "subscribed" } as const;
       }
 
-      if (
-        current?.status === "pending" &&
-        current.updatedAt !== null &&
-        current.updatedAt.getTime() > now.getTime() - checkoutRetryMs
-      ) {
+      if (current?.status === "pending" && isFresh(current.updatedAt, now)) {
         return { outcome: "in_progress" } as const;
       }
 
       const today = saoPauloDate(now);
 
-      const patch = {
+      const pending = {
         planId: plan.id,
         status: "pending",
         currentPeriodStart: today,
         currentPeriodEnd: today,
+        checkoutId: null,
+        checkoutUrl: null,
         updatedAt: now,
       } as const;
 
-      if (current) {
-        await tx.update(subscriptions).set(patch).where(eq(subscriptions.id, current.id));
-
-        return { outcome: "started", id: current.id, planSlug: plan.slug } as const;
+      if (current?.status === "pending") {
+        await tx.update(subscriptions).set(pending).where(eq(subscriptions.id, current.id));
       }
 
-      const [created] = await tx
-        .insert(subscriptions)
-        .values({ orgId, ...patch, createdAt: now })
-        .returning({ id: subscriptions.id });
+      const id =
+        current?.status === "pending"
+          ? current.id
+          : (
+              await tx
+                .insert(subscriptions)
+                .values({ orgId, ...pending, createdAt: now })
+                .returning({ id: subscriptions.id })
+            )[0].id;
 
-      return { outcome: "started", id: created.id, planSlug: plan.slug } as const;
+      const checkout = await issueCheckout(tx, id, plan.slug, now, create);
+
+      return { outcome: "started", url: checkout.url } as const;
     });
   }
 
-  async function releaseSubscription(orgId: string, id: string) {
-    await db
-      .update(subscriptions)
-      .set({ updatedAt: new Date(0) })
-      .where(
-        and(
-          eq(subscriptions.id, id),
-          eq(subscriptions.orgId, orgId),
-          eq(subscriptions.status, "pending"),
-        ),
-      );
+  async function payExisting(orgId: string, now: Date, create: CreateCheckout) {
+    return db.transaction(async (tx) => {
+      await lockOrg(tx, orgId);
+
+      const [row] = await tx
+        .select({
+          id: subscriptions.id,
+          status: subscriptions.status,
+          updatedAt: subscriptions.updatedAt,
+          checkoutId: subscriptions.checkoutId,
+          checkoutUrl: subscriptions.checkoutUrl,
+          planSlug: plans.slug,
+        })
+        .from(subscriptions)
+        .innerJoin(plans, eq(plans.id, subscriptions.planId))
+        .where(eq(subscriptions.orgId, orgId))
+        .orderBy(desc(subscriptions.createdAt))
+        .limit(1);
+
+      if (!row) return { outcome: "none" } as const;
+
+      if (row.status !== "pending" && row.status !== "past_due") {
+        return { outcome: "not_payable" } as const;
+      }
+
+      if (row.checkoutId !== null && row.checkoutUrl !== null && isFresh(row.updatedAt, now)) {
+        return { outcome: "issued", checkoutId: row.checkoutId, url: row.checkoutUrl } as const;
+      }
+
+      const checkout = await issueCheckout(tx, row.id, row.planSlug, now, create);
+
+      return { outcome: "issued", checkoutId: checkout.id, url: checkout.url } as const;
+    });
   }
 
   async function listInvoices(orgId: string) {
@@ -179,7 +251,14 @@ export function createBillingRepository(db: Database) {
 
   async function getSubscriptionById(id: string) {
     const [row] = await db
-      .select({ id: subscriptions.id, planId: subscriptions.planId, orgId: subscriptions.orgId })
+      .select({
+        id: subscriptions.id,
+        planId: subscriptions.planId,
+        orgId: subscriptions.orgId,
+        status: subscriptions.status,
+        checkoutId: subscriptions.checkoutId,
+        providerSubscriptionId: subscriptions.providerSubscriptionId,
+      })
       .from(subscriptions)
       .where(eq(subscriptions.id, id))
       .limit(1);
@@ -192,6 +271,8 @@ export function createBillingRepository(db: Database) {
     id: string,
     patch: {
       status: SubscriptionStatus;
+      providerSubscriptionId?: string;
+      checkoutUrl?: string | null;
       currentPeriodStart?: string;
       currentPeriodEnd?: string;
     },
@@ -301,7 +382,7 @@ export function createBillingRepository(db: Database) {
     listPlans,
     getSubscription,
     startSubscription,
-    releaseSubscription,
+    payExisting,
     listInvoices,
     findOpenInvoice,
     getSubscriptionById,
