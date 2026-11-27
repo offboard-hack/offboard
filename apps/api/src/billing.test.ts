@@ -150,6 +150,65 @@ describe("abacatepay gateway", () => {
   });
 });
 
+describe("abacatepay gateway cancel", () => {
+  let requestPath = "";
+  let requestBody = "";
+  let responseBody = "";
+
+  const server = createServer((req, res) => {
+    requestPath = req.url ?? "";
+    requestBody = "";
+    req.on("data", (chunk) => {
+      requestBody += String(chunk);
+    });
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(responseBody);
+    });
+  });
+
+  let base = "";
+
+  beforeAll(async () => {
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+
+    // WARNING: listen(0) guarantees AddressInfo with a port
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+    });
+  });
+
+  it("cancels a subscription", async () => {
+    responseBody = JSON.stringify({ success: true, data: { id: "subs_123" }, error: null });
+
+    await expect(
+      createAbacatePayGateway("secret-key", base).cancelSubscription("subs_123"),
+    ).resolves.toBeUndefined();
+    expect(requestPath).toContain("/subscriptions/cancel");
+    expect(JSON.parse(requestBody)).toEqual({ id: "subs_123" });
+  });
+
+  it("throws when cancel fails", async () => {
+    responseBody = JSON.stringify({ success: false, data: null, error: "not found" });
+
+    await expect(
+      createAbacatePayGateway("secret-key", base).cancelSubscription("subs_x"),
+    ).rejects.toThrow("AbacatePay subscription cancel failed");
+  });
+
+  it("throws when the gateway is not configured", async () => {
+    await expect(createAbacatePayGateway(undefined).cancelSubscription("subs_1")).rejects.toThrow(
+      "ABACATEPAY_API_KEY is not configured",
+    );
+  });
+});
+
 describe.skipIf(!url)("billing", () => {
   const db = createClient(url ?? "");
   const repos = createRepositories(db);

@@ -2,14 +2,16 @@ import type { Database } from "@offboard/db/client";
 import {
   type BenefitPolicyRule,
   benefitAssignments,
+  benefitInvoices,
   benefitPolicies,
+  copayProducts,
   offboardingCases,
   plans,
   talentProfiles,
 } from "@offboard/db/schema";
-import { aliasedTable, and, eq, gte, isNull } from "drizzle-orm";
+import { aliasedTable, and, count, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import { evaluateBenefitRules, matchesBenefitRule } from "../../shared/benefit-rules.js";
-import { addMonths } from "../../shared/sao-paulo-date.js";
+import { addMonths, saoPauloDate } from "../../shared/sao-paulo-date.js";
 
 type AssignmentSource = (typeof benefitAssignments.$inferSelect)["source"];
 
@@ -189,7 +191,117 @@ export function createBenefitRepository(db: Database) {
     return rows.length > 0;
   }
 
+  async function getCopayProduct(fromPlanId: string, toPlanId: string) {
+    const [row] = await db
+      .select({ abacatePayProductId: copayProducts.abacatePayProductId })
+      .from(copayProducts)
+      .where(and(eq(copayProducts.fromPlanId, fromPlanId), eq(copayProducts.toPlanId, toPlanId)))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async function findAssignmentByProfile(profileId: string) {
+    const [row] = await db
+      .select({
+        id: benefitAssignments.id,
+        assignedPlanId: benefitAssignments.assignedPlanId,
+        effectivePlanId: benefitAssignments.effectivePlanId,
+        copaySubscriptionId: benefitAssignments.copaySubscriptionId,
+        validUntil: benefitAssignments.validUntil,
+      })
+      .from(benefitAssignments)
+      .where(eq(benefitAssignments.profileId, profileId))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async function updateCopayState(
+    profileId: string,
+    patch: { effectivePlanId?: string; copaySubscriptionId?: string | null },
+  ) {
+    await db
+      .update(benefitAssignments)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(eq(benefitAssignments.profileId, profileId));
+  }
+
+  async function findAssignmentBySubscription(copaySubscriptionId: string) {
+    const [row] = await db
+      .select({
+        profileId: benefitAssignments.profileId,
+        assignedPlanId: benefitAssignments.assignedPlanId,
+        effectivePlanId: benefitAssignments.effectivePlanId,
+        validUntil: benefitAssignments.validUntil,
+      })
+      .from(benefitAssignments)
+      .where(eq(benefitAssignments.copaySubscriptionId, copaySubscriptionId))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async function tallyActiveAssignments(orgId: string) {
+    const [row] = await db
+      .select({
+        totalCents: sql<number>`coalesce(sum(${plans.perPersonPriceCents}), 0)::int`,
+        count: count(),
+      })
+      .from(benefitAssignments)
+      .innerJoin(plans, eq(plans.id, benefitAssignments.assignedPlanId))
+      .where(
+        and(
+          eq(benefitAssignments.orgId, orgId),
+          gte(benefitAssignments.validUntil, saoPauloDate(new Date())),
+        ),
+      );
+
+    return row;
+  }
+
+  async function createBenefitInvoice(orgId: string, period: string, totalCents: number) {
+    await db
+      .insert(benefitInvoices)
+      .values({ orgId, period, totalCents })
+      .onConflictDoNothing({ target: [benefitInvoices.orgId, benefitInvoices.period] });
+
+    const [row] = await db
+      .select({
+        id: benefitInvoices.id,
+        period: benefitInvoices.period,
+        totalCents: benefitInvoices.totalCents,
+        status: benefitInvoices.status,
+      })
+      .from(benefitInvoices)
+      .where(and(eq(benefitInvoices.orgId, orgId), eq(benefitInvoices.period, period)))
+      .limit(1);
+
+    return row;
+  }
+
+  async function listBenefitInvoices(orgId: string) {
+    return db
+      .select({
+        id: benefitInvoices.id,
+        period: benefitInvoices.period,
+        totalCents: benefitInvoices.totalCents,
+        status: benefitInvoices.status,
+        createdAt: benefitInvoices.createdAt,
+      })
+      .from(benefitInvoices)
+      .where(eq(benefitInvoices.orgId, orgId))
+      .orderBy(desc(benefitInvoices.period));
+  }
+
   return {
+    getCopayProduct,
+    findAssignmentByProfile,
+    updateCopayState,
+    findAssignmentBySubscription,
+    tallyActiveAssignments,
+    createBenefitInvoice,
+    listBenefitInvoices,
     pendingPerson,
     applyBenefitPolicy,
     profileInOrg,

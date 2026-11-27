@@ -11,6 +11,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
   varchar,
@@ -819,6 +820,49 @@ export const benefitAssignments = pgTable(
     index("benefit_assignments_org_id_idx").on(table.orgId),
   ],
 );
+
+export const benefitInvoiceStatusEnum = pgEnum("benefit_invoice_status", ["draft", "sent"]);
+
+export const copayProducts = pgTable(
+  "copay_products",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    fromPlanId: uuid("from_plan_id")
+      .notNull()
+      .references(() => plans.id),
+    toPlanId: uuid("to_plan_id")
+      .notNull()
+      .references(() => plans.id),
+    abacatePayProductId: varchar("abacatepay_product_id", { length: 255 }).notNull(),
+  },
+  (table) => [unique("copay_products_pair_idx").on(table.fromPlanId, table.toPlanId)],
+);
+
+export const benefitInvoices = pgTable(
+  "benefit_invoices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: orgIdColumn(),
+    period: varchar("period", { length: 7 }).notNull(),
+    totalCents: integer("total_cents").notNull().default(0),
+    status: benefitInvoiceStatusEnum("status").notNull().default("draft"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [unique("benefit_invoices_org_period_idx").on(table.orgId, table.period)],
+);
+
+export const copayProductsRelations = relations(copayProducts, ({ one }) => ({
+  fromPlan: one(plans, { fields: [copayProducts.fromPlanId], references: [plans.id] }),
+  toPlan: one(plans, { fields: [copayProducts.toPlanId], references: [plans.id] }),
+}));
+
+export const benefitInvoicesRelations = relations(benefitInvoices, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [benefitInvoices.orgId],
+    references: [organizations.id],
+  }),
+}));
 
 export const benefitPoliciesRelations = relations(benefitPolicies, ({ one }) => ({
   organization: one(organizations, {
