@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { careerFailure } from "./failure";
+import { careerFailure, deleteAccountFailure } from "./failure";
 
 describe("careerFailure", () => {
   it("translates a known API reason", () => {
@@ -90,5 +90,52 @@ describe("careerFailure", () => {
   it("leaves other failures to the caller", () => {
     expect(careerFailure(500, { status: 500, value: "oops" })).toBeUndefined();
     expect(careerFailure(422, { status: 422, value: { type: "validation" } })).toBeUndefined();
+  });
+});
+
+describe("deleteAccountFailure", () => {
+  const subscription =
+    "Não foi possível cancelar sua assinatura agora. Tente de novo em alguns minutos.";
+
+  it("maps both cancellation failures", () => {
+    expect(
+      deleteAccountFailure(502, {
+        status: 502,
+        value: { error: "Could not cancel Carreira Pro; try again" },
+      }),
+    ).toBe(subscription);
+    expect(
+      deleteAccountFailure(502, {
+        status: 502,
+        value: { error: "Could not cancel the benefit upgrade; try again" },
+      }),
+    ).toBe(subscription);
+  });
+
+  it("separates a storage failure", () => {
+    expect(
+      deleteAccountFailure(502, { status: 502, value: { error: "Could not delete stored files" } }),
+    ).toBe("Não foi possível apagar seus arquivos agora. Tente de novo em alguns minutos.");
+  });
+
+  it("maps unavailable billing and storage", () => {
+    const text = "Não é possível apagar agora. Tente mais tarde.";
+
+    expect(
+      deleteAccountFailure(503, { status: 503, value: { error: "Billing not configured" } }),
+    ).toBe(text);
+    expect(
+      deleteAccountFailure(503, { status: 503, value: { error: "File storage not configured" } }),
+    ).toBe(text);
+  });
+
+  it("falls back for anything else", () => {
+    expect(deleteAccountFailure(500, null)).toBe(
+      "Não foi possível apagar sua conta. Tente de novo.",
+    );
+  });
+
+  it("handles a 502 without a readable body", () => {
+    expect(deleteAccountFailure(502, "boom")).toBe(subscription);
   });
 });

@@ -1,9 +1,12 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { z } from "zod";
 import { EmployeeLogin } from "@/features/employee/login";
 import { SignInLayout } from "@/features/sign-in/sign-in-layout";
 import { getApiClient } from "@/shared/lib/api-client";
+import { Alert, AlertDescription } from "@/shared/ui/shadcn/alert";
 
 export const Route = createFileRoute("/colaborador_/entrar")({
+  validateSearch: z.object({ aviso: z.literal("conta-apagada").optional().catch(undefined) }),
   beforeLoad: async () => {
     const result = await getApiClient().api.employee.session.get();
 
@@ -16,6 +19,8 @@ export const Route = createFileRoute("/colaborador_/entrar")({
 });
 
 function EmployeeLoginRoute() {
+  const { aviso } = Route.useSearch();
+
   return (
     <SignInLayout
       title="Entre na sua jornada"
@@ -27,6 +32,11 @@ function EmployeeLoginRoute() {
         </Link>
       }
     >
+      {aviso ? (
+        <Alert role="status">
+          <AlertDescription>Sua conta foi apagada.</AlertDescription>
+        </Alert>
+      ) : null}
       <EmployeeLogin />
     </SignInLayout>
   );

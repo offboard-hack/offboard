@@ -8,12 +8,14 @@ import {
   retryEmployeeRead,
 } from "@/entities/employee";
 import { getApiClient } from "@/shared/lib/api-client";
-import { careerFailure } from "./failure";
+import { careerFailure, deleteAccountFailure } from "./failure";
 import { jobsRefetchInterval, resumeRefetchInterval, scoreArrived } from "./refresh";
 
 export { jobsRefetchInterval } from "./refresh";
 
 type Me = ApiClient["api"]["me"];
+
+export type AccountExport = Treaty.Data<Me["export"]["get"]>;
 
 export type CareerPlan = Treaty.Data<Me["plan"]["get"]>;
 
@@ -830,5 +832,31 @@ export function useUndoRejection(account: EmployeeAccount) {
         "Não foi possível trazer a vaga de volta.",
       ),
     onSuccess: () => refreshAfterRejection(queryClient, account),
+  });
+}
+
+export function useExportAccountData(account: EmployeeAccount) {
+  return useMutation({
+    mutationFn: async () =>
+      settle(
+        await client().export.get({ headers: employeeAccessHeaders(account) }),
+        "Não foi possível baixar seus dados. Tente de novo.",
+      ),
+  });
+}
+
+export function useDeleteAccount(account: EmployeeAccount) {
+  return useMutation({
+    async mutationFn() {
+      const result = await client().delete(undefined, {
+        headers: employeeAccessHeaders(account),
+      });
+
+      checkEmployeeAccess(result.status);
+
+      if (result.error !== null) {
+        throw new Error(deleteAccountFailure(result.status, result.error));
+      }
+    },
   });
 }
