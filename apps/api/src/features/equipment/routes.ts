@@ -29,6 +29,13 @@ const manualEquipment = t.Object({
   returnMethod,
 });
 
+const importProblem = t.Union([
+  t.Literal("unknown-person"),
+  t.Literal("ambiguous-person"),
+  t.Literal("tag-in-use"),
+  t.Literal("repeated-tag"),
+]);
+
 const equipmentErrors = {
   "missing-case": [404, "Case not found"],
   missing: [404, "Equipment not found"],
@@ -78,6 +85,34 @@ export function equipmentRoutes(repos: EquipmentRepository, access: PortalAccess
         permit: ["update", "Offboarding"],
         body: t.Composite([manualEquipment, t.Object({ caseId: t.String({ format: "uuid" }) })]),
         response: { 201: equipmentRow, 404: errorResponse, 409: errorResponse },
+      },
+    )
+    .post(
+      "/equipment/import",
+      async ({ body, principal, status }) => {
+        const result = await repos.importEquipment(principal.orgId, body.rows);
+
+        return result.problems.length
+          ? status(422, { problems: result.problems })
+          : status(201, { created: result.created });
+      },
+      {
+        permit: ["update", "Offboarding"],
+        body: t.Object({
+          rows: t.Array(
+            t.Composite([
+              manualEquipment,
+              t.Object({ person: t.String({ minLength: 1, maxLength: 255 }) }),
+            ]),
+            { minItems: 1, maxItems: 500 },
+          ),
+        }),
+        response: {
+          201: t.Object({ created: t.Number() }),
+          422: t.Object({
+            problems: t.Array(t.Object({ record: t.Number(), problem: importProblem })),
+          }),
+        },
       },
     )
     .patch(
