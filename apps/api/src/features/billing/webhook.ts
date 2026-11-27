@@ -65,10 +65,15 @@ const talentPrefix = "talent:";
 
 const talentProfileId = z.uuid();
 
-async function talentSubscriptionOf(repos: BillingRepository, externalId: string) {
-  const parsed = talentProfileId.safeParse(externalId.slice(talentPrefix.length));
+const attemptToken = /^[a-z0-9]{1,32}$/i;
 
-  return parsed.success ? repos.findTalentSubscription(parsed.data) : null;
+export function checkoutReferenceId(externalId: string, prefix = "") {
+  const [id, attempt, ...extra] = externalId.slice(prefix.length).split(":");
+  const parsed = talentProfileId.safeParse(id);
+
+  if (!parsed.success || extra.length > 0) return null;
+
+  return attempt === undefined || attemptToken.test(attempt) ? parsed.data : null;
 }
 
 type TalentTarget = {
@@ -329,10 +334,10 @@ export async function applyWebhookEvent(
   deliveryId: string | null,
 ) {
   const name = event.event ?? event.type;
-  const subscriptionId = event.data.checkout?.externalId;
+  const externalId = event.data.checkout?.externalId;
 
-  if (subscriptionId?.startsWith(copayPrefix)) {
-    const copay = await copayTargetOf(benefits, subscriptionId, event.data.subscription.id);
+  if (externalId?.startsWith(copayPrefix)) {
+    const copay = await copayTargetOf(benefits, externalId, event.data.subscription.id);
 
     if (!copay) {
       console.error("copay webhook ignored", { event: name });
@@ -343,13 +348,21 @@ export async function applyWebhookEvent(
     return applyCopayEvent(benefits, gateway, name, event, copay);
   }
 
-  if (subscriptionId?.startsWith(talentPrefix)) {
-    const talent = await talentSubscriptionOf(repos, subscriptionId);
+  if (externalId?.startsWith(talentPrefix)) {
+    const profileId = checkoutReferenceId(externalId, talentPrefix);
+
+    if (!profileId) {
+      console.error("talent webhook ignored", { event: name });
+
+      return;
+    }
+
+    const talent = await repos.findTalentSubscription(profileId);
 
     return applyTalentEvent(repos, gateway, name, event, deliveryId, talent);
   }
 
-  if (!subscriptionId) {
+  if (!externalId) {
     const talent = await repos.findTalentSubscriptionByProvider(event.data.subscription.id);
 
     if (talent) return applyTalentEvent(repos, gateway, name, event, deliveryId, talent);
@@ -358,6 +371,8 @@ export async function applyWebhookEvent(
 
     if (copay) return applyCopayEvent(benefits, gateway, name, event, copay);
   }
+
+  const subscriptionId = externalId ? checkoutReferenceId(externalId) : null;
 
   if (!name || !subscriptionId) return;
 

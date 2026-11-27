@@ -1,4 +1,5 @@
 import { Elysia, t } from "elysia";
+import { checkoutAttempt } from "../../shared/checkout-attempt.js";
 import { careerPro } from "../../shared/career-pro.js";
 import { logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
@@ -179,7 +180,7 @@ export function careerPlanRoutes(
 
         try {
           const checkout = await gateway.createSubscriptionCheckout({
-            externalId: `talent:${row.profileId}`,
+            externalId: `talent:${row.profileId}:${checkoutAttempt()}`,
             planSlug: careerPro.slug,
             returnUrl: careerScreen,
             completionUrl: `${careerScreen}&plano=ok`,

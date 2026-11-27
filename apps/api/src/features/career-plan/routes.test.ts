@@ -339,7 +339,7 @@ describe.skipIf(!url)("career plan route", () => {
     expect(await response.json()).toEqual({ url: "https://pay.example/bill_pro" });
     expect(checkouts).toEqual([
       {
-        externalId: `talent:${profileId}`,
+        externalId: expect.stringMatching(new RegExp(`^talent:${profileId}:[a-z0-9]+$`)),
         planSlug: "carreira-pro",
         returnUrl: `${webOrigin}/colaborador?tela=carreira`,
         completionUrl: `${webOrigin}/colaborador?tela=carreira&plano=ok`,
@@ -375,6 +375,7 @@ describe.skipIf(!url)("career plan route", () => {
       providerSubscriptionId: null,
     });
     expect(checkouts).toHaveLength(2);
+    expect(checkouts[0].externalId).not.toBe(checkouts[1].externalId);
   });
 
   it("restarts the checkout of a canceled Carreira Pro without a period end", async () => {
