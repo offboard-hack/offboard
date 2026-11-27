@@ -15,14 +15,14 @@ export function createAbacatePayGateway(
   base = "https://api.abacatepay.com/v",
   cancelTimeoutMs = 8000,
 ) {
-  function client(timeout?: number) {
+  function client(rest: { timeout?: number; retry?: { max: number } } = {}) {
     if (!apiKey) throw new Error("ABACATEPAY_API_KEY is not configured");
 
-    return AbacatePay({ secret: apiKey, rest: { base, timeout } });
+    return AbacatePay({ secret: apiKey, rest: { base, ...rest } });
   }
 
   async function cancelSubscription(id: string) {
-    const api = client(cancelTimeoutMs);
+    const api = client({ timeout: cancelTimeoutMs, retry: { max: 0 } });
     const result = await api.subscriptions.cancel(id);
 
     if (result.success) return;

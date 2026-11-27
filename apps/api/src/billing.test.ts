@@ -318,7 +318,7 @@ describe("abacatepay gateway cancel timeout", () => {
     await expect(
       createAbacatePayGateway("secret-key", base, 20).cancelSubscription("subs_1"),
     ).rejects.toThrow("AbacatePay subscription cancel failed");
-    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(Date.now() - started).toBeLessThan(1500);
   });
 });
 
@@ -2659,6 +2659,84 @@ describe.skipIf(!url)("billing", () => {
           copaySubscriptionId: null,
           effectivePlanId: goldId,
         });
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("stops at the time budget when the gateway hangs and still runs the other drain work", async () => {
+      const logged = vi.spyOn(console, "error");
+      const attempts: string[] = [];
+      let elapsed = 0;
+
+      const hanging = createApp(webOrigin, repos, {
+        auth,
+        sendEmail: () => Promise.resolve(),
+        cronSecret: "sweep-secret",
+        catalog: [],
+        clock: () => elapsed,
+        abacatepay: {
+          configured: true,
+          createSubscriptionCheckout: () => Promise.resolve({ id: "bill_x", url: "https://x" }),
+          async cancelSubscription(id: string) {
+            attempts.push(id);
+            elapsed += 10_000;
+
+            throw new Error("gateway hung");
+          },
+        },
+      });
+
+      for (let index = 0; index < 5; index += 1) {
+        await upgraded(`subs_${index}`, "2000-01-01");
+      }
+
+      await repos.background.enqueue("score_resume", randomUUID());
+
+      try {
+        const res = await drainWith(hanging);
+
+        expect(res.status).toBe(200);
+        expect(attempts).toHaveLength(2);
+        expect((await res.json()).processed).toBeGreaterThanOrEqual(1);
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it("does not let rows that always fail starve the others", async () => {
+      const logged = vi.spyOn(console, "error");
+
+      const profiles = await db
+        .insert(talentProfiles)
+        .values(
+          Array.from({ length: 22 }, () => ({
+            orgId: defaultOrgId,
+            personalEmail: `pessoa-${randomUUID()}@exemplo.com`,
+            name: "Pessoa Teste",
+            sponsoredUntil: "2099-12-31",
+          })),
+        )
+        .returning({ id: talentProfiles.id });
+
+      await db.insert(benefitAssignments).values(
+        profiles.map((profile, index) => ({
+          orgId: defaultOrgId,
+          profileId: profile.id,
+          assignedPlanId: goldId,
+          effectivePlanId: platinumId,
+          source: "manual",
+          validUntil: index < 20 ? "2000-01-01" : "2000-01-02",
+          copaySubscriptionId: index < 20 ? `subs_bad_${index}` : `subs_good_${index}`,
+        })) satisfies (typeof benefitAssignments.$inferInsert)[],
+      );
+
+      for (let index = 0; index < 20; index += 1) failing.add(`subs_bad_${index}`);
+
+      try {
+        for (let tick = 0; tick < 12 && cancelled.length < 2; tick += 1) await drainNow();
+
+        expect([...cancelled].sort()).toEqual(["subs_good_20", "subs_good_21"]);
       } finally {
         logged.mockRestore();
       }

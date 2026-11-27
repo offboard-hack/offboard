@@ -91,6 +91,7 @@ const dayMs = 24 * 60 * 60 * 1000;
 const contactRetentionMs = 30 * dayMs;
 const usageRetentionMs = 7 * dayMs;
 const copaySweepLimit = 20;
+const copaySweepBudgetMs = 20_000;
 const aiApplyBudgetMs = 210_000;
 
 type AppOptions = {
@@ -110,6 +111,7 @@ type AppOptions = {
   embedProfile?: Embed;
   captcha?: Captcha;
   catalog?: readonly CatalogSource[];
+  clock?: () => number;
   fetchFeedImpl?: typeof fetch;
   fetchGreenhouseImpl?: typeof fetch;
   fetchBrowserImpl?: typeof fetch;
@@ -523,7 +525,12 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       .expiredCopays(saoPauloDate(new Date()), copaySweepLimit)
       .catch(logFailure("co-pay expiry sweep failed"));
 
+    const clock = options.clock ?? Date.now;
+    const started = clock();
+
     for (const { profileId, copaySubscriptionId } of expired ?? []) {
+      if (clock() - started >= copaySweepBudgetMs) return;
+
       await abacatepay
         .cancelSubscription(copaySubscriptionId)
         .then(() => repos.benefits.clearExpiredCopay(profileId, copaySubscriptionId))

@@ -283,7 +283,7 @@ export function createBenefitRepository(db: Database) {
           lt(benefitAssignments.validUntil, today),
         ),
       )
-      .orderBy(benefitAssignments.validUntil)
+      .orderBy(sql`random()`)
       .limit(limit);
   }
 
