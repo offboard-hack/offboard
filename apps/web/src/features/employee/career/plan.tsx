@@ -1,7 +1,7 @@
 import { brazilTimezone } from "@offboard/employee";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { careerPlanQuery, useUpgradeCheckout } from "@/entities/career";
+import { careerPlanQuery, useCancelCareerPro, useUpgradeCheckout } from "@/entities/career";
 import type { EmployeeAccount } from "@/entities/employee";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
@@ -9,6 +9,10 @@ import { EmployeeError, EmployeePanel } from "../ui";
 import { featureComparisonView, type TierFeatures } from "./benefit-features";
 import {
   type CareerPlan,
+  cancelConfirmLabel,
+  cancelConfirmPrompt,
+  cancelKeepLabel,
+  cancelProLabel,
   paymentReceivedNote,
   planCardView,
   planPollInterval,
@@ -25,6 +29,7 @@ const dayFormat = new Intl.DateTimeFormat("en-CA", {
 
 export function PlanSection({ account, paid }: { account: EmployeeAccount; paid: boolean }) {
   const checkout = useUpgradeCheckout(account);
+  const cancel = useCancelCareerPro(account);
   const [openedAt] = useState(() => Date.now());
   const [today] = useState(() => dayFormat.format(new Date()));
 
@@ -46,8 +51,10 @@ export function PlanSection({ account, paid }: { account: EmployeeAccount; paid:
       today={today}
       paid={paid}
       upgrading={checkout.isPending || checkout.isSuccess}
-      error={checkout.error?.message}
+      error={checkout.error?.message ?? cancel.error?.message}
+      canceling={cancel.isPending}
       onUpgrade={() => checkout.mutate()}
+      onCancel={() => cancel.mutate()}
     />
   );
 }
@@ -81,15 +88,20 @@ export function PlanCard({
   paid,
   upgrading,
   error,
+  canceling,
   onUpgrade,
+  onCancel,
 }: {
   plan: CareerPlan;
   today: string;
   paid: boolean;
   upgrading: boolean;
   error?: string;
+  canceling: boolean;
   onUpgrade: () => void;
+  onCancel: () => void;
 }) {
+  const [confirming, setConfirming] = useState(false);
   const view = planCardView(plan, today, paid);
   const comparison = view.showComparison ? featureComparisonView(view.activeBenefit) : null;
 
@@ -140,6 +152,26 @@ export function PlanCard({
           <Button onClick={onUpgrade} disabled={upgrading}>
             {view.upgradeLabel}
           </Button>
+        </div>
+      ) : null}
+      {view.cancelable && !confirming ? (
+        <div>
+          <Button variant="outline" onClick={() => setConfirming(true)}>
+            {cancelProLabel}
+          </Button>
+        </div>
+      ) : null}
+      {view.cancelable && confirming ? (
+        <div role="alertdialog" aria-label={cancelProLabel} className="space-y-2">
+          <p className="text-sm">{cancelConfirmPrompt}</p>
+          <div className="flex gap-2">
+            <Button variant="destructive" onClick={onCancel} disabled={canceling}>
+              {cancelConfirmLabel}
+            </Button>
+            <Button variant="outline" onClick={() => setConfirming(false)} disabled={canceling}>
+              {cancelKeepLabel}
+            </Button>
+          </div>
         </div>
       ) : null}
       {view.upgrade === "unavailable" ? (

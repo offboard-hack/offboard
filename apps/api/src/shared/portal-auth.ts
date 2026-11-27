@@ -27,7 +27,8 @@ export type PortalAccess =
   | { kind: "anonymous" }
   | { kind: "forbidden" }
   | { kind: "authenticated"; principal: PortalPrincipal }
-  | { kind: "talent"; profile: TalentPrincipal };
+  | { kind: "talent"; profile: TalentPrincipal }
+  | { kind: "staff"; email: string };
 
 export type PortalAuth = {
   handler: (request: Request) => Promise<Response>;

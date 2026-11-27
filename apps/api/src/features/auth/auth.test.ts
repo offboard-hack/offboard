@@ -28,6 +28,7 @@ describe.skipIf(!databaseUrl)("invite-only sign-in with PostgreSQL", () => {
   const auth = createAuth({
     db,
     origin,
+    staffEmails: new Set(),
     secret: randomUUID() + randomUUID(),
     talent,
     sendLink({ email, url }) {
@@ -537,6 +538,69 @@ describe.skipIf(!databaseUrl)("invite-only sign-in with PostgreSQL", () => {
     });
 
     expect(await repos.deleteTeamMember(defaultOrgId, member.id)).toBe(true);
+  });
+
+  it("signs an allowlisted staff email in with a code and nobody else", async () => {
+    const staffEmail = `staff-${randomUUID()}@offboard.example`;
+    const outsider = `outsider-${randomUUID()}@offboard.example`;
+
+    const sharedSecret = randomUUID() + randomUUID();
+
+    const staffAuth = createAuth({
+      db,
+      origin,
+      secret: sharedSecret,
+      talent,
+      staffEmails: new Set([staffEmail]),
+      sendLink() {
+        return Promise.resolve();
+      },
+      sendCode({ email, code }) {
+        codes.set(email, code);
+
+        return Promise.resolve();
+      },
+    });
+
+    const staffRequest = (path: string, body: { email: string; type?: "sign-in"; otp?: string }) =>
+      staffAuth.handler(
+        new Request(`${origin}/api/auth${path}`, {
+          method: "POST",
+          headers: { origin, "content-type": "application/json", [codeAudienceHeader]: "staff" },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    await staffRequest("/email-otp/send-verification-otp", { email: outsider, type: "sign-in" });
+    expect(codes.has(outsider)).toBe(false);
+
+    expect(
+      (
+        await staffRequest("/email-otp/send-verification-otp", {
+          email: staffEmail,
+          type: "sign-in",
+        })
+      ).status,
+    ).toBe(200);
+
+    const headers = sessionHeaders(
+      await staffRequest("/sign-in/email-otp", { email: staffEmail, otp: codes.get(staffEmail) }),
+    );
+
+    expect(await staffAuth.resolvePrincipal(headers)).toEqual({ kind: "staff", email: staffEmail });
+
+    const revokedAuth = createAuth({
+      db,
+      origin,
+      secret: sharedSecret,
+      talent,
+      staffEmails: new Set(),
+      sendLink() {
+        return Promise.resolve();
+      },
+    });
+
+    expect(await revokedAuth.resolvePrincipal(headers)).toEqual({ kind: "forbidden" });
   });
 
   it("uses the configured public origin and sends email through Resend", async () => {

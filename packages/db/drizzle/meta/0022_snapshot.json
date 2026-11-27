@@ -1,5 +1,5 @@
 {
-  "id": "c65c2c3f-1664-4f31-a6fb-0ffc25d152c2",
+  "id": "d5fbb2f4-0a73-451c-8fdc-10f9a210ef4a",
   "prevId": "0f8cf893-5208-4782-99d2-af3f4bc65118",
   "version": "7",
   "dialect": "postgresql",
@@ -1604,74 +1604,6 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.demo_profile_embeddings": {
-      "name": "demo_profile_embeddings",
-      "schema": "",
-      "columns": {
-        "slug": {
-          "name": "slug",
-          "type": "varchar(80)",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "embedded_hash": {
-          "name": "embedded_hash",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "embedding": {
-          "name": "embedding",
-          "type": "vector(1024)",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.demo_search_usage": {
-      "name": "demo_search_usage",
-      "schema": "",
-      "columns": {
-        "bucket": {
-          "name": "bucket",
-          "type": "varchar(80)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "day": {
-          "name": "day",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "searches": {
-          "name": "searches",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "demo_search_usage_bucket_day_pk": {
-          "name": "demo_search_usage_bucket_day_pk",
-          "columns": ["bucket", "day"]
-        }
-      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -3797,6 +3729,24 @@
           "primaryKey": false,
           "notNull": true
         },
+        "checkout_id": {
+          "name": "checkout_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "checkout_url": {
+          "name": "checkout_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_subscription_id": {
+          "name": "provider_subscription_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -4727,7 +4677,7 @@
     "public.subscription_status": {
       "name": "subscription_status",
       "schema": "public",
-      "values": ["active", "past_due", "canceled", "trialing"]
+      "values": ["active", "past_due", "canceled", "trialing", "pending"]
     },
     "public.talent_subscription_status": {
       "name": "talent_subscription_status",

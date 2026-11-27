@@ -55,7 +55,7 @@ import {
   employeeStateSchema,
   type EmployeeState,
 } from "@offboard/employee";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { status } from "elysia";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -236,7 +236,9 @@ describe.skipIf(!url)("api", () => {
     department?: string;
     deadline?: string;
     status?: string;
-    rows?: { name: string; department?: string }[];
+    rows?:
+      | { name: string; department?: string }[]
+      | { person: string; item: string; tag: string; returnMethod: string }[];
     actionId?: string;
     enabled?: boolean;
     shareOutcomeWithHr?: boolean | string;
@@ -1101,7 +1103,12 @@ describe.skipIf(!url)("api", () => {
       });
       expect(await (await call(gated, "talent", "/me/plan", "GET", mine.id)).json()).toEqual({
         company: { name: "Gold", includesAiApply: false, sponsoredUntil },
-        individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+        individual: {
+          plan: "carreira-pro",
+          status: "active",
+          currentPeriodEnd: null,
+          cancelable: false,
+        },
         benefit: null,
         aiApply: { allowedBy: "individual", dailyLimit: 10 },
         upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
@@ -3157,6 +3164,24 @@ describe.skipIf(!url)("api", () => {
         failRemove: boolean;
       };
 
+      type BillingStub = {
+        configured: boolean;
+        createSubscriptionCheckout: () => Promise<{ id: string; url: string }>;
+        cancelSubscription: (id: string) => Promise<void>;
+      };
+
+      function billingStub(cancelled: string[], fail = false) {
+        return {
+          configured: true,
+          createSubscriptionCheckout: async () => ({ id: "bill", url: "https://pay.example/bill" }),
+          cancelSubscription: async (id) => {
+            if (fail) throw new Error("gateway down");
+
+            cancelled.push(id);
+          },
+        } satisfies BillingStub;
+      }
+
       type Scoring = { output: object; calls: number; prompts: string[] };
 
       const rubric = [
@@ -3218,6 +3243,7 @@ describe.skipIf(!url)("api", () => {
           draft?: object;
           embed?: Embed;
           embedProfile?: Embed;
+          billing?: BillingStub;
         } = {},
       ) {
         const store: Store = { puts: [], removed: [], prefixes: [], failRemove: false };
@@ -3318,6 +3344,7 @@ describe.skipIf(!url)("api", () => {
           embed: options.embed,
           embedProfile: options.embedProfile,
           storage: options.storage === false ? undefined : storage,
+          abacatepay: options.billing,
           runInBackground: (task) => {
             background.push(task);
           },
@@ -7089,6 +7116,134 @@ describe.skipIf(!url)("api", () => {
         expect((await request(instance, id, "/me")).status).toBe(403);
       });
 
+      describe("with a Carreira Pro subscription", () => {
+        async function subscribe(
+          profileId: string,
+          status: "active" | "past_due" | "pending" | "canceled",
+          providerSubscriptionId: string | null = "subs_pro",
+        ) {
+          await db.insert(talentSubscriptions).values({
+            profileId,
+            status,
+            providerSubscriptionId,
+            currentPeriodEnd: "2099-01-01",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
+
+        it("cancels the subscription at AbacatePay before deleting", async () => {
+          for (const status of ["active", "past_due", "pending"] as const) {
+            const cancelled: string[] = [];
+            const { instance } = resumesApp({ billing: billingStub(cancelled) });
+            const id = await profile(`${status}@example.com`);
+
+            await subscribe(id, status);
+
+            expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+            expect(cancelled).toEqual(["subs_pro"]);
+            expect(await repos.talent.findById(id)).toBeUndefined();
+            expect(
+              await db
+                .select()
+                .from(talentSubscriptions)
+                .where(eq(talentSubscriptions.profileId, id)),
+            ).toEqual([]);
+          }
+        });
+
+        it("keeps the account and the subscription when AbacatePay fails", async () => {
+          const logged = vi.spyOn(console, "error");
+          const cancelled: string[] = [];
+          const { instance, store } = resumesApp({ billing: billingStub(cancelled, true) });
+          const id = await profile();
+
+          await subscribe(id, "active");
+          await upload(instance, id);
+
+          try {
+            const res = await request(instance, id, "/me", { method: "DELETE" });
+
+            expect(res.status).toBe(502);
+            expect(await res.json()).toEqual({ error: "Could not cancel Carreira Pro; try again" });
+            expect(store.prefixes).toEqual([]);
+            expect((await request(instance, id, "/me")).status).toBe(200);
+            expect(
+              (
+                await db
+                  .select({ status: talentSubscriptions.status })
+                  .from(talentSubscriptions)
+                  .where(eq(talentSubscriptions.profileId, id))
+              )[0],
+            ).toEqual({ status: "active" });
+          } finally {
+            logged.mockRestore();
+          }
+        });
+
+        it("refuses to delete when billing is not configured", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          await subscribe(id, "active");
+
+          const res = await request(instance, id, "/me", { method: "DELETE" });
+
+          expect(res.status).toBe(503);
+          expect(await res.json()).toEqual({ error: "Billing not configured" });
+          expect((await request(instance, id, "/me")).status).toBe(200);
+        });
+
+        it("deletes without calling AbacatePay when there is nothing to cancel", async () => {
+          const cancelled: string[] = [];
+          const { instance } = resumesApp({ billing: billingStub(cancelled, true) });
+          const noProvider = await profile("a@example.com");
+          const alreadyCanceled = await profile("b@example.com", 1);
+          const none = await profile("c@example.com", 2);
+
+          await subscribe(noProvider, "pending", null);
+          await subscribe(alreadyCanceled, "canceled");
+
+          for (const id of [noProvider, alreadyCanceled, none]) {
+            expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+          }
+
+          expect(cancelled).toEqual([]);
+        });
+
+        it("does not call AbacatePay again once it was canceled and a later step failed", async () => {
+          const cancelled: string[] = [];
+          const { instance, store } = resumesApp({ billing: billingStub(cancelled) });
+          const id = await profile();
+
+          await subscribe(id, "active");
+          await upload(instance, id);
+
+          store.failRemove = true;
+
+          expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(502);
+
+          store.failRemove = false;
+
+          expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+          expect(cancelled).toEqual(["subs_pro"]);
+        });
+
+        it("cancels only the subscription of the signed-in profile", async () => {
+          const cancelled: string[] = [];
+          const { instance } = resumesApp({ billing: billingStub(cancelled) });
+          const mine = await profile();
+          const other = await profile("outra@example.com", 1);
+
+          await subscribe(mine, "active", "subs_mine");
+          await subscribe(other, "active", "subs_other");
+
+          expect((await request(instance, mine, "/me", { method: "DELETE" })).status).toBe(204);
+          expect(cancelled).toEqual(["subs_mine"]);
+          expect((await request(instance, other, "/me")).status).toBe(200);
+        });
+      });
+
       it("keeps the employee journey of the same person when the talent account is deleted", async () => {
         const { instance } = resumesApp();
         const id = await profile();
@@ -8789,6 +8944,15 @@ describe.skipIf(!url)("api", () => {
     expect(await res.json()).toEqual({ name: "Test Toggle", status: "disconnected" });
   });
 
+  it("treats only a connected E-mail row as switched on", async () => {
+    expect(await repos.integrations.isConnected(defaultOrgId, "E-mail")).toBe(true);
+
+    await call("/integrations/E-mail", "PUT", { status: "disconnected" });
+
+    expect(await repos.integrations.isConnected(defaultOrgId, "E-mail")).toBe(false);
+    expect(await repos.integrations.isConnected(defaultOrgId, "Never Saved")).toBe(false);
+  });
+
   describe("Slack settings", () => {
     const slackPosts: URLSearchParams[] = [];
 
@@ -9232,6 +9396,100 @@ describe.skipIf(!url)("api", () => {
 
       expect(add.status).toBe(403);
       expect(remove.status).toBe(403);
+    });
+  });
+
+  describe("equipment import", () => {
+    async function freshCase(name: string, email?: string) {
+      const [created] = await db
+        .insert(offboardingCases)
+        .values({
+          orgId: defaultOrgId,
+          name,
+          role: "Analista",
+          department: "Produto",
+          deadline: "2027-03-01",
+        })
+        .returning({ id: offboardingCases.id });
+
+      if (email) {
+        await db
+          .insert(employeeAccess)
+          .values({ caseId: created!.id, orgId: defaultOrgId, email, plan: emptyEmployeePlan });
+      }
+
+      return created!.id;
+    }
+
+    function importRows(
+      rows: { person: string; item: string; tag: string; returnMethod: string }[],
+    ) {
+      return call("/equipment/import", "POST", { rows });
+    }
+
+    const notebook = { item: "Notebook", returnMethod: "pickup" };
+
+    it("adds every row, matching people by name or e-mail", async () => {
+      const byName = await freshCase("Importada Por Nome");
+      const byEmail = await freshCase("Importada Por Email", "importada@example.com");
+
+      const res = await importRows([
+        { ...notebook, person: "importada por nome", tag: "IMP-001" },
+        { ...notebook, person: "IMPORTADA@example.com", tag: "IMP-002", returnMethod: "in_person" },
+      ]);
+
+      expect(res.status).toBe(201);
+      expect(await res.json()).toEqual({ created: 2 });
+
+      const rows = await db
+        .select({
+          caseId: equipment.caseId,
+          tag: equipment.tag,
+          fromEmployeePlan: equipment.fromEmployeePlan,
+        })
+        .from(equipment)
+        .where(inArray(equipment.tag, ["IMP-001", "IMP-002"]))
+        .orderBy(asc(equipment.tag));
+
+      expect(rows).toEqual([
+        { caseId: byName, tag: "IMP-001", fromEmployeePlan: false },
+        { caseId: byEmail, tag: "IMP-002", fromEmployeePlan: false },
+      ]);
+    });
+
+    it("saves nothing when any row has a problem", async () => {
+      await freshCase("Importada Sem Problema");
+
+      const res = await importRows([
+        { ...notebook, person: "Importada Sem Problema", tag: "IMP-010" },
+        { ...notebook, person: "Pessoa Inexistente", tag: "IMP-011" },
+      ]);
+
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({ problems: [{ record: 2, problem: "unknown-person" }] });
+      expect(
+        await db.select({ id: equipment.id }).from(equipment).where(eq(equipment.tag, "IMP-010")),
+      ).toEqual([]);
+    });
+
+    it("rejects an empty file", async () => {
+      expect((await importRows([])).status).toBe(422);
+    });
+
+    it("lets visualizador not import", async () => {
+      const res = await app.handle(
+        new Request("http://localhost/api/equipment/import", {
+          method: "POST",
+          headers: {
+            "x-test-session": "visualizador",
+            origin: webOrigin,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ rows: [{ ...notebook, person: "X", tag: "IMP-020" }] }),
+        }),
+      );
+
+      expect(res.status).toBe(403);
     });
   });
 
@@ -9806,6 +10064,41 @@ describe.skipIf(!url)("api", () => {
     expect(await res.json()).toEqual({ trackingCode: "XX000000000BR", tracking: null });
   });
 
+  it("hides tracking and skips the delivery check when Correios is switched off", async () => {
+    const trackingApp = createApp(webOrigin, repos, { ...appOptions, tracking: trackingConfig });
+
+    trackingStatus = 200;
+    trackingBody = JSON.stringify({
+      status: "TRACKING_STATUS_FOUND",
+      carrier: "CARRIER_CORREIOS",
+      payload: {
+        temEventoEntrega: true,
+        eventos: [{ descricao: "Objeto entregue ao destinatário" }],
+      },
+    });
+
+    const list = await (await call("/offboardings")).json();
+    const detail = await (await call(`/offboardings/${list[0].id}`)).json();
+    const task = detail.tasks.find((t: { status: string }) => t.status === "todo");
+
+    await db.update(tasks).set({ trackingCode: "OF000000000BR" }).where(eq(tasks.id, task.id));
+    await call("/integrations/Transportadora%3A%3ACorreios", "PUT", { status: "disconnected" });
+
+    const res = await trackingApp.handle(
+      new Request(`http://localhost/api/tasks/${task.id}/tracking`),
+    );
+
+    expect(await res.json()).toEqual({ trackingCode: "OF000000000BR", tracking: null });
+
+    const checked = await trackingApp.handle(
+      new Request("http://localhost/api/correios/check", {
+        headers: { authorization: `Bearer ${cronSecret}` },
+      }),
+    );
+
+    expect((await checked.json()).delivered).not.toContain(task.id);
+  });
+
   it("returns 404 for tracking on unknown task", async () => {
     const res = await app.handle(
       new Request(`http://localhost/api/tasks/${missingTaskId}/tracking`),
@@ -10041,6 +10334,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
   const employeeAuth = createAuth({
     db,
     origin: webOrigin,
+    staffEmails: new Set(),
     secret: randomUUID() + randomUUID(),
     ipAddressHeaders: ["x-test-employee-ip"],
     talent: repos.talent,

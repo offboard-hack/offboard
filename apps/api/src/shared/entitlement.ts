@@ -11,9 +11,16 @@ export type IndividualPlan = {
 };
 
 export function individualActive(individual: IndividualPlan | null, today: string) {
+  if (individual === null) return false;
+
+  if (individual.status === "active") {
+    return individual.currentPeriodEnd === null || today <= individual.currentPeriodEnd;
+  }
+
   return (
-    individual?.status === "active" &&
-    (individual.currentPeriodEnd === null || today <= individual.currentPeriodEnd)
+    individual.status === "canceled" &&
+    individual.currentPeriodEnd !== null &&
+    today <= individual.currentPeriodEnd
   );
 }
 

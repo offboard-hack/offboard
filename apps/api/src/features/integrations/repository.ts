@@ -28,6 +28,15 @@ export function createIntegrationsRepository(db: Database) {
     return row;
   }
 
+  async function isConnected(orgId: string, name: string) {
+    const [row] = await db
+      .select({ status: integrations.status })
+      .from(integrations)
+      .where(and(eq(integrations.orgId, orgId), eq(integrations.name, name)));
+
+    return row?.status === "connected";
+  }
+
   async function readConfig(orgId: string, name: string) {
     const [row] = await db
       .select({ config: integrations.config })
@@ -55,6 +64,7 @@ export function createIntegrationsRepository(db: Database) {
   return {
     listIntegrations,
     upsertIntegration,
+    isConnected,
     readConfig,
     saveConfig,
   };

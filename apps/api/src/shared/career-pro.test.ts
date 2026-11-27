@@ -93,7 +93,12 @@ describe("careerPlanOf", () => {
 
     expect(pro("2026-12-26")).toEqual({
       company: { name: null, includesAiApply: false, sponsoredUntil: "2027-02-28" },
-      individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-12-26" },
+      individual: {
+        plan: "carreira-pro",
+        status: "active",
+        currentPeriodEnd: "2026-12-26",
+        cancelable: false,
+      },
       benefit: null,
       aiApply: { allowedBy: "individual", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
@@ -106,11 +111,37 @@ describe("careerPlanOf", () => {
       upgrade: { offered: true },
     });
     expect(pro("2026-12-26", "pending")).toMatchObject({
-      individual: { plan: "carreira-pro", status: "pending", currentPeriodEnd: "2026-12-26" },
+      individual: {
+        plan: "carreira-pro",
+        status: "pending",
+        currentPeriodEnd: "2026-12-26",
+        cancelable: false,
+      },
       benefit: null,
       aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: true },
     });
+  });
+
+  it("allows canceling only an active or past-due plan with a provider subscription", () => {
+    const cancelable = (
+      status: "active" | "past_due" | "pending" | "canceled",
+      providerSubscriptionId: string | null | undefined,
+    ) =>
+      careerPlanOf(
+        standing({
+          company: null,
+          individual: { status, currentPeriodEnd: "2099-01-01", providerSubscriptionId },
+        }),
+        now,
+      ).individual?.cancelable;
+
+    expect(cancelable("active", "subs_1")).toBe(true);
+    expect(cancelable("past_due", "subs_1")).toBe(true);
+    expect(cancelable("active", null)).toBe(false);
+    expect(cancelable("active", undefined)).toBe(false);
+    expect(cancelable("pending", "subs_1")).toBe(false);
+    expect(cancelable("canceled", "subs_1")).toBe(false);
   });
 
   it("holds back the upgrade while a checkout is in flight", () => {
@@ -140,15 +171,38 @@ describe("careerPlanOf", () => {
     });
   });
 
-  it("never grants a canceled or past-due Carreira Pro", () => {
-    for (const status of ["canceled", "past_due"] as const) {
-      expect(
-        careerPlanOf(
-          standing({ company: null, individual: { status, currentPeriodEnd: "2099-01-01" } }),
-          now,
-        ).aiApply.allowedBy,
-      ).toBeNull();
-    }
+  it("never grants a past-due Carreira Pro", () => {
+    expect(
+      careerPlanOf(
+        standing({
+          company: null,
+          individual: { status: "past_due", currentPeriodEnd: "2099-01-01" },
+        }),
+        now,
+      ).aiApply.allowedBy,
+    ).toBeNull();
+  });
+
+  it("keeps a canceled Carreira Pro until its paid period ends and then offers the upgrade", () => {
+    const canceled = (currentPeriodEnd: string | null) =>
+      careerPlanOf(
+        standing({ company: null, individual: { status: "canceled", currentPeriodEnd } }),
+        now,
+      );
+
+    expect(canceled("2026-11-26")).toMatchObject({
+      individual: { status: "canceled", currentPeriodEnd: "2026-11-26" },
+      aiApply: { allowedBy: "individual", dailyLimit: 10 },
+      upgrade: { offered: false },
+    });
+    expect(canceled("2026-11-25")).toMatchObject({
+      aiApply: { allowedBy: null },
+      upgrade: { offered: true },
+    });
+    expect(canceled(null)).toMatchObject({
+      aiApply: { allowedBy: null },
+      upgrade: { offered: true },
+    });
   });
 });
 

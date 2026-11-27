@@ -15,6 +15,9 @@ const reasons = new Map([
   ["Already subscribed", "Você já tem um pagamento em andamento. Tente de novo em alguns minutos."],
   ["Billing not configured", "Indisponível no momento."],
   ["Could not start the checkout", "Não foi possível abrir o pagamento. Tente de novo."],
+  ["Could not cancel Carreira Pro", "Não foi possível cancelar agora. Tente de novo."],
+  ["Could not cancel Carreira Pro; try again", "Não foi possível cancelar agora. Tente de novo."],
+  ["No active Carreira Pro", "Você não tem um Carreira Pro ativo."],
   ["Access lapsed", "Seu acesso à carreira terminou."],
   ["Upload a résumé first", "Envie seu currículo antes de continuar."],
   ["Already applied", "Você já se candidatou a esta vaga."],
@@ -41,11 +44,18 @@ const reasons = new Map([
   ["Nothing to check", "Esta candidatura não precisa mais de confirmação."],
 ]);
 
+const canceledUntil = /^Carreira Pro canceled until (\d{4})-(\d{2})-(\d{2})$/;
+
 export function careerFailure<Failure>(status: number, failure: Failure) {
   const parsed = failureBody.safeParse(failure);
   const reason = parsed.success ? reasons.get(parsed.data.value.error) : undefined;
 
   if (reason) return reason;
+
+  const until = parsed.success ? canceledUntil.exec(parsed.data.value.error) : null;
+
+  if (until)
+    return `Seu Carreira Pro cancelado ainda vale até ${until[3]}/${until[2]}/${until[1]}.`;
 
   if (status === 402) return "Seu acesso à carreira terminou.";
 

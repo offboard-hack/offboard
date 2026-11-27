@@ -217,10 +217,16 @@ export function createMatchesRepository(db: Database) {
   async function profilesForMatching(now: Date) {
     const today = new Date(now.getTime() - saoPauloOffsetMs).toISOString().slice(0, 10);
 
-    const individual = and(
-      eq(talentSubscriptions.status, "active"),
-      or(
-        isNull(talentSubscriptions.currentPeriodEnd),
+    const individual = or(
+      and(
+        eq(talentSubscriptions.status, "active"),
+        or(
+          isNull(talentSubscriptions.currentPeriodEnd),
+          gte(talentSubscriptions.currentPeriodEnd, today),
+        ),
+      ),
+      and(
+        eq(talentSubscriptions.status, "canceled"),
         gte(talentSubscriptions.currentPeriodEnd, today),
       ),
     );
