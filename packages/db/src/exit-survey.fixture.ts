@@ -18,7 +18,10 @@ export const exitSurveyRatingKeys = [
 export type SeedExitSurvey = {
   caseName: string;
   npsScore: number;
-  responses: Record<(typeof exitSurveyRatingKeys)[number], number>;
+  responses: Record<(typeof exitSurveyRatingKeys)[number], number> & {
+    comment?: string;
+    anonymous?: boolean;
+  };
   topics: (typeof exitSurveyTopics)[number][];
   submittedAt: Date;
 };
@@ -34,6 +37,8 @@ export const seedExitSurveys: readonly SeedExitSurvey[] = [
       communication: 5,
       equipmentReturn: 4,
       documents: 4,
+      comment: "O processo foi claro e a equipe de RH me acompanhou em cada etapa.",
+      anonymous: false,
     },
     topics: ["Respeito na comunicação", "Clareza de prazos"],
     submittedAt: new Date("2026-06-18T14:00:00Z"),
@@ -62,6 +67,8 @@ export const seedExitSurveys: readonly SeedExitSurvey[] = [
       communication: 2,
       equipmentReturn: 2,
       documents: 3,
+      comment: "Os prazos mudaram várias vezes e eu soube de benefícios só no último dia.",
+      anonymous: true,
     },
     topics: ["Clareza de prazos", "Acesso a benefícios", "Apoio emocional"],
     submittedAt: new Date("2026-08-21T12:15:00Z"),
@@ -104,6 +111,8 @@ export const seedExitSurveys: readonly SeedExitSurvey[] = [
       communication: 5,
       equipmentReturn: 5,
       documents: 4,
+      comment: "Devolução de equipamentos rápida. Gostei de receber o checklist logo no início.",
+      anonymous: false,
     },
     topics: ["Respeito na comunicação", "Acesso a benefícios"],
     submittedAt: new Date("2026-11-11T13:00:00Z"),

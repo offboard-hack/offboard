@@ -401,6 +401,69 @@ describe.skipIf(!url)("benefit routes", () => {
     expect(cancelled).toEqual([]);
   });
 
+  describe("open co-pay checkout", () => {
+    const issued = {
+      copayCheckoutAt: new Date(),
+      copayCheckoutId: "bill_1",
+      copayCheckoutUrl: "https://pay.example/bill_1",
+      copayPriceCents: 4000,
+    };
+
+    const voided = {
+      copayCheckoutAt: null,
+      copayCheckoutId: null,
+      copayCheckoutUrl: null,
+      copayPriceCents: null,
+    };
+
+    async function openCheckout() {
+      const { low, high } = await planIds();
+      const profileId = await profile();
+
+      await call("/benefit-assignments", { method: "POST", json: { profileId, planId: low } });
+      await db
+        .update(benefitAssignments)
+        .set(issued)
+        .where(eq(benefitAssignments.profileId, profileId));
+
+      return { high, profileId };
+    }
+
+    it("is voided when HR assigns another plan", async () => {
+      const { high, profileId } = await openCheckout();
+
+      await call("/benefit-assignments", { method: "POST", json: { profileId, planId: high } });
+
+      expect(await row(profileId)).toMatchObject(voided);
+    });
+
+    it("is voided when HR updates the assignment", async () => {
+      const { high, profileId } = await openCheckout();
+      const saved = await row(profileId);
+
+      await call(`/benefit-assignments/${saved.id}`, { method: "PUT", json: { planId: high } });
+
+      expect(await row(profileId)).toMatchObject(voided);
+    });
+
+    it("is untouched by another organization", async () => {
+      const { high, profileId } = await openCheckout();
+      const saved = await row(profileId);
+
+      const res = await call(`/benefit-assignments/${saved.id}`, {
+        method: "PUT",
+        org: crypto.randomUUID(),
+        json: { planId: high },
+      });
+
+      expect(res.status).toBe(404);
+      expect(await row(profileId)).toMatchObject({
+        copayCheckoutId: "bill_1",
+        copayPriceCents: 4000,
+      });
+    });
+  });
+
   it("returns 502 and keeps the row when cancel fails", async () => {
     const { low, profileId } = await seedCopay();
     const before = await row(profileId);

@@ -9,7 +9,19 @@ import {
   plans,
   talentProfiles,
 } from "@offboard/db/schema";
-import { aliasedTable, and, count, desc, eq, gte, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import {
+  aliasedTable,
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import { evaluateBenefitRules, matchesBenefitRule } from "../../shared/benefit-rules.js";
 import { addMonths, saoPauloDate } from "../../shared/sao-paulo-date.js";
 
@@ -29,6 +41,12 @@ type AssignmentInput = {
   source: AssignmentSource;
   validUntil: string;
 };
+
+const paymentGraceDays = 4;
+
+function addDays(date: string, days: number) {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+}
 
 export function createBenefitRepository(db: Database) {
   async function getPolicy(orgId: string) {
@@ -108,6 +126,13 @@ export function createBenefitRepository(db: Database) {
           effectivePlanId: input.effectivePlanId,
           source: input.source,
           validUntil: input.validUntil,
+          copayCheckoutAt: null,
+          copayCheckoutId: null,
+          copayCheckoutUrl: null,
+          copayPriceCents: null,
+          copayPeriodEnd: null,
+          copayPaymentFailedAt: null,
+          copayTargetPlanId: null,
           updatedAt: new Date(),
         },
       })
@@ -236,6 +261,13 @@ export function createBenefitRepository(db: Database) {
         assignedPlanId: benefitAssignments.assignedPlanId,
         effectivePlanId: benefitAssignments.effectivePlanId,
         copaySubscriptionId: benefitAssignments.copaySubscriptionId,
+        copayCheckoutId: benefitAssignments.copayCheckoutId,
+        copayCheckoutUrl: benefitAssignments.copayCheckoutUrl,
+        copayCheckoutAt: benefitAssignments.copayCheckoutAt,
+        copayPriceCents: benefitAssignments.copayPriceCents,
+        copayPeriodEnd: benefitAssignments.copayPeriodEnd,
+        copayPaymentFailedAt: benefitAssignments.copayPaymentFailedAt,
+        copayTargetPlanId: benefitAssignments.copayTargetPlanId,
         validUntil: benefitAssignments.validUntil,
       })
       .from(benefitAssignments)
@@ -261,6 +293,13 @@ export function createBenefitRepository(db: Database) {
         profileId: benefitAssignments.profileId,
         assignedPlanId: benefitAssignments.assignedPlanId,
         effectivePlanId: benefitAssignments.effectivePlanId,
+        copayCheckoutId: benefitAssignments.copayCheckoutId,
+        copayCheckoutUrl: benefitAssignments.copayCheckoutUrl,
+        copayCheckoutAt: benefitAssignments.copayCheckoutAt,
+        copayPriceCents: benefitAssignments.copayPriceCents,
+        copayPeriodEnd: benefitAssignments.copayPeriodEnd,
+        copayPaymentFailedAt: benefitAssignments.copayPaymentFailedAt,
+        copayTargetPlanId: benefitAssignments.copayTargetPlanId,
         validUntil: benefitAssignments.validUntil,
       })
       .from(benefitAssignments)
@@ -280,20 +319,32 @@ export function createBenefitRepository(db: Database) {
       .where(
         and(
           isNotNull(benefitAssignments.copaySubscriptionId),
-          lt(benefitAssignments.validUntil, today),
+          or(
+            lt(benefitAssignments.validUntil, today),
+            and(
+              isNotNull(benefitAssignments.copayCheckoutAt),
+              lt(benefitAssignments.copayPeriodEnd, today),
+            ),
+          ),
         ),
       )
       .orderBy(sql`random()`)
       .limit(limit);
   }
 
-  async function clearExpiredCopay(profileId: string, copaySubscriptionId: string) {
+  async function revertCopay(profileId: string, copaySubscriptionId: string) {
     await db
       .update(benefitAssignments)
       .set({
         copaySubscriptionId: null,
         effectivePlanId: benefitAssignments.assignedPlanId,
         copayCheckoutAt: null,
+        copayCheckoutId: null,
+        copayCheckoutUrl: null,
+        copayPriceCents: null,
+        copayPeriodEnd: null,
+        copayPaymentFailedAt: null,
+        copayTargetPlanId: null,
         updatedAt: new Date(),
       })
       .where(
@@ -302,6 +353,109 @@ export function createBenefitRepository(db: Database) {
           eq(benefitAssignments.copaySubscriptionId, copaySubscriptionId),
         ),
       );
+  }
+
+  async function activateCopay(
+    profileId: string,
+    checkoutId: string,
+    patch: { effectivePlanId: string; copaySubscriptionId: string; copayPeriodEnd: string },
+  ) {
+    const rows = await db
+      .update(benefitAssignments)
+      .set({
+        ...patch,
+        copayCheckoutAt: null,
+        copayCheckoutUrl: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(benefitAssignments.profileId, profileId),
+          isNull(benefitAssignments.copaySubscriptionId),
+          eq(benefitAssignments.copayCheckoutId, checkoutId),
+        ),
+      )
+      .returning({ id: benefitAssignments.id });
+
+    return rows.length > 0;
+  }
+
+  async function restoreCopay(
+    profileId: string,
+    copaySubscriptionId: string,
+    markedAt: Date,
+    previous: {
+      copayCheckoutAt: Date | null;
+      copayPeriodEnd: string | null;
+      copayPaymentFailedAt: Date | null;
+    },
+  ) {
+    await db
+      .update(benefitAssignments)
+      .set({ ...previous, updatedAt: new Date() })
+      .where(
+        and(
+          eq(benefitAssignments.profileId, profileId),
+          eq(benefitAssignments.copaySubscriptionId, copaySubscriptionId),
+          eq(benefitAssignments.copayCheckoutAt, markedAt),
+        ),
+      );
+  }
+
+  async function failCopayPayment(profileId: string, copaySubscriptionId: string, now: Date) {
+    const graceEnd = addDays(saoPauloDate(now), paymentGraceDays);
+
+    await db
+      .update(benefitAssignments)
+      .set({
+        copayCheckoutAt: now,
+        copayPaymentFailedAt: now,
+        copayPeriodEnd: sql`greatest(coalesce(${benefitAssignments.copayPeriodEnd}, ${graceEnd}::date), ${graceEnd}::date)`,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(benefitAssignments.profileId, profileId),
+          eq(benefitAssignments.copaySubscriptionId, copaySubscriptionId),
+        ),
+      );
+  }
+
+  async function renewCopay(profileId: string, copaySubscriptionId: string, periodEnd: string) {
+    await db
+      .update(benefitAssignments)
+      .set({
+        copayPeriodEnd: periodEnd,
+        copayCheckoutAt: null,
+        copayPaymentFailedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(benefitAssignments.profileId, profileId),
+          eq(benefitAssignments.copaySubscriptionId, copaySubscriptionId),
+        ),
+      );
+  }
+
+  async function windDownCopay(profileId: string, copaySubscriptionId: string, now: Date) {
+    const [row] = await db
+      .update(benefitAssignments)
+      .set({
+        copayCheckoutAt: now,
+        copayPaymentFailedAt: null,
+        copayPeriodEnd: sql`coalesce(${benefitAssignments.copayPeriodEnd}, least(${benefitAssignments.validUntil}, ${addMonths(saoPauloDate(now), 1)}::date))`,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(benefitAssignments.profileId, profileId),
+          eq(benefitAssignments.copaySubscriptionId, copaySubscriptionId),
+        ),
+      )
+      .returning({ periodEnd: benefitAssignments.copayPeriodEnd });
+
+    return row?.periodEnd ?? null;
   }
 
   async function tallyActiveAssignments(orgId: string) {
@@ -363,7 +517,12 @@ export function createBenefitRepository(db: Database) {
     updateCopayState,
     findAssignmentBySubscription,
     expiredCopays,
-    clearExpiredCopay,
+    revertCopay,
+    activateCopay,
+    renewCopay,
+    restoreCopay,
+    failCopayPayment,
+    windDownCopay,
     tallyActiveAssignments,
     createBenefitInvoice,
     listBenefitInvoices,

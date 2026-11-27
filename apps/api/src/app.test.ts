@@ -10141,6 +10141,66 @@ describe.skipIf(!url)("api", () => {
     });
   });
 
+  it("lists exit survey comments newest first and hides anonymous authors", async () => {
+    const cases = await (await call("/offboardings")).json();
+    await db.$client.query("DELETE FROM exit_surveys");
+
+    await db.insert(exitSurveys).values([
+      {
+        orgId: defaultOrgId,
+        caseId: cases[0].id,
+        npsScore: 8,
+        responses: { comment: "Nomeado", anonymous: false },
+        topics: [],
+        submittedAt: new Date("2026-05-10T12:00:00Z"),
+      },
+      {
+        orgId: defaultOrgId,
+        caseId: cases[1].id,
+        npsScore: 8,
+        responses: { comment: "Anônimo", anonymous: true },
+        topics: [],
+        submittedAt: new Date("2026-07-10T12:00:00Z"),
+      },
+      {
+        orgId: defaultOrgId,
+        caseId: cases[2].id,
+        npsScore: 8,
+        responses: { comment: "Sem flag" },
+        topics: [],
+        submittedAt: new Date("2026-06-10T12:00:00Z"),
+      },
+      {
+        orgId: defaultOrgId,
+        caseId: cases[3].id,
+        npsScore: 8,
+        responses: { comment: "", anonymous: false },
+        topics: [],
+      },
+      { orgId: defaultOrgId, caseId: cases[4].id, npsScore: 8, responses: {}, topics: [] },
+    ]);
+
+    const res = await call("/exit-surveys/comments");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([
+      { comment: "Anônimo", month: "2026-07", author: null },
+      { comment: "Sem flag", month: "2026-06", author: null },
+      {
+        comment: "Nomeado",
+        month: "2026-05",
+        author: { name: cases[0].name, department: cases[0].department },
+      },
+    ]);
+
+    const list = await (await call("/exit-surveys")).json();
+
+    for (const { responses } of list) {
+      expect(responses).not.toHaveProperty("comment");
+      expect(responses).not.toHaveProperty("anonymous");
+    }
+  });
+
   it("returns zeroed aggregates without surveys", async () => {
     await db.$client.query("DELETE FROM exit_surveys");
     const res = await call("/exit-surveys/aggregates");
@@ -10264,6 +10324,8 @@ describe.skipIf(!url)("api", () => {
     expect((await send("rh", "/exit-surveys")).status).toBe(200);
     expect((await send("gestor", "/exit-surveys")).status).toBe(403);
     expect((await send("visualizador", "/exit-surveys/aggregates")).status).toBe(403);
+    expect((await send("rh", "/exit-surveys/comments")).status).toBe(200);
+    expect((await send("visualizador", "/exit-surveys/comments")).status).toBe(403);
 
     const submit = await send("visualizador", "/exit-surveys", "POST", {
       caseId: missingCaseId,

@@ -26,6 +26,30 @@ describe("careerFailure", () => {
     ).toBe("Não foi possível abrir o pagamento. Tente de novo.");
   });
 
+  it.each([
+    ["Co-pay already active", "Você já tem um upgrade do benefício ativo."],
+    [
+      "Co-pay active",
+      "Você tem um upgrade do benefício ativo. Cancele-o antes de assinar o Carreira Pro.",
+    ],
+    [
+      "Co-pay checkout open",
+      "Você já tem um pagamento de upgrade em andamento. Conclua-o ou tente de novo em alguns minutos.",
+    ],
+    [
+      "Carreira Pro active",
+      "Você já tem o Carreira Pro. Cancele-o antes de contratar o upgrade do benefício.",
+    ],
+    [
+      "Carreira Pro checkout open",
+      "Você já tem um pagamento do Carreira Pro em andamento. Tente de novo em alguns minutos.",
+    ],
+    ["No active co-pay", "Você não tem um upgrade do benefício ativo."],
+    ["Could not cancel the co-pay", "Não foi possível cancelar o upgrade agora. Tente de novo."],
+  ])("translates the co-pay and Carreira Pro exclusion reason %s", (error, message) => {
+    expect(careerFailure(409, { status: 409, value: { error } })).toBe(message);
+  });
+
   it("tells when a canceled Carreira Pro still has access", () => {
     expect(
       careerFailure(409, {

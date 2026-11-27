@@ -1,5 +1,5 @@
 import type { Database } from "@offboard/db/client";
-import { exitSurveys } from "@offboard/db/schema";
+import { exitSurveys, type ConfigValue } from "@offboard/db/schema";
 import { exitSurveyRatings, type Departure } from "@offboard/employee/departure";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -23,9 +23,16 @@ export async function syncExitSurvey(
 
   const npsScore = feedback.recommendation;
 
-  const responses = Object.fromEntries(
+  const comment = feedback.comment.trim();
+
+  const responses: Record<string, ConfigValue> = Object.fromEntries(
     exitSurveyRatings.flatMap(({ key }) => (feedback[key] === null ? [] : [[key, feedback[key]]])),
   );
+
+  if (comment) {
+    responses.comment = comment;
+    responses.anonymous = feedback.anonymous;
+  }
 
   const topics = feedback.topics;
 

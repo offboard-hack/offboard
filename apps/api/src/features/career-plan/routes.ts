@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { checkoutAttempt } from "../../shared/checkout-attempt.js";
-import { careerPro } from "../../shared/career-pro.js";
+import { careerPro, checkoutInFlight, checkoutRetryMs } from "../../shared/career-pro.js";
 import { logFailureCode } from "../../shared/error-summary.js";
 import { errorResponse } from "../../shared/http.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
@@ -61,6 +61,10 @@ const careerPlanResponse = t.Object({
       targetPlanName: t.String(),
       priceCents: t.Number(),
       active: t.Boolean(),
+      checkoutOpen: t.Boolean(),
+      endsAt: nullableDate,
+      checkoutUrl: nullableDate,
+      paymentFailed: t.Boolean(),
     }),
     t.Null(),
   ]),
@@ -73,17 +77,25 @@ type CareerCheckout = {
     planSlug: string;
     returnUrl: string;
     completionUrl: string;
-  }): Promise<{ url: string }>;
+  }): Promise<{ id: string; url: string }>;
   cancelSubscription(id: string): Promise<void>;
 };
 
+type CopayAssignment = {
+  assignedPlanId: string;
+  effectivePlanId: string;
+  copaySubscriptionId: string | null;
+  copayCheckoutUrl: string | null;
+  copayTargetPlanId: string | null;
+  copayPaymentFailedAt: Date | null;
+  copayCheckoutAt: Date | null;
+  copayPriceCents: number | null;
+  copayPeriodEnd: string | null;
+  validUntil: string;
+};
+
 type CopayBenefits = {
-  findAssignmentByProfile(profileId: string): Promise<{
-    assignedPlanId: string;
-    effectivePlanId: string;
-    copaySubscriptionId: string | null;
-    validUntil: string;
-  } | null>;
+  findAssignmentByProfile(profileId: string): Promise<CopayAssignment | null>;
   getCopayProduct(
     fromPlanId: string,
     toPlanId: string,
@@ -93,7 +105,26 @@ type CopayBenefits = {
   listCopayTargets(
     fromPlanId: string,
   ): Promise<{ planId: string; name: string; upgradeCents: number }[]>;
+  windDownCopay(profileId: string, subscriptionId: string, now: Date): Promise<string | null>;
+  restoreCopay(
+    profileId: string,
+    subscriptionId: string,
+    markedAt: Date,
+    previous: {
+      copayCheckoutAt: Date | null;
+      copayPeriodEnd: string | null;
+      copayPaymentFailedAt: Date | null;
+    },
+  ): Promise<void>;
 };
+
+function checkoutOpenOf(assignment: CopayAssignment, now: Date) {
+  return (
+    assignment.copaySubscriptionId === null &&
+    assignment.copayCheckoutAt !== null &&
+    assignment.copayCheckoutAt.getTime() > now.getTime() - checkoutRetryMs
+  );
+}
 
 export function careerPlanRoutes(
   repos: CareerPlanRepository,
@@ -105,13 +136,12 @@ export function careerPlanRoutes(
   const careerScreen = `${webOrigin}/colaborador?tela=carreira`;
 
   async function copayOf(profileId: string) {
+    const now = new Date();
     const assignment = await benefits.findAssignmentByProfile(profileId);
 
-    if (!assignment || assignment.validUntil < saoPauloDate(new Date())) return null;
+    if (!assignment || assignment.validUntil < saoPauloDate(now)) return null;
 
-    const active = assignment.copaySubscriptionId !== null;
-
-    if (active) {
+    if (assignment.copaySubscriptionId !== null) {
       const prices = await benefits.planPriceMap();
       const names = await benefits.planNameMap();
       const effectivePrice = prices.get(assignment.effectivePlanId)!;
@@ -121,8 +151,15 @@ export function careerPlanRoutes(
         offered: false,
         targetPlanId: assignment.effectivePlanId,
         targetPlanName: names.get(assignment.effectivePlanId)!,
-        priceCents: effectivePrice - assignedPrice,
+        priceCents: assignment.copayPriceCents ?? effectivePrice - assignedPrice,
         active: true,
+        checkoutOpen: false,
+        endsAt:
+          assignment.copayCheckoutAt === null || assignment.copayPaymentFailedAt !== null
+            ? null
+            : assignment.copayPeriodEnd,
+        checkoutUrl: null,
+        paymentFailed: assignment.copayPaymentFailedAt !== null,
       };
     }
 
@@ -130,13 +167,36 @@ export function careerPlanRoutes(
 
     if (!target) return null;
 
+    const checkoutOpen = checkoutOpenOf(assignment, now);
+    const issued = checkoutOpen && assignment.copayTargetPlanId === target.planId;
+
     return {
       offered: gateway.configured,
       targetPlanId: target.planId,
       targetPlanName: target.name,
-      priceCents: target.upgradeCents,
+      priceCents: issued
+        ? (assignment.copayPriceCents ?? target.upgradeCents)
+        : target.upgradeCents,
       active: false,
+      checkoutOpen,
+      endsAt: null,
+      checkoutUrl: issued ? assignment.copayCheckoutUrl : null,
+      paymentFailed: false,
     };
+  }
+
+  async function carreiraProBlock(profileId: string, now: Date) {
+    const individual = await repos.individual(profileId);
+    const end = individual?.currentPeriodEnd ?? null;
+
+    if (
+      individual?.status === "past_due" ||
+      (individual?.status === "active" && (end === null || end >= saoPauloDate(now)))
+    ) {
+      return "Carreira Pro active";
+    }
+
+    return checkoutInFlight(individual, now) ? "Carreira Pro checkout open" : null;
   }
 
   return new Elysia()
@@ -164,7 +224,20 @@ export function careerPlanRoutes(
       async ({ me, status }) => {
         if (!gateway.configured) return status(503, { error: "Billing not configured" });
 
-        const row = await repos.startCheckout(me.id, new Date());
+        const now = new Date();
+        const assignment = await benefits.findAssignmentByProfile(me.id);
+
+        if (assignment) {
+          if (assignment.copaySubscriptionId !== null) {
+            return status(409, { error: "Co-pay active" });
+          }
+
+          if (checkoutOpenOf(assignment, now)) {
+            return status(409, { error: "Co-pay checkout open" });
+          }
+        }
+
+        const row = await repos.startCheckout(me.id, now);
 
         if (!row) {
           const today = saoPauloDate(new Date());
@@ -213,7 +286,14 @@ export function careerPlanRoutes(
 
         if (!assignment) return status(404, { error: "No benefit plan" });
 
-        if (assignment.copaySubscriptionId) return status(409, { error: "Co-pay already active" });
+        if (assignment.copaySubscriptionId !== null) {
+          return status(409, { error: "Co-pay already active" });
+        }
+
+        const now = new Date();
+        const block = await carreiraProBlock(me.id, now);
+
+        if (block) return status(409, { error: block });
 
         const prices = await benefits.planPriceMap();
         const assignedPrice = prices.get(assignment.assignedPlanId)!;
@@ -234,9 +314,26 @@ export function careerPlanRoutes(
 
         if (!product) return status(422, { error: "No co-pay available for this plan" });
 
-        const row = await repos.startCopayCheckout(me.id, new Date());
+        const priceCents = targetPrice - assignedPrice;
 
-        if (!row) return status(409, { error: "Co-pay already active" });
+        if (checkoutOpenOf(assignment, now)) {
+          if (assignment.copayCheckoutUrl === null) {
+            return status(409, { error: "Co-pay checkout open" });
+          }
+
+          if (
+            assignment.copayTargetPlanId === body.targetPlanId &&
+            assignment.copayPriceCents === priceCents
+          ) {
+            return { url: assignment.copayCheckoutUrl };
+          }
+
+          await repos.releaseCopayCheckout(me.id);
+        }
+
+        const row = await repos.startCopayCheckout(me.id, now);
+
+        if (!row) return status(409, { error: "Co-pay checkout open" });
 
         try {
           const checkout = await gateway.createSubscriptionCheckout({
@@ -245,6 +342,15 @@ export function careerPlanRoutes(
             returnUrl: careerScreen,
             completionUrl: `${careerScreen}&copay=ok`,
           });
+
+          const stored = await repos.storeCopayCheckout(me.id, {
+            id: checkout.id,
+            url: checkout.url,
+            priceCents,
+            targetPlanId: body.targetPlanId,
+          });
+
+          if (!stored) return status(502, { error: "Could not start the checkout" });
 
           return { url: checkout.url };
         } catch (cause) {
@@ -262,6 +368,48 @@ export function careerPlanRoutes(
           404: errorResponse,
           409: errorResponse,
           422: errorResponse,
+          502: errorResponse,
+          503: errorResponse,
+        },
+      },
+    )
+    .post(
+      "/me/plan/copay-cancel",
+      async ({ me, status }) => {
+        if (!gateway.configured) return status(503, { error: "Billing not configured" });
+
+        const assignment = await benefits.findAssignmentByProfile(me.id);
+
+        if (!assignment || assignment.copaySubscriptionId === null) {
+          return status(409, { error: "No active co-pay" });
+        }
+
+        const subscriptionId = assignment.copaySubscriptionId;
+        const markedAt = new Date();
+        const endsAt = await benefits.windDownCopay(me.id, subscriptionId, markedAt);
+
+        if (endsAt === null) return status(409, { error: "No active co-pay" });
+
+        try {
+          await gateway.cancelSubscription(subscriptionId);
+        } catch (cause) {
+          logFailureCode("Co-pay cancellation failed")(cause);
+          await benefits.restoreCopay(me.id, subscriptionId, markedAt, {
+            copayCheckoutAt: assignment.copayCheckoutAt,
+            copayPeriodEnd: assignment.copayPeriodEnd,
+            copayPaymentFailedAt: assignment.copayPaymentFailedAt,
+          });
+
+          return status(502, { error: "Could not cancel the co-pay" });
+        }
+
+        return { endsAt };
+      },
+      {
+        talent: "signed-in",
+        response: {
+          200: t.Object({ endsAt: t.String() }),
+          409: errorResponse,
           502: errorResponse,
           503: errorResponse,
         },

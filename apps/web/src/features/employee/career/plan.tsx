@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   careerPlanQuery,
   useCancelCareerPro,
+  useCancelCopay,
   useCopayCheckout,
   useUpgradeCheckout,
 } from "@/entities/career";
@@ -15,6 +16,9 @@ import { featureComparisonView, type TierFeatures } from "./benefit-features";
 import {
   type CareerPlan,
   cancelConfirmLabel,
+  cancelCopayLabel,
+  cancelCopayPrompt,
+  copayContinueLabel,
   cancelConfirmPrompt,
   cancelKeepLabel,
   cancelProLabel,
@@ -45,6 +49,7 @@ export function PlanSection({
   const checkout = useUpgradeCheckout(account);
   const copayCheckout = useCopayCheckout(account);
   const cancel = useCancelCareerPro(account);
+  const cancelCopay = useCancelCopay(account);
   const [openedAt] = useState(() => Date.now());
   const [today] = useState(() => dayFormat.format(new Date()));
 
@@ -70,11 +75,19 @@ export function PlanSection({
       copayPaid={copayPaid}
       upgrading={checkout.isPending || checkout.isSuccess}
       copaying={copayCheckout.isPending || copayCheckout.isSuccess}
-      error={checkout.error?.message ?? copayCheckout.error?.message ?? cancel.error?.message}
+      error={
+        checkout.error?.message ??
+        copayCheckout.error?.message ??
+        cancel.error?.message ??
+        cancelCopay.error?.message
+      }
       canceling={cancel.isPending}
+      cancelingCopay={cancelCopay.isPending}
       onUpgrade={() => checkout.mutate()}
       onCopay={(targetPlanId) => copayCheckout.mutate(targetPlanId)}
+      onContinueCopay={(url) => window.location.assign(url)}
       onCancel={() => cancel.mutate()}
+      onCancelCopay={() => cancelCopay.mutate()}
     />
   );
 }
@@ -111,9 +124,12 @@ export function PlanCard({
   copaying,
   error,
   canceling,
+  cancelingCopay,
   onUpgrade,
   onCopay,
+  onContinueCopay,
   onCancel,
+  onCancelCopay,
 }: {
   plan: CareerPlan;
   today: string;
@@ -123,11 +139,15 @@ export function PlanCard({
   copaying: boolean;
   error?: string;
   canceling: boolean;
+  cancelingCopay: boolean;
   onUpgrade: () => void;
   onCopay: (targetPlanId: string) => void;
+  onContinueCopay: (url: string) => void;
   onCancel: () => void;
+  onCancelCopay: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [confirmingCopay, setConfirmingCopay] = useState(false);
   const view = planCardView(plan, today, paid, copayPaid);
   const { copay } = plan;
   const comparison = view.showComparison ? featureComparisonView(view.activeBenefit) : null;
@@ -179,8 +199,50 @@ export function PlanCard({
           </Button>
         </div>
       ) : null}
-      {view.copayButton === "active" ? (
+      {view.copayPendingLabel ? (
+        <p role="status" className="text-sm">
+          {view.copayPendingLabel}
+        </p>
+      ) : null}
+      {view.copayContinueUrl ? (
+        <div>
+          <Button variant="outline" onClick={() => onContinueCopay(view.copayContinueUrl!)}>
+            {copayContinueLabel}
+          </Button>
+        </div>
+      ) : null}
+      {view.copayPaymentFailedNote ? (
+        <p role="status" className="text-sm text-destructive">
+          {view.copayPaymentFailedNote}
+        </p>
+      ) : null}
+      {view.copayActiveLabel ? (
         <Badge variant="status-success">{view.copayActiveLabel}</Badge>
+      ) : null}
+      {view.copayEndedLabel ? <Badge variant="secondary">{view.copayEndedLabel}</Badge> : null}
+      {view.copayCancelable && !confirmingCopay ? (
+        <div>
+          <Button variant="outline" onClick={() => setConfirmingCopay(true)}>
+            {cancelCopayLabel}
+          </Button>
+        </div>
+      ) : null}
+      {view.copayCancelable && confirmingCopay ? (
+        <div role="alertdialog" aria-label={cancelCopayLabel} className="space-y-2">
+          <p className="text-sm">{cancelCopayPrompt}</p>
+          <div className="flex gap-2">
+            <Button variant="destructive" onClick={onCancelCopay} disabled={cancelingCopay}>
+              {cancelConfirmLabel}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmingCopay(false)}
+              disabled={cancelingCopay}
+            >
+              {cancelKeepLabel}
+            </Button>
+          </div>
+        </div>
       ) : null}
       {view.upgrade === "available" ? (
         <div>

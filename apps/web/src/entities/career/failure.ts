@@ -14,6 +14,25 @@ const reasons = new Map([
   ],
   ["Already subscribed", "Você já tem um pagamento em andamento. Tente de novo em alguns minutos."],
   ["Billing not configured", "Indisponível no momento."],
+  ["Co-pay already active", "Você já tem um upgrade do benefício ativo."],
+  [
+    "Co-pay active",
+    "Você tem um upgrade do benefício ativo. Cancele-o antes de assinar o Carreira Pro.",
+  ],
+  [
+    "Co-pay checkout open",
+    "Você já tem um pagamento de upgrade em andamento. Conclua-o ou tente de novo em alguns minutos.",
+  ],
+  [
+    "Carreira Pro active",
+    "Você já tem o Carreira Pro. Cancele-o antes de contratar o upgrade do benefício.",
+  ],
+  [
+    "Carreira Pro checkout open",
+    "Você já tem um pagamento do Carreira Pro em andamento. Tente de novo em alguns minutos.",
+  ],
+  ["No active co-pay", "Você não tem um upgrade do benefício ativo."],
+  ["Could not cancel the co-pay", "Não foi possível cancelar o upgrade agora. Tente de novo."],
   ["Could not start the checkout", "Não foi possível abrir o pagamento. Tente de novo."],
   ["Could not cancel Carreira Pro", "Não foi possível cancelar agora. Tente de novo."],
   ["Could not cancel Carreira Pro; try again", "Não foi possível cancelar agora. Tente de novo."],

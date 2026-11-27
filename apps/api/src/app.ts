@@ -533,7 +533,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
 
       await abacatepay
         .cancelSubscription(copaySubscriptionId)
-        .then(() => repos.benefits.clearExpiredCopay(profileId, copaySubscriptionId))
+        .then(() => repos.benefits.revertCopay(profileId, copaySubscriptionId))
         .catch(logFailure("co-pay expiry cancellation failed"));
     }
   }

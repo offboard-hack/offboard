@@ -1,5 +1,5 @@
 import type { Database } from "@offboard/db/client";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { exitSurveyRatings } from "@offboard/employee/departure";
 import type { ConfigValue } from "@offboard/db/schema";
 import { exitSurveys, offboardingCases } from "@offboard/db/schema";
@@ -20,6 +20,16 @@ const monthLabels = [
 ];
 
 const chartMonths = 6;
+
+const commentLimit = 30;
+
+function withoutComment({
+  comment: _comment,
+  anonymous: _anonymous,
+  ...ratings
+}: Record<string, ConfigValue>) {
+  return ratings;
+}
 
 function percent(part: number, total: number) {
   return total === 0 ? 0 : Math.round((part / total) * 100);
@@ -42,7 +52,35 @@ export function createExitSurveysRepository(db: Database) {
       .from(exitSurveys)
       .innerJoin(offboardingCases, eq(exitSurveys.caseId, offboardingCases.id))
       .where(eq(exitSurveys.orgId, orgId))
-      .orderBy(desc(exitSurveys.submittedAt));
+      .orderBy(desc(exitSurveys.submittedAt))
+      .then((rows) => rows.map((row) => ({ ...row, responses: withoutComment(row.responses) })));
+  }
+
+  async function listComments(orgId: string) {
+    const rows = await db
+      .select({
+        comment: sql<string>`${exitSurveys.responses}->>'comment'`,
+        anonymous: sql<boolean>`${exitSurveys.responses}->>'anonymous' is distinct from 'false'`,
+        name: offboardingCases.name,
+        department: offboardingCases.department,
+        submittedAt: exitSurveys.submittedAt,
+      })
+      .from(exitSurveys)
+      .innerJoin(offboardingCases, eq(exitSurveys.caseId, offboardingCases.id))
+      .where(
+        and(
+          eq(exitSurveys.orgId, orgId),
+          sql`coalesce(${exitSurveys.responses}->>'comment', '') <> ''`,
+        ),
+      )
+      .orderBy(desc(exitSurveys.submittedAt))
+      .limit(commentLimit);
+
+    return rows.map(({ comment, anonymous, name, department, submittedAt }) => ({
+      comment,
+      month: submittedAt.toISOString().slice(0, 7),
+      author: anonymous ? null : { name, department },
+    }));
   }
 
   async function getSurveyAggregates(orgId: string) {
@@ -156,7 +194,7 @@ export function createExitSurveysRepository(db: Database) {
     return row;
   }
 
-  return { listSurveys, getSurveyAggregates, submitSurvey };
+  return { listSurveys, listComments, getSurveyAggregates, submitSurvey };
 }
 
 export type ExitSurveysRepository = ReturnType<typeof createExitSurveysRepository>;
