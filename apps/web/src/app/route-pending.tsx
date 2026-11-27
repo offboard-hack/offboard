@@ -136,3 +136,11 @@ export function IntegrationsPending() {
     </ListPendingPage>
   );
 }
+
+export function AutomationsPending() {
+  return (
+    <ListPendingPage title="Automações">
+      <TablePlaceholder filters={false} />
+    </ListPendingPage>
+  );
+}

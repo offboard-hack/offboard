@@ -1,6 +1,6 @@
 import type { Database } from "@offboard/db/client";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { actionConfigs, checklistModels } from "@offboard/db/schema";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import { actionConfigs, automationRules, checklistModels } from "@offboard/db/schema";
 
 import type { z } from "zod";
 import {
@@ -23,7 +23,26 @@ const actionConfigColumns = {
   phase: actionConfigs.phase,
 };
 
-export function createActionConfigsRepository(db: Database) {
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+type RuleDraft = Pick<
+  typeof automationRules.$inferInsert,
+  "name" | "trigger" | "conditions" | "actions" | "enabled" | "cronSchedule" | "sourceRef"
+>;
+
+export type ChecklistRules = (tx: Transaction) => {
+  upsertBySourceRef: (orgId: string, sourceRef: string, data: RuleDraft) => Promise<{ id: string }>;
+  listRules: (orgId: string) => Promise<
+    Array<{
+      id: string;
+      sourceRef: string | null;
+      enabled: boolean;
+      actions: typeof automationRules.$inferSelect.actions;
+    }>
+  >;
+};
+
+export function createActionConfigsRepository(db: Database, checklistRules: ChecklistRules) {
   async function listActionConfigs(orgId: string) {
     return db
       .select(actionConfigColumns)
@@ -40,22 +59,6 @@ export function createActionConfigsRepository(db: Database) {
         and(
           eq(actionConfigs.orgId, orgId),
           eq(actionConfigs.phase, phase),
-          eq(actionConfigs.enabled, true),
-        ),
-      );
-  }
-
-  async function getActionConfigsByStep(orgId: string, stepId: string) {
-    return db
-      .select(actionConfigColumns)
-      .from(actionConfigs)
-      .where(
-        and(
-          eq(actionConfigs.orgId, orgId),
-          inArray(
-            actionConfigs.actionId,
-            actionKinds.map((kind) => `${kind}:${stepId}`),
-          ),
           eq(actionConfigs.enabled, true),
         ),
       );
@@ -134,61 +137,65 @@ export function createActionConfigsRepository(db: Database) {
 
       if (!model) return null;
 
+      const rules = checklistRules(tx);
       const stepsById = new Map(steps.map((step) => [step.id, step]));
 
       if (knownRowIds.length > 0) {
         const knownRows = await tx
-          .select({ id: actionConfigs.id, actionId: actionConfigs.actionId })
-          .from(actionConfigs)
-          .where(and(eq(actionConfigs.orgId, orgId), inArray(actionConfigs.id, knownRowIds)));
+          .select({ id: automationRules.id, sourceRef: automationRules.sourceRef })
+          .from(automationRules)
+          .where(and(eq(automationRules.orgId, orgId), inArray(automationRules.id, knownRowIds)));
 
-        const removals = knownRows.flatMap(({ id, actionId }) => {
-          const kind = actionKinds.find((entry) => actionId.startsWith(entry + ":"));
+        const removals = knownRows.flatMap(({ id, sourceRef }) => {
+          const kind = actionKinds.find((entry) => sourceRef?.startsWith(entry + ":"));
 
-          if (!kind) return [];
+          if (!kind || !sourceRef) return [];
 
-          const step = stepsById.get(actionId.slice(kind.length + 1));
+          const step = stepsById.get(sourceRef.slice(kind.length + 1));
 
           return !step || step[kind] === null ? [id] : [];
         });
 
         if (removals.length > 0) {
           await tx
-            .delete(actionConfigs)
-            .where(and(eq(actionConfigs.orgId, orgId), inArray(actionConfigs.id, removals)));
+            .delete(automationRules)
+            .where(and(eq(automationRules.orgId, orgId), inArray(automationRules.id, removals)));
         }
       }
 
-      const actions = steps.flatMap((step) =>
-        actionKinds.flatMap((kind) => {
+      for (const step of steps) {
+        for (const kind of actionKinds) {
           const config = step[kind];
 
-          return config
-            ? [{ orgId, actionId: `${kind}:${step.id}`, phase: step.phase, config }]
-            : [];
-        }),
-      );
+          if (config) {
+            const sourceRef = `${kind}:${step.id}`;
 
-      if (actions.length > 0) {
-        await tx
-          .insert(actionConfigs)
-          .values(actions)
-          .onConflictDoUpdate({
-            target: [actionConfigs.orgId, actionConfigs.actionId],
-            set: {
-              phase: sql`excluded.phase`,
-              config: sql`excluded.config`,
-              updatedAt: new Date(),
-            },
-            setWhere: sql`${actionConfigs.phase} <> excluded.phase OR ${actionConfigs.config} <> excluded.config`,
-          });
+            await rules.upsertBySourceRef(orgId, sourceRef, {
+              name: `${kind}: ${step.title}`,
+              trigger: "task.status_changed",
+              conditions: { "task.stepId": step.id },
+              actions: [{ type: kind, ...config }],
+              cronSchedule: null,
+              sourceRef,
+            });
+          }
+        }
       }
 
-      const actionRows = await tx
-        .select(actionConfigColumns)
-        .from(actionConfigs)
-        .where(eq(actionConfigs.orgId, orgId))
-        .orderBy(asc(actionConfigs.actionId));
+      const actionRows = (await rules.listRules(orgId)).flatMap(
+        ({ id, sourceRef, enabled, actions }) => {
+          if (!sourceRef) return [];
+
+          const { type: _type, ...config } = actions[0] ?? {};
+          const stepId = sourceRef.slice(sourceRef.indexOf(":") + 1);
+
+          return [
+            { id, actionId: sourceRef, enabled, config, phase: stepsById.get(stepId)?.phase ?? "" },
+          ];
+        },
+      );
+
+      actionRows.sort((a, b) => a.actionId.localeCompare(b.actionId));
 
       return { revision: model.revision, steps: layout, actionRows };
     });
@@ -197,7 +204,6 @@ export function createActionConfigsRepository(db: Database) {
   return {
     readChecklist,
     saveChecklist,
-    getActionConfigsByStep,
     listActionConfigs,
     getActionConfigsByPhase,
     getActionConfig,

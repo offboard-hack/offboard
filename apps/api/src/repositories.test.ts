@@ -5,6 +5,7 @@ import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import {
   actionConfigs,
+  automationRules,
   defaultOrgId,
   employeeAccess,
   equipment,
@@ -211,7 +212,7 @@ describe.skipIf(!url)("repositories", () => {
 
     const updated = await repos.offboardings.updateTaskStatus(defaultOrgId, target.id, "done");
 
-    expect(updated).toEqual({
+    expect(updated).toMatchObject({
       ...target,
       status: "done",
     });
@@ -783,6 +784,17 @@ describe.skipIf(!url)("multi-tenant isolation", () => {
     });
   });
 
+  it("reports whether all of a case's equipment was received within the organization", async () => {
+    expect(await repos.equipment.areAllCaseEquipmentReceived(orgA, caseB)).toBe(false);
+
+    await repos.equipment.updateEquipmentStatus(orgB, equipmentB, "transit");
+    expect(await repos.equipment.areAllCaseEquipmentReceived(orgB, caseB)).toBe(false);
+
+    await repos.equipment.updateEquipmentStatus(orgB, equipmentB, "received");
+    expect(await repos.equipment.areAllCaseEquipmentReceived(orgB, caseB)).toBe(true);
+    expect(await repos.equipment.areAllCaseEquipmentReceived(orgA, caseB)).toBe(false);
+  });
+
   it("scopes exit surveys to the organization", async () => {
     expect((await repos.exitSurveys.listSurveys(orgB)).map(({ caseName }) => caseName)).toEqual([
       "Case B",
@@ -911,5 +923,133 @@ describe.skipIf(!url)("multi-tenant isolation", () => {
     expect(await repos.employee.saveSettings(orgA, caseB, { ...settings, revision: 1 })).toBe(
       "missing-case",
     );
+  });
+});
+
+describe.skipIf(!url)("automation rules", () => {
+  const db = createClient(url ?? "");
+  const repos = createRepositories(db);
+  const orgA = defaultOrgId;
+  const orgB = "00000000-0000-0000-0000-0000000000b3";
+
+  const rule = {
+    name: "Rule",
+    trigger: "task.status_changed" as const,
+    conditions: { to: "done" },
+    actions: [{ type: "slack" as const }],
+  };
+
+  beforeAll(async () => {
+    await migrate(db, {
+      migrationsFolder: fileURLToPath(new URL("../../../packages/db/drizzle", import.meta.url)),
+    });
+  });
+
+  beforeEach(async () => {
+    await db.delete(automationRules);
+    await db
+      .insert(organizations)
+      .values([
+        { id: orgA, name: "Default", slug: "default" },
+        { id: orgB, name: "Org B3", slug: "org-b3" },
+      ])
+      .onConflictDoNothing();
+  });
+
+  afterAll(async () => {
+    await db.delete(automationRules);
+    await db.$client.end();
+  });
+
+  it("creates, reads, updates, lists and deletes rules scoped by org", async () => {
+    const created = await repos.automationRules.createRule(orgA, rule);
+    expect(created.id).toMatch(uuidPattern);
+    expect(created.enabled).toBe(true);
+    expect(created.sourceRef).toBeNull();
+
+    expect((await repos.automationRules.listRules(orgA)).map(({ id }) => id)).toEqual([created.id]);
+    expect(await repos.automationRules.listRules(orgB)).toEqual([]);
+    expect((await repos.automationRules.getRule(orgA, created.id))?.name).toBe("Rule");
+    expect(await repos.automationRules.getRule(orgB, created.id)).toBeNull();
+
+    const updated = await repos.automationRules.updateRule(orgA, created.id, { name: "Renamed" });
+    expect(updated?.name).toBe("Renamed");
+    expect(await repos.automationRules.updateRule(orgB, created.id, { name: "X" })).toBeNull();
+
+    expect(await repos.automationRules.deleteRule(orgB, created.id)).toBe(false);
+    expect(await repos.automationRules.deleteRule(orgA, created.id)).toBe(true);
+    expect(await repos.automationRules.deleteRule(orgA, created.id)).toBe(false);
+  });
+
+  it("returns only enabled rules for the org and trigger", async () => {
+    const match = await repos.automationRules.createRule(orgA, rule);
+    await repos.automationRules.createRule(orgA, { ...rule, enabled: false });
+    await repos.automationRules.createRule(orgA, { ...rule, trigger: "correios.delivered" });
+    await repos.automationRules.createRule(orgB, rule);
+
+    const rules = await repos.automationRules.getEnabledRulesByTrigger(orgA, "task.status_changed");
+    expect(rules.map(({ id }) => id)).toEqual([match.id]);
+  });
+
+  it("returns enabled cron rules across all orgs with their org id", async () => {
+    const cron = { ...rule, trigger: "schedule.cron" as const, cronSchedule: "0 9 * * *" };
+    const a = await repos.automationRules.createRule(orgA, cron);
+    const b = await repos.automationRules.createRule(orgB, cron);
+    await repos.automationRules.createRule(orgA, { ...cron, enabled: false });
+    await repos.automationRules.createRule(orgA, rule);
+
+    const rules = await repos.automationRules.getAllCronRules();
+    expect(rules.every(({ cronSchedule }) => cronSchedule === "0 9 * * *")).toBe(true);
+    expect(rules.map(({ id, orgId }) => [id, orgId]).sort()).toEqual(
+      [
+        [a.id, orgA],
+        [b.id, orgB],
+      ].sort(),
+    );
+  });
+
+  it("creates a rule with source_ref", async () => {
+    const created = await repos.automationRules.upsertBySourceRef(orgA, "ref-1", rule);
+    expect(created.sourceRef).toBe("ref-1");
+    expect(await repos.automationRules.listRules(orgA)).toHaveLength(1);
+  });
+
+  it("upserts by source_ref within the same org", async () => {
+    const first = await repos.automationRules.upsertBySourceRef(orgA, "ref-1", rule);
+
+    const second = await repos.automationRules.upsertBySourceRef(orgA, "ref-1", {
+      ...rule,
+      name: "Changed",
+    });
+
+    expect(second.id).toBe(first.id);
+    expect(second.name).toBe("Changed");
+    expect(await repos.automationRules.listRules(orgA)).toHaveLength(1);
+  });
+
+  it("keeps a rule disabled when upserting by source_ref", async () => {
+    const first = await repos.automationRules.upsertBySourceRef(orgA, "ref-1", rule);
+
+    await repos.automationRules.updateRule(orgA, first.id, { enabled: false });
+
+    const second = await repos.automationRules.upsertBySourceRef(orgA, "ref-1", rule);
+
+    expect(second.enabled).toBe(false);
+  });
+
+  it("allows same source_ref in different orgs", async () => {
+    const a = await repos.automationRules.upsertBySourceRef(orgA, "ref-1", rule);
+    const b = await repos.automationRules.upsertBySourceRef(orgB, "ref-1", rule);
+
+    expect(a.id).not.toBe(b.id);
+    expect(await db.select().from(automationRules)).toHaveLength(2);
+  });
+
+  it("deletes by source_ref within the org only", async () => {
+    await repos.automationRules.upsertBySourceRef(orgA, "ref-1", rule);
+
+    expect(await repos.automationRules.deleteBySourceRef(orgB, "ref-1")).toBe(false);
+    expect(await repos.automationRules.deleteBySourceRef(orgA, "ref-1")).toBe(true);
+    expect(await repos.automationRules.deleteBySourceRef(orgA, "ref-1")).toBe(false);
   });
 });

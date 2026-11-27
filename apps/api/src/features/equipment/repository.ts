@@ -59,6 +59,32 @@ export function createEquipmentRepository(db: Database) {
     return updated ?? null;
   }
 
+  async function readRuleContext(orgId: string, id: string) {
+    const [row] = await db
+      .select({
+        id: equipment.id,
+        tag: equipment.tag,
+        item: equipment.item,
+        status: equipment.status,
+        caseId: equipment.caseId,
+        caseName: offboardingCases.name,
+      })
+      .from(equipment)
+      .leftJoin(offboardingCases, eq(offboardingCases.id, equipment.caseId))
+      .where(and(eq(equipment.id, id), eq(equipment.orgId, orgId)));
+
+    return row ?? null;
+  }
+
+  async function areAllCaseEquipmentReceived(orgId: string, caseId: string) {
+    const rows = await db
+      .select({ status: equipment.status })
+      .from(equipment)
+      .where(and(eq(equipment.orgId, orgId), eq(equipment.caseId, caseId)));
+
+    return rows.length > 0 && rows.every((row) => row.status === "received");
+  }
+
   async function casesWithEmail(orgId: string, email: string) {
     const key = normalizeHolderEmail(email);
 
@@ -231,6 +257,8 @@ export function createEquipmentRepository(db: Database) {
     importEquipment,
     listEquipment,
     updateEquipmentStatus,
+    readRuleContext,
+    areAllCaseEquipmentReceived,
     createEquipment,
     assignEquipment,
     updateEquipment,

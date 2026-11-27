@@ -10,7 +10,7 @@ import { emptyCareer } from "@offboard/employee/career";
 import { initialDeparture } from "@offboard/employee/departure";
 import { Elysia, t } from "elysia";
 import { z } from "zod";
-import { dispatchTaskAction, type DispatchAction } from "../../shared/action-dispatch.js";
+import { fireTaskStatusChanged, type FireRules } from "../../shared/rule-dispatch.js";
 import type { ChecklistChange } from "./checklist.js";
 import { allReceived } from "./equipment.js";
 import type { PortalAccessPlugin } from "../../shared/access.js";
@@ -45,14 +45,14 @@ export function employeeRoutes(
   access: PortalAccessPlugin,
   resolveEmployee: EmployeeAuth | undefined,
   origin: string,
-  dispatchAction: DispatchAction,
+  fireRules: FireRules,
   inviteEmployee: InviteEmployee,
   accessGranted: AccessGranted,
   trackShipment: TrackShipment,
 ) {
   function dispatchChanges(changes: ChecklistChange[]) {
     for (const change of changes) {
-      void dispatchTaskAction(dispatchAction, change).catch(() => {});
+      void fireTaskStatusChanged(fireRules, change).catch(() => {});
     }
   }
 

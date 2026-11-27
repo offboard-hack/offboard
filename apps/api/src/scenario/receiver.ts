@@ -2,14 +2,18 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { z } from "zod";
 
-const hit = z.object({
-  taskId: z.string(),
-  taskTitle: z.string(),
-  status: z.string(),
-  phase: z.string(),
-});
+const hit = z
+  .object({
+    task: z.object({ id: z.string(), title: z.string(), status: z.string(), phase: z.string() }),
+  })
+  .transform(({ task }) => ({
+    taskId: task.id,
+    taskTitle: task.title,
+    status: task.status,
+    phase: task.phase,
+  }));
 
-export type Hit = z.infer<typeof hit>;
+export type Hit = z.output<typeof hit>;
 
 export type Receiver = { url: string; hits: Hit[]; close(): Promise<void> };
 

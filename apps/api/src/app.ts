@@ -1,7 +1,13 @@
 import { cors } from "@elysia/cors";
 import { Elysia, ElysiaCustomStatusResponse, t } from "elysia";
 import { actionConfigsRoutes } from "./features/action-configs/routes.js";
-import { fireActions } from "./features/action-configs/actions.js";
+import { automationRulesRoutes } from "./features/automation-rules/routes.js";
+import {
+  fireRulesForTrigger,
+  runScheduledRules,
+  type EngineRepos,
+} from "./features/automation-rules/engine.js";
+import { fireTaskStatusChanged, type FireRules } from "./shared/rule-dispatch.js";
 import { saoPauloDate } from "./shared/sao-paulo-date.js";
 import type { PortalAuth } from "./shared/portal-auth.js";
 import { employeeRoutes } from "./features/employee/routes.js";
@@ -64,7 +70,6 @@ import { preferencesRoutes } from "./features/preferences/routes.js";
 import { trackPackage, type TrackingConfig } from "./features/offboardings/correios.js";
 import { teamRoutes } from "./features/team/routes.js";
 import type { Repositories } from "./repositories.js";
-import { dispatchTaskAction, type DispatchAction } from "./shared/action-dispatch.js";
 import type { ResumeContent } from "@offboard/db/schema";
 import { portalAccess } from "./shared/access.js";
 import type { GenerateStructured } from "./shared/ai.js";
@@ -149,20 +154,16 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
   const slackApiUrl = options.slackApiUrl ?? defaultSlackApiUrl;
   const readSlackToken = slackTokenReader(repos.integrations, box);
 
-  const dispatchAction: DispatchAction = async (context, stepId) => {
-    const getActionConfigsByPhase = stepId
-      ? (orgId: string) => repos.actionConfigs.getActionConfigsByStep(orgId, stepId)
-      : repos.actionConfigs.getActionConfigsByPhase;
+  const engineRepos: EngineRepos = {
+    automationRules: repos.automationRules,
+    offboardings: repos.offboardings,
+    equipment: repos.equipment,
+    slack: { apiUrl: slackApiUrl, readToken: readSlackToken },
+    emailEnabled: (orgId) => repos.integrations.isConnected(orgId, emailIntegration),
+  };
 
-    await fireActions(
-      { getActionConfigsByPhase },
-      context,
-      {
-        apiUrl: slackApiUrl,
-        readToken: readSlackToken,
-      },
-      (orgId) => repos.integrations.isConnected(orgId, emailIntegration),
-    );
+  const fireRules: FireRules = async (trigger, context) => {
+    await fireRulesForTrigger(trigger, context, engineRepos);
   };
 
   const inviteEmployee: InviteEmployee = async (orgId, caseId) => {
@@ -187,7 +188,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     try {
       const changes = await repos.employee.markInviteSent(orgId, caseId);
 
-      await Promise.allSettled(changes.map((change) => dispatchTaskAction(dispatchAction, change)));
+      await Promise.allSettled(changes.map((change) => fireTaskStatusChanged(fireRules, change)));
     } catch {
       console.error({ event: "employee.invite_task_failed" });
     }
@@ -542,6 +543,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
     await sweepExpiredCopays();
     await repos.aiApply.sweepStale(new Date()).catch(logFailure("AI application sweep failed"));
     await scheduleSources();
+    await runScheduledRules(engineRepos).catch(logFailure("scheduled rules failed"));
     await repos.aiApply
       .queuedIds()
       .then((ids) => repos.background.enqueueMany("ai_apply", ids))
@@ -587,7 +589,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         access,
         options.auth.resolveEmployee,
         webOrigin,
-        dispatchAction,
+        fireRules,
         inviteEmployee,
         accessGranted,
         async (orgId, code) =>
@@ -600,16 +602,24 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       offboardingsRoutes(
         repos.offboardings,
         access,
-        dispatchAction,
         repos.actionConfigs.readChecklist,
         options.cronSecret,
         options.webhookSecret,
         inviteEmployee,
         (orgId) => repos.integrations.isConnected(orgId, correiosIntegration),
+        fireRules,
         options.tracking,
       ),
     )
     .use(actionConfigsRoutes(repos.actionConfigs, access))
+    .use(
+      automationRulesRoutes(
+        repos.automationRules,
+        access,
+        () => runScheduledRules(engineRepos),
+        options.cronSecret,
+      ),
+    )
     .use(teamRoutes(repos.team, access))
     .use(insightsRoutes(repos.insights, access))
     .use(
@@ -720,7 +730,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       ),
     )
     .use(accountRoutes(repos.account, talent, options.storage, abacatepay))
-    .use(equipmentRoutes(repos.equipment, access))
+    .use(equipmentRoutes(repos.equipment, access, fireRules))
     .use(exitSurveysRoutes(repos.exitSurveys, access))
     .use(
       integrationsRoutes(repos.integrations, access, options.slackSigningSecret, box, slackApiUrl),

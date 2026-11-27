@@ -225,6 +225,13 @@
       "when": 1795840000000,
       "tag": "0031_add_task_due_time",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795850000000,
+      "tag": "0032_add_automation_rules",
+      "breakpoints": true
     }
   ]
 }

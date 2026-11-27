@@ -275,6 +275,8 @@ export function createOffboardingsRepository(db: Database) {
         description: tasks.description,
         dueDate: tasks.dueDate,
         trackingCode: tasks.trackingCode,
+        phase: tasks.phase,
+        stepId: tasks.checklistStepId,
       });
 
     if (!updated) return null;
@@ -312,8 +314,10 @@ export function createOffboardingsRepository(db: Database) {
         stepId: tasks.checklistStepId,
         trackingCode: tasks.trackingCode,
         caseId: tasks.caseId,
+        caseName: offboardingCases.name,
       })
       .from(tasks)
+      .innerJoin(offboardingCases, eq(offboardingCases.id, tasks.caseId))
       .where(and(isNotNull(tasks.trackingCode), ne(tasks.status, "done")));
   }
 
