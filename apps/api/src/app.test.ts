@@ -1103,7 +1103,12 @@ describe.skipIf(!url)("api", () => {
       });
       expect(await (await call(gated, "talent", "/me/plan", "GET", mine.id)).json()).toEqual({
         company: { name: "Gold", includesAiApply: false, sponsoredUntil },
-        individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
+        individual: {
+          plan: "carreira-pro",
+          status: "active",
+          currentPeriodEnd: null,
+          cancelable: false,
+        },
         benefit: null,
         aiApply: { allowedBy: "individual", dailyLimit: 10 },
         upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
@@ -3159,6 +3164,24 @@ describe.skipIf(!url)("api", () => {
         failRemove: boolean;
       };
 
+      type BillingStub = {
+        configured: boolean;
+        createSubscriptionCheckout: () => Promise<{ id: string; url: string }>;
+        cancelSubscription: (id: string) => Promise<void>;
+      };
+
+      function billingStub(cancelled: string[], fail = false) {
+        return {
+          configured: true,
+          createSubscriptionCheckout: async () => ({ id: "bill", url: "https://pay.example/bill" }),
+          cancelSubscription: async (id) => {
+            if (fail) throw new Error("gateway down");
+
+            cancelled.push(id);
+          },
+        } satisfies BillingStub;
+      }
+
       type Scoring = { output: object; calls: number; prompts: string[] };
 
       const rubric = [
@@ -3220,6 +3243,7 @@ describe.skipIf(!url)("api", () => {
           draft?: object;
           embed?: Embed;
           embedProfile?: Embed;
+          billing?: BillingStub;
         } = {},
       ) {
         const store: Store = { puts: [], removed: [], prefixes: [], failRemove: false };
@@ -3320,6 +3344,7 @@ describe.skipIf(!url)("api", () => {
           embed: options.embed,
           embedProfile: options.embedProfile,
           storage: options.storage === false ? undefined : storage,
+          abacatepay: options.billing,
           runInBackground: (task) => {
             background.push(task);
           },
@@ -7009,6 +7034,134 @@ describe.skipIf(!url)("api", () => {
         expect(deleted.status).toBe(204);
         expect(store.prefixes).toEqual([`resumes/${id}/`, `ai-applications/${id}/`]);
         expect((await request(instance, id, "/me")).status).toBe(403);
+      });
+
+      describe("with a Carreira Pro subscription", () => {
+        async function subscribe(
+          profileId: string,
+          status: "active" | "past_due" | "pending" | "canceled",
+          providerSubscriptionId: string | null = "subs_pro",
+        ) {
+          await db.insert(talentSubscriptions).values({
+            profileId,
+            status,
+            providerSubscriptionId,
+            currentPeriodEnd: "2099-01-01",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
+
+        it("cancels the subscription at AbacatePay before deleting", async () => {
+          for (const status of ["active", "past_due", "pending"] as const) {
+            const cancelled: string[] = [];
+            const { instance } = resumesApp({ billing: billingStub(cancelled) });
+            const id = await profile(`${status}@example.com`);
+
+            await subscribe(id, status);
+
+            expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+            expect(cancelled).toEqual(["subs_pro"]);
+            expect(await repos.talent.findById(id)).toBeUndefined();
+            expect(
+              await db
+                .select()
+                .from(talentSubscriptions)
+                .where(eq(talentSubscriptions.profileId, id)),
+            ).toEqual([]);
+          }
+        });
+
+        it("keeps the account and the subscription when AbacatePay fails", async () => {
+          const logged = vi.spyOn(console, "error");
+          const cancelled: string[] = [];
+          const { instance, store } = resumesApp({ billing: billingStub(cancelled, true) });
+          const id = await profile();
+
+          await subscribe(id, "active");
+          await upload(instance, id);
+
+          try {
+            const res = await request(instance, id, "/me", { method: "DELETE" });
+
+            expect(res.status).toBe(502);
+            expect(await res.json()).toEqual({ error: "Could not cancel Carreira Pro; try again" });
+            expect(store.prefixes).toEqual([]);
+            expect((await request(instance, id, "/me")).status).toBe(200);
+            expect(
+              (
+                await db
+                  .select({ status: talentSubscriptions.status })
+                  .from(talentSubscriptions)
+                  .where(eq(talentSubscriptions.profileId, id))
+              )[0],
+            ).toEqual({ status: "active" });
+          } finally {
+            logged.mockRestore();
+          }
+        });
+
+        it("refuses to delete when billing is not configured", async () => {
+          const { instance } = resumesApp();
+          const id = await profile();
+
+          await subscribe(id, "active");
+
+          const res = await request(instance, id, "/me", { method: "DELETE" });
+
+          expect(res.status).toBe(503);
+          expect(await res.json()).toEqual({ error: "Billing not configured" });
+          expect((await request(instance, id, "/me")).status).toBe(200);
+        });
+
+        it("deletes without calling AbacatePay when there is nothing to cancel", async () => {
+          const cancelled: string[] = [];
+          const { instance } = resumesApp({ billing: billingStub(cancelled, true) });
+          const noProvider = await profile("a@example.com");
+          const alreadyCanceled = await profile("b@example.com", 1);
+          const none = await profile("c@example.com", 2);
+
+          await subscribe(noProvider, "pending", null);
+          await subscribe(alreadyCanceled, "canceled");
+
+          for (const id of [noProvider, alreadyCanceled, none]) {
+            expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+          }
+
+          expect(cancelled).toEqual([]);
+        });
+
+        it("does not call AbacatePay again once it was canceled and a later step failed", async () => {
+          const cancelled: string[] = [];
+          const { instance, store } = resumesApp({ billing: billingStub(cancelled) });
+          const id = await profile();
+
+          await subscribe(id, "active");
+          await upload(instance, id);
+
+          store.failRemove = true;
+
+          expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(502);
+
+          store.failRemove = false;
+
+          expect((await request(instance, id, "/me", { method: "DELETE" })).status).toBe(204);
+          expect(cancelled).toEqual(["subs_pro"]);
+        });
+
+        it("cancels only the subscription of the signed-in profile", async () => {
+          const cancelled: string[] = [];
+          const { instance } = resumesApp({ billing: billingStub(cancelled) });
+          const mine = await profile();
+          const other = await profile("outra@example.com", 1);
+
+          await subscribe(mine, "active", "subs_mine");
+          await subscribe(other, "active", "subs_other");
+
+          expect((await request(instance, mine, "/me", { method: "DELETE" })).status).toBe(204);
+          expect(cancelled).toEqual(["subs_mine"]);
+          expect((await request(instance, other, "/me")).status).toBe(200);
+        });
       });
 
       it("keeps the employee journey of the same person when the talent account is deleted", async () => {

@@ -298,6 +298,22 @@ export function useUpgradeCheckout(account: EmployeeAccount) {
   });
 }
 
+export function useCancelCareerPro(account: EmployeeAccount) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    async mutationFn() {
+      const result = await client().plan.cancel.post(undefined, {
+        headers: employeeAccessHeaders(account),
+      });
+
+      await queryClient.invalidateQueries({ queryKey: careerPlanQuery(account).queryKey });
+
+      return settle(result, "Não foi possível cancelar agora. Tente de novo.");
+    },
+  });
+}
+
 export type ResumeContentInput = Parameters<Me["resume"]["post"]>[0]["content"];
 
 export function useReadResume(account: EmployeeAccount) {

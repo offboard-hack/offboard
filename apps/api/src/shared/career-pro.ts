@@ -30,7 +30,9 @@ export type BenefitStanding = {
 export type CareerStanding = {
   sponsoredUntil: string;
   company: (CompanyPlan & { name: string }) | null;
-  individual: (IndividualPlan & { updatedAt?: Date | null }) | null;
+  individual:
+    | (IndividualPlan & { updatedAt?: Date | null; providerSubscriptionId?: string | null })
+    | null;
   benefit?: BenefitStanding | null;
 };
 
@@ -90,6 +92,9 @@ export function careerPlanOf(standing: CareerStanding, now: Date) {
       plan: careerPro.slug,
       status: individual.status,
       currentPeriodEnd: individual.currentPeriodEnd,
+      cancelable:
+        (individual.status === "active" || individual.status === "past_due") &&
+        (individual.providerSubscriptionId ?? null) !== null,
     },
     benefit,
     aiApply: { allowedBy, dailyLimit },
