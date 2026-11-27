@@ -88,6 +88,7 @@ const navigationGroups: {
     label: string;
     icon: string;
     subject?: "Team" | "Integrations" | "Billing";
+    action?: "read" | "manage";
   }[];
 }[] = [
   {
@@ -152,6 +153,7 @@ const navigationGroups: {
         to: "/beneficios",
         label: "Benefícios",
         subject: "Billing",
+        action: "read",
         icon: "M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z",
       },
     ],
@@ -170,7 +172,9 @@ function PortalNavigation({
 
   const groups = navigationGroups.map(({ label, links }) => ({
     label,
-    links: links.filter(({ subject }) => !subject || ability.can("manage", subject)),
+    links: links.filter(
+      ({ subject, action }) => !subject || ability.can(action ?? "manage", subject),
+    ),
   }));
 
   return (
