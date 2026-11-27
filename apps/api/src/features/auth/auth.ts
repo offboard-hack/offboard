@@ -46,6 +46,7 @@ const nativeEndpoints = new Set([codeRequestPath, codeSignInPath, "/sign-out"]);
 const codeEndpoints = new Set([codeRequestPath, codeSignInPath]);
 const linkPaths = new Set([verifyPath, "/sign-in/magic-link"]);
 const employeeCookie = "offboard-colaborador";
+const staffCookie = "offboard-staff";
 
 export const codeAudienceHeader = "x-offboard-audience";
 
@@ -443,6 +444,7 @@ export function createAuth({
 
   const memberAuth = buildAuth("better-auth");
   const employeeAuth = buildAuth(employeeCookie);
+  const staffAuth = buildAuth(staffCookie);
 
   return {
     async handler(request) {
@@ -502,12 +504,15 @@ export function createAuth({
         (request.headers.get(codeAudienceHeader) === "employee" ||
           Boolean(request.headers.get("cookie")?.includes(`${employeeCookie}.session_token=`)));
 
-      const auth =
+      let auth = employeeAuth;
+
+      if (codeAudience === "staff") auth = staffAuth;
+      else if (
         codeAudience !== "employee" ||
         linkPaths.has(path) ||
         (path === "/sign-out" && !employeeSignOut)
-          ? memberAuth
-          : employeeAuth;
+      )
+        auth = memberAuth;
 
       const scope: CodeScope = {
         audience: codeAudience,
@@ -538,7 +543,9 @@ export function createAuth({
       return new Response(response.body, { status: response.status, headers });
     },
     async resolvePrincipal(headers) {
-      const session = await memberAuth.api.getSession({ headers });
+      const session =
+        (await staffAuth.api.getSession({ headers })) ??
+        (await memberAuth.api.getSession({ headers }));
 
       if (!session) return { kind: "anonymous" };
 
