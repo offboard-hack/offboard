@@ -10,6 +10,7 @@ export default defineConfig({
         "src/server.ts",
         "src/vercel.ts",
         "src/worker.ts",
+        "src/scenario/cli.ts",
         "src/shared/action-dispatch.ts",
         "src/**/*.test.ts",
       ],

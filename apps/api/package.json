@@ -13,6 +13,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "tsx src/server.ts",
+    "scenario": "tsx src/scenario/cli.ts",
     "test": "vitest run --coverage",
     "lint": "tsc --noEmit && oxlint src",
     "build:vercel": "esbuild src/vercel.ts --bundle --platform=node --target=node22 --format=esm --banner:js='import { createRequire } from \"node:module\"; const require = createRequire(import.meta.url);' --outfile=dist/vercel.mjs"
