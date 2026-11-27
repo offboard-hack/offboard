@@ -71,6 +71,7 @@ export function Portal() {
   return (
     <PortalLayout
       fullWidth={fullWidth}
+      workspaceName={principal.orgName}
       accountMenu={<PortalSidebarUser principal={principal} />}
       navigation={
         <PortalNavigation principal={principal} detailActive={caseActive || importActive} />

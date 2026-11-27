@@ -136,6 +136,7 @@ const auth: PortalAuth = {
         email: "member@example.com",
         role,
         orgId: headers.get("x-test-org-id") ?? defaultOrgId,
+        orgName: "Test Org",
       },
     });
   },
@@ -12410,7 +12411,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
       const session = await request("/session", "GET", cookie);
       expect(session.status).toBe(200);
-      expect(await session.json()).toMatchObject({ id: member.id, email });
+      expect(await session.json()).toMatchObject({ id: member.id, email, orgName: "Default" });
       expect((await request("/employee/session", "GET", cookie)).status).toBe(401);
 
       await repos.team.deleteTeamMember(defaultOrgId, member.id);

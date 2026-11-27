@@ -147,6 +147,7 @@ describe("talentAccess", () => {
           email: "u@x.y",
           role: "admin",
           orgId: "00000000-0000-4000-8000-0000000000a1",
+          orgName: "Org",
         },
       },
       handler,
@@ -460,6 +461,7 @@ describe("talentAccess", () => {
       email: "u@x.y",
       role: "admin",
       orgId: "00000000-0000-4000-8000-0000000000a1",
+      orgName: "Org",
     },
   };
 

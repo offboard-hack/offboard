@@ -9,6 +9,7 @@ import {
   authVerification,
   employeeAccess,
   offboardingCases,
+  organizations,
   teamMembers,
 } from "@offboard/db/schema";
 import { betterAuth } from "better-auth";
@@ -56,6 +57,7 @@ const memberFields = {
   email: teamMembers.email,
   role: teamMembers.role,
   orgId: teamMembers.orgId,
+  orgName: organizations.name,
 };
 
 const originSchema = z
@@ -154,6 +156,7 @@ export function createAuth({
     const [member] = await db
       .select(memberFields)
       .from(teamMembers)
+      .innerJoin(organizations, eq(teamMembers.orgId, organizations.id))
       .where(
         and(
           eq(normalizedEmail, email.toLowerCase()),

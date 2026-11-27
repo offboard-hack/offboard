@@ -46,6 +46,7 @@ describe("staffAccess", () => {
         email: "ceo@acme.com",
         role: "admin",
         orgId: "00000000-0000-0000-0000-000000000001",
+        orgName: "Default",
       },
     });
 

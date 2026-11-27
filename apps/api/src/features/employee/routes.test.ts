@@ -28,6 +28,7 @@ const auth: PortalAuth = {
         email: "rh@example.com",
         role: "admin",
         orgId: headers.get("x-test-org") ?? defaultOrgId,
+        orgName: "Test Org",
       },
     }),
 };

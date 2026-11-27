@@ -407,7 +407,7 @@ describe.skipIf(!databaseUrl)("invite-only sign-in with PostgreSQL", () => {
 
     expect(await auth.resolvePrincipal(portal)).toEqual({
       kind: "authenticated",
-      principal: { ...member, orgId: defaultOrgId },
+      principal: { ...member, orgId: defaultOrgId, orgName: "Default" },
     });
 
     expect(await auth.resolvePrincipal(sessionHeaders(app))).toEqual({
@@ -528,13 +528,13 @@ describe.skipIf(!databaseUrl)("invite-only sign-in with PostgreSQL", () => {
 
     expect(await auth.resolvePrincipal(portal)).toEqual({
       kind: "authenticated",
-      principal: { ...member, orgId: defaultOrgId },
+      principal: { ...member, orgId: defaultOrgId, orgName: "Default" },
     });
     expect(await auth.resolvePrincipal(app)).toEqual({ kind: "anonymous" });
 
     expect(await auth.resolvePrincipal(await memberSession(email))).toEqual({
       kind: "authenticated",
-      principal: { ...member, orgId: defaultOrgId },
+      principal: { ...member, orgId: defaultOrgId, orgName: "Default" },
     });
 
     expect(await repos.deleteTeamMember(defaultOrgId, member.id)).toBe(true);

@@ -18,7 +18,7 @@ export const teamMemberResponse = t.Object({
 
 export const portalPrincipalResponse = t.Composite([
   teamMemberResponse,
-  t.Object({ orgId: t.String({ format: "uuid" }) }),
+  t.Object({ orgId: t.String({ format: "uuid" }), orgName: t.String() }),
 ]);
 
 export type TalentPrincipal = { id: string; name: string; email: string };
