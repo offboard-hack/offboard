@@ -23,7 +23,14 @@ import { Button, buttonVariants } from "@/shared/ui/shadcn/button";
 import { Skeleton } from "@/shared/ui/shadcn/skeleton";
 import { Spinner } from "@/shared/ui/shadcn/spinner";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "../ui";
-import { careerDate, criterionLabel, resumeScoreState, scoreCriteria } from "./labels";
+import {
+  careerDate,
+  criterionLabel,
+  gainLabel,
+  pointsLabel,
+  resumeScoreState,
+  scoreCriteria,
+} from "./labels";
 import { ResumeWizard } from "./resume-wizard";
 
 export function CareerPending() {
@@ -111,7 +118,12 @@ function ResumeScore({ resume }: { resume: CareerResume }) {
               <span className="flex justify-between gap-4">
                 <span className="font-medium">{item.label}</span>
                 <span className="tabular-nums text-muted-foreground">
-                  {item.points}/{item.max}
+                  <span aria-hidden="true">
+                    {item.points}/{item.max}
+                  </span>
+                  <span className="sr-only">
+                    {pointsLabel(item.points)} de {item.max}
+                  </span>
                 </span>
               </span>
               {item.reason ? (
@@ -155,7 +167,7 @@ function Suggestions({ account }: { account: EmployeeAccount }) {
                 <p className="font-medium wrap-anywhere">{suggestion.rationale}</p>
                 {label ? <Badge variant="secondary">{label}</Badge> : null}
                 {suggestion.estimatedGain > 0 ? (
-                  <Badge variant="status-success">+{suggestion.estimatedGain} pontos</Badge>
+                  <Badge variant="status-success">{gainLabel(suggestion.estimatedGain)}</Badge>
                 ) : null}
               </div>
               <p className="text-sm text-muted-foreground line-through wrap-anywhere">
@@ -164,8 +176,8 @@ function Suggestions({ account }: { account: EmployeeAccount }) {
               <p className="text-sm wrap-anywhere">{suggestion.suggestedText}</p>
               {suggestion.extraGainWithFacts > 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Mais +{suggestion.extraGainWithFacts} se você incluir os dados reais pedidos
-                  acima.
+                  Mais {gainLabel(suggestion.extraGainWithFacts)} se você incluir os dados reais
+                  pedidos acima.
                 </p>
               ) : null}
               <div className="flex flex-wrap gap-2">

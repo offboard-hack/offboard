@@ -382,6 +382,8 @@ describe("scoreResume", () => {
     const { system, prompt } = requests[0] ?? { system: "", prompt: "" };
 
     expect(system).toContain("When <previous> is present");
+    expect(system).toContain("plain Brazilian Portuguese");
+    expect(system).toContain("never formulas, fractions, multiplication signs");
     expect(system).toContain("keep each criterion's points unless");
     expect(system).toContain("its reason must say what changed");
     expect(system).toContain("Never propose any of them again");

@@ -49,6 +49,14 @@ describe("breakdownOf", () => {
     expect(totalOf(breakdown)).toBe(45);
   });
 
+  it("keeps arithmetic out of stored reasons", () => {
+    const breakdown = breakdownOf(
+      criteriaSchema.parse(assessment(3, "Poucos números (20 × 1/6 ≈ 3), mas há verbos fortes.")),
+    );
+
+    expect(breakdown.results.reason).toBe("Poucos números, mas há verbos fortes.");
+  });
+
   it("stores short, clean reasons", () => {
     const breakdown = breakdownOf(
       criteriaSchema.parse(assessment(1, `  Fala\u0000 de ${"x".repeat(400)}`)),

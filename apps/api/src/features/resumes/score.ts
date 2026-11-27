@@ -66,7 +66,7 @@ const system = [
   "You review one résumé (CV) for the Brazilian job market.",
   "Score it criterion by criterion with this fixed rubric. Apply each rule literally, counting bullets where the rule counts them, so the same résumé always gets the same points:",
   rubric,
-  "For every criterion give points between 0 and its maximum and a one-line reason in Brazilian Portuguese that names what earned or cost the points.",
+  'For every criterion give points between 0 and its maximum and a one-line reason in plain Brazilian Portuguese, written for the person reading their own résumé: say what is good and what to improve, never formulas, fractions, multiplication signs, equals signs or point arithmetic (no "20 × 1/6 ≈ 3"). Do all calculations silently; the reason only describes the résumé.',
   "Propose up to eight concrete rewrites, the ones that would raise the points the most. Each rewrite replaces the whole text of one node, identified by its id. Only the headline, the summary and experience bullets have ids; never target anything else.",
   "Each rewrite names the one criterion it improves most. estimatedGain is how many points that criterion would rise under the rubric if suggestedText replaced the node exactly as written and nothing else changed; it never exceeds the criterion's maximum minus the points you gave it. Count only what the text already contains: never assume the person later adds numbers, tools or other facts.",
   "extraGainWithFacts is the additional points, from 0 to 20, available only if the person also adds the real facts the rationale asks for. Use 0 when the rationale asks for nothing.",
