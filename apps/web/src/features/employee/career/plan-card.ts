@@ -24,6 +24,8 @@ export type CareerPlan = {
     active: boolean;
     checkoutOpen: boolean;
     endsAt: string | null;
+    checkoutUrl: string | null;
+    paymentFailed: boolean;
   } | null;
 };
 
@@ -89,6 +91,11 @@ export const cancelCopayPrompt =
   "Cancelar o upgrade? Você mantém o acesso até o fim do período já pago.";
 
 export const copayPendingLabel = "Pagamento em andamento";
+
+export const copayContinueLabel = "Continuar pagamento";
+
+export const copayPaymentFailedNote =
+  "Pagamento do upgrade pendente. Verifique seu método de pagamento.";
 
 export function shouldPollPlan(plan: CareerPlan | undefined, today: string, copayPaid = false) {
   if (plan === undefined) return true;
@@ -205,6 +212,8 @@ export function planCardView(plan: CareerPlan, today: string, paid: boolean, cop
         ? `Upgrade para ${copay.targetPlanName} · ${planPrice(copay.priceCents)}`
         : null,
     copayPendingLabel: copayButton === "pending" ? copayPendingLabel : null,
+    copayContinueUrl: copayButton === "pending" ? (copay?.checkoutUrl ?? null) : null,
+    copayPaymentFailedNote: copay?.active && copay.paymentFailed ? copayPaymentFailedNote : null,
     copayActiveLabel:
       copay && copayButton === "active" && copay.endsAt === null
         ? `Upgrade ativo · ${copay.targetPlanName} · ${planPrice(copay.priceCents)}`

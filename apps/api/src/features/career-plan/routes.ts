@@ -63,6 +63,8 @@ const careerPlanResponse = t.Object({
       active: t.Boolean(),
       checkoutOpen: t.Boolean(),
       endsAt: nullableDate,
+      checkoutUrl: nullableDate,
+      paymentFailed: t.Boolean(),
     }),
     t.Null(),
   ]),
@@ -84,6 +86,8 @@ type CopayAssignment = {
   effectivePlanId: string;
   copaySubscriptionId: string | null;
   copayCheckoutUrl: string | null;
+  copayTargetPlanId: string | null;
+  copayPaymentFailedAt: Date | null;
   copayCheckoutAt: Date | null;
   copayPriceCents: number | null;
   copayPeriodEnd: string | null;
@@ -105,8 +109,12 @@ type CopayBenefits = {
   restoreCopay(
     profileId: string,
     subscriptionId: string,
-    checkoutAt: Date | null,
-    periodEnd: string | null,
+    markedAt: Date,
+    previous: {
+      copayCheckoutAt: Date | null;
+      copayPeriodEnd: string | null;
+      copayPaymentFailedAt: Date | null;
+    },
   ): Promise<void>;
 };
 
@@ -146,7 +154,12 @@ export function careerPlanRoutes(
         priceCents: assignment.copayPriceCents ?? effectivePrice - assignedPrice,
         active: true,
         checkoutOpen: false,
-        endsAt: assignment.copayCheckoutAt === null ? null : assignment.copayPeriodEnd,
+        endsAt:
+          assignment.copayCheckoutAt === null || assignment.copayPaymentFailedAt !== null
+            ? null
+            : assignment.copayPeriodEnd,
+        checkoutUrl: null,
+        paymentFailed: assignment.copayPaymentFailedAt !== null,
       };
     }
 
@@ -155,17 +168,20 @@ export function careerPlanRoutes(
     if (!target) return null;
 
     const checkoutOpen = checkoutOpenOf(assignment, now);
+    const issued = checkoutOpen && assignment.copayTargetPlanId === target.planId;
 
     return {
       offered: gateway.configured,
       targetPlanId: target.planId,
       targetPlanName: target.name,
-      priceCents: checkoutOpen
+      priceCents: issued
         ? (assignment.copayPriceCents ?? target.upgradeCents)
         : target.upgradeCents,
       active: false,
       checkoutOpen,
       endsAt: null,
+      checkoutUrl: issued ? assignment.copayCheckoutUrl : null,
+      paymentFailed: false,
     };
   }
 
@@ -301,9 +317,18 @@ export function careerPlanRoutes(
         const priceCents = targetPrice - assignedPrice;
 
         if (checkoutOpenOf(assignment, now)) {
-          return assignment.copayCheckoutUrl !== null && assignment.copayPriceCents === priceCents
-            ? { url: assignment.copayCheckoutUrl }
-            : status(409, { error: "Co-pay checkout open" });
+          if (assignment.copayCheckoutUrl === null) {
+            return status(409, { error: "Co-pay checkout open" });
+          }
+
+          if (
+            assignment.copayTargetPlanId === body.targetPlanId &&
+            assignment.copayPriceCents === priceCents
+          ) {
+            return { url: assignment.copayCheckoutUrl };
+          }
+
+          await repos.releaseCopayCheckout(me.id);
         }
 
         const row = await repos.startCopayCheckout(me.id, now);
@@ -322,6 +347,7 @@ export function careerPlanRoutes(
             id: checkout.id,
             url: checkout.url,
             priceCents,
+            targetPlanId: body.targetPlanId,
           });
 
           if (!stored) return status(502, { error: "Could not start the checkout" });
@@ -359,7 +385,8 @@ export function careerPlanRoutes(
         }
 
         const subscriptionId = assignment.copaySubscriptionId;
-        const endsAt = await benefits.windDownCopay(me.id, subscriptionId, new Date());
+        const markedAt = new Date();
+        const endsAt = await benefits.windDownCopay(me.id, subscriptionId, markedAt);
 
         if (endsAt === null) return status(409, { error: "No active co-pay" });
 
@@ -367,12 +394,11 @@ export function careerPlanRoutes(
           await gateway.cancelSubscription(subscriptionId);
         } catch (cause) {
           logFailureCode("Co-pay cancellation failed")(cause);
-          await benefits.restoreCopay(
-            me.id,
-            subscriptionId,
-            assignment.copayCheckoutAt,
-            assignment.copayPeriodEnd,
-          );
+          await benefits.restoreCopay(me.id, subscriptionId, markedAt, {
+            copayCheckoutAt: assignment.copayCheckoutAt,
+            copayPeriodEnd: assignment.copayPeriodEnd,
+            copayPaymentFailedAt: assignment.copayPaymentFailedAt,
+          });
 
           return status(502, { error: "Could not cancel the co-pay" });
         }

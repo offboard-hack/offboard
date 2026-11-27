@@ -819,6 +819,8 @@ export const benefitAssignments = pgTable(
     copayCheckoutUrl: text("copay_checkout_url"),
     copayPriceCents: integer("copay_price_cents"),
     copayPeriodEnd: date("copay_period_end"),
+    copayPaymentFailedAt: timestamp("copay_payment_failed_at"),
+    copayTargetPlanId: uuid("copay_target_plan_id").references(() => plans.id),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },

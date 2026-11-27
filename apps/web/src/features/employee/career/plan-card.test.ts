@@ -48,6 +48,8 @@ describe("plan card view", () => {
       copayButton: "hidden",
       copayLabel: null,
       copayPendingLabel: null,
+      copayContinueUrl: null,
+      copayPaymentFailedNote: null,
       copayActiveLabel: null,
       copayEndedLabel: null,
       copayCancelable: false,
@@ -297,6 +299,8 @@ describe("plan card view", () => {
       priceCents: 3000,
       checkoutOpen: false,
       endsAt: null,
+      checkoutUrl: null,
+      paymentFailed: false,
     };
 
     expect(shouldPollPlan(undefined, today, true)).toBe(true);
@@ -492,6 +496,8 @@ describe("co-pay button", () => {
     active: false,
     checkoutOpen: false,
     endsAt: null,
+    checkoutUrl: null,
+    paymentFailed: false,
   };
 
   it("shows co-pay button when offered", () => {
@@ -510,6 +516,7 @@ describe("co-pay button", () => {
     ).toMatchObject({
       copayButton: "pending",
       copayLabel: null,
+      copayContinueUrl: null,
       copayPendingLabel: "Pagamento em andamento",
       copayActiveLabel: null,
       copayCancelable: false,
@@ -538,6 +545,26 @@ describe("co-pay button", () => {
     expect(
       planCardView({ ...benefitBase, copay: { ...copay, offered: false } }, today, false),
     ).toMatchObject({ copayButton: "hidden", copayLabel: null });
+  });
+
+  it("offers to continue the open payment when its URL is known", () => {
+    const open = { ...copay, checkoutOpen: true, checkoutUrl: "https://pay.example/bill_1" };
+
+    expect(planCardView({ ...benefitBase, copay: open }, today, false)).toMatchObject({
+      copayButton: "pending",
+      copayContinueUrl: "https://pay.example/bill_1",
+    });
+  });
+
+  it("warns about a failed upgrade payment while keeping the upgrade and its cancel button", () => {
+    const failed = { ...copay, offered: false, active: true, paymentFailed: true };
+
+    expect(planCardView({ ...benefitBase, copay: failed }, today, false)).toMatchObject({
+      copayPaymentFailedNote: "Pagamento do upgrade pendente. Verifique seu método de pagamento.",
+      copayActiveLabel: "Upgrade ativo · Platinum · R$ 30/mês",
+      copayEndedLabel: null,
+      copayCancelable: true,
+    });
   });
 
   it("shows the agreed price and a cancel button once the co-pay is active", () => {

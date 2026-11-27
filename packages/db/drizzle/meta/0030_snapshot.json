@@ -1,5 +1,5 @@
 {
-  "id": "a013998d-e391-4909-8a29-6c3ecfc90548",
+  "id": "50687c7e-bd72-44d2-8b9c-8318b9152121",
   "prevId": "81d0fd4c-3bed-4915-8f67-4551a8d86269",
   "version": "7",
   "dialect": "postgresql",
@@ -1423,6 +1423,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "copay_payment_failed_at": {
+          "name": "copay_payment_failed_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "copay_target_plan_id": {
+          "name": "copay_target_plan_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -1503,6 +1515,15 @@
           "tableFrom": "benefit_assignments",
           "tableTo": "plans",
           "columnsFrom": ["effective_plan_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "benefit_assignments_copay_target_plan_id_plans_id_fk": {
+          "name": "benefit_assignments_copay_target_plan_id_plans_id_fk",
+          "tableFrom": "benefit_assignments",
+          "tableTo": "plans",
+          "columnsFrom": ["copay_target_plan_id"],
           "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"

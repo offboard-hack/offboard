@@ -289,7 +289,7 @@ export type CopayBenefits = {
     patch: { effectivePlanId: string; copaySubscriptionId: string; copayPeriodEnd: string },
   ): Promise<boolean>;
   renewCopay(profileId: string, subscriptionId: string, periodEnd: string): Promise<void>;
-  windDownCopay(profileId: string, subscriptionId: string, now: Date): Promise<string | null>;
+  failCopayPayment(profileId: string, subscriptionId: string, now: Date): Promise<void>;
   revertCopay(profileId: string, subscriptionId: string): Promise<void>;
 };
 
@@ -440,7 +440,7 @@ async function applyCopayEvent(
 
   if (name === "subscription.payment_failed") {
     console.error("copay payment failed", { profileId });
-    await benefits.windDownCopay(profileId, providerSubscriptionId, new Date());
+    await benefits.failCopayPayment(profileId, providerSubscriptionId, new Date());
   }
 }
 

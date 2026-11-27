@@ -18,6 +18,7 @@ import {
   cancelConfirmLabel,
   cancelCopayLabel,
   cancelCopayPrompt,
+  copayContinueLabel,
   cancelConfirmPrompt,
   cancelKeepLabel,
   cancelProLabel,
@@ -84,6 +85,7 @@ export function PlanSection({
       cancelingCopay={cancelCopay.isPending}
       onUpgrade={() => checkout.mutate()}
       onCopay={(targetPlanId) => copayCheckout.mutate(targetPlanId)}
+      onContinueCopay={(url) => window.location.assign(url)}
       onCancel={() => cancel.mutate()}
       onCancelCopay={() => cancelCopay.mutate()}
     />
@@ -125,6 +127,7 @@ export function PlanCard({
   cancelingCopay,
   onUpgrade,
   onCopay,
+  onContinueCopay,
   onCancel,
   onCancelCopay,
 }: {
@@ -139,6 +142,7 @@ export function PlanCard({
   cancelingCopay: boolean;
   onUpgrade: () => void;
   onCopay: (targetPlanId: string) => void;
+  onContinueCopay: (url: string) => void;
   onCancel: () => void;
   onCancelCopay: () => void;
 }) {
@@ -198,6 +202,18 @@ export function PlanCard({
       {view.copayPendingLabel ? (
         <p role="status" className="text-sm">
           {view.copayPendingLabel}
+        </p>
+      ) : null}
+      {view.copayContinueUrl ? (
+        <div>
+          <Button variant="outline" onClick={() => onContinueCopay(view.copayContinueUrl!)}>
+            {copayContinueLabel}
+          </Button>
+        </div>
+      ) : null}
+      {view.copayPaymentFailedNote ? (
+        <p role="status" className="text-sm text-destructive">
+          {view.copayPaymentFailedNote}
         </p>
       ) : null}
       {view.copayActiveLabel ? (

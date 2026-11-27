@@ -765,6 +765,8 @@ describe.skipIf(!url)("career plan route", () => {
         active: false,
         checkoutOpen: false,
         endsAt: null,
+        checkoutUrl: null,
+        paymentFailed: false,
       });
       expect(body.copay.priceCents).toBeGreaterThan(0);
     });
@@ -852,7 +854,9 @@ describe.skipIf(!url)("career plan route", () => {
 
       await assigned(profileId);
       await registered("gold", "platinum");
-      await db.update(benefitAssignments).set({ copayCheckoutAt: new Date() });
+      await db
+        .update(benefitAssignments)
+        .set({ copayCheckoutAt: new Date(), copayTargetPlanId: await planId("platinum") });
 
       const { copay: reported } = await (await get(profileId)).json();
 
@@ -917,10 +921,12 @@ describe.skipIf(!url)("career plan route", () => {
         copayCheckoutId: "bill_pro",
         copayCheckoutUrl: "https://pay.example/bill_pro",
         copayPriceCents: prices.get(platinum)! - prices.get(gold)!,
+        copayTargetPlanId: platinum,
         copaySubscriptionId: null,
       });
       expect((await (await get(profileId)).json()).copay).toMatchObject({
         checkoutOpen: true,
+        checkoutUrl: "https://pay.example/bill_pro",
         active: false,
         priceCents: prices.get(platinum)! - prices.get(gold)!,
       });
@@ -941,19 +947,74 @@ describe.skipIf(!url)("career plan route", () => {
       expect(checkouts).toHaveLength(1);
     });
 
-    it("answers 409 to a repeat checkout for a different target", async () => {
-      const profileId = await profile("2099-12-31");
+    describe("repeat checkout that no longer matches", () => {
+      let issued = 0;
 
-      await assigned(profileId);
-      await registered("gold", "platinum");
-      await registered("gold", "platinum-premium");
-      await copay(profileId, await planId("platinum"));
+      const numbered = planApp({
+        ...gateway,
+        async createSubscriptionCheckout(params: CheckoutParams) {
+          issued += 1;
+          checkouts.push(params);
 
-      const response = await copay(profileId, await planId("platinum-premium"));
+          return { id: `bill_${issued}`, url: `https://pay.example/bill_${issued}` };
+        },
+      });
 
-      expect(response.status).toBe(409);
-      expect(await response.json()).toEqual({ error: "Co-pay checkout open" });
-      expect(checkouts).toHaveLength(1);
+      beforeEach(() => {
+        issued = 0;
+      });
+
+      it("voids the old checkout and issues a new one for a different target", async () => {
+        const profileId = await profile("2099-12-31");
+
+        await assigned(profileId);
+        await registered("gold", "platinum");
+        await registered("gold", "platinum-premium");
+        await copay(profileId, await planId("platinum"), numbered);
+
+        const premium = await planId("platinum-premium");
+        const response = await copay(profileId, premium, numbered);
+
+        expect(await response.json()).toEqual({ url: "https://pay.example/bill_2" });
+        expect(checkouts).toHaveLength(2);
+        expect(await stored(profileId)).toMatchObject({
+          copayCheckoutId: "bill_2",
+          copayTargetPlanId: premium,
+        });
+      });
+
+      it("voids the old checkout and issues a new one when the price differs", async () => {
+        const profileId = await profile("2099-12-31");
+
+        await assigned(profileId);
+        await registered("gold", "platinum");
+        await copay(profileId, await planId("platinum"), numbered);
+        await db.update(benefitAssignments).set({ copayPriceCents: 1 });
+
+        const response = await copay(profileId, await planId("platinum"), numbered);
+
+        expect(await response.json()).toEqual({ url: "https://pay.example/bill_2" });
+        expect(await stored(profileId)).toMatchObject({ copayCheckoutId: "bill_2" });
+      });
+
+      it("does not offer the continue URL when the stored target is not the card target", async () => {
+        const profileId = await profile("2099-12-31");
+
+        await assigned(profileId);
+        await registered("gold", "platinum");
+        await db.update(benefitAssignments).set({
+          copayCheckoutAt: new Date(),
+          copayCheckoutId: "bill_old",
+          copayCheckoutUrl: "https://pay.example/bill_old",
+          copayPriceCents: 1,
+          copayTargetPlanId: await planId("platinum-premium"),
+        });
+
+        expect((await (await get(profileId)).json()).copay).toMatchObject({
+          checkoutOpen: true,
+          checkoutUrl: null,
+        });
+      });
     });
 
     it("answers 409 to a repeat while the first request has not stored its URL yet", async () => {
@@ -1140,6 +1201,54 @@ describe.skipIf(!url)("career plan route", () => {
           active: true,
           endsAt: "2099-06-30",
           priceCents: 4000,
+        });
+      });
+
+      it("reports a failed payment without an end date and clears it on cancel", async () => {
+        const profileId = await profile("2099-12-31");
+        const failedAt = new Date();
+
+        await upgraded(profileId, { copayCheckoutAt: failedAt, copayPaymentFailedAt: failedAt });
+
+        expect((await (await get(profileId)).json()).copay).toMatchObject({
+          active: true,
+          paymentFailed: true,
+          endsAt: null,
+        });
+
+        await cancel(profileId);
+
+        expect((await (await get(profileId)).json()).copay).toMatchObject({
+          paymentFailed: false,
+          endsAt: "2099-06-30",
+        });
+      });
+
+      it("does not clobber a renewal that landed before the gateway failed", async () => {
+        const profileId = await profile("2099-12-31");
+
+        await upgraded(profileId);
+
+        const racing = planApp({
+          ...gateway,
+          async cancelSubscription() {
+            await repos.benefits.renewCopay(profileId, "subs_copay", "2099-07-31");
+
+            throw new TypeError("down");
+          },
+        });
+
+        const response = await racing.handle(
+          new Request("http://localhost/me/plan/copay-cancel", {
+            method: "POST",
+            headers: { "x-test-talent-id": profileId, origin: webOrigin },
+          }),
+        );
+
+        expect(response.status).toBe(502);
+        expect(await stored(profileId)).toMatchObject({
+          copayCheckoutAt: null,
+          copayPeriodEnd: "2099-07-31",
         });
       });
 

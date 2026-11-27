@@ -197,6 +197,7 @@ export function createCareerPlanRepository(db: Database) {
         copayCheckoutId: null,
         copayCheckoutUrl: null,
         copayPriceCents: null,
+        copayTargetPlanId: null,
       })
       .where(
         and(
@@ -216,7 +217,7 @@ export function createCareerPlanRepository(db: Database) {
 
   async function storeCopayCheckout(
     profileId: string,
-    checkout: { id: string; url: string; priceCents: number },
+    checkout: { id: string; url: string; priceCents: number; targetPlanId: string },
   ) {
     const rows = await db
       .update(benefitAssignments)
@@ -224,6 +225,7 @@ export function createCareerPlanRepository(db: Database) {
         copayCheckoutId: checkout.id,
         copayCheckoutUrl: checkout.url,
         copayPriceCents: checkout.priceCents,
+        copayTargetPlanId: checkout.targetPlanId,
       })
       .where(
         and(
@@ -245,6 +247,7 @@ export function createCareerPlanRepository(db: Database) {
         copayCheckoutId: null,
         copayCheckoutUrl: null,
         copayPriceCents: null,
+        copayTargetPlanId: null,
       })
       .where(
         and(

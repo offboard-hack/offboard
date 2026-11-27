@@ -2703,6 +2703,41 @@ describe.skipIf(!url)("billing", () => {
       }
     });
 
+    it("gives a failed payment four days of grace and shows it as pending until it recovers", async () => {
+      await assign({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
+        copayPeriodEnd: "2020-01-01",
+      });
+      await copayWebhook("subscription.payment_failed", `copay:${profileId}:${platinumId}`);
+
+      const today = saoPauloDate(new Date());
+
+      const grace = new Date(Date.parse(`${today}T00:00:00Z`) + 4 * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+
+      expect(cancelled).toEqual([]);
+      expect(await assignment()).toMatchObject({
+        effectivePlanId: platinumId,
+        copaySubscriptionId: "subs_1",
+        copayPeriodEnd: grace,
+      });
+      expect((await assignment()).copayPaymentFailedAt).not.toBeNull();
+
+      await copayWebhook("subscription.cancelled", `copay:${profileId}:${platinumId}`);
+
+      expect(await assignment()).toMatchObject({ copaySubscriptionId: "subs_1" });
+
+      await copayWebhook("subscription.renewed", `copay:${profileId}:${platinumId}`);
+
+      expect(await assignment()).toMatchObject({
+        copayCheckoutAt: null,
+        copayPaymentFailedAt: null,
+        copayPeriodEnd: monthFromToday(),
+      });
+    });
+
     it("falls back to the provider subscription id", async () => {
       await assign({ effectivePlanId: platinumId, copaySubscriptionId: "subs_1" });
       await copayWebhook("subscription.cancelled", null);
