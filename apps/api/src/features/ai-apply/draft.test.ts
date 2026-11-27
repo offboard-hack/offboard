@@ -779,6 +779,204 @@ describe("draftAnswers", () => {
         expect(find(answers, "multi")).toMatchObject({ value: ["2", "4"], status: "suggested" });
       });
 
+      it("drops the demographic suggestions when this form's D&I consent is not yes", async () => {
+        const consent = select(
+          "consent",
+          "Consentimento - Diversidade e Inclusão (D&I)",
+          options("Sim. Eu concordo", "Não. Eu não concordo"),
+          true,
+        );
+
+        const run = (answer: string) =>
+          draftAnswers(
+            fake([]).generate,
+            input([consent, race, relatives], {
+              library: [...saved, { question: "Consentimento D&I", answer, sensitive: true }],
+            }),
+          );
+
+        const refused = await run("Não. Eu não concordo");
+        const given = await run("Sim, concordo");
+
+        const unanswered = await draftAnswers(
+          fake([]).generate,
+          input([consent, race], { library: saved }),
+        );
+
+        expect(refused.map(({ status }) => status)).toEqual(["suggested", "sensitive", "blank"]);
+        expect(refused[0].value).toBe("2");
+        expect(given.map(({ status }) => status)).toEqual(["suggested", "suggested", "suggested"]);
+        expect(unanswered.map(({ status }) => status)).toEqual(["sensitive", "sensitive"]);
+      });
+
+      it("also withholds exact saved demographic answers when consent is not yes", async () => {
+        const consent = select(
+          "consent",
+          "Consentimento - Diversidade e Inclusão (D&I)",
+          options("Sim. Eu concordo", "Não. Eu não concordo"),
+          true,
+        );
+
+        const exact = select("exact", "Raça/cor", options("Branca", "Preta"), true);
+
+        const pronouns = question({ id: "pronouns", label: "Pronouns" });
+        const colour = question({ id: "colour", label: "What is your skin colour?" });
+
+        const form = [consent, exact, pronouns, colour];
+
+        const library = (answer: string) => [
+          { question: "Consentimento D&I", answer, sensitive: true },
+          { question: "Raça/cor", answer: "Branca", sensitive: true },
+          { question: "Pronouns", answer: "Ela/dela", sensitive: false },
+          { question: "What is your skin colour?", answer: "Branca", sensitive: false },
+        ];
+
+        const refused = await draftAnswers(
+          fake([]).generate,
+          input(form, { library: library("Não. Eu não concordo") }),
+        );
+
+        const given = await draftAnswers(
+          fake([]).generate,
+          input(form, { library: library("Sim. Eu concordo") }),
+        );
+
+        expect(refused.map(({ status }) => status)).toEqual([
+          "suggested",
+          "sensitive",
+          "blank",
+          "blank",
+        ]);
+
+        expect(given.map(({ status }) => status)).toEqual([
+          "suggested",
+          "filled",
+          "filled",
+          "filled",
+        ]);
+      });
+
+      it("fills demographic answers when consent is answered Autorizo", async () => {
+        const consent = select(
+          "consent",
+          "Consentimento - Diversidade e Inclusão (D&I)",
+          options("Autorizo", "Não autorizo"),
+          true,
+        );
+
+        const exact = select("exact", "Raça/cor", options("Branca", "Preta"), true);
+
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([consent, exact, race], {
+            library: [
+              ...saved,
+              { question: "Consentimento D&I", answer: "Autorizo", sensitive: true },
+            ],
+          }),
+        );
+
+        expect(answers.map(({ status }) => status)).toEqual(["suggested", "filled", "suggested"]);
+      });
+
+      it("reads topics only from saved answers that pass the filters", async () => {
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([relatives], {
+            library: [
+              {
+                question: "Você tem parentes trabalhando na empresa?",
+                answer: "Não 52998224725",
+                sensitive: false,
+              },
+              {
+                question: "Você tem parentes trabalhando na empresa?",
+                answer: "Sim",
+                sensitive: false,
+              },
+            ],
+            fields: fieldsOf({ cpf: { value: "52998224725", share: false } }),
+          }),
+        );
+
+        expect(answers[0]).toMatchObject({ value: "1", status: "suggested" });
+      });
+
+      it("suggests from the diversity data declared in the profile", async () => {
+        const combined = select(
+          "combined",
+          "Identidade de gênero",
+          options("Mulher", "Mulher cisgênero", "Mulher trans", "Homem cisgênero"),
+          true,
+        );
+
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([combined, gender, race], {
+            library: saved,
+            fields: fieldsOf({
+              gender: { value: "female;cis", share: true },
+              race: { value: "brown", share: true },
+            }),
+          }),
+        );
+
+        expect(answers).toEqual([
+          {
+            questionId: "combined",
+            value: "2",
+            source: "profile",
+            inferred: false,
+            status: "suggested",
+          },
+          {
+            questionId: "gender",
+            value: ["1", "4"],
+            source: "profile",
+            inferred: false,
+            status: "suggested",
+          },
+          {
+            questionId: "race",
+            value: "3",
+            source: "profile",
+            inferred: false,
+            status: "suggested",
+          },
+        ]);
+      });
+
+      it("withholds every question of a topic the person chose not to share", async () => {
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([race, { ...race, id: "exact", label: "Raça/cor" }], {
+            library: saved,
+            fields: fieldsOf({ race: { value: "white", share: false } }),
+          }),
+        );
+
+        expect(answers.map(({ value, status }) => [value, status])).toEqual([
+          [null, "not_shared"],
+          [null, "not_shared"],
+        ]);
+      });
+
+      it("stays blank when a declared value only fits a more specific option", async () => {
+        const combinedOnly = select(
+          "combinedOnly",
+          "Gênero",
+          options("Mulher cisgênero", "Mulher trans"),
+          true,
+        );
+
+        const answers = await draftAnswers(
+          fake([]).generate,
+          input([combinedOnly], { fields: fieldsOf({ gender: { value: "female", share: true } }) }),
+        );
+
+        expect(answers[0]).toMatchObject({ value: null, status: "sensitive" });
+      });
+
       it("ignores a saved answer the profile withholds", async () => {
         const { generate } = fake([]);
 

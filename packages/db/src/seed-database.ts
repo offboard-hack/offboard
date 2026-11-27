@@ -522,6 +522,10 @@ export async function seedDatabase(
             monthlyPriceCents: plan.monthlyPriceCents,
             maxEmployees: plan.maxEmployees,
             features: plan.features,
+            perPersonPriceCents: plan.perPersonPriceCents,
+            aiApplyDailyLimit: plan.aiApplyDailyLimit,
+            aiApplyPriority: plan.aiApplyPriority,
+            detailedScore: plan.detailedScore,
             updatedAt: new Date(),
           },
         });

@@ -70,7 +70,11 @@ export function createResumesRepository(db: Database) {
     return row && toResumeView(row);
   }
 
-  async function replaceBase(profileId: string, content: ResumeContent, sourceFileKey: string) {
+  async function replaceBase(
+    profileId: string,
+    content: ResumeContent,
+    sourceFileKey: string | null,
+  ) {
     return db.transaction(async (tx) => {
       const [previous] = await tx
         .select({ sourceFileKey: resumes.sourceFileKey })

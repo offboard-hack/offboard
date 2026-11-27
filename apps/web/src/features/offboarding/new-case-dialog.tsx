@@ -5,6 +5,7 @@ import { Add01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useId, useState } from "react";
 import { Button } from "@/shared/ui/shadcn/button";
+import { Checkbox } from "@/shared/ui/shadcn/checkbox";
 import { Input } from "@/shared/ui/shadcn/input";
 import { Label } from "@/shared/ui/shadcn/label";
 import {
@@ -26,6 +27,7 @@ const newCaseSchema = z.object({
   department: z.enum(offboardingDepartments, { error: "Escolha a área." }),
   deadline: z.iso.date({ error: "Informe uma data válida." }),
   email: z.string().trim().toLowerCase().pipe(z.email("Informe um e-mail válido.")),
+  invite: z.boolean(),
 });
 
 export type NewCase = z.output<typeof newCaseSchema>;
@@ -42,7 +44,14 @@ export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => Pro
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const form = useForm({
-    defaultValues: { name: "", role: "", department: "", deadline: "", email: "" },
+    defaultValues: {
+      name: "",
+      role: "",
+      department: "",
+      deadline: "",
+      email: "",
+      invite: true,
+    },
     validators: { onSubmit: newCaseSchema },
     onSubmit: async ({ value }) => {
       setSubmitError(null);
@@ -186,6 +195,26 @@ export function NewCaseDialog({ onCreate }: { onCreate: (record: NewCase) => Pro
                   </div>
                 );
               }}
+            </form.Field>
+            <form.Field name="invite">
+              {(field) => (
+                <div className="flex items-start gap-3 sm:col-span-2">
+                  <Checkbox
+                    id={id + "-invite"}
+                    checked={field.state.value}
+                    onCheckedChange={field.handleChange}
+                    aria-describedby={id + "-invite-hint"}
+                    className="mt-0.5"
+                  />
+                  <div className="grid gap-1">
+                    <Label htmlFor={id + "-invite"}>Enviar convite ao colaborador agora</Label>
+                    <p id={id + "-invite-hint"} className="text-sm text-muted-foreground">
+                      Desmarque se a pessoa ainda não foi comunicada. Você pode enviar depois na
+                      Área do colaborador.
+                    </p>
+                  </div>
+                </div>
+              )}
             </form.Field>
           </DialogBody>
           {submitError && (

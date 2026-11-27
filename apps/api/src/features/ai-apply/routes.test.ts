@@ -807,6 +807,18 @@ describe.skipIf(!url)("ai apply route", () => {
 
       await repos.answers.answer(profileId, saved, "No", new Date());
 
+      const agreed = await repos.answers.ensureQuestion(
+        "Consentimento - Diversidade e Inclusão (D&I)",
+        new Date(),
+      );
+
+      await repos.answers.answer(
+        profileId,
+        agreed,
+        "Sim. Eu concordo com a coleta e uso dessas informações para estratégias de D&I",
+        new Date(),
+      );
+
       const second = await (await post(profileId, jobId)).json();
 
       expect(answerFor(second, pcd.id)).toMatchObject({
@@ -1540,6 +1552,18 @@ describe.skipIf(!url)("ai apply route", () => {
       expect(saved).toHaveLength(3);
 
       await db.delete(aiApplications).where(eq(aiApplications.id, id));
+
+      const agreed = await repos.answers.ensureQuestion(
+        "Consentimento - Diversidade e Inclusão (D&I)",
+        new Date(),
+      );
+
+      await repos.answers.answer(
+        profileId,
+        agreed,
+        "Sim. Eu concordo com a coleta e uso dessas informações para estratégias de D&I",
+        new Date(),
+      );
 
       const next = await app.post(profileId, otherJob);
       const body = await next.json();

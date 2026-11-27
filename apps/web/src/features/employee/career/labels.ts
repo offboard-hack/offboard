@@ -101,6 +101,10 @@ const attemptReasons = new Map([
   ["fill_failed", "Um campo do formulário não aceitou a resposta. Candidate-se pelo site da vaga."],
   ["form_rejected", "O site da vaga recusou o envio. Confira as mensagens abaixo."],
   [
+    "form_errors",
+    "O formulário mostrou erros antes do envio, então a IA não enviou nada. Confira as mensagens abaixo.",
+  ],
+  [
     "foreign_phone",
     "A IA só preenche telefones do Brasil (+55). Corrija o telefone e prepare de novo.",
   ],

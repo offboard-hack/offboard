@@ -274,6 +274,16 @@ export const challengeVisible = (page: OutcomePage) =>
 export const errorsVisible = (page: OutcomePage) =>
   page.errors.some((error) => error.visible && error.text !== "");
 
+const errorLimit = 5;
+
+const errorTexts = (page: OutcomePage) => {
+  const texts = page.errors.flatMap((error) =>
+    error.visible && error.text !== "" ? [error.text] : [],
+  );
+
+  return [...new Set(texts)].slice(0, errorLimit);
+};
+
 export const classifyOutcome = (page: OutcomePage) => {
   const confirmed =
     page.path.includes("/confirmation") ||
@@ -577,6 +587,9 @@ const fillAnswer = (page: Page, question: FormQuestion, value: Answer, input: Fi
 
   const many = [value].flat();
   const single = Array.isArray(value) ? undefined : value;
+  const freeText = first.options.some((option) => option.freeForm && many.includes(option.value));
+
+  if (freeText) return fail("fill_failed", first.name);
 
   const demographic = first.name.startsWith(demographicPrefix);
 
@@ -676,25 +689,21 @@ export const fillGreenhouse = async (page: Page, input: FillInput) => {
 export const submitGreenhouse = async (page: Page) => {
   const before = await page.evaluate(outcomeExpression, outcomePage);
 
-  if (challengeVisible(before)) return "challenge";
+  if (challengeVisible(before)) return { outcome: "challenge", errors: [] } as const;
 
-  if (errorsVisible(before)) return "errors";
+  if (errorsVisible(before)) return { outcome: "errors", errors: errorTexts(before) } as const;
 
-  if (!(await page.evaluate(liftExpression, z.boolean()))) return "unguarded";
+  if (!(await page.evaluate(liftExpression, z.boolean()))) {
+    return { outcome: "unguarded", errors: [] } as const;
+  }
 
   await page.click(submitButton);
 
-  return "clicked";
+  return { outcome: "clicked", errors: [] } as const;
 };
 
-const errorLimit = 5;
-
-export const visibleErrors = async (page: Page) => {
-  const { errors } = await page.evaluate(outcomeExpression, outcomePage);
-  const texts = errors.flatMap((error) => (error.visible && error.text !== "" ? [error.text] : []));
-
-  return [...new Set(texts)].slice(0, errorLimit);
-};
+export const visibleErrors = async (page: Page) =>
+  errorTexts(await page.evaluate(outcomeExpression, outcomePage));
 
 export const awaitOutcome = async (page: Page, timeoutMs: number) => {
   const deadline = Date.now() + timeoutMs;

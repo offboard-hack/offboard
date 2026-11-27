@@ -52,7 +52,7 @@ import {
   employeeStateSchema,
   type EmployeeState,
 } from "@offboard/employee";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { status } from "elysia";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -251,6 +251,10 @@ describe.skipIf(!url)("api", () => {
     personalEmail?: string;
     sponsoredUntil?: string;
     botToken?: string;
+    item?: string;
+    tag?: string;
+    returnMethod?: string;
+    caseId?: string;
   };
 
   function call(
@@ -1067,7 +1071,8 @@ describe.skipIf(!url)("api", () => {
       expect(await (await call(gated, "talent", "/me/plan", "GET", mine.id)).json()).toEqual({
         company: { name: "Gold", includesAiApply: false, sponsoredUntil },
         individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: null },
-        aiApply: { allowedBy: "individual" },
+        benefit: null,
+        aiApply: { allowedBy: "individual", dailyLimit: 10 },
         upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
       });
 
@@ -3535,6 +3540,280 @@ describe.skipIf(!url)("api", () => {
           expect(await res.json()).toEqual({ error: "Résumé upload not configured" });
           expect(store.puts).toEqual([]);
         }
+      });
+
+      function create(
+        instance: ReturnType<typeof resumesApp>["instance"],
+        talentId: string,
+        content: string,
+        file?: { bytes: Uint8Array; name: string },
+      ) {
+        const form = new FormData();
+
+        form.set("content", content);
+
+        if (file) form.set("file", new File([new Uint8Array(file.bytes)], file.name));
+
+        return request(instance, talentId, "/me/resume", { method: "POST", body: form });
+      }
+
+      function readFile(
+        instance: ReturnType<typeof resumesApp>["instance"],
+        talentId: string,
+        bytes: Uint8Array = pdf,
+      ) {
+        const form = new FormData();
+
+        form.set("file", new File([new Uint8Array(bytes)], "cv.pdf", { type: "application/pdf" }));
+
+        return request(instance, talentId, "/me/resume/read", { method: "POST", body: form });
+      }
+
+      const reviewed = {
+        headline: { text: "Engenheira de Software" },
+        summary: { text: "" },
+        experiences: [
+          { company: "Acme", role: "Dev", start: "2019", end: null, bullets: [{ text: "Fez X" }] },
+        ],
+        education: [],
+        skills: [{ name: "Go" }],
+        languages: [{ name: "Inglês", level: "Fluente" }],
+        contact: { email: null, phone: null, city: "Recife", links: [] },
+      };
+
+      it("reads a résumé without saving or storing it", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        const res = await readFile(instance, id);
+
+        expect(res.status).toBe(200);
+
+        const { content } = await res.json();
+
+        expect(content.headline).toEqual({
+          id: expect.any(String),
+          text: "Engenheira de Software",
+        });
+        expect(content.experiences[0].bullets[0].text).toBe("Fez X");
+        expect(store.puts).toEqual([]);
+        expect((await request(instance, id, "/me/resume")).status).toBe(404);
+      });
+
+      it("refuses to read unsupported files, non-résumés and failed extractions", async () => {
+        const id = await profile();
+        const { instance } = resumesApp();
+        const html = await readFile(instance, id, new TextEncoder().encode("<html></html>"));
+
+        expect(html.status).toBe(422);
+        expect(await html.json()).toEqual({ error: "Unsupported file" });
+
+        const bomb = zipSync({ "word/document.xml": new Uint8Array(3_000_000).fill(0x61) });
+        const large = await readFile(instance, id, bomb);
+
+        expect(large.status).toBe(422);
+        expect(await large.json()).toEqual({ error: "File too large" });
+
+        const notResume = resumesApp({ draft: { ...draft, isResume: false } });
+        const refused = await readFile(notResume.instance, id);
+
+        expect(refused.status).toBe(422);
+        expect(await refused.json()).toEqual({ error: "File is not a résumé" });
+
+        const logged = vi.spyOn(console, "error");
+
+        const failing = resumesApp({
+          generate: async ({ prompt }) => {
+            throw leakyError(prompt);
+          },
+        });
+
+        const failed = await readFile(failing.instance, id);
+
+        expect(failed.status).toBe(502);
+        expect(await failed.json()).toEqual({ error: "Could not read the résumé" });
+        logged.mockRestore();
+
+        const unconfigured = await readFile(resumesApp({ generate: null }).instance, id);
+
+        expect(unconfigured.status).toBe(503);
+        expect(await unconfigured.json()).toEqual({ error: "Résumé reading not configured" });
+      });
+
+      it("creates the résumé from reviewed content and keeps the file", async () => {
+        const { instance, store, settle } = resumesApp();
+        const id = await profile();
+
+        const first = await create(instance, id, JSON.stringify(reviewed), {
+          bytes: pdf,
+          name: "cv.pdf",
+        });
+
+        expect(first.status).toBe(200);
+
+        const created = await first.json();
+
+        expect(created).toMatchObject({ kind: "base", score: null, rescoring: true });
+        expect(created.content.skills[0]).toEqual({ id: expect.any(String), name: "Go" });
+        expect(created.content.contact.city).toBe("Recife");
+        expect(store.puts).toEqual([
+          {
+            key: expect.stringMatching(new RegExp(`^resumes/${id}/[0-9a-f-]+\\.pdf$`)),
+            contentType: "application/pdf",
+          },
+        ]);
+
+        await settle();
+
+        const fromScratch = await create(
+          instance,
+          id,
+          JSON.stringify({ ...reviewed, experiences: [] }),
+        );
+
+        expect(fromScratch.status).toBe(200);
+        expect((await fromScratch.json()).id).toBe(created.id);
+        expect(store.puts).toHaveLength(1);
+        expect(store.removed).toEqual([store.puts[0].key]);
+
+        const asJson = await request(instance, id, "/me/resume", {
+          method: "POST",
+          json: { content: reviewed },
+        });
+
+        expect(asJson.status).toBe(200);
+
+        const docxFile = await create(instance, id, JSON.stringify(reviewed), {
+          bytes: docx(),
+          name: "cv.docx",
+        });
+
+        expect(docxFile.status).toBe(200);
+        expect(store.puts[1].key).toMatch(/\.docx$/);
+      });
+
+      it("refuses invalid, empty or unstorable résumés", async () => {
+        const { instance, store } = resumesApp();
+        const id = await profile();
+
+        for (const content of ["{", JSON.stringify({ headline: {} })]) {
+          const res = await create(instance, id, content);
+
+          expect(res.status).toBe(422);
+          expect(await res.json()).toEqual({ error: "Invalid résumé content" });
+        }
+
+        const tooLong = await create(
+          instance,
+          id,
+          JSON.stringify({ ...reviewed, headline: { text: "a".repeat(2_001) } }),
+        );
+
+        expect(tooLong.status).toBe(422);
+        expect(await tooLong.json()).toEqual({ error: "Invalid résumé content" });
+
+        const malformed = await instance.handle(
+          new Request("http://localhost/api/me/resume", {
+            method: "POST",
+            headers: {
+              "x-test-session": "talent",
+              "x-test-talent-id": id,
+              origin: webOrigin,
+              "content-type": "multipart/form-data; boundary=x",
+            },
+            body: "--x\r\nbroken",
+          }),
+        );
+
+        expect(malformed.status).toBe(400);
+
+        const duplicate = await create(
+          instance,
+          id,
+          JSON.stringify({
+            ...reviewed,
+            skills: [
+              { id: "same", name: "Go" },
+              { id: "same", name: "Rust" },
+            ],
+          }),
+        );
+
+        expect(duplicate.status).toBe(422);
+        expect(await duplicate.json()).toEqual({ error: "Duplicate node ids" });
+
+        const empty = await create(
+          instance,
+          id,
+          JSON.stringify({
+            ...reviewed,
+            headline: { text: "  " },
+            experiences: [],
+          }),
+        );
+
+        expect(empty.status).toBe(422);
+        expect(await empty.json()).toEqual({ error: "Résumé is empty" });
+
+        const html = await create(instance, id, JSON.stringify(reviewed), {
+          bytes: new TextEncoder().encode("<html></html>"),
+          name: "cv.pdf",
+        });
+
+        expect(html.status).toBe(422);
+        expect(await html.json()).toEqual({ error: "Unsupported file" });
+
+        expect(store.puts).toEqual([]);
+
+        const noStorage = resumesApp({ storage: false });
+
+        const unstorable = await create(noStorage.instance, id, JSON.stringify(reviewed), {
+          bytes: pdf,
+          name: "cv.pdf",
+        });
+
+        expect(unstorable.status).toBe(503);
+        expect(await unstorable.json()).toEqual({ error: "Résumé upload not configured" });
+        expect((await create(noStorage.instance, id, JSON.stringify(reviewed))).status).toBe(200);
+      });
+
+      it("removes the stored file when creating the résumé fails", async () => {
+        const removed: string[] = [];
+
+        const storage: ObjectStorage = {
+          put: async () => undefined,
+          remove: async (keys) => {
+            removed.push(...keys);
+          },
+          removePrefix: async () => undefined,
+          get: async () => null,
+        };
+
+        const failing = (fileStorage?: ObjectStorage) =>
+          createApp(
+            webOrigin,
+            {
+              ...repos,
+              resumes: {
+                ...repos.resumes,
+                replaceBase: () => Promise.reject(new Error("db down")),
+              },
+            },
+            { ...appOptions, storage: fileStorage },
+          );
+
+        const id = await profile();
+
+        const withFile = await create(failing(storage), id, JSON.stringify(reviewed), {
+          bytes: pdf,
+          name: "cv.pdf",
+        });
+
+        expect(withFile.status).toBe(500);
+        expect(removed).toHaveLength(1);
+        expect((await create(failing(storage), id, JSON.stringify(reviewed))).status).toBe(500);
+        expect((await create(failing(), id, JSON.stringify(reviewed))).status).toBe(500);
+        expect(removed).toHaveLength(1);
       });
 
       it("reads and edits the résumé", async () => {
@@ -6351,6 +6630,11 @@ describe.skipIf(!url)("api", () => {
             cpf: emptyField,
             birthDate: emptyField,
             address: emptyField,
+            gender: emptyField,
+            race: emptyField,
+            orientation: emptyField,
+            disability: emptyField,
+            pronoun: emptyField,
           },
         };
 
@@ -7784,10 +8068,19 @@ describe.skipIf(!url)("api", () => {
       return created.id;
     }
 
+    async function inviteTask(caseId: string) {
+      const found = z
+        .object({ tasks: z.array(z.object({ title: z.string(), status: z.string() })) })
+        .parse(await (await call(`/offboardings/${caseId}`)).json());
+
+      return found.tasks.find((task) => task.title === "Enviar convite do app Offboard")?.status;
+    }
+
     it("invites the employee when HR asks for it on create", async () => {
       const res = await call("/offboardings", "POST", { ...person, invite: true });
 
       expect(res.status).toBe(201);
+      expect(await inviteTask((await res.json()).id)).toBe("done");
       expect(invitedEmails).toEqual([person.email]);
       expect(sentTexts[0]).toContain("Olá, Ana.");
       expect(sentTexts[0]).toContain("Default liberou para você");
@@ -7795,7 +8088,10 @@ describe.skipIf(!url)("api", () => {
     });
 
     it("does not invite unless HR asks for it", async () => {
-      expect((await call("/offboardings", "POST", person)).status).toBe(201);
+      const created = await call("/offboardings", "POST", person);
+
+      expect(created.status).toBe(201);
+      expect(await inviteTask((await created.json()).id)).toBe("todo");
       expect(
         (await call("/offboardings", "POST", { ...person, email: "b@example.com", invite: false }))
           .status,
@@ -7809,7 +8105,7 @@ describe.skipIf(!url)("api", () => {
       const res = await call("/offboardings", "POST", { ...person, invite: true });
 
       expect(res.status).toBe(201);
-      expect((await call(`/offboardings/${(await res.json()).id}`)).status).toBe(200);
+      expect(await inviteTask((await res.json()).id)).toBe("todo");
       expect(invitedEmails).toEqual([]);
     });
 
@@ -7847,12 +8143,66 @@ describe.skipIf(!url)("api", () => {
       expect(sent.status).toBe(200);
       expect(await sent.json()).toEqual({ sent: true });
       expect(invitedEmails).toEqual([person.email]);
+      expect(await inviteTask(created.id)).toBe("done");
 
       inviteFailures.remaining = 1;
 
       expect((await access(target, "POST")).status).toBe(502);
       expect((await access(`${await importedCase()}/invite`, "POST")).status).toBe(409);
       expect((await access(`${missingCaseId}/invite`, "POST")).status).toBe(404);
+    });
+
+    it("sends at most three invites per case a day", async () => {
+      const response = await call("/offboardings", "POST", { ...person, invite: true });
+      const created = await response.json();
+      const target = `${created.id}/invite`;
+
+      expect(
+        (
+          await access(created.id, "PUT", {
+            email: "outro@example.com",
+            plan: emptyEmployeePlan,
+            revision: 1,
+          })
+        ).status,
+      ).toBe(200);
+      expect((await access(target, "POST")).status).toBe(200);
+
+      const limited = await access(target, "POST");
+
+      expect(limited.status).toBe(429);
+      expect(await limited.json()).toEqual({ error: "Too many invites" });
+      expect(invitedEmails).toEqual([person.email, "outro@example.com", "outro@example.com"]);
+
+      await db
+        .update(authRateLimit)
+        .set({ lastRequest: Date.now() - 24 * 60 * 60 * 1000 })
+        .where(eq(authRateLimit.key, `offboard:employee-invite:${created.id}`));
+
+      expect((await access(target, "POST")).status).toBe(200);
+      expect(invitedEmails).toHaveLength(4);
+    });
+
+    it("still reports the invite as sent when the checklist task cannot be updated", async () => {
+      const created = await (await call("/offboardings", "POST", person)).json();
+
+      const failing = createApp(
+        webOrigin,
+        {
+          ...repos,
+          employee: {
+            ...repos.employee,
+            markInviteSent: () => Promise.reject(new Error("db down")),
+          },
+        },
+        { ...appOptions, auth: { ...auth, resolveEmployee: async () => null } },
+      );
+
+      const sent = await call(`/employee-access/${created.id}/invite`, "POST", undefined, failing);
+
+      expect(sent.status).toBe(200);
+      expect(invitedEmails).toEqual([person.email]);
+      expect(await inviteTask(created.id)).toBe("todo");
     });
   });
 
@@ -8370,6 +8720,206 @@ describe.skipIf(!url)("api", () => {
     const res = await call(`/equipment/${missingTaskId}`, "PUT", { status: "invalid" });
 
     expect(res.status).toBe(422);
+  });
+
+  describe("manual equipment", () => {
+    async function anyCase() {
+      const [row] = await db
+        .select({ id: offboardingCases.id, name: offboardingCases.name })
+        .from(offboardingCases)
+        .where(eq(offboardingCases.orgId, defaultOrgId))
+        .orderBy(asc(offboardingCases.name))
+        .limit(1);
+
+      return row!;
+    }
+
+    function addItem(caseId: string, tag: string) {
+      return call("/equipment", "POST", { caseId, item: "Notebook", tag, returnMethod: "pickup" });
+    }
+
+    it("adds an item to a case and lists it as editable", async () => {
+      const target = await anyCase();
+      const res = await addItem(target.id, "MAN-001");
+
+      expect(res.status).toBe(201);
+      expect(await res.json()).toEqual({
+        id: expect.any(String),
+        item: "Notebook",
+        tag: "MAN-001",
+        returnMethod: "pickup",
+        scheduledDate: null,
+        status: "with_person",
+      });
+
+      const listed = await repos.employee.listEquipmentReturns(defaultOrgId, target.id);
+
+      expect(listed).toContainEqual(
+        expect.objectContaining({ code: "MAN-001", person: target.name, fromEmployeePlan: false }),
+      );
+    });
+
+    it("refuses an asset tag already in use", async () => {
+      const target = await anyCase();
+
+      await addItem(target.id, "MAN-002");
+
+      const res = await addItem(target.id, "MAN-002");
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "Asset tag already in use" });
+    });
+
+    it("refuses a case from another organization", async () => {
+      const res = await addItem(missingCaseId, "MAN-003");
+
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: "Case not found" });
+    });
+
+    it("rejects a blank item or a tag with spaces", async () => {
+      const target = await anyCase();
+
+      expect(
+        (
+          await call("/equipment", "POST", {
+            caseId: target.id,
+            item: "  ",
+            tag: "MAN-004",
+            returnMethod: "pickup",
+          })
+        ).status,
+      ).toBe(422);
+      expect((await addItem(target.id, "MAN 004")).status).toBe(422);
+    });
+
+    it("edits a manual item", async () => {
+      const target = await anyCase();
+      const created = await (await addItem(target.id, "MAN-005")).json();
+
+      const res = await call(`/equipment/${created.id}`, "PATCH", {
+        item: "Monitor",
+        tag: "MAN-005B",
+        returnMethod: "in_person",
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        ...created,
+        item: "Monitor",
+        tag: "MAN-005B",
+        returnMethod: "in_person",
+      });
+    });
+
+    it("refuses an edit to a tag already in use", async () => {
+      const target = await anyCase();
+
+      await addItem(target.id, "MAN-006");
+
+      const created = await (await addItem(target.id, "MAN-007")).json();
+
+      const res = await call(`/equipment/${created.id}`, "PATCH", {
+        item: "Notebook",
+        tag: "MAN-006",
+        returnMethod: "pickup",
+      });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "Asset tag already in use" });
+    });
+
+    it("removes a manual item", async () => {
+      const target = await anyCase();
+      const created = await (await addItem(target.id, "MAN-008")).json();
+
+      expect((await call(`/equipment/${created.id}`, "DELETE")).status).toBe(204);
+      expect((await call(`/equipment/${created.id}`, "DELETE")).status).toBe(404);
+    });
+
+    it("leaves items from the employee plan to the plan", async () => {
+      const target = await anyCase();
+
+      const [planned] = await db
+        .insert(equipment)
+        .values({
+          orgId: defaultOrgId,
+          caseId: target.id,
+          item: "Celular",
+          tag: "PLAN-001",
+          returnMethod: "pickup",
+          status: "with_person",
+          fromEmployeePlan: true,
+        })
+        .returning({ id: equipment.id });
+
+      const edit = await call(`/equipment/${planned!.id}`, "PATCH", {
+        item: "Outro",
+        tag: "PLAN-001",
+        returnMethod: "pickup",
+      });
+
+      expect(edit.status).toBe(409);
+      expect(await edit.json()).toEqual({ error: "Equipment comes from the employee plan" });
+      expect((await call(`/equipment/${planned!.id}`, "DELETE")).status).toBe(409);
+    });
+
+    it("rethrows database errors other than a tag clash", async () => {
+      const target = await anyCase();
+      const created = await (await addItem(target.id, "MAN-011")).json();
+
+      await expect(
+        repos.equipment.updateEquipment(defaultOrgId, created.id, {
+          item: "x".repeat(300),
+          tag: "MAN-011",
+          returnMethod: "pickup",
+        }),
+      ).rejects.toThrow();
+    });
+
+    it("answers 404 for an unknown item", async () => {
+      const edit = await call(`/equipment/${missingTaskId}`, "PATCH", {
+        item: "Notebook",
+        tag: "MAN-009",
+        returnMethod: "pickup",
+      });
+
+      expect(edit.status).toBe(404);
+      expect(await edit.json()).toEqual({ error: "Equipment not found" });
+    });
+
+    it("lets visualizador neither add nor remove items", async () => {
+      const headers = {
+        "x-test-session": "visualizador",
+        origin: webOrigin,
+        "content-type": "application/json",
+      };
+
+      const target = await anyCase();
+
+      const add = await app.handle(
+        new Request("http://localhost/api/equipment", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            caseId: target.id,
+            item: "X",
+            tag: "MAN-010",
+            returnMethod: "pickup",
+          }),
+        }),
+      );
+
+      const remove = await app.handle(
+        new Request(`http://localhost/api/equipment/${missingTaskId}`, {
+          method: "DELETE",
+          headers,
+        }),
+      );
+
+      expect(add.status).toBe(403);
+      expect(remove.status).toBe(403);
+    });
   });
 
   it("lists exit surveys with case names, newest first", async () => {
@@ -9206,7 +9756,8 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
       | { done: boolean }
       | { code: string; received: boolean }
       | { shareOutcomeWithHr: boolean }
-      | { email: string; callbackURL: string },
+      | { email: string; callbackURL: string }
+      | { code: string },
     origin = webOrigin,
     nativeOrigin?: string,
     grantId = cookie ? grants.get(cookie) : undefined,
@@ -9449,6 +10000,9 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     const taskPath = "/employee/checklist/";
     expect((await request(taskPath + manual.id, "PATCH", cookie, { done: true })).status).toBe(403);
     expect(
+      (await request("/employee/tracking-code", "PATCH", cookie, { code: "AA000000000BR" })).status,
+    ).toBe(403);
+    expect(
       (
         await request("/employee/state", "PUT", cookie, {
           key: "consent",
@@ -9482,6 +10036,34 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
         },
       );
     }
+
+    expect(journey.trackingCode).toBeNull();
+
+    expect(
+      (await request("/employee/tracking-code", "PATCH", cookie, { code: "INVALID!" })).status,
+    ).toBe(422);
+
+    const trackingResult = await (
+      await request("/employee/tracking-code", "PATCH", cookie, { code: "AB123456789BR" })
+    ).json();
+
+    expect(trackingResult.trackingCode).toBe("AB123456789BR");
+
+    const journeyAfterTracking = await (await request("/employee/journey", "GET", cookie)).json();
+
+    expect(journeyAfterTracking.trackingCode).toBe("AB123456789BR");
+
+    await db
+      .update(tasks)
+      .set({ checklistStepId: null })
+      .where(and(eq(tasks.caseId, record.id), eq(tasks.checklistStepId, "collect")));
+    expect(
+      (await request("/employee/tracking-code", "PATCH", cookie, { code: "XX000000000BR" })).status,
+    ).toBe(404);
+    await db
+      .update(tasks)
+      .set({ checklistStepId: "collect" })
+      .where(and(eq(tasks.caseId, record.id), isNull(tasks.checklistStepId)));
 
     const booking = {
       method: "pickup",

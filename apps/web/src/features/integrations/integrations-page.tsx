@@ -3,7 +3,6 @@ import {
   CreditCardIcon,
   File01Icon,
   HeartCheckIcon,
-  LaptopIcon,
   Mail01Icon,
   MedicalFileIcon,
   RefreshIcon,
@@ -101,12 +100,6 @@ const catalog: Integration[] = [
     logo: "/brands/hubspot.svg",
     purpose: "Transfere negócios e contatos.",
     comingSoon: true,
-  },
-  {
-    name: "Inventário de TI",
-    category: "equipment",
-    icon: LaptopIcon,
-    purpose: "Lista os bens de cada pessoa e registra a entrada no estoque.",
   },
   {
     name: "Transportadora",

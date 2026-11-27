@@ -1,5 +1,5 @@
 {
-  "id": "1fb5b510-6e8c-4db9-9e74-8ee14047faf9",
+  "id": "62e19b39-397d-4f44-9835-e20d1e73304d",
   "prevId": "4e5308a4-6115-431b-ad04-7c95a2a7fcbd",
   "version": "7",
   "dialect": "postgresql",
@@ -1326,6 +1326,223 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.benefit_assignments": {
+      "name": "benefit_assignments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'00000000-0000-0000-0000-000000000001'"
+        },
+        "profile_id": {
+          "name": "profile_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "assigned_plan_id": {
+          "name": "assigned_plan_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "effective_plan_id": {
+          "name": "effective_plan_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "benefit_assignment_source",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valid_until": {
+          "name": "valid_until",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "copay_subscription_id": {
+          "name": "copay_subscription_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "grace_until": {
+          "name": "grace_until",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "benefit_assignments_profile_id_idx": {
+          "name": "benefit_assignments_profile_id_idx",
+          "columns": [
+            {
+              "expression": "profile_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "benefit_assignments_org_id_idx": {
+          "name": "benefit_assignments_org_id_idx",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "benefit_assignments_org_id_organizations_id_fk": {
+          "name": "benefit_assignments_org_id_organizations_id_fk",
+          "tableFrom": "benefit_assignments",
+          "tableTo": "organizations",
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "benefit_assignments_profile_id_talent_profiles_id_fk": {
+          "name": "benefit_assignments_profile_id_talent_profiles_id_fk",
+          "tableFrom": "benefit_assignments",
+          "tableTo": "talent_profiles",
+          "columnsFrom": ["profile_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "benefit_assignments_assigned_plan_id_plans_id_fk": {
+          "name": "benefit_assignments_assigned_plan_id_plans_id_fk",
+          "tableFrom": "benefit_assignments",
+          "tableTo": "plans",
+          "columnsFrom": ["assigned_plan_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "benefit_assignments_effective_plan_id_plans_id_fk": {
+          "name": "benefit_assignments_effective_plan_id_plans_id_fk",
+          "tableFrom": "benefit_assignments",
+          "tableTo": "plans",
+          "columnsFrom": ["effective_plan_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.benefit_policies": {
+      "name": "benefit_policies",
+      "schema": "",
+      "columns": {
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "default_plan_id": {
+          "name": "default_plan_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "benefit_duration_months": {
+          "name": "benefit_duration_months",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 6
+        },
+        "rules": {
+          "name": "rules",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "benefit_policies_org_id_organizations_id_fk": {
+          "name": "benefit_policies_org_id_organizations_id_fk",
+          "tableFrom": "benefit_policies",
+          "tableTo": "organizations",
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "benefit_policies_default_plan_id_plans_id_fk": {
+          "name": "benefit_policies_default_plan_id_plans_id_fk",
+          "tableFrom": "benefit_policies",
+          "tableTo": "plans",
+          "columnsFrom": ["default_plan_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.billing_webhook_events": {
       "name": "billing_webhook_events",
       "schema": "",
@@ -1918,13 +2135,6 @@
           "notNull": true,
           "default": "'disconnected'"
         },
-        "config": {
-          "name": "config",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -1941,6 +2151,21 @@
         }
       },
       "indexes": {
+        "integrations_name_idx": {
+          "name": "integrations_name_idx",
+          "columns": [
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "integrations_org_name_idx": {
           "name": "integrations_org_name_idx",
           "columns": [
@@ -2937,6 +3162,34 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'[]'::jsonb"
+        },
+        "per_person_price_cents": {
+          "name": "per_person_price_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "ai_apply_daily_limit": {
+          "name": "ai_apply_daily_limit",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "ai_apply_priority": {
+          "name": "ai_apply_priority",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "detailed_score": {
+          "name": "detailed_score",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "created_at": {
           "name": "created_at",
@@ -4315,6 +4568,11 @@
       "name": "background_job_status",
       "schema": "public",
       "values": ["pending", "running", "done", "failed"]
+    },
+    "public.benefit_assignment_source": {
+      "name": "benefit_assignment_source",
+      "schema": "public",
+      "values": ["default", "rule", "manual"]
     },
     "public.connection_status": {
       "name": "connection_status",

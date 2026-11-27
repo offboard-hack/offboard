@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { benefitEntitlement } from "./entitlement.js";
 import { careerPlanOf, careerPro, type CareerStanding } from "./career-pro.js";
 
 const now = new Date("2026-11-26T15:00:00Z");
@@ -27,12 +28,13 @@ describe("careerPlanOf", () => {
     expect(careerPlanOf(standing(), now)).toEqual({
       company: { name: "Platinum Premium", includesAiApply: true, sponsoredUntil: "2027-02-28" },
       individual: null,
-      aiApply: { allowedBy: "company" },
+      benefit: null,
+      aiApply: { allowedBy: "company", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
     expect(
       careerPlanOf(standing({ company: { ...top, status: "trialing" } }), now).aiApply,
-    ).toEqual({ allowedBy: "company" });
+    ).toEqual({ allowedBy: "company", dailyLimit: 10 });
   });
 
   it("counts the sponsorship date in São Paulo, inclusive", () => {
@@ -44,7 +46,8 @@ describe("careerPlanOf", () => {
     expect(careerPlanOf(lastDay, new Date("2026-11-27T03:00:00Z"))).toEqual({
       company: { name: "Platinum Premium", includesAiApply: true, sponsoredUntil: "2026-11-26" },
       individual: null,
-      aiApply: { allowedBy: null },
+      benefit: null,
+      aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: true, priceCents: 7900, dailyLimit: 10 },
     });
   });
@@ -64,7 +67,8 @@ describe("careerPlanOf", () => {
     ).toEqual({
       company: { name: "Gold", includesAiApply: false, sponsoredUntil: "2027-02-28" },
       individual: null,
-      aiApply: { allowedBy: null },
+      benefit: null,
+      aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: true, priceCents: 7900, dailyLimit: 10 },
     });
 
@@ -90,18 +94,21 @@ describe("careerPlanOf", () => {
     expect(pro("2026-12-26")).toEqual({
       company: { name: null, includesAiApply: false, sponsoredUntil: "2027-02-28" },
       individual: { plan: "carreira-pro", status: "active", currentPeriodEnd: "2026-12-26" },
-      aiApply: { allowedBy: "individual" },
+      benefit: null,
+      aiApply: { allowedBy: "individual", dailyLimit: 10 },
       upgrade: { offered: false, priceCents: 7900, dailyLimit: 10 },
     });
     expect(pro("2026-11-26").aiApply.allowedBy).toBe("individual");
     expect(pro(null).aiApply.allowedBy).toBe("individual");
     expect(pro("2026-11-25")).toMatchObject({
-      aiApply: { allowedBy: null },
+      benefit: null,
+      aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: true },
     });
     expect(pro("2026-12-26", "pending")).toMatchObject({
       individual: { plan: "carreira-pro", status: "pending", currentPeriodEnd: "2026-12-26" },
-      aiApply: { allowedBy: null },
+      benefit: null,
+      aiApply: { allowedBy: null, dailyLimit: 10 },
       upgrade: { offered: true },
     });
   });
@@ -127,7 +134,8 @@ describe("careerPlanOf", () => {
     });
 
     expect(careerPlanOf(both, now)).toMatchObject({
-      aiApply: { allowedBy: "company" },
+      benefit: null,
+      aiApply: { allowedBy: "company", dailyLimit: 10 },
       upgrade: { offered: false },
     });
   });
@@ -141,5 +149,82 @@ describe("careerPlanOf", () => {
         ).aiApply.allowedBy,
       ).toBeNull();
     }
+  });
+});
+
+describe("benefitEntitlement", () => {
+  it("is sponsored while the benefit has AI Apply and has not expired", () => {
+    const benefit = { aiApplyDailyLimit: 3, validUntil: "2027-06-01" };
+
+    expect(benefitEntitlement(benefit, "2026-11-26")).toEqual({
+      kind: "sponsored",
+      until: "2027-06-01",
+    });
+    expect(benefitEntitlement(benefit, "2027-06-01").kind).toBe("sponsored");
+  });
+
+  it("is lapsed without AI Apply, once expired, or without a benefit", () => {
+    const lapsed = { kind: "lapsed", until: null };
+
+    expect(
+      benefitEntitlement({ aiApplyDailyLimit: 0, validUntil: "2027-06-01" }, "2026-11-26"),
+    ).toEqual(lapsed);
+    expect(
+      benefitEntitlement({ aiApplyDailyLimit: 10, validUntil: "2026-01-01" }, "2026-11-26"),
+    ).toEqual(lapsed);
+    expect(benefitEntitlement(null, "2026-11-26")).toEqual(lapsed);
+  });
+});
+
+describe("careerPlanOf with a benefit", () => {
+  const gold = {
+    planName: "Gold",
+    aiApplyDailyLimit: 3,
+    aiApplyPriority: false,
+    detailedScore: true,
+    validUntil: "2027-06-01",
+    source: "rule" as const,
+  };
+
+  const silver = { name: "Silver", slug: "silver", status: "active" };
+
+  it("grants AI Apply from the benefit with its own daily limit", () => {
+    const plan = careerPlanOf(standing({ company: silver, benefit: gold }), now);
+
+    expect(plan.aiApply).toEqual({ allowedBy: "benefit", dailyLimit: 3 });
+    expect(plan.benefit).toEqual(gold);
+  });
+
+  it("never grants an expired benefit and falls back to the company", () => {
+    const plan = careerPlanOf(standing({ benefit: { ...gold, validUntil: "2026-01-01" } }), now);
+
+    expect(plan.aiApply).toEqual({ allowedBy: "company", dailyLimit: 10 });
+  });
+
+  it("never grants a benefit without AI Apply", () => {
+    const plan = careerPlanOf(
+      standing({ company: silver, benefit: { ...gold, aiApplyDailyLimit: 0 } }),
+      now,
+    );
+
+    expect(plan.aiApply).toEqual({ allowedBy: null, dailyLimit: 10 });
+  });
+
+  it("lets a higher tier win over a lower benefit", () => {
+    const individual = { status: "active", currentPeriodEnd: "2027-01-01" } as const;
+
+    expect(
+      careerPlanOf(standing({ company: silver, individual, benefit: gold }), now).aiApply,
+    ).toEqual({ allowedBy: "individual", dailyLimit: 10 });
+    expect(careerPlanOf(standing({ benefit: gold }), now).aiApply).toEqual({
+      allowedBy: "company",
+      dailyLimit: 10,
+    });
+  });
+
+  it("names the benefit when it matches the top tier", () => {
+    const plan = careerPlanOf(standing({ benefit: { ...gold, aiApplyDailyLimit: 10 } }), now);
+
+    expect(plan.aiApply).toEqual({ allowedBy: "benefit", dailyLimit: 10 });
   });
 });

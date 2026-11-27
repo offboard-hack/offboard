@@ -1,5 +1,6 @@
 import type { ApiClient, Treaty } from "@offboard/api-client";
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
+import { z } from "zod";
 import { getApiClient } from "@/shared/lib/api-client";
 
 type EquipmentApi = ApiClient["api"]["equipment-returns"];
@@ -88,4 +89,45 @@ export async function updateEquipmentReceipt({
   if (error) throw new Error("Não foi possível atualizar o recebimento. Tente novamente.");
 
   return data;
+}
+
+const equipmentFailure = z.object({ error: z.string() });
+
+export class EquipmentChangeError extends Error {
+  constructor(readonly code: string | undefined) {
+    super("Failed to change equipment");
+  }
+}
+
+type EquipmentInput = {
+  caseId: string;
+  item: string;
+  tag: string;
+  returnMethod: "pickup" | "in_person";
+};
+
+function useEquipmentChange<Variables>(change: (variables: Variables) => Promise<void>) {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: change,
+    onSuccess: () => client.invalidateQueries({ queryKey: equipmentReturnsKey }),
+  });
+}
+
+export function useSaveEquipment(id?: string) {
+  return useEquipmentChange(async ({ caseId, ...fields }: EquipmentInput) => {
+    const api = getApiClient().api.equipment;
+    const { error } = id ? await api({ id }).patch(fields) : await api.post({ caseId, ...fields });
+
+    if (error) throw new EquipmentChangeError(equipmentFailure.safeParse(error.value).data?.error);
+  });
+}
+
+export function useRemoveEquipment(id: string) {
+  return useEquipmentChange<void>(async () => {
+    const { error } = await getApiClient().api.equipment({ id }).delete();
+
+    if (error) throw new EquipmentChangeError(equipmentFailure.safeParse(error.value).data?.error);
+  });
 }

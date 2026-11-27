@@ -624,6 +624,11 @@ describe.skipIf(!url)("account repository", () => {
         cpf: { value: null, share: false },
         birthDate: { value: null, share: false },
         address: { value: null, share: false },
+        gender: { value: null, share: false },
+        race: { value: null, share: false },
+        orientation: { value: null, share: false },
+        disability: { value: null, share: false },
+        pronoun: { value: null, share: false },
       },
     });
 

@@ -47,6 +47,7 @@ function build(options: {
   found?: TalentProfile | undefined;
   companyActive?: boolean;
   individual?: IndividualPlan;
+  benefit?: { aiApplyDailyLimit: number; validUntil: string } | null;
   handler?: () => void;
   realClock?: boolean;
   employee?: () => Promise<EmployeePrincipal | null>;
@@ -81,6 +82,7 @@ function build(options: {
           return options.companyActive ?? true;
         },
         individualPlan: async () => options.individual ?? null,
+        benefitPlan: "benefit" in options ? async () => options.benefit ?? null : undefined,
         now: options.realClock ? undefined : () => now,
       }),
     )
@@ -232,6 +234,66 @@ describe("talentAccess", () => {
     }).handle(new Request("http://localhost/entitlement"));
 
     expect(await open.json()).toEqual({ kind: "individual", until: null });
+  });
+
+  it("lets a benefit tier with AI Apply keep access once the company sponsorship lapses", async () => {
+    const granted = await build({
+      companyActive: false,
+      benefit: { aiApplyDailyLimit: 3, validUntil: "2026-06-15" },
+    }).handle(new Request("http://localhost/entitlement"));
+
+    expect(await granted.json()).toEqual({ kind: "sponsored", until: "2026-06-15" });
+  });
+
+  it("falls back to Carreira Pro when the benefit is expired, empty or absent", async () => {
+    const individual = { status: "active", currentPeriodEnd: null } as const;
+
+    for (const benefit of [
+      { aiApplyDailyLimit: 3, validUntil: "2026-06-14" },
+      { aiApplyDailyLimit: 0, validUntil: "2099-01-01" },
+      null,
+    ]) {
+      const response = await build({ companyActive: false, individual, benefit }).handle(
+        new Request("http://localhost/entitlement"),
+      );
+
+      expect(await response.json()).toEqual({ kind: "individual", until: null });
+    }
+
+    const lapsed = await build({
+      companyActive: false,
+      benefit: { aiApplyDailyLimit: 3, validUntil: "2026-06-14" },
+    }).handle(new Request("http://localhost/active"));
+
+    expect(lapsed.status).toBe(402);
+  });
+
+  it("does not consult the benefit while the company sponsors", async () => {
+    const benefitPlan = vi.fn();
+
+    const response = await new Elysia()
+      .use(
+        talentAccess({
+          auth: {
+            handler: async () => new Response(),
+            resolvePrincipal: async () => ({
+              kind: "talent",
+              profile: { id: "t1", name: "Ana", email: "a@b.c" },
+            }),
+          },
+          webOrigin,
+          talent: { findById: async () => profile, ensureForCollaborator: async () => profile },
+          companyActive: async () => true,
+          individualPlan: async () => null,
+          benefitPlan,
+          now: () => now,
+        }),
+      )
+      .get("/e", ({ entitlement }) => entitlement, { talent: "active" })
+      .handle(new Request("http://localhost/e"));
+
+    expect((await response.json()).kind).toBe("sponsored");
+    expect(benefitPlan).not.toHaveBeenCalled();
   });
 
   it("answers 402 once the Carreira Pro is canceled or its period ended", async () => {

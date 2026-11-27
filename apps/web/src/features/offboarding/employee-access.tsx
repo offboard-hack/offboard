@@ -5,6 +5,8 @@ import {
   employeeAccessSettingsSchema,
   employeePlanSchema,
 } from "@offboard/employee";
+import { MailSend01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useForm } from "@tanstack/react-form";
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -226,6 +228,45 @@ class EmployeeSettingsChanged extends Error {
   }
 }
 
+function InviteButton({ caseId, email }: { caseId: string; email: string }) {
+  const queryClient = useQueryClient();
+
+  const invite = useMutation({
+    async mutationFn() {
+      const result = await getApiClient().api["employee-access"]({ caseId }).invite.post();
+
+      if (result.status === 429) {
+        throw new Error("Este caso já recebeu 3 convites nas últimas 24 horas. Tente mais tarde.");
+      }
+
+      if (result.error) throw new Error("Não foi possível enviar o convite. Tente novamente.");
+    },
+    onSuccess() {
+      void queryClient.invalidateQueries({ queryKey: offboardingsQuery.queryKey });
+    },
+  });
+
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <Button
+        type="button"
+        variant="outline"
+        disabled={invite.isPending}
+        onClick={() => invite.mutate()}
+      >
+        <HugeiconsIcon icon={MailSend01Icon} data-icon="inline-start" aria-hidden="true" />
+        {invite.isPending ? "Enviando convite…" : "Enviar convite"}
+      </Button>
+      {invite.isSuccess ? <p role="status">Convite enviado para {email}.</p> : null}
+      {invite.error ? (
+        <p role="alert" className="text-destructive">
+          {invite.error.message}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function AccessForm({
   caseId,
   settings,
@@ -364,8 +405,10 @@ function AccessForm({
       }}
     >
       <p className="text-muted-foreground">
-        O colaborador entra com um código por e-mail. Apagar o e-mail revoga o acesso.
+        O colaborador entra com um código por e-mail. Ao salvar um e-mail novo, enviamos o convite
+        de acesso. Apagar o e-mail revoga o acesso.
       </p>
+      {baseline.email ? <InviteButton caseId={caseId} email={baseline.email} /> : null}
       {fields.map(({ key, label, type }) => (
         <form.Field key={key} name={key}>
           {(field) => (

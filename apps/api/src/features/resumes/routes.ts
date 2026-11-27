@@ -7,10 +7,11 @@ import type { ObjectStorage } from "../../shared/object-storage.js";
 import { pdfAttachment } from "../../shared/resume-pdf.js";
 import type { TalentAccessPlugin } from "../../shared/talent-access.js";
 import { resumeContentInputSchema, withNodeIds, type ResumeContent } from "./content.js";
-import { readResumeFile } from "./document.js";
-import { extractResume } from "./extract.js";
+import { readResumeFile, type ResumeFile } from "./document.js";
+import { extractResume, isEmptyResume } from "./extract.js";
 import { scoreIsCurrent, type ResumesRepository } from "./repository.js";
 import {
+  resumeContent,
   resumeContentBody,
   resumeResponse,
   suggestionResponse,
@@ -35,6 +36,24 @@ const docxType = "application/vnd.openxmlformats-officedocument.wordprocessingml
 
 function discard(storage: ObjectStorage, keys: string[]) {
   return storage.remove(keys).catch(() => undefined);
+}
+
+async function storeFile(storage: ObjectStorage, profileId: string, file: ResumeFile) {
+  const key = `resumes/${profileId}/${crypto.randomUUID()}.${file.kind}`;
+
+  await storage.put(key, file.data, file.kind === "pdf" ? "application/pdf" : docxType);
+
+  return key;
+}
+
+async function readFile(file: File) {
+  const read = readResumeFile(new Uint8Array(await file.arrayBuffer()));
+
+  if (read === "unsupported") return { error: "Unsupported file" } as const;
+
+  if (read === "too_large") return { error: "File too large" } as const;
+
+  return read;
 }
 
 export function resumesRoutes(
@@ -73,15 +92,11 @@ export function resumesRoutes(
           return status(503, { error: "Résumé upload not configured" });
         }
 
-        const file = readResumeFile(new Uint8Array(await body.file.arrayBuffer()));
+        const file = await readFile(body.file);
 
-        if (file === "unsupported") return status(422, { error: "Unsupported file" });
+        if ("error" in file) return status(422, file);
 
-        if (file === "too_large") return status(422, { error: "File too large" });
-
-        const key = `resumes/${me.id}/${crypto.randomUUID()}.${file.kind}`;
-
-        await storage.put(key, file.data, file.kind === "pdf" ? "application/pdf" : docxType);
+        const key = await storeFile(storage, me.id, file);
 
         const content = await extractResume(generate, file).catch(
           logFailure("résumé extraction failed"),
@@ -120,6 +135,91 @@ export function resumesRoutes(
           502: errorResponse,
           503: errorResponse,
         },
+      },
+    )
+    .post(
+      "/me/resume/read",
+      async ({ body, status }) => {
+        const { generate } = deps;
+
+        if (!generate) return status(503, { error: "Résumé reading not configured" });
+
+        const file = await readFile(body.file);
+
+        if ("error" in file) return status(422, file);
+
+        const content = await extractResume(generate, file).catch(
+          logFailure("résumé extraction failed"),
+        );
+
+        if (content === undefined) return status(502, { error: "Could not read the résumé" });
+
+        if (content === "not_a_resume") return status(422, { error: "File is not a résumé" });
+
+        return { content };
+      },
+      {
+        talent: "active",
+        body: t.Object({ file: t.File({ maxSize: maxBytes }) }),
+        response: {
+          200: t.Object({ content: resumeContent }),
+          422: errorResponse,
+          502: errorResponse,
+          503: errorResponse,
+        },
+      },
+    )
+    .post(
+      "/me/resume",
+      async ({ me, body, status }) => {
+        const input = resumeContentInputSchema.safeParse(body.content);
+
+        if (!input.success) return status(422, invalidContent);
+
+        const content = withNodeIds(input.data);
+
+        if (content === "duplicate_ids") return status(422, { error: "Duplicate node ids" });
+
+        if (isEmptyResume(content)) return status(422, { error: "Résumé is empty" });
+
+        const { storage } = deps;
+        let key: string | null = null;
+
+        if (body.file) {
+          if (!storage) return status(503, { error: "Résumé upload not configured" });
+
+          const file = await readFile(body.file);
+
+          if ("error" in file) return status(422, file);
+
+          key = await storeFile(storage, me.id, file);
+        }
+
+        const saved = await repos.replaceBase(me.id, content, key).catch(async (error) => {
+          if (storage && key) await discard(storage, [key]);
+
+          throw error;
+        });
+
+        if (storage && saved.previousFileKey) await discard(storage, [saved.previousFileKey]);
+
+        const rescoring = await deps.rescore(saved.resume.id, me.id);
+
+        return { ...saved.resume, rescoring };
+      },
+      {
+        talent: "active",
+        body: t.Object({
+          content: resumeContentBody,
+          file: t.Optional(t.File({ maxSize: maxBytes })),
+        }),
+        response: {
+          200: resumeResponse,
+          422: errorResponse,
+          503: errorResponse,
+        },
+        error: ({ code, status }) =>
+          code === "VALIDATION" ? status(422, invalidContent) : undefined,
       },
     )
     .get(
