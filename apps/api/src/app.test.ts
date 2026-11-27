@@ -10036,6 +10036,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
   const employeeAuth = createAuth({
     db,
     origin: webOrigin,
+    staffEmails: new Set(),
     secret: randomUUID() + randomUUID(),
     ipAddressHeaders: ["x-test-employee-ip"],
     talent: repos.talent,

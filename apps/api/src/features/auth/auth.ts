@@ -21,6 +21,7 @@ import { z } from "zod";
 
 import type { PortalAuth, TalentPrincipal } from "../../shared/portal-auth.js";
 import { isEmployeeApp } from "../../shared/employee-auth.js";
+import { parseStaffEmails } from "../../shared/staff-access.js";
 import { createEmailSender, type CloudflareEmailBinding } from "./email.js";
 import { signInCodeEmail, signInEmail, signInLinkMinutes } from "./sign-in-email.js";
 
@@ -87,7 +88,18 @@ const sessionAudience = z.union([
   z
     .object({ memberId: z.string() })
     .transform(({ memberId }) => ({ audience: "member" as const, id: memberId })),
+  z
+    .object({ staffEmail: z.string() })
+    .transform(({ staffEmail }) => ({ audience: "staff" as const, id: staffEmail })),
 ]);
+
+function codeAudienceOf(header: string | null) {
+  if (header === "member") return "member" as const;
+
+  if (header === "staff") return "staff" as const;
+
+  return "employee" as const;
+}
 
 const appCallback = z.object({ callbackURL: z.string().regex(/^\/app(?:[/?]|$)/) });
 const talentSession = z.object({ talentProfileId: z.string() });
@@ -115,11 +127,13 @@ export function createAuth({
   sendCode,
   onVercel = false,
   ipAddressHeaders = onVercel ? ["x-vercel-forwarded-for"] : [],
+  staffEmails,
 }: {
   db: Database;
   origin: string;
   secret: string;
   talent: TalentDirectory;
+  staffEmails: ReadonlySet<string>;
   sendLink: (message: { email: string; url: string }) => Promise<void>;
   sendCode?: (message: { email: string; code: string }) => Promise<void>;
   onVercel?: boolean;
@@ -152,9 +166,10 @@ export function createAuth({
   const normalizedEmployeeEmail = sql<string>`lower(${employeeAccess.email})`;
 
   type CodeScope = {
-    audience: "employee" | "member";
+    audience: "employee" | "member" | "staff";
     grant: Awaited<ReturnType<typeof findEmployee>>;
     member: Awaited<ReturnType<typeof findMember>> | undefined;
+    staffEmail: string | undefined;
   };
 
   const codeScope = new AsyncLocalStorage<CodeScope>();
@@ -195,11 +210,33 @@ export function createAuth({
       return { audience: "employee" as const, grant: scope.grant };
     }
 
+    if (scope?.audience === "staff" && scope.staffEmail) {
+      return { audience: "staff" as const, email: scope.staffEmail };
+    }
+
     throw invalidCode();
+  }
+
+  function subjectName(subject: ReturnType<typeof requireCodeSubject>) {
+    if (subject.audience === "member") return subject.member.name;
+
+    if (subject.audience === "staff") return subject.email;
+
+    return subject.grant.name;
+  }
+
+  function sessionSubject(subject: ReturnType<typeof requireCodeSubject>) {
+    if (subject.audience === "member") return { memberId: subject.member.id };
+
+    if (subject.audience === "staff") return { staffEmail: subject.email };
+
+    return { employeeCaseId: subject.grant.caseId, employeeGrantId: subject.grant.grantId };
   }
 
   async function codeRecipient(email: string) {
     const scope = codeScope.getStore();
+
+    if (scope?.audience === "staff") return scope.staffEmail === email;
 
     return scope?.audience === "member"
       ? scope.member && findMember(email, scope.member.id)
@@ -288,6 +325,7 @@ export function createAuth({
           employeeCaseId: { type: "string", required: false, input: false },
           employeeGrantId: { type: "string", required: false, input: false },
           talentProfileId: { type: "string", required: false, input: false },
+          staffEmail: { type: "string", required: false, input: false },
         },
       },
       hooks: {
@@ -302,6 +340,10 @@ export function createAuth({
 
             if (scope && parsed.success) {
               if (scope.audience === "member") scope.member = await findMember(parsed.data.email);
+              else if (scope.audience === "staff")
+                scope.staffEmail = staffEmails.has(parsed.data.email)
+                  ? parsed.data.email
+                  : undefined;
               else scope.grant = await findEmployee(parsed.data.email);
             }
           }
@@ -316,10 +358,7 @@ export function createAuth({
               if (context?.path === codeSignInPath) {
                 const subject = requireCodeSubject();
 
-                const name =
-                  subject.audience === "member" ? subject.member.name : subject.grant.name;
-
-                return { data: { name, image: null } };
+                return { data: { name: subjectName(subject), image: null } };
               }
 
               const profileId = callbackContext.parse(context).query.token;
@@ -335,15 +374,7 @@ export function createAuth({
               if (context?.path === codeSignInPath) {
                 const subject = requireCodeSubject();
 
-                return {
-                  data:
-                    subject.audience === "member"
-                      ? { memberId: subject.member.id }
-                      : {
-                          employeeCaseId: subject.grant.caseId,
-                          employeeGrantId: subject.grant.grantId,
-                        },
-                };
+                return { data: sessionSubject(subject) };
               }
 
               const profileId = callbackContext.parse(context).query.token;
@@ -424,14 +455,13 @@ export function createAuth({
 
       const native = nativeEndpoints.has(path) && isEmployeeApp(request, origin);
 
-      const codeAudience =
-        request.headers.get(codeAudienceHeader) === "member" ? "member" : "employee";
+      const codeAudience = codeAudienceOf(request.headers.get(codeAudienceHeader));
 
       if (request.method === "POST" && request.headers.get("origin") !== origin && !native) {
         return new Response(null, { status: 403 });
       }
 
-      if (native && codeAudience === "member" && codeEndpoints.has(path)) {
+      if (native && codeAudience !== "employee" && codeEndpoints.has(path)) {
         return new Response(null, { status: 403 });
       }
 
@@ -473,13 +503,18 @@ export function createAuth({
           Boolean(request.headers.get("cookie")?.includes(`${employeeCookie}.session_token=`)));
 
       const auth =
-        codeAudience === "member" ||
+        codeAudience !== "employee" ||
         linkPaths.has(path) ||
         (path === "/sign-out" && !employeeSignOut)
           ? memberAuth
           : employeeAuth;
 
-      const scope: CodeScope = { audience: codeAudience, grant: null, member: undefined };
+      const scope: CodeScope = {
+        audience: codeAudience,
+        grant: null,
+        member: undefined,
+        staffEmail: undefined,
+      };
 
       const response = await codeScope.run(scope, async () => {
         const result = await auth.handler(authRequest);
@@ -513,6 +548,12 @@ export function createAuth({
 
       const { audience, id } = signedIn.data;
       const email = session.user.email.toLowerCase();
+
+      if (audience === "staff") {
+        return staffEmails.has(id)
+          ? { kind: "staff" as const, email: id }
+          : { kind: "forbidden" as const };
+      }
 
       if (audience === "talent") {
         const profile = await talent.findForSignIn(email, id);
@@ -579,6 +620,7 @@ export function createRuntimeAuth(
     origin,
     secret,
     talent,
+    staffEmails: parseStaffEmails(env.BACKOFFICE_STAFF_EMAILS),
     onVercel: env.VERCEL === "1",
     ipAddressHeaders:
       ipAddressHeaders ?? (env.EMAIL_PROVIDER === "console" ? ["x-forwarded-for"] : undefined),

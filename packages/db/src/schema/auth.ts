@@ -36,6 +36,7 @@ export const authSession = pgTable(
     talentProfileId: uuid("talent_profile_id").references(() => talentProfiles.id, {
       onDelete: "cascade",
     }),
+    staffEmail: text("staff_email"),
     expiresAt: timestamp("expires_at").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -47,7 +48,7 @@ export const authSession = pgTable(
     index("auth_session_employee_case_id_idx").on(table.employeeCaseId),
     check(
       "auth_session_one_audience",
-      sql`num_nonnulls(${table.memberId}, ${table.employeeCaseId}, ${table.talentProfileId}) = 1`,
+      sql`num_nonnulls(${table.memberId}, ${table.employeeCaseId}, ${table.talentProfileId}, ${table.staffEmail}) = 1`,
     ),
     check(
       "auth_session_employee_grant",
