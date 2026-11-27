@@ -4612,6 +4612,7 @@ describe.skipIf(!url)("api", () => {
         const embedder = fakeEmbed();
         const app = resumesApp({ embedProfile: embedder.embed });
         const id = await profile();
+        const profileCalls = () => embedder.calls.filter((call) => call.length === 1);
 
         const created = await (await upload(app.instance, id)).json();
 
@@ -4621,7 +4622,7 @@ describe.skipIf(!url)("api", () => {
 
         expect(first.embedding).toHaveLength(1024);
         expect(first.hash).toMatch(/^[0-9a-f]{64}$/);
-        expect(embedder.calls).toEqual([
+        expect(profileCalls()).toEqual([
           [
             "Engenheira de Software\nDez anos de experiência\nDev · Acme · 2019 – atual\nFez X\nTypeScript",
           ],
@@ -4630,7 +4631,7 @@ describe.skipIf(!url)("api", () => {
         await repos.background.enqueue("embed_profile", created.id);
         await app.settle();
 
-        expect(embedder.calls).toHaveLength(1);
+        expect(profileCalls()).toHaveLength(1);
 
         const edited = await request(app.instance, id, "/me/resume", {
           method: "PATCH",
@@ -4647,9 +4648,9 @@ describe.skipIf(!url)("api", () => {
 
         await app.settle();
 
-        expect(embedder.calls).toHaveLength(2);
-        expect(embedder.calls[1][0]).toContain("Inglês (Fluente)\nRecife");
-        expect(embedder.calls[1][0]).not.toContain("maria@example.com");
+        expect(profileCalls()).toHaveLength(2);
+        expect(profileCalls()[1][0]).toContain("Inglês (Fluente)\nRecife");
+        expect(profileCalls()[1][0]).not.toContain("maria@example.com");
         expect((await profileEmbedding(id)).hash).not.toBe(first.hash);
       });
 
@@ -4695,6 +4696,7 @@ describe.skipIf(!url)("api", () => {
               ...repos.resumes,
               withoutProfileEmbedding: () => Promise.reject(new Error("db down")),
             },
+            demo: { ...repos.demo, stored: () => Promise.reject(new Error("demo down")) },
           },
           { ...appOptions, embedProfile: fakeEmbed().embed },
         );
@@ -4710,6 +4712,10 @@ describe.skipIf(!url)("api", () => {
         expect(logged.mock.calls).toContainEqual([
           "profile embedding backfill failed",
           { name: "Error", message: "db down" },
+        ]);
+        expect(logged.mock.calls).toContainEqual([
+          "demo embedding sync failed",
+          { name: "Error", message: "demo down" },
         ]);
         logged.mockRestore();
       });

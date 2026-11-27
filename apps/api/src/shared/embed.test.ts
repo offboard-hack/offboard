@@ -94,40 +94,40 @@ describe("embedding texts", () => {
 
 describe("profileEmbeddingText", () => {
   it("describes the whole résumé for people search, without contact details", () => {
-    expect(
-      profileEmbeddingText({
-        ...content,
-        experiences: [
-          {
-            id: "e1",
-            role: "Tech Lead",
-            company: "Acme",
-            start: "2021",
-            end: null,
-            bullets: [{ id: "b", text: "Liderou 6 pessoas" }],
-          },
-          { id: "e2", role: "Dev", company: "Beta", start: "", end: "2020", bullets: [] },
-        ],
-        education: [
-          { id: "d1", institution: "UFPE", degree: "Computação", start: "2012", end: "2016" },
-          { id: "d2", institution: "Alura", degree: "Go", start: null, end: null },
-        ],
-        skills: [
-          { id: "k1", name: "Go" },
-          { id: "k2", name: "Kubernetes" },
-        ],
-        languages: [
-          { id: "l1", name: "Inglês", level: "Fluente" },
-          { id: "l2", name: "Espanhol", level: null },
-        ],
-        contact: {
-          email: "maria@example.com",
-          phone: "81 99999-0000",
-          city: "Recife, PE",
-          links: ["https://www.linkedin.com/in/maria"],
+    const full: ResumeContent = {
+      ...content,
+      experiences: [
+        {
+          id: "e1",
+          role: "Tech Lead",
+          company: "Acme",
+          start: "2021",
+          end: null,
+          bullets: [{ id: "b", text: "Liderou 6 pessoas" }],
         },
-      }),
-    ).toBe(
+        { id: "e2", role: "Dev", company: "Beta", start: "", end: "2020", bullets: [] },
+      ],
+      education: [
+        { id: "d1", institution: "UFPE", degree: "Computação", start: "2012", end: "2016" },
+        { id: "d2", institution: "Alura", degree: "Go", start: null, end: null },
+      ],
+      skills: [
+        { id: "k1", name: "Go" },
+        { id: "k2", name: "Kubernetes" },
+      ],
+      languages: [
+        { id: "l1", name: "Inglês", level: "Fluente" },
+        { id: "l2", name: "Espanhol", level: null },
+      ],
+      contact: {
+        email: "maria@example.com",
+        phone: "81 99999-0000",
+        city: "Recife, PE",
+        links: ["https://www.linkedin.com/in/maria"],
+      },
+    };
+
+    expect(profileEmbeddingText(full)).toBe(
       [
         "Engenheira de Software",
         "Backend com TypeScript.",
@@ -147,7 +147,7 @@ describe("profileEmbeddingText", () => {
     expect(
       profileEmbeddingText({
         ...content,
-        summary: { id: "s", text: "" },
+        summary: { text: "" },
         experiences: [],
         skills: [],
       }),
