@@ -6,12 +6,13 @@ import { ptBR } from "date-fns/locale";
 import { useState } from "react";
 import { careerInterviewsQuery, useRemoveInterview } from "@/entities/career";
 import type { EmployeeAccount, EmployeeJourney } from "@/entities/employee";
+import { todayAtWorkspace } from "@/entities/offboarding";
 import { Badge } from "@/shared/ui/shadcn/badge";
 import { Button } from "@/shared/ui/shadcn/button";
 import { Calendar } from "@/shared/ui/shadcn/calendar";
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/shared/ui/shadcn/item";
 import { EmployeeEmpty, EmployeeError, EmployeePanel } from "./ui";
-import { agendaItems, dayKey, daysWithItems, itemsOn, monthRange } from "./agenda";
+import { agendaItems, dayKey, daysWithItems, itemsOn, monthRange, parseDay } from "./agenda";
 
 const dayLabel = new Intl.DateTimeFormat("pt-BR", {
   weekday: "long",
@@ -26,8 +27,8 @@ export function EmployeeAgenda({
   account: EmployeeAccount;
   journey: EmployeeJourney;
 }) {
-  const [month, setMonth] = useState(() => new Date());
-  const [selected, setSelected] = useState(() => new Date());
+  const [month, setMonth] = useState(() => parseDay(todayAtWorkspace()));
+  const [selected, setSelected] = useState(() => parseDay(todayAtWorkspace()));
   const { from, to } = monthRange(month);
   const remove = useRemoveInterview(account);
   const interviews = useQuery(careerInterviewsQuery(account, from, to));

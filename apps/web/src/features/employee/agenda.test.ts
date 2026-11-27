@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CareerInterview } from "@/entities/career";
 import type { EmployeeJourney } from "@/entities/employee";
-import { agendaItems, dayKey, daysWithItems, itemsOn, monthRange } from "./agenda";
+import { agendaItems, dayKey, daysWithItems, itemsOn, monthRange, parseDay } from "./agenda";
 
 const checklist = [
   {
@@ -93,6 +93,10 @@ describe("builds the agenda", () => {
 });
 
 describe("handles calendar days", () => {
+  it("parses a day as local midnight", () => {
+    expect(parseDay("2026-12-03")).toEqual(new Date(2026, 11, 3));
+  });
+
   it("formats a local day key", () => {
     expect(dayKey(new Date(2026, 0, 5))).toBe("2026-01-05");
   });

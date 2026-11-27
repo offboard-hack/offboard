@@ -95,8 +95,10 @@ export function itemsOn(items: AgendaItem[], day: string) {
   return items.filter((item) => item.day === day);
 }
 
+export function parseDay(day: string) {
+  return new Date(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8)));
+}
+
 export function daysWithItems(items: AgendaItem[]) {
-  return [...new Set(items.map((item) => item.day))].map(
-    (day) => new Date(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8))),
-  );
+  return [...new Set(items.map((item) => item.day))].map(parseDay);
 }
