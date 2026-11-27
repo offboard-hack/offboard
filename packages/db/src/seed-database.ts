@@ -55,7 +55,7 @@ export async function seedDatabase(
     for (const { tasks: caseTasks, ...item } of fixtures.cases) {
       const [created] = await tx
         .insert(offboardingCases)
-        .values(item)
+        .values({ ...item, orgId: defaultOrgId })
         .returning({ id: offboardingCases.id });
 
       caseIds.set(item.name, created.id);
@@ -66,6 +66,7 @@ export async function seedDatabase(
         const [inserted] = await tx
           .insert(tasks)
           .values({
+            orgId: defaultOrgId,
             caseId: created.id,
             team: seedTask.team,
             title: seedTask.title,
@@ -81,6 +82,7 @@ export async function seedDatabase(
         if (seedTask.subtasks && seedTask.subtasks.length > 0) {
           await tx.insert(subtasks).values(
             seedTask.subtasks.map((sub, j) => ({
+              orgId: defaultOrgId,
               taskId: inserted.id,
               title: sub.title,
               done: sub.done,
@@ -96,7 +98,7 @@ export async function seedDatabase(
 
       if (!caseId) continue;
 
-      const values = { ...item, caseId, scheduledDate: scheduledDate ?? null };
+      const values = { ...item, orgId: defaultOrgId, caseId, scheduledDate: scheduledDate ?? null };
 
       await tx
         .insert(equipment)
@@ -114,17 +116,23 @@ export async function seedDatabase(
 
       await tx
         .insert(exitSurveys)
-        .values({ caseId, ...survey })
+        .values({ orgId: defaultOrgId, caseId, ...survey })
         .onConflictDoUpdate({ target: exitSurveys.caseId, set: survey });
     }
 
     if (seedIntegrations.length > 0) {
-      await tx.insert(integrations).values(seedIntegrations);
+      await tx
+        .insert(integrations)
+        .values(seedIntegrations.map((i) => ({ ...i, orgId: defaultOrgId })));
     }
 
-    await tx.insert(teamMembers).values(fixtures.members);
+    await tx
+      .insert(teamMembers)
+      .values(fixtures.members.map((m) => ({ ...m, orgId: defaultOrgId })));
 
-    await tx.insert(actionConfigs).values(seedActionConfigs);
+    await tx
+      .insert(actionConfigs)
+      .values(seedActionConfigs.map((a) => ({ ...a, orgId: defaultOrgId })));
 
     for (const plan of seedPlans) {
       await tx
@@ -147,12 +155,13 @@ export async function seedDatabase(
 
     const [createdSubscription] = await tx
       .insert(subscriptions)
-      .values({ ...subscription, planId: plan.id })
+      .values({ ...subscription, orgId: defaultOrgId, planId: plan.id })
       .returning({ id: subscriptions.id });
 
     await tx.insert(invoices).values(
       seedInvoices.map((invoice) => ({
         ...invoice,
+        orgId: defaultOrgId,
         subscriptionId: createdSubscription.id,
       })),
     );

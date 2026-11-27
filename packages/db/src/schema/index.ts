@@ -42,7 +42,7 @@ export const organizations = pgTable("organizations", {
 const orgIdColumn = () =>
   uuid("org_id")
     .notNull()
-    .default(defaultOrgId)
+
     .references(() => organizations.id);
 
 export const offboardingCases = pgTable(
@@ -274,7 +274,6 @@ export const integrations = pgTable(
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
-    uniqueIndex("integrations_name_idx").on(table.name),
     uniqueIndex("integrations_org_name_idx").on(table.orgId, table.name),
     index("integrations_org_id_idx").on(table.orgId),
   ],
@@ -288,7 +287,7 @@ export const teamMembers = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     orgId: orgIdColumn(),
     name: varchar("name", { length: 255 }).notNull(),
-    email: varchar("email", { length: 255 }).notNull().unique(),
+    email: varchar("email", { length: 255 }).notNull(),
     role: memberRoleEnum("role").notNull(),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
@@ -312,7 +311,6 @@ export const actionConfigs = pgTable(
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
-    uniqueIndex("action_configs_action_id_idx").on(table.actionId),
     uniqueIndex("action_configs_org_action_id_idx").on(table.orgId, table.actionId),
     index("action_configs_org_id_idx").on(table.orgId),
   ],

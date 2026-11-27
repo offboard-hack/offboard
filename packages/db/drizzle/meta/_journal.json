@@ -85,6 +85,13 @@
       "when": 1795740000006,
       "tag": "0011_add_organizations",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795740000007,
+      "tag": "0012_contract_org_id",
+      "breakpoints": true
     }
   ]
 }

@@ -12,12 +12,12 @@ import {
 import type { MemberRole, TeamMember } from "@/entities/team";
 import { listPagination } from "@/shared/lib/list-pagination";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
+import { PortalFilter } from "@/shared/ui/select";
 import { Button } from "@/shared/ui/shadcn/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/shadcn/popover";
 import { classProps } from "../../shared/lib/class-props";
 import { DataTable } from "../../shared/ui/data-table";
 import type { TableColumn } from "../../shared/ui/data-table";
-import { PortalFilter } from "../../shared/ui/select";
 import { portalStyles as s } from "../../shared/ui/surface.styles";
 import { AddMemberDialog } from "./add-member-dialog";
 import type { NewMember } from "./add-member-dialog";
@@ -93,12 +93,13 @@ export function AccessPage() {
   const refresh = () => client.invalidateQueries(teamQuery);
 
   const add = useMutation({ mutationFn: createTeamMember, onSettled: refresh });
-  const remove = useMutation({ mutationFn: deleteTeamMember, onSettled: refresh });
 
   const updateRole = useMutation({
     mutationFn: ({ id, role }: { id: string; role: MemberRole }) => updateTeamMemberRole(id, role),
     onSettled: refresh,
   });
+
+  const remove = useMutation({ mutationFn: deleteTeamMember, onSettled: refresh });
 
   async function addMember({ name, email, role }: NewMember) {
     await add.mutateAsync({ name, email, role: roleByLabel[role] });
@@ -165,6 +166,11 @@ export function AccessPage() {
       breadcrumb={<ListBreadcrumb title="Equipe e permissões" />}
     >
       <section className="min-w-0" aria-labelledby="equipe">
+        {updateRole.isError && (
+          <p role="alert" className="mb-3 text-sm text-destructive">
+            Não foi possível alterar o papel. Atualize a página e tente novamente.
+          </p>
+        )}
         {remove.isError && (
           <p role="alert" className="mb-3 text-sm text-destructive">
             Não foi possível remover o acesso. Atualize a página e tente novamente.
