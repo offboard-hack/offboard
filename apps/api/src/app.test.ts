@@ -233,6 +233,7 @@ describe.skipIf(!url)("api", () => {
     actionId?: string;
     enabled?: boolean;
     shareOutcomeWithHr?: boolean | string;
+    searchable?: boolean;
     config?: Record<string, ConfigValue>;
     phase?: string;
     event?: string | { type: string; user?: string };
