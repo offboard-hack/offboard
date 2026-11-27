@@ -36,7 +36,9 @@ import {
   applicationEvents,
   applications,
   backgroundJobs,
+  benefitAssignments,
   billingWebhookEvents,
+  copayProducts,
   defaultOrgId,
   equipment,
   exitSurveys,
@@ -186,6 +188,8 @@ export async function seedDatabase(
     await tx.delete(actionConfigs);
     await tx.delete(invoices);
     await tx.delete(subscriptions);
+    await tx.delete(benefitAssignments);
+    await tx.delete(copayProducts);
     await tx.delete(plans);
     await tx.delete(equipment);
     await tx.delete(exitSurveys);

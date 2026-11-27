@@ -564,7 +564,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         },
       ),
     )
-    .use(careerPlanRoutes(repos.careerPlan, talent, abacatepay, webOrigin))
+    .use(careerPlanRoutes(repos.careerPlan, talent, abacatepay, webOrigin, repos.benefits))
     .use(jobsRoutes(repos.jobs, talent))
     .use(applicationsRoutes(repos.applications, talent, publicPageUrl))
     .use(

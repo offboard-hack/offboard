@@ -8,7 +8,7 @@ import {
   talentProfiles,
   talentSubscriptions,
 } from "@offboard/db/schema";
-import { and, desc, eq, gte, isNotNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { careerPlanOf, checkoutRetryMs } from "../../shared/career-pro.js";
 import { saoPauloDate } from "../../shared/sao-paulo-date.js";
 
@@ -141,7 +141,47 @@ export function createCareerPlanRepository(db: Database) {
       );
   }
 
-  return { plan, allowedBy, individual, startCheckout, releaseCheckout };
+  async function startCopayCheckout(profileId: string, now: Date) {
+    const [row] = await db
+      .update(benefitAssignments)
+      .set({ updatedAt: now })
+      .where(
+        and(
+          eq(benefitAssignments.profileId, profileId),
+          gte(benefitAssignments.validUntil, saoPauloDate(now)),
+          isNull(benefitAssignments.copaySubscriptionId),
+          or(
+            isNull(benefitAssignments.updatedAt),
+            lt(benefitAssignments.updatedAt, new Date(now.getTime() - checkoutRetryMs)),
+          ),
+        ),
+      )
+      .returning({ assignmentId: benefitAssignments.id });
+
+    return row ?? null;
+  }
+
+  async function releaseCopayCheckout(profileId: string) {
+    await db
+      .update(benefitAssignments)
+      .set({ updatedAt: new Date(0) })
+      .where(
+        and(
+          eq(benefitAssignments.profileId, profileId),
+          isNull(benefitAssignments.copaySubscriptionId),
+        ),
+      );
+  }
+
+  return {
+    plan,
+    allowedBy,
+    individual,
+    startCheckout,
+    releaseCheckout,
+    startCopayCheckout,
+    releaseCopayCheckout,
+  };
 }
 
 export type CareerPlanRepository = ReturnType<typeof createCareerPlanRepository>;

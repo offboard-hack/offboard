@@ -1,6 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { createClient } from "@offboard/db/client";
 import {
+  benefitAssignments,
+  copayProducts,
   defaultOrgId,
   employeeAccess,
   offboardingCases,
@@ -22,6 +24,7 @@ import { careerPlanRoutes } from "./routes.js";
 
 const url = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
 const webOrigin = "http://localhost:5173";
+const missingPlan = "00000000-0000-4000-8000-000000000000";
 
 const auth: PortalAuth = {
   handler: async () => new Response(null),
@@ -66,6 +69,7 @@ describe.skipIf(!url)("career plan route", () => {
         }),
         checkout,
         webOrigin,
+        repos.benefits,
       ),
     );
   }
@@ -277,6 +281,7 @@ describe.skipIf(!url)("career plan route", () => {
         }),
         gateway,
         webOrigin,
+        repos.benefits,
       ),
     );
 
@@ -431,5 +436,166 @@ describe.skipIf(!url)("career plan route", () => {
     } finally {
       logged.mockRestore();
     }
+  });
+
+  describe("co-pay checkout", () => {
+    const copay = (profileId: string, targetPlanId: string, target = app) =>
+      target.handle(
+        new Request("http://localhost/me/plan/copay-checkout", {
+          method: "POST",
+          headers: {
+            "x-test-talent-id": profileId,
+            origin: webOrigin,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ targetPlanId }),
+        }),
+      );
+
+    async function planId(slug: string) {
+      const [plan] = await db.select({ id: plans.id }).from(plans).where(eq(plans.slug, slug));
+
+      return plan.id;
+    }
+
+    async function assigned(profileId: string, slug = "gold") {
+      const id = await planId(slug);
+
+      await db.insert(benefitAssignments).values({
+        orgId: defaultOrgId,
+        profileId,
+        assignedPlanId: id,
+        effectivePlanId: id,
+        source: "default",
+        validUntil: "2099-12-31",
+      });
+    }
+
+    async function registered(from: string, to: string) {
+      await db.insert(copayProducts).values({
+        fromPlanId: await planId(from),
+        toPlanId: await planId(to),
+        abacatePayProductId: `prod_${from}_${to}`,
+      });
+    }
+
+    it("starts a co-pay checkout for a valid upgrade", async () => {
+      const profileId = await profile("2099-12-31");
+
+      await assigned(profileId);
+      await registered("gold", "platinum");
+
+      const response = await copay(profileId, await planId("platinum"));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ url: "https://pay.example/bill_pro" });
+      expect(checkouts).toEqual([
+        {
+          externalId: `copay:${profileId}:${await planId("platinum")}`,
+          planSlug: "prod_gold_platinum",
+          returnUrl: `${webOrigin}/colaborador?tela=carreira`,
+          completionUrl: `${webOrigin}/colaborador?tela=carreira&plano=ok`,
+        },
+      ]);
+    });
+
+    it("refuses a second checkout while the first one is recent", async () => {
+      const profileId = await profile("2099-12-31");
+
+      await assigned(profileId);
+      await registered("gold", "platinum");
+
+      const target = await planId("platinum");
+
+      expect((await copay(profileId, target)).status).toBe(200);
+      expect((await copay(profileId, target)).status).toBe(409);
+      expect(checkouts).toHaveLength(1);
+    });
+
+    it("answers 404 without a benefit assignment", async () => {
+      const profileId = await profile("2099-12-31");
+
+      expect((await copay(profileId, await planId("platinum"))).status).toBe(404);
+    });
+
+    it("answers 422 for the same or a lower tier", async () => {
+      const profileId = await profile("2099-12-31");
+
+      await assigned(profileId);
+      await registered("gold", "silver");
+
+      expect((await copay(profileId, await planId("gold"))).status).toBe(422);
+      expect((await copay(profileId, await planId("silver"))).status).toBe(422);
+      expect((await copay(profileId, missingPlan)).status).toBe(422);
+    });
+
+    it("answers 422 when no co-pay product is registered", async () => {
+      const profileId = await profile("2099-12-31");
+
+      await assigned(profileId);
+
+      expect((await copay(profileId, await planId("platinum"))).status).toBe(422);
+    });
+
+    it("answers 503 without AbacatePay", async () => {
+      const profileId = await profile("2099-12-31");
+
+      await assigned(profileId);
+
+      const response = await copay(
+        profileId,
+        await planId("platinum"),
+        planApp({ ...gateway, configured: false }),
+      );
+
+      expect(response.status).toBe(503);
+    });
+
+    it("answers 409 when a co-pay is already active", async () => {
+      const profileId = await profile("2099-12-31");
+
+      await assigned(profileId);
+      await registered("gold", "platinum");
+      await db.update(benefitAssignments).set({ copaySubscriptionId: "subs_copay" });
+
+      expect((await copay(profileId, await planId("platinum"))).status).toBe(409);
+      expect(checkouts).toEqual([]);
+    });
+
+    it("answers 409 when the assignment has expired", async () => {
+      const profileId = await profile("2099-12-31");
+
+      await assigned(profileId);
+      await registered("gold", "platinum");
+      await db.update(benefitAssignments).set({ validUntil: "2000-01-01" });
+
+      expect((await copay(profileId, await planId("platinum"))).status).toBe(409);
+    });
+
+    it("releases the lock and answers 502 when AbacatePay fails", async () => {
+      const logged = vi.spyOn(console, "error");
+      const profileId = await profile("2099-12-31");
+
+      await assigned(profileId);
+      await registered("gold", "platinum");
+
+      const failing = planApp({
+        configured: true,
+        createSubscriptionCheckout: async () => {
+          throw new TypeError("secret provider detail");
+        },
+      });
+
+      try {
+        const target = await planId("platinum");
+        const response = await copay(profileId, target, failing);
+
+        expect(response.status).toBe(502);
+        expect(logged).toHaveBeenCalledWith("Co-pay checkout failed", { name: "TypeError" });
+        expect((await copay(profileId, target)).status).toBe(200);
+      } finally {
+        logged.mockRestore();
+      }
+    });
   });
 });
