@@ -24,6 +24,7 @@ import {
   applicationPackages,
   applications,
   authSession,
+  automationRules,
   backgroundJobs,
   defaultOrgId,
   interviews,
@@ -43,6 +44,7 @@ import {
   talentProfiles,
   tasks,
 } from "../src/schema/index.ts";
+import { defaultAutomationRules, seedAutomationRules } from "../src/automation-rules.fixture.ts";
 import { seedPlans } from "../src/billing.fixture.ts";
 import { seedJobSources } from "../src/job-source.fixture.ts";
 import { commonQuestions } from "../src/preferences.fixture.ts";
@@ -1388,3 +1390,41 @@ describe("publicToken", () => {
     expect(publicToken()).not.toBe(token);
   });
 });
+
+it.skipIf(!url)(
+  "seeds default automation rules per org and enforces source_ref uniqueness",
+  async () => {
+    const db = createClient(url ?? "");
+
+    try {
+      await migrate(db, {
+        migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)),
+      });
+      await db.delete(automationRules).where(eq(automationRules.orgId, defaultOrgId));
+
+      const seeded = await seedAutomationRules(db, defaultOrgId);
+
+      expect(seeded).toHaveLength(defaultAutomationRules.length);
+      expect(seeded.map((rule) => rule.trigger).sort()).toEqual([
+        "correios.delivered",
+        "correios.delivered",
+        "equipment.status_changed",
+        "schedule.cron",
+      ]);
+      expect(seeded.find((rule) => rule.trigger === "schedule.cron")?.cronSchedule).toBe(
+        "0 */4 * * *",
+      );
+
+      const row = { orgId: defaultOrgId, name: "x", trigger: "task.status_changed" as const };
+
+      await db.insert(automationRules).values({ ...row, sourceRef: "ref" });
+      await expect(
+        db.insert(automationRules).values({ ...row, sourceRef: "ref" }),
+      ).rejects.toThrow();
+      await db.insert(automationRules).values([row, row]);
+    } finally {
+      await db.delete(automationRules).where(eq(automationRules.orgId, defaultOrgId));
+      await db.$client.end();
+    }
+  },
+);

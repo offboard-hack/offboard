@@ -682,6 +682,53 @@ export const actionConfigs = pgTable(
   ],
 );
 
+export const ruleTriggers = [
+  "equipment.status_changed",
+  "task.status_changed",
+  "correios.delivered",
+  "correios.in_transit",
+  "schedule.cron",
+] as const;
+
+export const ruleActionTypes = [
+  "update_task",
+  "update_equipment",
+  "slack",
+  "email",
+  "webhook",
+  "correios_check",
+] as const;
+
+export type RuleTrigger = (typeof ruleTriggers)[number];
+
+export type RuleAction = { type: (typeof ruleActionTypes)[number] } & Record<string, ConfigValue>;
+
+export const automationRules = pgTable(
+  "automation_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .default(defaultOrgId)
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    trigger: varchar("trigger", { length: 100 }).$type<RuleTrigger>().notNull(),
+    conditions: jsonb("conditions").$type<Record<string, string>>().notNull().default({}),
+    actions: jsonb("actions").$type<RuleAction[]>().notNull().default([]),
+    enabled: boolean("enabled").notNull().default(true),
+    cronSchedule: varchar("cron_schedule", { length: 50 }),
+    sourceRef: varchar("source_ref", { length: 200 }),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("automation_rules_org_trigger_idx").on(table.orgId, table.trigger),
+    uniqueIndex("automation_rules_org_source_ref_idx")
+      .on(table.orgId, table.sourceRef)
+      .where(sql`${table.sourceRef} IS NOT NULL`),
+  ],
+);
+
 export const subscriptionStatusEnum = pgEnum("subscription_status", [
   "active",
   "past_due",
@@ -914,6 +961,7 @@ export const organizationsRelations = relations(organizations, ({ one, many }) =
   teamMembers: many(teamMembers),
   integrations: many(integrations),
   actionConfigs: many(actionConfigs),
+  automationRules: many(automationRules),
   subscriptions: many(subscriptions),
   invoices: many(invoices),
   employeeAccess: many(employeeAccess),
