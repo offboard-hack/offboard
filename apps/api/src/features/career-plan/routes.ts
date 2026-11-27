@@ -184,7 +184,7 @@ export function careerPlanRoutes(
         if (assignment.copaySubscriptionId) return status(409, { error: "Co-pay already active" });
 
         const prices = await benefits.planPriceMap();
-        const assignedPrice = prices.get(assignment.assignedPlanId) ?? 0;
+        const assignedPrice = prices.get(assignment.assignedPlanId)!;
         const targetPrice = prices.get(body.targetPlanId);
 
         if (

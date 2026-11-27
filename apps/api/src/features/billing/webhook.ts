@@ -244,7 +244,7 @@ async function applyCopayEvent(
   if (name === "subscription.completed" && targetPlanId) {
     const prices = await benefits.planPriceMap();
 
-    if ((prices.get(targetPlanId) ?? 0) > (prices.get(assignment.effectivePlanId) ?? 0)) {
+    if (prices.get(targetPlanId)! > prices.get(assignment.effectivePlanId)!) {
       await benefits.updateCopayState(profileId, {
         effectivePlanId: targetPlanId,
         copaySubscriptionId: providerSubscriptionId,
