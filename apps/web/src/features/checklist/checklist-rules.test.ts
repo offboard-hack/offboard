@@ -5,13 +5,13 @@ import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { ChecklistStep } from "./checklist-draft";
 import {
-  actionConfigsQuery,
-  checklistActionConfigsQuery,
-  applyActionConfigs,
+  checklistRulesQuery,
+  checklistRulesQueryByOrg,
+  applyChecklistRules,
   mergeStepSettings,
-  knownActionRowIds,
-  type ActionConfigRow,
-} from "./action-config";
+  knownRuleIds,
+  type ChecklistRuleRow,
+} from "./checklist-rules";
 
 type Received = { method: string; url: string; body: unknown };
 
@@ -98,15 +98,15 @@ const step = (overrides: Partial<ChecklistStep> = {}) =>
     ...overrides,
   }) satisfies ChecklistStep;
 
-const row = (overrides: Partial<ActionConfigRow> = {}) =>
+const row = (overrides: Partial<ChecklistRuleRow> = {}) =>
   ({
     id: "r1",
     actionId: "email:s1",
     config: email,
     ...overrides,
-  }) satisfies ActionConfigRow;
+  }) satisfies ChecklistRuleRow;
 
-function apiRule(r: ActionConfigRow) {
+function apiRule(r: ChecklistRuleRow) {
   return {
     id: r.id,
     sourceRef: r.actionId,
@@ -121,9 +121,9 @@ function apiRule(r: ActionConfigRow) {
   };
 }
 
-describe("actionConfigsQuery", () => {
+describe("checklistRulesQuery", () => {
   const fetchRows = () =>
-    runInRequest(() => new QueryClient().fetchQuery({ ...actionConfigsQuery, retry: false }));
+    runInRequest(() => new QueryClient().fetchQuery({ ...checklistRulesQuery, retry: false }));
 
   it("fetches and parses rows", async () => {
     listBody = [apiRule(row())];
@@ -157,19 +157,19 @@ describe("actionConfigsQuery", () => {
   it("rejects when the server fails", async () => {
     failing = true;
 
-    await expect(fetchRows()).rejects.toThrow("Failed to fetch action configs");
+    await expect(fetchRows()).rejects.toThrow("Failed to fetch checklist rules");
   });
 });
 
-it("scopes the checklist action cache to the organization", () => {
-  expect(checklistActionConfigsQuery("org-a").queryKey).not.toEqual(
-    checklistActionConfigsQuery("org-b").queryKey,
+it("scopes the checklist rules cache to the organization", () => {
+  expect(checklistRulesQueryByOrg("org-a").queryKey).not.toEqual(
+    checklistRulesQueryByOrg("org-b").queryKey,
   );
 });
 
 it("tracks only rows for steps loaded in the draft", () => {
   expect(
-    knownActionRowIds(
+    knownRuleIds(
       [step()],
       [
         row(),
@@ -202,9 +202,9 @@ describe("mergeStepSettings", () => {
   });
 });
 
-describe("applyActionConfigs", () => {
+describe("applyChecklistRules", () => {
   it("merges server email config into a step without one", () => {
-    const [result] = applyActionConfigs([step()], [row()]);
+    const [result] = applyChecklistRules([step()], [row()]);
 
     expect(result.email).toEqual(email);
     expect(result.slack).toBeUndefined();
@@ -214,7 +214,7 @@ describe("applyActionConfigs", () => {
   it("preserves local config over the server one", () => {
     const local = { subject: "Local", body: "Local" };
 
-    const [result] = applyActionConfigs([step({ email: local })], [row()]);
+    const [result] = applyChecklistRules([step({ email: local })], [row()]);
 
     expect(result.email).toEqual(local);
   });
@@ -228,7 +228,7 @@ describe("applyActionConfigs", () => {
 
     const draft = [step({ email: null, slack: null, webhook: null })];
 
-    expect(applyActionConfigs(draft, rows)[0]).toMatchObject({
+    expect(applyChecklistRules(draft, rows)[0]).toMatchObject({
       email: null,
       slack: null,
       webhook: null,
@@ -236,19 +236,19 @@ describe("applyActionConfigs", () => {
   });
 
   it("ignores invalid server config", () => {
-    const [result] = applyActionConfigs([step()], [row({ config: { subject: "" } })]);
+    const [result] = applyChecklistRules([step()], [row({ config: { subject: "" } })]);
 
     expect(result.email).toBeUndefined();
   });
 
   it("leaves steps without configs when rows are empty", () => {
-    const [result] = applyActionConfigs([step()], []);
+    const [result] = applyChecklistRules([step()], []);
 
     expect(result).toEqual({ ...step(), email: undefined, slack: undefined, webhook: undefined });
   });
 
   it("handles email, slack and webhook rows", () => {
-    const [result] = applyActionConfigs(
+    const [result] = applyChecklistRules(
       [step()],
       [
         row(),

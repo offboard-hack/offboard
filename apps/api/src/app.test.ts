@@ -300,7 +300,7 @@ describe.skipIf(!url)("api", () => {
   function call(
     path: string,
     method = "GET",
-    body?: Payload | Parameters<typeof repos.actionConfigs.saveChecklist>[1],
+    body?: Payload | Parameters<typeof repos.checklist.saveChecklist>[1],
     target = app,
   ) {
     const encoded = body === undefined ? undefined : JSON.stringify(body);
@@ -11507,7 +11507,7 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
 
   it("shares the employee checklist, booking and per-item receipts with the HR case", async () => {
     const email = `workflow-${randomUUID()}@offboard.example`;
-    const layout = (await repos.actionConfigs.readChecklist(defaultOrgId)).steps;
+    const layout = (await repos.checklist.readChecklist(defaultOrgId)).steps;
 
     const person = {
       name: "Pessoa do fluxo",
@@ -11631,14 +11631,14 @@ describe.skipIf(!url)("employee journey with PostgreSQL and Better Auth", () => 
     await db.insert(organizations).values({ id: orgId, slug: orgId, name: "Outra organização" });
 
     try {
-      const other = await repos.actionConfigs.saveChecklist(orgId, {
+      const other = await repos.checklist.saveChecklist(orgId, {
         revision: 0,
         steps: [],
         knownRowIds: [],
       });
 
       expect(other?.steps).toEqual([]);
-      expect((await repos.actionConfigs.readChecklist(defaultOrgId)).steps).toEqual(layout);
+      expect((await repos.checklist.readChecklist(defaultOrgId)).steps).toEqual(layout);
       expect(await repos.employee.listEquipmentReturns(orgId, record.id)).toEqual([]);
       expect(await repos.employee.readCollectionBooking(orgId, record.id)).toBeNull();
       expect(await repos.employee.updateReceipt(orgId, record.id, "QA-1", true)).toBeNull();

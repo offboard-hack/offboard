@@ -8,7 +8,7 @@ const kinds = ["email", "slack", "webhook"] as const;
 
 type RuleAction = AutomationRuleRow["actions"][number];
 
-export type ActionConfigRow = {
+export type ChecklistRuleRow = {
   id: string;
   actionId: string;
   config: Omit<RuleAction, "type">;
@@ -17,15 +17,15 @@ export type ActionConfigRow = {
 function extractConfig(action: RuleAction) {
   return Object.fromEntries(
     Object.entries(action).filter(([key]) => key !== "type"),
-  ) satisfies ActionConfigRow["config"];
+  ) satisfies ChecklistRuleRow["config"];
 }
 
-async function listActionConfigs({ signal }: { signal: AbortSignal }) {
+async function listChecklistRules({ signal }: { signal: AbortSignal }) {
   const { data, error } = await getApiClient().api["automation-rules"].get({
     fetch: { signal },
   });
 
-  if (error) throw new Error("Failed to fetch action configs");
+  if (error) throw new Error("Failed to fetch checklist rules");
 
   return (data ?? []).flatMap((rule) => {
     if (!rule.sourceRef) return [];
@@ -38,20 +38,20 @@ async function listActionConfigs({ signal }: { signal: AbortSignal }) {
   });
 }
 
-export const actionConfigsQuery = queryOptions({
-  queryKey: ["action-configs"],
-  queryFn: listActionConfigs,
+export const checklistRulesQuery = queryOptions({
+  queryKey: ["checklist-rules"],
+  queryFn: listChecklistRules,
   staleTime: 30_000,
 });
 
-export function checklistActionConfigsQuery(orgId: string) {
+export function checklistRulesQueryByOrg(orgId: string) {
   return queryOptions({
-    ...actionConfigsQuery,
-    queryKey: [...actionConfigsQuery.queryKey, orgId],
+    ...checklistRulesQuery,
+    queryKey: [...checklistRulesQuery.queryKey, orgId],
   });
 }
 
-export function knownActionRowIds(steps: ChecklistStep[], rows: ActionConfigRow[]) {
+export function knownRuleIds(steps: ChecklistStep[], rows: ChecklistRuleRow[]) {
   const ids = new Set(steps.flatMap((step) => kinds.map((kind) => `${kind}:${step.id}`)));
 
   return rows.flatMap(({ id, actionId }) => (ids.has(actionId) ? [id] : []));
@@ -71,7 +71,7 @@ export function mergeStepSettings(step: ChecklistStep, settings: StepSettings) {
   } satisfies ChecklistStep;
 }
 
-export function applyActionConfigs(steps: ChecklistStep[], rows: ActionConfigRow[]) {
+export function applyChecklistRules(steps: ChecklistStep[], rows: ChecklistRuleRow[]) {
   const byActionId = new Map(rows.map((row) => [row.actionId, row]));
 
   return steps.map<ChecklistStep>((step) => {

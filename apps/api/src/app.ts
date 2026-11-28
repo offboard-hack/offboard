@@ -1,6 +1,6 @@
 import { cors } from "@elysia/cors";
 import { Elysia, ElysiaCustomStatusResponse, t } from "elysia";
-import { actionConfigsRoutes } from "./features/action-configs/routes.js";
+import { checklistRoutes } from "./features/checklist/routes.js";
 import { automationRulesRoutes } from "./features/automation-rules/routes.js";
 import {
   fireRulesForTrigger,
@@ -600,7 +600,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
       offboardingsRoutes(
         repos.offboardings,
         access,
-        repos.actionConfigs.readChecklist,
+        repos.checklist.readChecklist,
         options.cronSecret,
         options.webhookSecret,
         inviteEmployee,
@@ -609,7 +609,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         options.tracking,
       ),
     )
-    .use(actionConfigsRoutes(repos.actionConfigs, access))
+    .use(checklistRoutes(repos.checklist, access))
     .use(
       automationRulesRoutes(
         repos.automationRules,
