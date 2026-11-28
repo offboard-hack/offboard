@@ -8,7 +8,6 @@ export default defineConfig({
       include: [
         "src/features/checklist/action-config.ts",
         "src/app/spending-tabs.ts",
-        "src/app/backoffice-host.ts",
         "src/entities/benefits-summary.ts",
         "src/features/benefits/policy-form.ts",
         "src/features/asset-returns/equipment-form.ts",

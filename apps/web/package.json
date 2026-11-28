@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run build -w @offboard/backoffice && tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build",
     "start": "vite preview",
     "lint": "oxlint src",
     "test": "vitest run --coverage",
-    "build:cloudflare": "npm run build -w @offboard/backoffice && tsc --noEmit && vite build --mode cloudflare",
+    "build:cloudflare": "tsc --noEmit && vite build --mode cloudflare",
     "deploy:cloudflare": "npm run build:cloudflare && cf deploy --prebuilt"
   },
   "dependencies": {

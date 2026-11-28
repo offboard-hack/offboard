@@ -14,11 +14,9 @@ const provider = z
   .parse(process.env.EMAIL_PROVIDER);
 
 const appDomain = "app.off-board.xyz";
-const backofficeDomain = "backoffice.off-board.xyz";
 
 const env: NonNullable<WorkerConfig["env"]> = {
   EMAIL_PROVIDER: bindings.text(provider),
-  BACKOFFICE_ORIGIN: bindings.text(`https://${backofficeDomain}`),
   ASSETS: bindings.assets(),
 };
 
@@ -71,7 +69,7 @@ export default defineConfig({
     compatibilityFlags: ["nodejs_compat"],
     placement: hyperdriveId && hyperdriveRegion ? { region: hyperdriveRegion } : undefined,
     workersDev: true,
-    domains: [appDomain, backofficeDomain],
+    domains: [appDomain],
     env,
     triggers: cronEnabled
       ? Object.values(cronSchedules).map((schedule) => triggers.scheduled({ schedule }))

@@ -131,14 +131,12 @@ export function createAuth({
   onVercel = false,
   ipAddressHeaders = onVercel ? ["x-vercel-forwarded-for"] : [],
   staffEmails,
-  backofficeOrigin,
 }: {
   db: Database;
   origin: string;
   secret: string;
   talent: TalentDirectory;
   staffEmails: ReadonlySet<string>;
-  backofficeOrigin?: string;
   sendLink: (message: { email: string; url: string }) => Promise<void>;
   sendCode?: (message: { email: string; code: string }) => Promise<void>;
   onVercel?: boolean;
@@ -450,10 +448,7 @@ export function createAuth({
   const memberAuth = buildAuth("better-auth");
   const employeeAuth = buildAuth(employeeCookie);
 
-  const staffAuth = buildAuth(
-    staffCookie,
-    backofficeOrigin ? [origin, backofficeOrigin] : [origin],
-  );
+  const staffAuth = buildAuth(staffCookie);
 
   return {
     async handler(request) {
@@ -470,15 +465,7 @@ export function createAuth({
 
       const requestOrigin = request.headers.get("origin");
 
-      const staffOrigin =
-        codeAudience === "staff" && nativeEndpoints.has(path) ? backofficeOrigin : undefined;
-
-      if (
-        request.method === "POST" &&
-        requestOrigin !== origin &&
-        requestOrigin !== staffOrigin &&
-        !native
-      ) {
+      if (request.method === "POST" && requestOrigin !== origin && !native) {
         return new Response(null, { status: 403 });
       }
 
@@ -647,7 +634,6 @@ export function createRuntimeAuth(
     secret,
     talent,
     staffEmails: parseStaffEmails(env.BACKOFFICE_STAFF_EMAILS),
-    backofficeOrigin: env.BACKOFFICE_ORIGIN && originSchema.parse(env.BACKOFFICE_ORIGIN),
     onVercel: env.VERCEL === "1",
     ipAddressHeaders:
       ipAddressHeaders ?? (env.EMAIL_PROVIDER === "console" ? ["x-forwarded-for"] : undefined),
