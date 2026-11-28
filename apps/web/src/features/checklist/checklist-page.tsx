@@ -17,12 +17,12 @@ import { getRouteApi, useHydrated } from "@tanstack/react-router";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState, type KeyboardEvent } from "react";
 import {
-  checklistActionConfigsQuery,
-  applyActionConfigs,
-  knownActionRowIds,
+  checklistRulesQueryByOrg,
+  applyChecklistRules,
+  knownRuleIds,
   mergeStepSettings,
-  type ActionConfigRow,
-} from "./action-config";
+  type ChecklistRuleRow,
+} from "./checklist-rules";
 import { cn } from "@/shared/lib/utils";
 import { ListBreadcrumb, ListPage } from "@/shared/ui/list-page";
 import { Badge } from "@/shared/ui/shadcn/badge";
@@ -341,7 +341,7 @@ export function ChecklistRulesPage() {
   } = route.useRouteContext();
 
   const hydrated = useHydrated();
-  const { data: actionRows } = useSuspenseQuery(checklistActionConfigsQuery(orgId));
+  const { data: actionRows } = useSuspenseQuery(checklistRulesQueryByOrg(orgId));
   const { data: model } = useSuspenseQuery(checklistModelQuery(orgId));
 
   if (!hydrated) return <ChecklistPending />;
@@ -355,22 +355,22 @@ function ChecklistEditor({
   model,
 }: {
   orgId: string;
-  actionRows: ActionConfigRow[];
+  actionRows: ChecklistRuleRow[];
   model: ChecklistModel;
 }) {
-  const template = applyActionConfigs(model.template, actionRows);
+  const template = applyChecklistRules(model.template, actionRows);
   const client = useQueryClient();
   const [restoredDraft] = useState(() => readDraftSnapshot(orgId));
 
   const [published, setPublished] = useState(() => ({
     revision: model.revision,
-    steps: applyActionConfigs(model.steps, actionRows),
+    steps: applyChecklistRules(model.steps, actionRows),
   }));
 
   const [revision, setRevision] = useState(restoredDraft?.revision ?? published.revision);
 
   const [knownRowIds, setKnownRowIds] = useState(
-    () => restoredDraft?.knownRowIds ?? knownActionRowIds(published.steps, actionRows),
+    () => restoredDraft?.knownRowIds ?? knownRuleIds(published.steps, actionRows),
   );
 
   const [draftStorageError, setDraftStorageError] = useState(false);
@@ -378,7 +378,7 @@ function ChecklistEditor({
   const [{ steps, history, message }, setDraft] = useState<Draft>(() => {
     const initialDraft = restoredDraft?.steps ?? published.steps;
 
-    return { steps: applyActionConfigs(initialDraft, actionRows), history: [], message: "" };
+    return { steps: applyChecklistRules(initialDraft, actionRows), history: [], message: "" };
   });
 
   const [dialog, setDialog] = useState<ChecklistDialog | null>(null);
@@ -525,13 +525,13 @@ function ChecklistEditor({
 
   function loadPublishedModel(
     next: Pick<ChecklistModel, "revision" | "steps">,
-    rows: ActionConfigRow[],
+    rows: ChecklistRuleRow[],
     message: string,
   ) {
-    const saved = applyActionConfigs(next.steps, rows);
+    const saved = applyChecklistRules(next.steps, rows);
 
     clearDraftSteps(orgId);
-    setKnownRowIds(knownActionRowIds(saved, rows));
+    setKnownRowIds(knownRuleIds(saved, rows));
     setRevision(next.revision);
     setPublished({ revision: next.revision, steps: saved });
     setDraftStorageError(false);
@@ -548,10 +548,10 @@ function ChecklistEditor({
       client.setQueryData(checklistModelQuery(orgId).queryKey, { ...next, template });
 
       const mapped = rows.map(
-        ({ id, actionId, config }) => ({ id, actionId, config }) satisfies ActionConfigRow,
+        ({ id, actionId, config }) => ({ id, actionId, config }) satisfies ChecklistRuleRow,
       );
 
-      client.setQueryData(checklistActionConfigsQuery(orgId).queryKey, mapped);
+      client.setQueryData(checklistRulesQueryByOrg(orgId).queryKey, mapped);
       loadPublishedModel(next, rows, "Modelo publicado.");
     },
   });
@@ -560,7 +560,7 @@ function ChecklistEditor({
     mutationFn: () =>
       Promise.all([
         client.fetchQuery({ ...checklistModelQuery(orgId), staleTime: 0 }),
-        client.fetchQuery({ ...checklistActionConfigsQuery(orgId), staleTime: 0 }),
+        client.fetchQuery({ ...checklistRulesQueryByOrg(orgId), staleTime: 0 }),
       ]),
     onSuccess: ([next, rows]) => {
       loadPublishedModel(next, rows, "Modelo publicado carregado.");

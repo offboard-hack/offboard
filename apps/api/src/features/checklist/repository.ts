@@ -29,7 +29,7 @@ export type ChecklistRules = (tx: Transaction) => {
   >;
 };
 
-export function createActionConfigsRepository(db: Database, checklistRules: ChecklistRules) {
+export function createChecklistRepository(db: Database, checklistRules: ChecklistRules) {
   async function readChecklist(orgId: string) {
     const [model] = await db.select().from(checklistModels).where(eq(checklistModels.orgId, orgId));
 
@@ -136,4 +136,4 @@ export function createActionConfigsRepository(db: Database, checklistRules: Chec
   };
 }
 
-export type ActionConfigsRepository = ReturnType<typeof createActionConfigsRepository>;
+export type ChecklistRepository = ReturnType<typeof createChecklistRepository>;

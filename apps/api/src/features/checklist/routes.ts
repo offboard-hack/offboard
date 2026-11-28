@@ -1,9 +1,9 @@
 import { Elysia } from "elysia";
 import type { PortalAccessPlugin } from "../../shared/access.js";
 import { saveChecklistSchema } from "../../shared/checklist.js";
-import type { ActionConfigsRepository } from "./repository.js";
+import type { ChecklistRepository } from "./repository.js";
 
-export function actionConfigsRoutes(repos: ActionConfigsRepository, access: PortalAccessPlugin) {
+export function checklistRoutes(repos: ChecklistRepository, access: PortalAccessPlugin) {
   return new Elysia()
     .use(access)
     .get("/checklist-model", ({ principal }) => repos.readChecklist(principal.orgId), {
