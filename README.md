@@ -8,7 +8,6 @@ HR platform for employee offboarding, career transition, and benefit management.
 | -------------------- | ----------------------------------------------------------------------------- |
 | API                  | [Elysia](https://elysiajs.com) on Node.js (local) / Cloudflare Workers (prod) |
 | Web                  | [TanStack Start](https://tanstack.com/start) + React + Tailwind CSS           |
-| Backoffice           | React SPA (Vite) served under `/backoffice`                                   |
 | Database             | PostgreSQL 16 with [pgvector](https://github.com/pgvector/pgvector)           |
 | ORM / Migrations     | [Drizzle](https://orm.drizzle.team)                                           |
 | Monorepo             | npm workspaces + [Turborepo](https://turbo.build)                             |
@@ -25,8 +24,6 @@ HR platform for employee offboarding, career transition, and benefit management.
 apps/
   api          Elysia API server + Cloudflare Worker entry
   web          TanStack Start SSR app (HR portal + collaborator app)
-  backoffice   Internal admin SPA
-  mobile       (placeholder)
 
 packages/
   db           Drizzle schema, migrations, seed
@@ -82,36 +79,20 @@ Create a `.env` file at the repo root (it is gitignored).
 
 ### Optional (features degrade gracefully without these)
 
-| Variable                    | Description                                                                |
-| --------------------------- | -------------------------------------------------------------------------- |
-| `API_HOST`                  | API bind address (default `127.0.0.1`)                                     |
-| `API_PORT`                  | API port (default `3001`)                                                  |
-| `WEB_ORIGIN`                | Web app origin for CORS (default `http://localhost:5173`)                  |
-| `API_URL`                   | API origin as seen by the web SSR server (default `http://localhost:3001`) |
-| `ANTHROPIC_API_KEY`         | Enables AI features (résumé analysis, job matching, AI Apply)              |
-| `AI_GATEWAY_API_KEY`        | Cloudflare AI Gateway key (alternative to direct Anthropic key)            |
-| `RESEND_API_KEY`            | Enables email sending (sign-in links, invites, notifications)              |
-| `AUTH_EMAIL_FROM`           | Sender address for auth emails (e.g. `noreply@your-domain.com`)            |
-| `ABACATEPAY_API_KEY`        | Enables co-pay billing (benefit plan upgrades)                             |
-| `ABACATEPAY_WEBHOOK_SECRET` | Validates AbacatePay webhook signatures                                    |
-| `CRON_SECRET`               | Bearer token protecting scheduled cron endpoints                           |
-| `WEBHOOK_SECRET`            | Bearer token protecting inbound webhook endpoints                          |
-| `SLACK_SIGNING_SECRET`      | Enables Slack integration for checklist actions                            |
-| `TRACKING_API_KEY`          | Enables Correios package tracking                                          |
-| `TRACKING_BASE_URL`         | Tracking API base URL (default `https://api.wonca.com.br`)                 |
-| `BROWSERBASE_API_KEY`       | Enables AI Apply browser automation                                        |
-| `BROWSERBASE_PROJECT_ID`    | Browserbase project for AI Apply sessions                                  |
-| `TURNSTILE_SITE_KEY`        | Cloudflare Turnstile captcha (contact form)                                |
-| `TURNSTILE_SECRET_KEY`      | Turnstile server-side validation key                                       |
-| `PUBLIC_PAGE_ORIGIN`        | Origin for the public candidate search page                                |
-| `RESUME_STORAGE_DIR`        | Local directory for résumé file storage (dev only; prod uses R2)           |
-| `BACKOFFICE_STAFF_EMAILS`   | Comma-separated emails allowed into the backoffice                         |
+| Variable             | Description                                                      |
+| -------------------- | ---------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`  | Enables AI features (résumé analysis, job matching, AI Apply)    |
+| `RESEND_API_KEY`     | Enables email sending (sign-in links, invites, notifications)    |
+| `AUTH_EMAIL_FROM`    | Sender address for auth emails (e.g. `noreply@your-domain.com`)  |
+| `RESUME_STORAGE_DIR` | Local directory for résumé file storage (dev only; prod uses R2) |
+
+The remaining secrets (`ABACATEPAY_API_KEY`, `BROWSERBASE_API_KEY`, `SLACK_SIGNING_SECRET`, `TURNSTILE_*`, `TRACKING_*`, etc.) are only needed in production or for specific integrations. See `apps/api/src/server.ts` for the full list.
 
 ## Commands
 
 | Command                            | Description                                      |
 | ---------------------------------- | ------------------------------------------------ |
-| `npm run dev`                      | Start API + web + backoffice in dev mode         |
+| `npm run dev`                      | Start API + web in dev mode                      |
 | `npm test`                         | Run all tests across workspaces                  |
 | `npm run lint`                     | Type-check + oxlint across workspaces            |
 | `npm run format`                   | Auto-format with oxfmt                           |
