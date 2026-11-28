@@ -15,9 +15,7 @@ import { applicationsRoutes } from "./features/applications/routes.js";
 import { authRoutes } from "./features/auth/routes.js";
 import { createAbacatePayGateway, type AbacatePayGateway } from "./features/billing/abacatepay.js";
 import { benefitRoutes } from "./features/benefits/routes.js";
-import { backofficeRoutes } from "./features/backoffice/routes.js";
 import { billingRoutes } from "./features/billing/routes.js";
-import { staffAccess } from "./shared/staff-access.js";
 import { equipmentRoutes } from "./features/equipment/routes.js";
 import { catalogSources, type CatalogSource } from "./features/sources/catalog.js";
 import { fetchFeed } from "./features/sources/sources.js";
@@ -745,8 +743,7 @@ export function createApp(webOrigin: string, repos: Repositories, options: AppOp
         webOrigin,
         options.abacatepayWebhookSecret,
       ),
-    )
-    .use(backofficeRoutes(repos.backoffice, staffAccess(options.auth)));
+    );
 }
 
 export type App = ReturnType<typeof createApp>;

@@ -31,7 +31,6 @@ const runtimeConfig = z.object({
   BROWSERBASE_PROJECT_ID: z.string().min(1).optional(),
   PUBLIC_PAGE_ORIGIN: z.string().min(1).optional(),
   BACKOFFICE_STAFF_EMAILS: z.string().optional(),
-  BACKOFFICE_ORIGIN: z.string().min(1).optional(),
   TRACKING_API_KEY: z.string().min(1).optional(),
   TRACKING_BASE_URL: z.string().min(1).optional(),
   TURNSTILE_SITE_KEY: z.string().min(1).optional(),
