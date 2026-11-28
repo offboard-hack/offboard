@@ -249,19 +249,6 @@ export function createOffboardingsRepository(db: Database) {
     });
   }
 
-  async function getTaskPhase(orgId: string, taskId: string) {
-    return (await getTaskAction(orgId, taskId))?.phase ?? null;
-  }
-
-  async function getTaskAction(orgId: string, taskId: string) {
-    const [row] = await db
-      .select({ phase: tasks.phase, stepId: tasks.checklistStepId })
-      .from(tasks)
-      .where(and(eq(tasks.orgId, orgId), eq(tasks.id, taskId)));
-
-    return row ?? null;
-  }
-
   async function updateTaskStatus(orgId: string, taskId: string, status: TaskStatus) {
     const [updated] = await db
       .update(tasks)
@@ -366,8 +353,6 @@ export function createOffboardingsRepository(db: Database) {
     createOffboarding,
     bulkCreateOffboardings,
     applyChecklist,
-    getTaskPhase,
-    getTaskAction,
     updateTaskStatus,
     toggleSubtask,
     getTrackedTasks,

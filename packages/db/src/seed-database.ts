@@ -8,7 +8,6 @@ import {
   type SeedApplication,
   type SeedInterview,
 } from "./application.fixture.ts";
-import { seedActionConfigs } from "./action-config.fixture.ts";
 import { seedPlans, seedSubscription } from "./billing.fixture.ts";
 import { seedEquipment } from "./equipment.fixture.ts";
 import type { Database } from "./client.ts";
@@ -30,7 +29,6 @@ import { normalizeQuestion } from "./question.ts";
 import { seedIntegrations } from "./integration.fixture.ts";
 import { baseSeedCases, seedCases } from "./offboarding.fixture.ts";
 import {
-  actionConfigs,
   aiApplications,
   answerQuestions,
   applicationEvents,
@@ -185,7 +183,6 @@ export async function seedDatabase(
     await tx.delete(applications);
     await tx.delete(jobs);
     await tx.delete(jobSources);
-    await tx.delete(actionConfigs);
     await tx.delete(invoices);
     await tx.delete(subscriptions);
     await tx.delete(benefitAssignments);
@@ -547,8 +544,6 @@ export async function seedDatabase(
     }
 
     await tx.insert(teamMembers).values(fixtures.members);
-
-    await tx.insert(actionConfigs).values(seedActionConfigs);
 
     await upsertPlans(tx);
 

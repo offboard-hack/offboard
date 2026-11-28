@@ -4,7 +4,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createClient } from "@offboard/db/client";
 import { createRepositories } from "./repositories.js";
 import {
-  actionConfigs,
   automationRules,
   defaultOrgId,
   employeeAccess,
@@ -327,102 +326,6 @@ describe.skipIf(!url)("repositories", () => {
     expect(updated).toEqual({ name: "Test Repo", status: "disconnected" });
   });
 
-  it("gets task phase", async () => {
-    const list = await repos.offboardings.listOffboardings(defaultOrgId);
-    const marina = list.find((c) => c.name === "Marina Lopes")!;
-    const detail = await repos.offboardings.getOffboarding(defaultOrgId, marina.id);
-    const task = detail?.tasks.find((t) => t.title === "Calcular a rescisão");
-
-    const phase = await repos.offboardings.getTaskPhase(defaultOrgId, task!.id);
-    expect(phase).toBe("first-week");
-  });
-
-  it("returns null for unknown task phase", async () => {
-    expect(
-      await repos.offboardings.getTaskPhase(defaultOrgId, "00000000-0000-0000-0000-000000000000"),
-    ).toBeNull();
-  });
-
-  it("gets action configs by phase", async () => {
-    const configs = await repos.actionConfigs.getActionConfigsByPhase(defaultOrgId, "d0");
-    expect(configs.length).toBeGreaterThanOrEqual(0);
-
-    for (const config of configs) {
-      expect(config.phase).toBe("d0");
-      expect(config.enabled).toBe(true);
-    }
-  });
-
-  it("lists action configs", async () => {
-    const configs = await repos.actionConfigs.listActionConfigs(defaultOrgId);
-    expect(configs.length).toBeGreaterThan(0);
-  });
-
-  it("gets a single action config", async () => {
-    const configs = await repos.actionConfigs.listActionConfigs(defaultOrgId);
-    const first = configs[0];
-    const found = await repos.actionConfigs.getActionConfig(defaultOrgId, first.id);
-    expect(found).toEqual(first);
-  });
-
-  it("returns null for unknown action config", async () => {
-    expect(
-      await repos.actionConfigs.getActionConfig(
-        defaultOrgId,
-        "00000000-0000-0000-0000-000000000000",
-      ),
-    ).toBeNull();
-  });
-
-  it("creates an action config", async () => {
-    const created = await repos.actionConfigs.createActionConfig(defaultOrgId, {
-      actionId: "webhook:test-create",
-      phase: "d0",
-      config: { url: "https://example.com" },
-    });
-
-    expect(created).toMatchObject({
-      actionId: "webhook:test-create",
-      phase: "d0",
-      enabled: true,
-    });
-  });
-
-  it("updates an action config", async () => {
-    const created = await repos.actionConfigs.createActionConfig(defaultOrgId, {
-      actionId: "webhook:test-update",
-      phase: "d0",
-    });
-
-    const updated = await repos.actionConfigs.updateActionConfig(defaultOrgId, created.id, {
-      enabled: false,
-    });
-
-    expect(updated?.enabled).toBe(false);
-  });
-
-  it("returns null when updating unknown action config", async () => {
-    expect(
-      await repos.actionConfigs.updateActionConfig(
-        defaultOrgId,
-        "00000000-0000-0000-0000-000000000000",
-        {
-          enabled: false,
-        },
-      ),
-    ).toBeNull();
-  });
-
-  it("deletes an action config", async () => {
-    const created = await repos.actionConfigs.createActionConfig(defaultOrgId, {
-      actionId: "webhook:test-delete",
-      phase: "d0",
-    });
-
-    expect(await repos.actionConfigs.deleteActionConfig(defaultOrgId, created.id)).toBe(true);
-    expect(await repos.actionConfigs.deleteActionConfig(defaultOrgId, created.id)).toBe(false);
-  });
-
   it("deletes tasks when their case is removed", async () => {
     const list = await repos.offboardings.listOffboardings(defaultOrgId);
     const nina = list.find((c) => c.name === "Nina Castro")!;
@@ -606,7 +509,6 @@ describe.skipIf(!url)("multi-tenant isolation", () => {
   let taskB: string;
   let subtaskB: string;
   let equipmentB: string;
-  let actionConfigB: string;
   let memberB: string;
   let subscriptionB: string;
   let invoiceB: string;
@@ -657,10 +559,6 @@ describe.skipIf(!url)("multi-tenant isolation", () => {
       .insert(exitSurveys)
       .values({ orgId: orgB, caseId: caseB, npsScore: 10, responses: {}, topics: ["Cultura"] });
     await db.insert(integrations).values({ orgId: orgB, name: "Org B Slack", status: "connected" });
-    [{ id: actionConfigB }] = await db
-      .insert(actionConfigs)
-      .values({ orgId: orgB, actionId: "webhook:org-b", phase: "d0" })
-      .returning({ id: actionConfigs.id });
     [{ id: memberB }] = await db
       .insert(teamMembers)
       .values({ orgId: orgB, name: "Member B", email: "member.b@orgb.example", role: "admin" })
@@ -729,8 +627,6 @@ describe.skipIf(!url)("multi-tenant isolation", () => {
   });
 
   it("rejects cross-organization task and subtask changes", async () => {
-    expect(await repos.offboardings.getTaskPhase(orgA, taskB)).toBeNull();
-    expect(await repos.offboardings.getTaskPhase(orgB, taskB)).toBe("d0");
     expect(await repos.offboardings.updateTaskStatus(orgA, taskB, "done")).toBeNull();
     expect(await repos.offboardings.toggleSubtask(orgA, subtaskB)).toBeNull();
     expect(await repos.offboardings.setTrackingCode(orgA, taskB, "XX")).toBeNull();
@@ -849,35 +745,6 @@ describe.skipIf(!url)("multi-tenant isolation", () => {
     expect((await repos.integrations.listIntegrations(orgA)).map(({ name }) => name)).not.toContain(
       "Org B Jira",
     );
-  });
-
-  it("scopes action configs to the organization", async () => {
-    expect((await repos.actionConfigs.listActionConfigs(orgB)).map(({ id }) => id)).toEqual([
-      actionConfigB,
-    ]);
-    expect((await repos.actionConfigs.listActionConfigs(orgA)).map(({ id }) => id)).not.toContain(
-      actionConfigB,
-    );
-    expect(
-      (await repos.actionConfigs.getActionConfigsByPhase(orgB, "d0")).map(({ id }) => id),
-    ).toEqual([actionConfigB]);
-    expect(
-      (await repos.actionConfigs.getActionConfigsByPhase(orgA, "d0")).map(({ id }) => id),
-    ).not.toContain(actionConfigB);
-    expect(await repos.actionConfigs.getActionConfig(orgA, actionConfigB)).toBeNull();
-    expect(
-      await repos.actionConfigs.updateActionConfig(orgA, actionConfigB, { enabled: false }),
-    ).toBeNull();
-    expect(await repos.actionConfigs.deleteActionConfig(orgA, actionConfigB)).toBe(false);
-
-    const created = await repos.actionConfigs.createActionConfig(orgB, {
-      actionId: "webhook:org-b-2",
-      phase: "d0",
-    });
-
-    const [row] = await db.select().from(actionConfigs).where(eq(actionConfigs.id, created.id));
-    expect(row.orgId).toBe(orgB);
-    expect(await repos.actionConfigs.deleteActionConfig(orgB, actionConfigB)).toBe(true);
   });
 
   it("scopes billing to the organization", async () => {
