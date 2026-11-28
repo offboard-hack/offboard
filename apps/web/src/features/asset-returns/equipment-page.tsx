@@ -560,9 +560,12 @@ export function EquipmentPage() {
           Como a coleta funciona
         </h2>
         <ol {...classProps(styles.steps)}>
-          <li>O RH informa os itens e disponibiliza datas na área do colaborador do caso.</li>
-          <li>A pessoa escolhe uma data para coleta em casa ou entrega no escritório.</li>
-          <li>A equipe confere os bens e registra cada recebimento no inventário.</li>
+          <li>O RH informa os itens que a pessoa deve devolver na área do colaborador do caso.</li>
+          <li>A pessoa envia os itens pelos Correios e informa o código de rastreio.</li>
+          <li>
+            Quando os Correios confirmam a entrega, a etapa de coleta é concluída e os bens ficam
+            como recebidos.
+          </li>
         </ol>
       </section>
     </ListPage>
